@@ -1,0 +1,24 @@
+[
+  {
+    "proposalId": 1,
+    "orgName": "BID",
+    "title": "BID",
+    "summary": "BID",
+    "contact": "schmidt@heitaria.ch",
+    "address": "Carrer Joan Miro 17\n3 B",
+    "city": "Esplugues de Llobregat",
+    "country": "Spain",
+    "amountUSD": 1,
+    "docs": [
+      {
+        "cid": "QmY9P3UjzhbPx7gRk9maMHbGa9TXi1LUvStJFk3urC23te",
+        "url": "https://ivory-negative-spoonbird-17.mypinata.cloud/ipfs/QmY9P3UjzhbPx7gRk9maMHbGa9TXi1LUvStJFk3urC23te",
+        "name": "Screenshot 2025-09-02 at 12.32.10.png",
+        "size": 73698
+      }
+    ],
+    "cid": "",
+    "status": "approved",
+    "createdAt": "2025-09-02T11:49:37.902Z"
+  }
+]

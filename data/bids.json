@@ -1,0 +1,125 @@
+[
+  {
+    "bidId": 13,
+    "proposalId": 13,
+    "vendorName": "Payment Vendor",
+    "priceUSD": 1,
+    "days": 1,
+    "notes": "Created from payment processing",
+    "walletAddress": "0x6Ea01052F315EBf1a4E907eF3B6CC1006D37Ce9D",
+    "preferredStablecoin": "USDC",
+    "milestones": [
+      {
+        "name": "Payment Milestone",
+        "amount": 1,
+        "dueDate": "2025-09-03T12:36:03.350Z",
+        "completed": true,
+        "completionDate": "2025-09-03T12:36:03.350Z",
+        "proof": "Paid via manual payment processor",
+        "paymentTxHash": "0xbe09c18babd627a25c3cebf414bd52871f611589ca53916bb61da9e447c3f9b1",
+        "paymentDate": "2025-09-03T12:43:03.010Z"
+      }
+    ],
+    "payments": [
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0x920dd7c9cd60c9d22e2210105e7b44dc162fba359e2cbba4b6be2db4644cd856",
+        "date": "2025-09-03T12:36:03.350Z",
+        "status": "completed"
+      },
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0x781c10636936cfa2775295d34be95a080b168665836f5b1631cda226ce07d9d6",
+        "date": "2025-09-03T12:37:51.217Z",
+        "status": "completed"
+      },
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0xbe09c18babd627a25c3cebf414bd52871f611589ca53916bb61da9e447c3f9b1",
+        "date": "2025-09-03T12:43:03.010Z",
+        "status": "completed"
+      }
+    ],
+    "status": "completed",
+    "createdAt": "2025-09-03T12:36:03.350Z",
+    "totalPaid": 3
+  },
+  {
+    "bidId": 16,
+    "proposalId": 16,
+    "vendorName": "Payment Vendor",
+    "priceUSD": 1,
+    "days": 1,
+    "notes": "Created from payment processing",
+    "walletAddress": "0x6Ea01052F315EBf1a4E907eF3B6CC1006D37Ce9D",
+    "preferredStablecoin": "USDC",
+    "milestones": [
+      {
+        "name": "Payment Milestone",
+        "amount": 1,
+        "dueDate": "2025-09-03T13:53:52.579Z",
+        "completed": true,
+        "completionDate": "2025-09-03T13:53:52.579Z",
+        "proof": "Paid via manual payment processor",
+        "paymentTxHash": "0x74b8805aa1ff6be287fd0c4e7a3a97049d2ed94c17d11a1d2f42a766793ac9ac",
+        "paymentDate": "2025-09-03T13:53:52.579Z"
+      }
+    ],
+    "payments": [
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0x74b8805aa1ff6be287fd0c4e7a3a97049d2ed94c17d11a1d2f42a766793ac9ac",
+        "date": "2025-09-03T13:53:52.579Z",
+        "status": "completed"
+      }
+    ],
+    "status": "completed",
+    "createdAt": "2025-09-03T13:53:52.579Z",
+    "totalPaid": 1
+  },
+  {
+    "bidId": 17,
+    "proposalId": 17,
+    "vendorName": "Payment Vendor",
+    "priceUSD": 1,
+    "days": 1,
+    "notes": "Created from payment processing",
+    "walletAddress": "0x6Ea01052F315EBf1a4E907eF3B6CC1006D37Ce9D",
+    "preferredStablecoin": "USDC",
+    "milestones": [
+      {
+        "name": "Payment Milestone",
+        "amount": 1,
+        "dueDate": "2025-09-03T14:07:22.876Z",
+        "completed": true,
+        "completionDate": "2025-09-03T14:07:22.876Z",
+        "proof": "Paid via manual payment processor",
+        "paymentTxHash": "0x1df5a20b1332acd4195ab1f5857ffd8a8aa0f05b7fb8f620b8c1fde536ce1a10",
+        "paymentDate": "2025-09-03T14:12:15.152Z"
+      }
+    ],
+    "payments": [
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0xd52db1872bd8883855af4770c8828bf1d38521c6aafa0500cc83f56d7b6e42e5",
+        "date": "2025-09-03T14:07:22.876Z",
+        "status": "completed"
+      },
+      {
+        "amount": 1,
+        "currency": "USDC",
+        "transactionHash": "0x1df5a20b1332acd4195ab1f5857ffd8a8aa0f05b7fb8f620b8c1fde536ce1a10",
+        "date": "2025-09-03T14:12:15.152Z",
+        "status": "completed"
+      }
+    ],
+    "status": "completed",
+    "createdAt": "2025-09-03T14:07:22.876Z",
+    "totalPaid": 2
+  }
+]

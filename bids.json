@@ -1,0 +1,145 @@
+const fs = require('fs');
+const path = require('path');
+
+// Static wallet address
+const STATIC_WALLET = '0x6Ea01052F315EBf1a4E907eF3B6CC1006D37Ce9D';
+
+// Directory and file path
+const dir = 'data';
+const filePath = path.join(dir, 'bids.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+}
+
+// Function to validate Ethereum address (basic check)
+function isValidEthAddress(address) {
+    return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
+
+// Function to generate unique ID
+function generateUniqueId(existingBids) {
+    const maxId = existingBids.length > 0 ? Math.max(...existingBids.map(bid => bid.bidId)) : 0;
+    return maxId + 1;
+}
+
+// Function to read existing bids
+function readBids() {
+    try {
+        if (fs.existsSync(filePath)) {
+            const data = fs.readFileSync(filePath, 'utf8');
+            return JSON.parse(data);
+        }
+        return [];
+    } catch (err) {
+        console.error('Error reading bids.json:', err.message);
+        return [];
+    }
+}
+
+// Function to add a new bid
+function addBid(newBidData) {
+    const bids = readBids();
+
+    // Validate required fields
+    if (!newBidData.proposalId || !newBidData.vendorName || !newBidData.priceUSD || !newBidData.days || !newBidData.preferredStablecoin) {
+        throw new Error('Missing required bid fields');
+    }
+
+    // Use static wallet if none provided, otherwise validate provided wallet
+    const walletAddress = newBidData.walletAddress || STATIC_WALLET;
+    if (!isValidEthAddress(walletAddress)) {
+        throw new Error('Invalid wallet address');
+    }
+
+    // Validate stablecoin
+    const validStablecoins = ['USDC', 'USDT', 'DAI'];
+    if (!validStablecoins.includes(newBidData.preferredStablecoin)) {
+        throw new Error('Invalid stablecoin. Must be USDC, USDT, or DAI');
+    }
+
+    // Generate new bid
+    const newBid = {
+        bidId: generateUniqueId(bids),
+        proposalId: newBidData.proposalId,
+        vendorName: newBidData.vendorName,
+        priceUSD: newBidData.priceUSD,
+        days: newBidData.days,
+        notes: newBidData.notes || '',
+        walletAddress: walletAddress,
+        preferredStablecoin: newBidData.preferredStablecoin,
+        milestones: newBidData.milestones || [{
+            name: newBidData.vendorName || 'Default Milestone',
+            amount: newBidData.priceUSD,
+            dueDate: new Date().toISOString(),
+            completed: false,
+            completionDate: null,
+            proof: '',
+            paymentTxHash: null,
+            paymentDate: null
+        }],
+        doc: newBidData.doc || null,
+        status: newBidData.status || 'pending',
+        createdAt: new Date().toISOString(),
+        payments: newBidData.payments || []
+    };
+
+    // Add to bids array
+    bids.push(newBid);
+
+    // Write updated bids to file
+    fs.writeFileSync(filePath, JSON.stringify(bids, null, 2), 'utf8');
+    console.log(`Added bid ${newBid.bidId} to ${filePath}`);
+}
+
+// Example usage: Add a new bid with a different wallet
+const exampleBid = {
+    proposalId: 14,
+    vendorName: 'NewVendor',
+    priceUSD: 1000,
+    days: 5,
+    notes: 'New bid with custom wallet',
+    walletAddress: '0x1234567890abcdef1234567890abcdef12345678', // Different wallet
+    preferredStablecoin: 'USDT',
+    milestones: [{
+        name: 'Initial Setup',
+        amount: 1000,
+        dueDate: '2025-09-10T00:00:00.000Z',
+        completed: false,
+        proof: ''
+    }],
+    doc: null,
+    status: 'pending'
+};
+
+try {
+    addBid(exampleBid);
+} catch (err) {
+    console.error('Error adding bid:', err.message);
+}
+
+// Example with static wallet (no walletAddress provided)
+const exampleBidStatic = {
+    proposalId: 15,
+    vendorName: 'StaticVendor',
+    priceUSD: 500,
+    days: 3,
+    notes: 'Using static wallet',
+    preferredStablecoin: 'USDC',
+    milestones: [{
+        name: 'Setup',
+        amount: 500,
+        dueDate: '2025-09-12T00:00:00.000Z',
+        completed: false,
+        proof: ''
+    }],
+    doc: null,
+    status: 'pending'
+};
+
+try {
+    addBid(exampleBidStatic);
+} catch (err) {
+    console.error('Error adding bid:', err.message);
+}
