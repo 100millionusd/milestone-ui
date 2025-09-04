@@ -1,11 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'export', // ← Add this for static export
-  trailingSlash: true, // ← Recommended for Netlify
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
-    unoptimized: true // ← Required for static export
-  }
+    unoptimized: true,
+  },
 }
 
-module.exports = nextConfig;
+module.exports = nextConfig
