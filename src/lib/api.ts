@@ -52,13 +52,33 @@ export interface TransactionResult {
   currency?: string;
 }
 
-// Base API URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// Base API URL - FIXED: Use your Railway URL as default
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 
+                     process.env.NEXT_PUBLIC_API_URL || 
+                     'https://zestful-tenderness.up.railway.app'; // ← YOUR RAILWAY URL
+
+// Helper function to get appropriate API URL based on context
+function getApiBaseUrl(): string {
+  // During build (static generation), return your Railway URL
+  if (typeof window === 'undefined') {
+    return 'https://zestful-tenderness.up.railway.app';
+  }
+  
+  // During runtime, use the configured URL or fallback to Railway
+  return API_BASE_URL;
+}
 
 // Helper function for API calls with retry logic for rate limiting
 async function apiFetch(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<any> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint}`;
   const maxRetries = 3;
+  
+  // During build, return mock data to avoid failed API calls
+  if (typeof window === 'undefined' && process.env.NODE_ENV === 'production') {
+    console.log(`Build-time: Skipping API call to ${endpoint}`);
+    return getMockDataForEndpoint(endpoint);
+  }
   
   try {
     const response = await fetch(url, {
@@ -104,6 +124,66 @@ async function apiFetch(endpoint: string, options: RequestInit = {}, retryCount 
     }
     
     throw error;
+  }
+}
+
+// Helper function for build-time mock data
+function getMockDataForEndpoint(endpoint: string): any {
+  console.log(`Generating mock data for: ${endpoint}`);
+  
+  switch (true) {
+    case endpoint === '/proposals':
+      return [];
+    case endpoint === '/bids':
+      return [];
+    case endpoint.startsWith('/proposals/'):
+      return { 
+        proposalId: 1, 
+        orgName: 'Example Organization', 
+        title: 'Sample Project', 
+        summary: 'This is a sample project description',
+        contact: 'contact@example.com',
+        amountUSD: 10000,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        cid: 'bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq'
+      };
+    case endpoint.startsWith('/bids/'):
+      return { 
+        bidId: 1, 
+        proposalId: 1, 
+        vendorName: 'Example Vendor', 
+        priceUSD: 5000,
+        days: 30,
+        notes: 'Sample bid proposal',
+        walletAddress: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+        preferredStablecoin: 'USDT',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        milestones: [
+          {
+            name: 'Initial Delivery',
+            amount: 2500,
+            dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            completed: false,
+            completionDate: null,
+            proof: '',
+            paymentTxHash: null,
+            paymentDate: null
+          }
+        ]
+      };
+    case endpoint === '/health':
+      return {
+        ok: true,
+        network: 'sepolia',
+        blockchain: 'connected',
+        signer: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+        balances: { USDC: 1000, USDT: 1500 },
+        counts: { proposals: 5, bids: 3 }
+      };
+    default:
+      return {};
   }
 }
 
@@ -176,10 +256,11 @@ export async function payMilestone(bidId: number, milestoneIndex: number): Promi
 
 // IPFS API - Original endpoints without /api/ prefix
 export async function uploadFileToIPFS(file: File): Promise<{ cid: string; url: string; size: number; name: string }> {
+  const baseUrl = getApiBaseUrl();
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE_URL}/ipfs/upload-file`, {
+  const response = await fetch(`${baseUrl}/ipfs/upload-file`, {
     method: 'POST',
     body: formData,
   });
@@ -209,7 +290,8 @@ export async function uploadJsonToIPFS(data: any): Promise<{ cid: string; url: s
 // Blockchain API - Original endpoints without /api/ prefix
 export async function getTokenBalances(address: string): Promise<{ USDC: string; USDT: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/balances/${address}`);
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/balances/${address}`);
     
     // Handle rate limiting for balance checks
     if (response.status === 429) {
@@ -233,7 +315,8 @@ export async function getTokenBalances(address: string): Promise<{ USDC: string;
 
 export async function getTransactionStatus(txHash: string): Promise<{ status: string; blockNumber?: number; confirmations?: number }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/transaction/${txHash}`);
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/transaction/${txHash}`);
     
     // Handle rate limiting for transaction status checks
     if (response.status === 429) {
@@ -258,7 +341,8 @@ export async function getTransactionStatus(txHash: string): Promise<{ status: st
 // Function to send tokens (using backend API) - Original endpoint without /api/ prefix
 export async function sendTokens(toAddress: string, amount: number, tokenSymbol: 'USDC' | 'USDT'): Promise<TransactionResult> {
   try {
-    const response = await fetch(`${API_BASE_URL}/bids/pay-milestone`, {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/bids/pay-milestone`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -326,90 +410,6 @@ export async function completeMilestoneWithPayment(
   }
 }
 
-// Alternative: Complete milestone and payment in one step (frontend blockchain)
-export async function completeMilestoneWithPaymentDirect(
-  bidId: number, 
-  milestoneIndex: number, 
-  proof: string
-): Promise<TransactionResult & { bid: Bid }> {
-  try {
-    // Get bid details
-    const bid = await getBid(bidId);
-    const milestone = bid.milestones[milestoneIndex];
-    
-    if (!milestone) {
-      throw new Error('Milestone not found');
-    }
-
-    // Validate wallet address
-    if (!bid.walletAddress || !bid.walletAddress.startsWith('0x')) {
-      throw new Error('Invalid vendor wallet address');
-    }
-
-    // Send real USDT/USDC payment using blockchain service
-    let paymentResult: TransactionResult;
-    
-    if (bid.preferredStablecoin === 'USDT') {
-      paymentResult = await blockchainService.sendUSDT(bid.walletAddress, milestone.amount);
-    } else if (bid.preferredStablecoin === 'USDC') {
-      paymentResult = await blockchainService.sendUSDC(bid.walletAddress, milestone.amount);
-    } else {
-      throw new Error('Unsupported stablecoin');
-    }
-
-    if (!paymentResult.success) {
-      throw new Error(paymentResult.error || 'Payment failed');
-    }
-
-    // Update milestone with payment info
-    const updatedBid = await updateMilestoneWithPayment(
-      bidId,
-      milestoneIndex,
-      proof,
-      paymentResult.transactionHash
-    );
-
-    return {
-      ...paymentResult,
-      bid: updatedBid
-    };
-
-  } catch (error) {
-    console.error('Payment error:', error);
-    throw new Error(error instanceof Error ? error.message : 'Payment processing failed');
-  }
-}
-
-// Helper function to update milestone with payment info
-async function updateMilestoneWithPayment(
-  bidId: number,
-  milestoneIndex: number,
-  proof: string,
-  transactionHash: string
-): Promise<Bid> {
-  // In a real implementation, this would update the backend
-  // For now, we'll just return the updated bid by fetching it again
-  await completeMilestone(bidId, milestoneIndex, proof);
-  
-  // Simulate updating payment info (in a real app, this would be a backend call)
-  const bid = await getBid(bidId);
-  
-  // Update the milestone with payment info
-  const updatedMilestones = [...bid.milestones];
-  if (updatedMilestones[milestoneIndex]) {
-    updatedMilestones[milestoneIndex] = {
-      ...updatedMilestones[milestoneIndex],
-      paymentTxHash: transactionHash,
-      paymentDate: new Date().toISOString()
-    };
-  }
-  
-  return {
-    ...bid,
-    milestones: updatedMilestones
-  };
-}
-
 // Health check - Original endpoint without /api/ prefix
 export async function healthCheck(): Promise<{
   ok: boolean;
@@ -420,7 +420,8 @@ export async function healthCheck(): Promise<{
   counts: { proposals: number; bids: number };
 }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/health`);
     if (!response.ok) {
       throw new Error('Health check failed');
     }
@@ -434,7 +435,8 @@ export async function healthCheck(): Promise<{
 // Test function - Original endpoint without /api/ prefix
 export async function testConnection(): Promise<{ success: boolean; bidCount: number; blockchain: any }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/test`);
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/test`);
     if (!response.ok) {
       throw new Error('Test failed');
     }
@@ -474,7 +476,6 @@ export default {
   
   // Payment
   completeMilestoneWithPayment,
-  completeMilestoneWithPaymentDirect,
   
   // System
   healthCheck,
