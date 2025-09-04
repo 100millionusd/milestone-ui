@@ -1,5 +1,5 @@
 [build]
-  command = "cp package.netlify.json package.json && npm install && npm run build"
+  command = "rm -rf pages/api/ && cp package.netlify.json package.json && npm install && npm run build"
   publish = ".next"
 
 [[redirects]]
