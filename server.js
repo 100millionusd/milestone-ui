@@ -1,0 +1,1 @@
+// Fix: Pinata token validation
