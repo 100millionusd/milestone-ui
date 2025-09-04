@@ -1,5 +1,5 @@
 [build]
-  command = "rm -rf pages/api/ && cp package.netlify.json package.json && npm install && npm run build"
+  command = "npm install --legacy-peer-deps && npm run build"
   publish = ".next"
 
 [[redirects]]
