@@ -1,11 +1,11 @@
-// src/app/bids/new/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { postJSON, uploadFileToIPFS, getProposal } from "@/lib/api";
 
-export default function NewBidPage() {
+// Renamed from NewBidPage to NewBidPageContent
+function NewBidPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const proposalId = searchParams.get('proposalId');
@@ -311,5 +311,14 @@ export default function NewBidPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+// ADD THIS SUSPENSE WRAPPER AS THE DEFAULT EXPORT
+export default function NewBidPage() {
+  return (
+    <Suspense fallback={<div>Loading bid form...</div>}>
+      <NewBidPageContent />
+    </Suspense>
   );
 }
