@@ -8,3 +8,5 @@ dist/
 .netlify
 .vercel
 coverage/
+node_modules
+api/node_modules
