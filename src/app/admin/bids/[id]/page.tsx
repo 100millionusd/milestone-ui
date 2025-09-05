@@ -1,14 +1,20 @@
-// src/app/admin/bids/[id]/page.tsx
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 type Params = { id: string };
 
-export default async function AdminBidDetailPage({ params }: { params: Params }) {
-  const base = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
+// Change THIS LINE:
+type AdminBidDetailPageProps = { params: Params };
+
+// TO:
+type AdminBidDetailPageProps = { params: Promise<Params> };
+
+export default async function AdminBidDetailPage(props: AdminBidDetailPageProps) {
+  // Add this line to await the params promise:
+  const params = await props.params;
   const bidId = params.id;
 
-  // Adjust this endpoint if your API differs
+  const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3000";
   const res = await fetch(`${base}/bids/${bidId}`, { cache: "no-store" });
   if (!res.ok) return notFound();
 
