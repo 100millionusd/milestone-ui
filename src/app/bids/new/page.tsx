@@ -22,7 +22,7 @@ function NewBidPageContent() {
     walletAddress: '',
     preferredStablecoin: 'USDC',
     milestones: [
-      { name: 'Milestone 1', amount: '', dueDate: '', proof: '' }
+      { name: 'Milestone 1', amount: '', dueDate: '' } // REMOVED: proof field
     ]
   });
   const [docFile, setDocFile] = useState(null);
@@ -56,9 +56,10 @@ function NewBidPageContent() {
         priceUSD: parseFloat(formData.priceUSD),
         days: parseInt(formData.days),
         milestones: formData.milestones.map(m => ({
-          ...m,
+          name: m.name,
           amount: parseFloat(m.amount),
           dueDate: new Date(m.dueDate).toISOString()
+          // REMOVED: proof field - only used when completing milestones
         })),
         doc
       };
@@ -79,7 +80,7 @@ function NewBidPageContent() {
   const addMilestone = () => {
     setFormData(prev => ({
       ...prev,
-      milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '', proof: '' }]
+      milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }] // REMOVED: proof field
     }));
   };
 
@@ -257,18 +258,6 @@ function NewBidPageContent() {
                       className="w-full p-2 border rounded text-sm"
                     />
                   </div>
-                </div>
-                
-                <div className="mt-3">
-                  <label className="block text-xs font-medium mb-1">Success Criteria *</label>
-                  <input
-                    type="text"
-                    required
-                    value={milestone.proof}
-                    onChange={(e) => updateMilestone(index, 'proof', e.target.value)}
-                    className="w-full p-2 border rounded text-sm"
-                    placeholder="What proves this milestone is complete?"
-                  />
                 </div>
               </div>
             ))}
