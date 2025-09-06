@@ -1,13 +1,11 @@
 [build]
   publish = ".next"
-  command = "npm run build"
+  command = "npm install && npm run build"  # ADD npm install first!
 
-# CRITICAL: This enables SSR like localhost
 [functions]
   directory = ".next/server"
   node_bundler = "esbuild"
 
-# Optional: If you want to use API routes on Netlify
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
@@ -17,3 +15,6 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+[build.environment]
+  NODE_VERSION = "18"
