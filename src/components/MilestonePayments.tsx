@@ -2,7 +2,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { completeMilestoneWithPayment, type Bid, type Milestone } from '@/lib/api';
+// FIXED IMPORT: Use correct functions
+import { completeMilestone, payMilestone, type Bid, type Milestone } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
@@ -20,25 +21,33 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate }) 
     try {
       setCompletingIndex(index);
       
-      // Use the new function with payment processing
-      const result = await completeMilestoneWithPayment(
-        bid.bidId, 
-        index, 
-        proof
-      );
+      // FIXED: Use completeMilestone for proof submission
+      await completeMilestone(bid.bidId, index, proof);
       
-      setPaymentResult(result);
       setProof('');
-      
-      if (result.success) {
-        alert(`Payment processed successfully! Transaction: ${result.transactionHash}`);
-      } else {
-        alert('Milestone completed but payment failed: ' + result.error);
-      }
+      alert('Proof submitted successfully! Admin will review and release payment.');
       
       onUpdate(); // Refresh the data
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to complete milestone');
+      alert(error instanceof Error ? error.message : 'Failed to submit proof');
+    } finally {
+      setCompletingIndex(null);
+    }
+  };
+
+  const handleReleasePayment = async (index: number) => {
+    try {
+      setCompletingIndex(index);
+      
+      // FIXED: Use payMilestone for payment release
+      const result = await payMilestone(bid.bidId, index);
+      
+      setPaymentResult(result);
+      alert('Payment released successfully!');
+      
+      onUpdate(); // Refresh the data
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to release payment');
     } finally {
       setCompletingIndex(null);
     }
@@ -155,6 +164,14 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate }) 
                 <p className="text-sm text-yellow-700 mt-1">
                   Waiting for payment processing...
                 </p>
+                {/* ADD PAYMENT RELEASE BUTTON FOR ADMINS */}
+                <button
+                  onClick={() => handleReleasePayment(index)}
+                  disabled={completingIndex === index}
+                  className="bg-green-600 text-white px-3 py-1 rounded text-sm mt-2 disabled:bg-gray-400"
+                >
+                  {completingIndex === index ? 'Processing...' : 'Release Payment'}
+                </button>
               </div>
             ) : (
               <div className="mt-3">
@@ -173,29 +190,16 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate }) 
                   disabled={completingIndex === index || !proof.trim()}
                   className="bg-green-600 text-white px-4 py-2 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
-                  {completingIndex === index ? 'Processing Payment...' : 'Complete & Release Payment'}
+                  {completingIndex === index ? 'Submitting Proof...' : 'Submit Proof'}
                 </button>
                 <p className="text-xs text-gray-500 mt-1">
-                  This will mark the milestone as completed and release payment to the vendor
+                  Submit proof of work for admin review and payment approval
                 </p>
               </div>
             )}
           </div>
         ))}
       </div>
-
-      {/* Show payment verification for the most recent payment */}
-      {paymentResult && paymentResult.success && paymentResult.transactionHash && (
-        <div className="mt-6">
-          <h4 className="font-semibold mb-3">Latest Payment Verification</h4>
-          <PaymentVerification
-            transactionHash={paymentResult.transactionHash}
-            currency={paymentResult.currency}
-            amount={paymentResult.amount}
-            toAddress={paymentResult.toAddress}
-          />
-        </div>
-      )}
 
       {/* Manual Payment Processor */}
       <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
