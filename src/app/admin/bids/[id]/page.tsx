@@ -4,10 +4,13 @@ import { notFound } from "next/navigation";
 
 type Params = { id: string };
 
-export default async function AdminBidDetailPage({ params }: { params: Params }) {
-  const base = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
-  const bidId = params.id;
+export default async function AdminBidDetailPage({ params }: { params: Promise<Params> }) {
+  // Await the params promise first
+  const resolvedParams = await params;
+  const bidId = resolvedParams.id;
 
+  const base = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
+  
   // Adjust this endpoint if your API differs
   const res = await fetch(`${base}/bids/${bidId}`, { cache: "no-store" });
   if (!res.ok) return notFound();
