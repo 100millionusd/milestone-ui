@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { postJSON, uploadFileToIPFS } from "@/lib/api";
+import { createProposal, uploadFileToIPFS } from "@/lib/api";
 
 export default function NewProposalPage() {
   const router = useRouter();
@@ -43,7 +43,7 @@ export default function NewProposalPage() {
         docs
       };
 
-      const res = await postJSON<{ proposalId: number; cid?: string }>("/proposals", body);
+      const res = await createProposal(body);
       
       if (res.proposalId) {
         router.push(`/projects/${res.proposalId}`);
