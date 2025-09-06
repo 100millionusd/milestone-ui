@@ -83,6 +83,22 @@ function NewBidPageContent() {
     }));
   };
 
+  const removeMilestone = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      milestones: prev.milestones.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateMilestone = (index: number, field: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      milestones: prev.milestones.map((milestone, i) =>
+        i === index ? { ...milestone, [field]: value } : milestone
+      )
+    }));
+  };
+
   if (!proposalId) {
     return <div className="max-w-4xl mx-auto p-6">No project selected. Please go back to projects and click "Submit Bid".</div>;
   }
@@ -100,7 +116,7 @@ function NewBidPageContent() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* ... (keep all your form JSX exactly as before) ... */}
+        {/* Vendor Information */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Vendor Name *</label>
@@ -110,8 +126,24 @@ function NewBidPageContent() {
               value={formData.vendorName}
               onChange={(e) => setFormData({...formData, vendorName: e.target.value})}
               className="w-full p-2 border rounded"
+              placeholder="Your company name"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Wallet Address *</label>
+            <input
+              type="text"
+              required
+              value={formData.walletAddress}
+              onChange={(e) => setFormData({...formData, walletAddress: e.target.value})}
+              className="w-full p-2 border rounded"
+              placeholder="0x..."
+            />
+          </div>
+        </div>
+
+        {/* Bid Details */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Bid Price (USD) *</label>
             <input
@@ -121,24 +153,155 @@ function NewBidPageContent() {
               value={formData.priceUSD}
               onChange={(e) => setFormData({...formData, priceUSD: e.target.value})}
               className="w-full p-2 border rounded"
+              placeholder="0.00"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Completion Days *</label>
+            <input
+              type="number"
+              required
+              value={formData.days}
+              onChange={(e) => setFormData({...formData, days: e.target.value})}
+              className="w-full p-2 border rounded"
+              placeholder="30"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Preferred Stablecoin *</label>
+            <select
+              required
+              value={formData.preferredStablecoin}
+              onChange={(e) => setFormData({...formData, preferredStablecoin: e.target.value})}
+              className="w-full p-2 border rounded"
+            >
+              <option value="USDC">USDC</option>
+              <option value="USDT">USDT</option>
+            </select>
           </div>
         </div>
 
-        {/* ... (rest of your form) ... */}
+        {/* Bid Notes */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Bid Proposal Details *</label>
+          <textarea
+            required
+            value={formData.notes}
+            onChange={(e) => setFormData({...formData, notes: e.target.value})}
+            className="w-full p-2 border rounded"
+            rows={4}
+            placeholder="Describe your approach, timeline, experience, why you're the best choice for this project..."
+          />
+        </div>
 
-        <div className="flex gap-4">
+        {/* Milestones */}
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <label className="block text-sm font-medium">Project Milestones *</label>
+            <button
+              type="button"
+              onClick={addMilestone}
+              className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+            >
+              + Add Milestone
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            {formData.milestones.map((milestone, index) => (
+              <div key={index} className="border p-4 rounded-lg bg-gray-50">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium">Milestone {index + 1}</h4>
+                  {formData.milestones.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeMilestone(index)}
+                      className="text-red-600 text-sm hover:text-red-800"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Milestone Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={milestone.name}
+                      onChange={(e) => updateMilestone(index, 'name', e.target.value)}
+                      className="w-full p-2 border rounded text-sm"
+                      placeholder="Design completion"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Amount ($) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={milestone.amount}
+                      onChange={(e) => updateMilestone(index, 'amount', e.target.value)}
+                      className="w-full p-2 border rounded text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Due Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={milestone.dueDate}
+                      onChange={(e) => updateMilestone(index, 'dueDate', e.target.value)}
+                      className="w-full p-2 border rounded text-sm"
+                    />
+                  </div>
+                </div>
+                
+                <div className="mt-3">
+                  <label className="block text-xs font-medium mb-1">Success Criteria *</label>
+                  <input
+                    type="text"
+                    required
+                    value={milestone.proof}
+                    onChange={(e) => updateMilestone(index, 'proof', e.target.value)}
+                    className="w-full p-2 border rounded text-sm"
+                    placeholder="What proves this milestone is complete?"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Supporting Documents */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+          <input
+            type="file"
+            onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+            className="w-full p-2 border rounded"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+          />
+          <p className="text-sm text-gray-500 mt-1">
+            Upload portfolio, previous work examples, certifications, or other supporting documents (PDF, Word, Images)
+          </p>
+        </div>
+
+        {/* Submit Buttons */}
+        <div className="flex gap-4 pt-4">
           <button
             type="submit"
             disabled={loading}
-            className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
+            className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
           >
-            {loading ? 'Submitting...' : 'Submit Bid'}
+            {loading ? 'Submitting Bid...' : 'Submit Bid'}
           </button>
           <button
             type="button"
             onClick={() => router.back()}
-            className="bg-gray-500 text-white px-6 py-2 rounded"
+            className="bg-gray-500 text-white px-6 py-3 rounded-lg"
           >
             Cancel
           </button>
