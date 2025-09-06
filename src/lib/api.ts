@@ -50,18 +50,25 @@ export interface TransactionResult {
 }
 
 // ---- Base URL resolution ----
-// ALWAYS use direct Railway URL (no proxy since API routes were removed)
-const API_BASE = (
-  process.env.API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://milestone-api-production.up.railway.app"
-).replace(/\/+$/, "");
+const getApiBase = () => {
+  // Server-side: use API_BASE_URL or default Railway URL
+  if (typeof window === 'undefined') {
+    return process.env.API_BASE_URL || "https://milestone-api-production.up.railway.app";
+  }
+  
+  // Browser-side: use NEXT_PUBLIC_API_BASE_URL or default Railway URL
+  return process.env.NEXT_PUBLIC_API_BASE_URL || "https://milestone-api-production.up.railway.app";
+};
+
+const API_BASE = getApiBase().replace(/\/+$/, '');
 
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
-  const r = await fetch(url(path), {
+  const fullUrl = url(path);
+  
+  const r = await fetch(fullUrl, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
@@ -148,7 +155,7 @@ export function uploadJsonToIPFS(data: any) {
   return apiFetch(`/ipfs/upload-json`, { method: "POST", body: JSON.stringify(data) });
 }
 export async function uploadFileToIPFS(file: File) {
-  // Use direct Railway URL for file uploads too
+  // Use direct URL for file uploads
   const fd = new FormData();
   fd.append("file", file);
   const r = await fetch(`${API_BASE}/ipfs/upload-file`, { method: "POST", body: fd }).catch((e) => {
