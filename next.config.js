@@ -1,6 +1,7 @@
+// next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
+  // REMOVE output: 'export' completely
   trailingSlash: true,
   images: {
     unoptimized: true
