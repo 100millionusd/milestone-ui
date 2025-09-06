@@ -1,6 +1,6 @@
 // src/lib/api.ts
-import { blockchainService } from './blockchain';
 
+// ---- Types ----
 export interface Proposal {
   proposalId: number;
   orgName: string;
@@ -13,10 +13,9 @@ export interface Proposal {
   amountUSD: number;
   docs: any[];
   cid: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: "pending" | "approved" | "rejected";
   createdAt: string;
 }
-
 export interface Milestone {
   name: string;
   amount: number;
@@ -27,7 +26,6 @@ export interface Milestone {
   paymentTxHash: string | null;
   paymentDate: string | null;
 }
-
 export interface Bid {
   bidId: number;
   proposalId: number;
@@ -36,13 +34,12 @@ export interface Bid {
   days: number;
   notes: string;
   walletAddress: string;
-  preferredStablecoin: 'USDT' | 'USDC';
+  preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
-  status: 'pending' | 'approved' | 'completed' | 'rejected';
+  status: "pending" | "approved" | "completed" | "rejected";
   createdAt: string;
 }
-
 export interface TransactionResult {
   success: boolean;
   transactionHash?: string;
@@ -52,409 +49,136 @@ export interface TransactionResult {
   currency?: string;
 }
 
-// Base API URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// ---- Base URL resolution ----
+const isBrowser = typeof window !== "undefined";
 
-// Helper function for API calls with retry logic for rate limiting
-async function apiFetch(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<any> {
-  const url = `${API_BASE_URL}${endpoint}`;
-  const maxRetries = 3;
-  
+// Server → hit Railway directly (no CORS on server)
+// Browser → hit our Next API proxies (same-origin, avoids CORS)
+const API_DIRECT = (
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://milestone-api-production.up.railway.app"
+).replace(/\/+$/, "");
+const API_PROXY = ""; // relative to site origin
+
+const url = (path: string) => (isBrowser ? `${API_PROXY}/api${path}` : `${API_DIRECT}${path}`);
+
+// ---- Fetch helper ----
+async function apiFetch(path: string, options: RequestInit = {}) {
+  const r = await fetch(url(path), {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    ...options,
+  }).catch((e) => {
+    // Network/CORS-level error
+    throw new Error(e?.message || "Failed to fetch");
+  });
+
+  // HTTP-level error
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try {
+      const j = await r.json();
+      msg = j?.error || msg;
+    } catch {
+      // ignore
+    }
+    throw new Error(msg);
+  }
+
+  // OK
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    });
-
-    if (!response.ok) {
-      // Handle rate limiting (429) with retry logic
-      if (response.status === 429 && retryCount < maxRetries) {
-        const retryAfter = response.headers.get('Retry-After');
-        const delay = retryAfter ? parseInt(retryAfter) * 1000 : 1000 * Math.pow(2, retryCount);
-        
-        console.warn(`Rate limited (429), retrying in ${delay}ms... (${retryCount + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return apiFetch(endpoint, options, retryCount + 1);
-      }
-      
-      // Handle other errors
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = {};
-      }
-      
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-    }
-
-    return response.json();
-  } catch (error) {
-    console.error(`API fetch error for ${endpoint}:`, error);
-    
-    // Only retry on network errors, not on application errors
-    if (error instanceof TypeError && error.message === 'Failed to fetch' && retryCount < maxRetries) {
-      const delay = 1000 * Math.pow(2, retryCount);
-      console.warn(`Network error, retrying in ${delay}ms... (${retryCount + 1}/${maxRetries})`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return apiFetch(endpoint, options, retryCount + 1);
-    }
-    
-    throw error;
+    return await r.json();
+  } catch {
+    return null;
   }
 }
 
-// Helper function for POST requests with JSON data
-export async function postJSON(endpoint: string, data: any): Promise<any> {
-  return apiFetch(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
+// ---- Proposals ----
+export function getProposals(): Promise<Proposal[]> {
+  return apiFetch("/proposals");
 }
-
-// Proposals API - Original endpoints without /api/ prefix
-export async function getProposals(): Promise<Proposal[]> {
-  return apiFetch('/proposals');
-}
-
-export async function getProposal(id: number): Promise<Proposal> {
+export function getProposal(id: number): Promise<Proposal> {
   return apiFetch(`/proposals/${id}`);
 }
-
-export async function createProposal(proposal: Omit<Proposal, 'proposalId' | 'status' | 'createdAt'>): Promise<{ ok: boolean; proposalId: number; cid: string | null }> {
-  return postJSON('/proposals', proposal);
+export function createProposal(
+  proposal: Omit<Proposal, "proposalId" | "status" | "createdAt" | "cid">
+): Promise<{ ok: boolean; proposalId: number; cid: string | null }> {
+  return apiFetch("/proposals", { method: "POST", body: JSON.stringify(proposal) });
+}
+export function approveProposal(id: number) {
+  return apiFetch(`/proposals/${id}/approve`, { method: "POST" });
+}
+export function rejectProposal(id: number) {
+  return apiFetch(`/proposals/${id}/reject`, { method: "POST" });
 }
 
-export async function approveProposal(id: number): Promise<{ ok: boolean; proposalId: number; status: string }> {
-  return apiFetch(`/proposals/${id}/approve`, {
-    method: 'POST',
-  });
+// ---- Bids ----
+export function getBids(proposalId?: number): Promise<Bid[]> {
+  const q = proposalId ? `?proposalId=${proposalId}` : "";
+  return apiFetch(`/bids${q}`);
 }
-
-export async function rejectProposal(id: number): Promise<{ ok: boolean; proposalId: number; status: string }> {
-  return apiFetch(`/proposals/${id}/reject`, {
-    method: 'POST',
-  });
-}
-
-// Bids API - Original endpoints without /api/ prefix
-export async function getBids(proposalId?: number): Promise<Bid[]> {
-  const endpoint = proposalId ? `/bids?proposalId=${proposalId}` : '/bids';
-  return apiFetch(endpoint);
-}
-
-export async function getBid(id: number): Promise<Bid> {
+export function getBid(id: number): Promise<Bid> {
   return apiFetch(`/bids/${id}`);
 }
-
-export async function createBid(bid: Omit<Bid, 'bidId' | 'status' | 'createdAt'>): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
-  return postJSON('/bids', bid);
+export function createBid(
+  bid: Omit<Bid, "bidId" | "status" | "createdAt">
+): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
+  return apiFetch("/bids", { method: "POST", body: JSON.stringify(bid) });
 }
-
-export async function approveBid(id: number): Promise<{ ok: boolean; bidId: number; status: string }> {
-  return apiFetch(`/bids/${id}/approve`, {
-    method: 'POST',
+export function approveBid(id: number) {
+  return apiFetch(`/bids/${id}/approve`, { method: "POST" });
+}
+export function rejectBid(id: number) {
+  return apiFetch(`/bids/${id}/reject`, { method: "POST" });
+}
+export function completeMilestone(bidId: number, milestoneIndex: number, proof: string) {
+  return apiFetch(`/bids/${bidId}/complete-milestone`, {
+    method: "POST",
+    body: JSON.stringify({ milestoneIndex, proof }),
+  });
+}
+export function payMilestone(bidId: number, milestoneIndex: number) {
+  return apiFetch(`/bids/${bidId}/pay-milestone`, {
+    method: "POST",
+    body: JSON.stringify({ milestoneIndex }),
   });
 }
 
-export async function rejectBid(id: number): Promise<{ ok: boolean; bidId: number; status: string }> {
-  return apiFetch(`/bids/${id}/reject`, {
-    method: 'POST',
+// ---- IPFS ----
+export function uploadJsonToIPFS(data: any) {
+  return apiFetch(`/ipfs/upload-json`, { method: "POST", body: JSON.stringify(data) });
+}
+export async function uploadFileToIPFS(file: File) {
+  // Browser only; goes through proxy too (you can add pages/api/ipfs/upload-file.ts if needed)
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch(`${API_PROXY}/api/ipfs/upload-file`, { method: "POST", body: fd }).catch((e) => {
+    throw new Error(e?.message || "Failed to upload file");
   });
-}
-
-export async function completeMilestone(bidId: number, milestoneIndex: number, proof: string): Promise<{ ok: boolean; bidId: number; milestoneIndex: number }> {
-  return postJSON(`/bids/${bidId}/complete-milestone`, { milestoneIndex, proof });
-}
-
-export async function payMilestone(bidId: number, milestoneIndex: number): Promise<{ ok: boolean; bidId: number; milestoneIndex: number; transactionHash: string }> {
-  return postJSON(`/bids/${bidId}/pay-milestone`, { milestoneIndex });
-}
-
-// IPFS API - Original endpoints without /api/ prefix
-export async function uploadFileToIPFS(file: File): Promise<{ cid: string; url: string; size: number; name: string }> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/ipfs/upload-file`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    // Handle rate limiting for file uploads
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After');
-      const delay = retryAfter ? parseInt(retryAfter) * 1000 : 2000;
-      
-      console.warn('Rate limited on file upload, retrying after delay...');
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return uploadFileToIPFS(file);
-    }
-    
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to upload file');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j?.error || `HTTP ${r.status}`);
   }
-
-  return response.json();
+  return r.json();
 }
 
-export async function uploadJsonToIPFS(data: any): Promise<{ cid: string; url: string }> {
-  return postJSON('/ipfs/upload-json', data);
+// ---- Health / test ----
+export function healthCheck() {
+  return apiFetch("/health");
+}
+export function testConnection() {
+  return apiFetch("/test");
 }
 
-// Blockchain API - Original endpoints without /api/ prefix
-export async function getTokenBalances(address: string): Promise<{ USDC: string; USDT: string }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/balances/${address}`);
-    
-    // Handle rate limiting for balance checks
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After');
-      const delay = retryAfter ? parseInt(retryAfter) * 1000 : 1000;
-      
-      console.warn('Rate limited on balance check, retrying after delay...');
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return getTokenBalances(address);
-    }
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch balances');
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching token balances:', error);
-    return { USDC: '0', USDT: '0' };
-  }
-}
-
-export async function getTransactionStatus(txHash: string): Promise<{ status: string; blockNumber?: number; confirmations?: number }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/transaction/${txHash}`);
-    
-    // Handle rate limiting for transaction status checks
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After');
-      const delay = retryAfter ? parseInt(retryAfter) * 1000 : 1000;
-      
-      console.warn('Rate limited on transaction status check, retrying after delay...');
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return getTransactionStatus(txHash);
-    }
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch transaction status');
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching transaction status:', error);
-    return { status: 'unknown' };
-  }
-}
-
-// Function to send tokens (using backend API) - Original endpoint without /api/ prefix
-export async function sendTokens(toAddress: string, amount: number, tokenSymbol: 'USDC' | 'USDT'): Promise<TransactionResult> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/bids/pay-milestone`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ toAddress, amount, tokenSymbol }),
-    });
-
-    // Handle rate limiting for token transfers
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After');
-      const delay = retryAfter ? parseInt(retryAfter) * 1000 : 1500;
-      
-      console.warn('Rate limited on token transfer, retrying after delay...');
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return sendTokens(toAddress, amount, tokenSymbol);
-    }
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to send tokens');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error sending tokens:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to send tokens'
-    };
-  }
-}
-
-// Update the completeMilestoneWithPayment function to use backend API
-export async function completeMilestoneWithPayment(
-  bidId: number, 
-  milestoneIndex: number, 
-  proof: string
-): Promise<TransactionResult & { bid: Bid }> {
-  try {
-    // First, complete the milestone
-    await completeMilestone(bidId, milestoneIndex, proof);
-    
-    // Then, process the payment
-    const paymentResult = await payMilestone(bidId, milestoneIndex);
-
-    if (!paymentResult.ok) {
-      throw new Error('Payment failed');
-    }
-
-    // Get the updated bid
-    const bid = await getBid(bidId);
-
-    return {
-      success: true,
-      transactionHash: paymentResult.transactionHash,
-      amount: bid.milestones[milestoneIndex].amount,
-      toAddress: bid.walletAddress,
-      currency: bid.preferredStablecoin,
-      bid: bid
-    };
-
-  } catch (error) {
-    console.error('Payment error:', error);
-    throw new Error(error instanceof Error ? error.message : 'Payment processing failed');
-  }
-}
-
-// Alternative: Complete milestone and payment in one step (frontend blockchain)
-export async function completeMilestoneWithPaymentDirect(
-  bidId: number, 
-  milestoneIndex: number, 
-  proof: string
-): Promise<TransactionResult & { bid: Bid }> {
-  try {
-    // Get bid details
-    const bid = await getBid(bidId);
-    const milestone = bid.milestones[milestoneIndex];
-    
-    if (!milestone) {
-      throw new Error('Milestone not found');
-    }
-
-    // Validate wallet address
-    if (!bid.walletAddress || !bid.walletAddress.startsWith('0x')) {
-      throw new Error('Invalid vendor wallet address');
-    }
-
-    // Send real USDT/USDC payment using blockchain service
-    let paymentResult: TransactionResult;
-    
-    if (bid.preferredStablecoin === 'USDT') {
-      paymentResult = await blockchainService.sendUSDT(bid.walletAddress, milestone.amount);
-    } else if (bid.preferredStablecoin === 'USDC') {
-      paymentResult = await blockchainService.sendUSDC(bid.walletAddress, milestone.amount);
-    } else {
-      throw new Error('Unsupported stablecoin');
-    }
-
-    if (!paymentResult.success) {
-      throw new Error(paymentResult.error || 'Payment failed');
-    }
-
-    // Update milestone with payment info
-    const updatedBid = await updateMilestoneWithPayment(
-      bidId,
-      milestoneIndex,
-      proof,
-      paymentResult.transactionHash
-    );
-
-    return {
-      ...paymentResult,
-      bid: updatedBid
-    };
-
-  } catch (error) {
-    console.error('Payment error:', error);
-    throw new Error(error instanceof Error ? error.message : 'Payment processing failed');
-  }
-}
-
-// Helper function to update milestone with payment info
-async function updateMilestoneWithPayment(
-  bidId: number,
-  milestoneIndex: number,
-  proof: string,
-  transactionHash: string
-): Promise<Bid> {
-  // In a real implementation, this would update the backend
-  // For now, we'll just return the updated bid by fetching it again
-  await completeMilestone(bidId, milestoneIndex, proof);
-  
-  // Simulate updating payment info (in a real app, this would be a backend call)
-  const bid = await getBid(bidId);
-  
-  // Update the milestone with payment info
-  const updatedMilestones = [...bid.milestones];
-  if (updatedMilestones[milestoneIndex]) {
-    updatedMilestones[milestoneIndex] = {
-      ...updatedMilestones[milestoneIndex],
-      paymentTxHash: transactionHash,
-      paymentDate: new Date().toISOString()
-    };
-  }
-  
-  return {
-    ...bid,
-    milestones: updatedMilestones
-  };
-}
-
-// Health check - Original endpoint without /api/ prefix
-export async function healthCheck(): Promise<{
-  ok: boolean;
-  network: string;
-  blockchain: string;
-  signer: string | null;
-  balances: { USDC: number; USDT: number };
-  counts: { proposals: number; bids: number };
-}> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    if (!response.ok) {
-      throw new Error('Health check failed');
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Health check error:', error);
-    throw new Error('Unable to connect to server');
-  }
-}
-
-// Test function - Original endpoint without /api/ prefix
-export async function testConnection(): Promise<{ success: boolean; bidCount: number; blockchain: any }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/test`);
-    if (!response.ok) {
-      throw new Error('Test failed');
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Test connection error:', error);
-    throw new Error('Unable to connect to server');
-  }
-}
-
-// Export all functions
 export default {
-  // Proposals
   getProposals,
   getProposal,
   createProposal,
   approveProposal,
   rejectProposal,
-  
-  // Bids
   getBids,
   getBid,
   createBid,
@@ -462,24 +186,8 @@ export default {
   rejectBid,
   completeMilestone,
   payMilestone,
-  
-  // IPFS
-  uploadFileToIPFS,
   uploadJsonToIPFS,
-  
-  // Blockchain
-  getTokenBalances,
-  getTransactionStatus,
-  sendTokens,
-  
-  // Payment
-  completeMilestoneWithPayment,
-  completeMilestoneWithPaymentDirect,
-  
-  // System
+  uploadFileToIPFS,
   healthCheck,
   testConnection,
-  
-  // Helper functions
-  postJSON
 };
