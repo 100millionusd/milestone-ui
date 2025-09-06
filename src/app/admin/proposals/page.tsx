@@ -1,5 +1,5 @@
 // src/app/admin/proposals/page.tsx
-import { getProposals } from "@/lib/api";
+import { getProposalsServer } from "@/lib/api-server"; // Use server version
 import AdminProposalsClient from "@/components/AdminProposalsClient";
 
 export const metadata = {
@@ -9,10 +9,10 @@ export const metadata = {
 
 export default async function AdminProposalsPage() {
   try {
-    const proposals = await getProposals();
+    const proposals = await getProposalsServer();
     return <AdminProposalsClient initialProposals={proposals} />;
   } catch (error) {
     console.error('Failed to fetch proposals:', error);
-    return <AdminProposalsClient />;
+    return <AdminProposalsClient initialProposals={[]} error={error.message} />;
   }
 }
