@@ -46,7 +46,7 @@ export default function NewProposalPage() {
       const res = await createProposal(body);
       
       if (res.proposalId) {
-        router.push(`/projects/${res.proposalId}`);
+        router.push(`/admin/proposals/${res.proposalId}`);
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
