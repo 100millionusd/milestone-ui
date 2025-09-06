@@ -50,18 +50,14 @@ export interface TransactionResult {
 }
 
 // ---- Base URL resolution ----
-const isBrowser = typeof window !== "undefined";
-
-// Server → hit Railway directly (no CORS on server)
-// Browser → hit our Next API proxies (same-origin, avoids CORS)
-const API_DIRECT = (
+// ALWAYS use direct Railway URL (no proxy since API routes were removed)
+const API_BASE = (
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "https://milestone-api-production.up.railway.app"
 ).replace(/\/+$/, "");
-const API_PROXY = ""; // relative to site origin
 
-const url = (path: string) => (isBrowser ? `${API_PROXY}/api${path}` : `${API_DIRECT}${path}`);
+const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
@@ -152,10 +148,10 @@ export function uploadJsonToIPFS(data: any) {
   return apiFetch(`/ipfs/upload-json`, { method: "POST", body: JSON.stringify(data) });
 }
 export async function uploadFileToIPFS(file: File) {
-  // Browser only; goes through proxy too (you can add pages/api/ipfs/upload-file.ts if needed)
+  // Use direct Railway URL for file uploads too
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch(`${API_PROXY}/api/ipfs/upload-file`, { method: "POST", body: fd }).catch((e) => {
+  const r = await fetch(`${API_BASE}/ipfs/upload-file`, { method: "POST", body: fd }).catch((e) => {
     throw new Error(e?.message || "Failed to upload file");
   });
   if (!r.ok) {
