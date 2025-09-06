@@ -16,10 +16,11 @@ export default function Navigation() {
   const navItems = [
     { href: '/', label: 'Dashboard' },
     { href: '/projects', label: 'Projects' },
-    { href: '/proposals', label: 'Proposals' }, // ADD THIS LINE
+    { href: '/proposals', label: 'Proposals' },
     { href: '/bids/new', label: 'Give a Bid' },
     { href: '/new', label: 'Submit Proposal' },
     { href: '/admin/proposals', label: 'Admin' },
+    { href: '/admin/bids', label: 'Manage Bids' } // ADDED THIS LINE
   ];
 
   return (
