@@ -1,5 +1,5 @@
 // src/app/admin/proposals/page.tsx
-import { getProposalsServer } from "@/lib/api-server"; // Use server version
+import { getProposals } from "@/lib/api";
 import AdminProposalsClient from "@/components/AdminProposalsClient";
 
 export const metadata = {
