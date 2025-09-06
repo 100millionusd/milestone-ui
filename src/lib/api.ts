@@ -99,6 +99,14 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   }
 }
 
+// ---- ADD THE MISSING POSTJSON FUNCTION ----
+export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
+  return apiFetch(path, { 
+    method: "POST", 
+    body: JSON.stringify(data) 
+  });
+};
+
 // ---- Proposals ----
 export function getProposals(): Promise<Proposal[]> {
   return apiFetch("/proposals");
@@ -193,4 +201,5 @@ export default {
   uploadFileToIPFS,
   healthCheck,
   testConnection,
+  postJSON, // Also add postJSON to the default export
 };
