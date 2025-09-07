@@ -1,6 +1,5 @@
 // server.js — Milestone API with USDT/USDC payments
 // -----------------------------------------------------------
-
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -9,7 +8,6 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
 const Joi = require("joi");
 const { ethers } = require("ethers");
 
@@ -180,7 +178,7 @@ class BlockchainService {
     // Check balance first
     const balance = await contract.balanceOf(await this.signer.getAddress());
     if (balance < amountInWei) {
-      throw new Error('Insufficient balance for payment');
+           throw new Error('Insufficient balance for payment');
     }
 
     // Send transaction
@@ -242,22 +240,20 @@ const app = express();
 // Initialize blockchain service
 const blockchainService = new BlockchainService();
 
+// Add trust proxy for Railway
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
-
+// Fix CORS configuration
 app.use(
   cors({
-    origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN,
-    credentials: false,
+    origin: CORS_ORIGIN,
+    credentials: true,
   })
 );
+
 app.use(express.json({ limit: "20mb" }));
 app.use(
   fileUpload({
@@ -597,7 +593,9 @@ app.post("/bids", async (req, res) => {
     }
 
     const proposal = await proposalsDB.findById(value.proposalId);
-    if (!proposal) return res.status(404).json({ error: "proposal 404" });
+    if (!proposal) return res.status(
+      return res.status(404).json({ error: "proposal 404" });
+    }
 
     const bids = await bidsDB.read();
     const bidId = bids.length ? bids[bids.length - 1].bidId + 1 : 1;
@@ -797,14 +795,14 @@ app.use((req, res, next) => {
 
 // ========== Environment Validation ==========
 function validateEnv() {
-  const required = ['CORS_ORIGIN'];
-  if (process.env.NODE_ENV === 'production') {
-    required.push('PINATA_JWT');
+  // Set default CORS_ORIGIN if not provided
+  if (!process.env.CORS_ORIGIN) {
+    process.env.CORS_ORIGIN = 'https://lithiumx.netlify.app';
   }
   
-  const missing = required.filter(key => !process.env[key]);
-  if (missing.length > 0) {
-    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+  // Only require PINATA_JWT in production
+  if (process.env.NODE_ENV === 'production' && !process.env.PINATA_JWT) {
+    console.error('Missing required environment variable: PINATA_JWT');
     process.exit(1);
   }
 }
@@ -826,9 +824,7 @@ async function startServer() {
       console.log(`[api] Blockchain configured: ${blockchainService.isConfigured()}`);
       
       if (blockchainService.isConfigured()) {
-        blockchainService.signer.getAddress().then(address => {
-          console.log(`[api] Signer address: ${address}`);
-        });
+        console.log(`[api] Signer address: ${blockchainService.signer.address}`);
       }
       
       console.log(`[api] Test endpoint: http://localhost:${PORT}/test`);
