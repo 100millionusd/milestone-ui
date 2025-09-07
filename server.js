@@ -240,19 +240,30 @@ const app = express();
 // Initialize blockchain service
 const blockchainService = new BlockchainService();
 
-// Add trust proxy for Railway
+// Add trust proxy for Railway (CRITICAL)
 app.set('trust proxy', 1);
+
+// ========== CORS FIX - MUST COME FIRST ==========
+// Handle preflight requests for all endpoints
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', 'https://lithiumx.netlify.app');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return res.status(200).end();
+});
+
+// Regular CORS middleware
+app.use(cors({
+  origin: 'https://lithiumx.netlify.app',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
 // Security middleware
 app.use(helmet());
-
-// Fix CORS configuration
-app.use(
-  cors({
-    origin: CORS_ORIGIN,
-    credentials: true,
-  })
-);
 
 app.use(express.json({ limit: "20mb" }));
 app.use(
@@ -593,9 +604,7 @@ app.post("/bids", async (req, res) => {
     }
 
     const proposal = await proposalsDB.findById(value.proposalId);
-    if (!proposal) return res.status(
-      return res.status(404).json({ error: "proposal 404" });
-    }
+    if (!proposal) return res.status(404).json({ error: "proposal 404" });
 
     const bids = await bidsDB.read();
     const bidId = bids.length ? bids[bids.length - 1].bidId + 1 : 1;
