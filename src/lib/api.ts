@@ -73,6 +73,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
+    credentials: 'include', // Include cookies for authentication
     ...options,
   }).catch((e) => {
     // Network/CORS-level error
@@ -145,12 +146,31 @@ export function approveBid(id: number) {
 export function rejectBid(id: number) {
   return apiFetch(`/bids/${id}/reject`, { method: "POST" });
 }
+
+// ---- Vendor-specific functions ----
+export function getVendorBids(): Promise<Bid[]> {
+  return apiFetch("/vendor/bids");
+}
+
 export function completeMilestone(bidId: number, milestoneIndex: number, proof: string) {
+  return apiFetch(`/vendor/bids/${bidId}/complete-milestone`, {
+    method: "POST",
+    body: JSON.stringify({ milestoneIndex, proof }),
+  });
+}
+
+export function getVendorPayments(): Promise<TransactionResult[]> {
+  return apiFetch("/vendor/payments");
+}
+
+// ---- Admin functions (kept separate) ----
+export function adminCompleteMilestone(bidId: number, milestoneIndex: number, proof: string) {
   return apiFetch(`/bids/${bidId}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
+
 export function payMilestone(bidId: number, milestoneIndex: number) {
   return apiFetch(`/bids/${bidId}/pay-milestone`, {
     method: "POST",
@@ -195,11 +215,14 @@ export default {
   createBid,
   approveBid,
   rejectBid,
-  completeMilestone,
+  getVendorBids,
+  completeMilestone, // Vendor version
+  getVendorPayments,
+  adminCompleteMilestone, // Admin version
   payMilestone,
   uploadJsonToIPFS,
   uploadFileToIPFS,
   healthCheck,
   testConnection,
-  postJSON, // Also add postJSON to the default export
+  postJSON,
 };
