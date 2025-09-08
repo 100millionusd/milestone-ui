@@ -153,7 +153,7 @@ export function getVendorBids(): Promise<Bid[]> {
 }
 
 export function completeMilestone(bidId: number, milestoneIndex: number, proof: string) {
-  return apiFetch(`/vendor/bids/${bidId}/complete-milestone`, {
+  return apiFetch(`/bids/${bidId}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
   });
