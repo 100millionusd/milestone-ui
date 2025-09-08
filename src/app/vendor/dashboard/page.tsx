@@ -3,22 +3,50 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getBids } from '@/lib/api';
+import { getVendorBids } from '@/lib/api';
+import { getVendorWalletAddress, connectWallet } from '@/lib/wallet';
 
 export default function VendorDashboard() {
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [walletConnected, setWalletConnected] = useState(false);
 
   useEffect(() => {
-    loadBids();
+    checkWalletConnection();
   }, []);
+
+  const checkWalletConnection = async () => {
+    try {
+      await getVendorWalletAddress();
+      setWalletConnected(true);
+      loadBids();
+    } catch (err) {
+      setLoading(false);
+      setError('Please connect your wallet to access the vendor dashboard.');
+    }
+  };
+
+  const handleConnectWallet = async () => {
+    try {
+      await connectWallet();
+      setWalletConnected(true);
+      setError('');
+      loadBids();
+    } catch (err) {
+      setError('Failed to connect wallet. Please install MetaMask.');
+    }
+  };
 
   const loadBids = async () => {
     try {
-      const bidsData = await getBids();
+      setLoading(true);
+      setError('');
+      const bidsData = await getVendorBids();
       setBids(bidsData);
     } catch (error) {
       console.error('Error loading bids:', error);
+      setError('Failed to load your bids. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -34,6 +62,25 @@ export default function VendorDashboard() {
     return bid.status.charAt(0).toUpperCase() + bid.status.slice(1);
   };
 
+  if (!walletConnected) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white rounded-lg shadow-sm p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">🔐</div>
+          <h2 className="text-xl font-semibold mb-4">Wallet Required</h2>
+          <p className="text-gray-600 mb-6">Please connect your wallet to access the vendor dashboard.</p>
+          <button
+            onClick={handleConnectWallet}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded font-medium"
+          >
+            Connect Wallet
+          </button>
+          {error && <p className="text-red-600 mt-4">{error}</p>}
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -46,18 +93,34 @@ export default function VendorDashboard() {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-2">Vendor Dashboard</h1>
-          <p className="text-gray-600">Manage your bids and submit proof of work</p>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold mb-2">Vendor Dashboard</h1>
+              <p className="text-gray-600">Manage your bids and submit proof of work</p>
+            </div>
+            <button
+              onClick={loadBids}
+              className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
 
         <div className="grid gap-6">
           {bids.map((bid) => (
             <div key={bid.bidId} className="bg-white rounded-lg shadow-sm p-6">
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  <h2 className="text-xl font-semibold">{bid.title}</h2>
+                  <h2 className="text-xl font-semibold">Proposal #{bid.proposalId}</h2>
                   <p className="text-gray-600">Bid ID: {bid.bidId}</p>
-                  <p className="text-gray-600">Organization: {bid.orgName}</p>
+                  <p className="text-gray-600">Vendor: {bid.vendorName}</p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                   bid.status === 'approved' ? 'bg-green-100 text-green-800' :
@@ -72,7 +135,7 @@ export default function VendorDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
                   <p className="font-medium text-gray-600">Your Bid</p>
-                  <p className="text-green-600 font-bold">${bid.priceUSD.toLocaleString()}</p>
+                  <p className="text-green-600 font-bold">${bid.priceUSD?.toLocaleString()}</p>
                 </div>
                 <div>
                   <p className="font-medium text-gray-600">Timeline</p>
@@ -84,7 +147,7 @@ export default function VendorDashboard() {
                 </div>
                 <div>
                   <p className="font-medium text-gray-600">Milestones</p>
-                  <p>{bid.milestones.filter((m: any) => m.completed).length}/{bid.milestones.length} completed</p>
+                  <p>{bid.milestones?.filter((m: any) => m.completed).length}/{bid.milestones?.length} completed</p>
                 </div>
               </div>
 
