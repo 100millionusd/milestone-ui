@@ -41,23 +41,33 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const init = async () => {
       try {
+        if (!clientId) {
+          console.error('❌ Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
+          return;
+        }
+
+        console.log('🔄 Initializing Web3Auth with network sapphire_devnet...');
+
         const web3authInstance = new Web3Auth({
           clientId,
-          web3AuthNetwork: 'sapphire_devnet', // ✅ MUST match your dashboard
+          web3AuthNetwork: 'sapphire_devnet', // ✅ must match your Web3Auth dashboard
           chainConfig,
         });
 
-        await web3authInstance.initModal();
+        await web3authInstance.initModal(); // ✅ works in v10
+        console.log('✅ Web3Auth initialized');
+
         setWeb3auth(web3authInstance);
 
         if (web3authInstance.provider) {
           setProvider(web3authInstance.provider);
+
           const ethersProvider = new ethers.BrowserProvider(web3authInstance.provider);
           const signer = await ethersProvider.getSigner();
           setAddress(await signer.getAddress());
         }
       } catch (error) {
-        console.error('Web3Auth init error:', error);
+        console.error('❌ Web3Auth init error:', error);
       }
     };
 
@@ -67,22 +77,31 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     if (!web3auth) return;
     try {
+      console.log('🔑 Opening Web3Auth modal...');
       const web3authProvider = await web3auth.connect();
       setProvider(web3authProvider);
 
       const ethersProvider = new ethers.BrowserProvider(web3authProvider);
       const signer = await ethersProvider.getSigner();
-      setAddress(await signer.getAddress());
+      const addr = await signer.getAddress();
+      setAddress(addr);
+
+      console.log('✅ Logged in as:', addr);
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ Login error:', error);
     }
   };
 
   const logout = async () => {
     if (!web3auth) return;
-    await web3auth.logout();
-    setProvider(null);
-    setAddress(null);
+    try {
+      await web3auth.logout();
+      setProvider(null);
+      setAddress(null);
+      console.log('✅ Logged out');
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+    }
   };
 
   return (
