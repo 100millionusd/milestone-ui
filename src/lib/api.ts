@@ -49,20 +49,6 @@ export interface TransactionResult {
   currency?: string;
 }
 
-export interface SubmittedProof {
-  id: string; // unique synthetic id
-  bidId: number;
-  proposalId: number;
-  vendorName: string;
-  walletAddress: string;
-  projectTitle: string;
-  description: string;
-  files: string[];
-  milestoneIndex: number;
-  amount: number;
-  status: "pending" | "approved" | "rejected" | "completed";
-}
-
 // ---- Base URL resolution ----
 const getApiBase = () => {
   if (typeof window === "undefined") {
@@ -78,6 +64,7 @@ const getApiBase = () => {
 };
 
 const API_BASE = getApiBase().replace(/\/+$/, "");
+
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
@@ -113,7 +100,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   }
 }
 
-// ---- POST JSON helper ----
+// ---- POST helper ----
 export const postJSON = async <T = any>(
   path: string,
   data: any
@@ -157,10 +144,7 @@ export function getBid(id: number): Promise<Bid> {
 export function createBid(
   bid: Omit<Bid, "bidId" | "status" | "createdAt">
 ): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
-  return apiFetch("/bids", {
-    method: "POST",
-    body: JSON.stringify(bid),
-  });
+  return apiFetch("/bids", { method: "POST", body: JSON.stringify(bid) });
 }
 export function approveBid(id: number) {
   return apiFetch(`/bids/${id}/approve`, { method: "POST" });
@@ -169,11 +153,10 @@ export function rejectBid(id: number) {
   return apiFetch(`/bids/${id}/reject`, { method: "POST" });
 }
 
-// ---- Vendor-specific functions ----
+// ---- Vendor ----
 export function getVendorBids(): Promise<Bid[]> {
   return apiFetch("/vendor/bids");
 }
-
 export function completeMilestone(
   bidId: number,
   milestoneIndex: number,
@@ -184,12 +167,11 @@ export function completeMilestone(
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
-
 export function getVendorPayments(): Promise<TransactionResult[]> {
   return apiFetch("/vendor/payments");
 }
 
-// ---- Admin functions ----
+// ---- Admin ----
 export function adminCompleteMilestone(
   bidId: number,
   milestoneIndex: number,
@@ -200,7 +182,6 @@ export function adminCompleteMilestone(
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
-
 export function payMilestone(bidId: number, milestoneIndex: number) {
   return apiFetch(`/bids/${bidId}/pay-milestone`, {
     method: "POST",
@@ -208,37 +189,19 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
-// ---- Proofs (Frontend Filtering) ----
-export async function getSubmittedProofs(): Promise<SubmittedProof[]> {
-  const bids = await getBids();
-  const proofs: SubmittedProof[] = [];
-
-  for (const bid of bids) {
-    bid.milestones.forEach((m, index) => {
-      if (m.proof && m.proof.trim().length > 0) {
-        proofs.push({
-          id: `${bid.bidId}-${index}`,
-          bidId: bid.bidId,
-          proposalId: bid.proposalId,
-          vendorName: bid.vendorName,
-          walletAddress: bid.walletAddress,
-          projectTitle: bid.title || "Untitled Project",
-          description: m.proof,
-          files: extractFileLinks(m.proof),
-          milestoneIndex: index,
-          amount: m.amount,
-          status: bid.status,
-        });
-      }
-    });
-  }
-
-  return proofs;
+// ---- Proofs (Vendor submissions reviewed by Admin) ----
+export function getSubmittedProofs(): Promise<any[]> {
+  return apiFetch("/proofs");
 }
-
-function extractFileLinks(proofText: string): string[] {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  return proofText.match(urlRegex) || [];
+export function approveProof(bidId: number, milestoneIndex: number) {
+  return apiFetch(`/proofs/${bidId}/${milestoneIndex}/approve`, {
+    method: "POST",
+  });
+}
+export function rejectProof(bidId: number, milestoneIndex: number) {
+  return apiFetch(`/proofs/${bidId}/${milestoneIndex}/reject`, {
+    method: "POST",
+  });
 }
 
 // ---- IPFS ----
@@ -264,7 +227,7 @@ export async function uploadFileToIPFS(file: File) {
   return r.json();
 }
 
-// ---- Health / test ----
+// ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
 }
@@ -289,6 +252,8 @@ export default {
   adminCompleteMilestone,
   payMilestone,
   getSubmittedProofs,
+  approveProof,
+  rejectProof,
   uploadJsonToIPFS,
   uploadFileToIPFS,
   healthCheck,
