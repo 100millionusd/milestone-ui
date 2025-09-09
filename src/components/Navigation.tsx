@@ -9,22 +9,20 @@ import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
-  const { address /*, role, logout, login */ } = useWeb3Auth();
+  const { address } = useWeb3Auth();
 
   const isActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + '/');
   };
 
-  // base navigation items
+  // base navigation items (removed Proposals + Give a Bid)
   const navItems = [
     { href: '/', label: 'Dashboard' },
     { href: '/projects', label: 'Projects' },
-    { href: '/proposals', label: 'Proposals' },
-    { href: '/bids/new', label: 'Give a Bid' },
-    { href: '/new', label: 'Submit Proposal' },
+    { href: '/new', label: 'Submit Proposal' }, // ✅ kept
     { href: '/admin/proposals', label: 'Admin' },
     { href: '/admin/bids', label: 'Manage Bids' },
-    { href: '/admin/proofs', label: 'Proofs' },   // 👈 NEW LINK for Admin Proofs
+    { href: '/admin/proofs', label: 'Proofs' },
     { href: '/vendor/dashboard', label: 'Vendors' }
   ];
 
