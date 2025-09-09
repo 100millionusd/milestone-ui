@@ -49,38 +49,52 @@ export interface TransactionResult {
   currency?: string;
 }
 
+export interface SubmittedProof {
+  id: string; // unique synthetic id
+  bidId: number;
+  proposalId: number;
+  vendorName: string;
+  walletAddress: string;
+  projectTitle: string;
+  description: string;
+  files: string[];
+  milestoneIndex: number;
+  amount: number;
+  status: "pending" | "approved" | "rejected" | "completed";
+}
+
 // ---- Base URL resolution ----
 const getApiBase = () => {
-  // Server-side: use API_BASE_URL or default Railway URL
-  if (typeof window === 'undefined') {
-    return process.env.API_BASE_URL || "https://milestone-api-production.up.railway.app";
+  if (typeof window === "undefined") {
+    return (
+      process.env.API_BASE_URL ||
+      "https://milestone-api-production.up.railway.app"
+    );
   }
-  
-  // Browser-side: use NEXT_PUBLIC_API_BASE_URL or default Railway URL
-  return process.env.NEXT_PUBLIC_API_BASE_URL || "https://milestone-api-production.up.railway.app";
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "https://milestone-api-production.up.railway.app"
+  );
 };
 
-const API_BASE = getApiBase().replace(/\/+$/, '');
-
+const API_BASE = getApiBase().replace(/\/+$/, "");
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
   const fullUrl = url(path);
-  
+
   const r = await fetch(fullUrl, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
-    credentials: 'include', // Include cookies for authentication
+    credentials: "include",
     ...options,
   }).catch((e) => {
-    // Network/CORS-level error
     throw new Error(e?.message || "Failed to fetch");
   });
 
-  // HTTP-level error
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try {
@@ -92,7 +106,6 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     throw new Error(msg);
   }
 
-  // OK
   try {
     return await r.json();
   } catch {
@@ -100,11 +113,14 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   }
 }
 
-// ---- ADD THE MISSING POSTJSON FUNCTION ----
-export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
-  return apiFetch(path, { 
-    method: "POST", 
-    body: JSON.stringify(data) 
+// ---- POST JSON helper ----
+export const postJSON = async <T = any>(
+  path: string,
+  data: any
+): Promise<T> => {
+  return apiFetch(path, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 };
 
@@ -118,7 +134,10 @@ export function getProposal(id: number): Promise<Proposal> {
 export function createProposal(
   proposal: Omit<Proposal, "proposalId" | "status" | "createdAt" | "cid">
 ): Promise<{ ok: boolean; proposalId: number; cid: string | null }> {
-  return apiFetch("/proposals", { method: "POST", body: JSON.stringify(proposal) });
+  return apiFetch("/proposals", {
+    method: "POST",
+    body: JSON.stringify(proposal),
+  });
 }
 export function approveProposal(id: number) {
   return apiFetch(`/proposals/${id}/approve`, { method: "POST" });
@@ -138,7 +157,10 @@ export function getBid(id: number): Promise<Bid> {
 export function createBid(
   bid: Omit<Bid, "bidId" | "status" | "createdAt">
 ): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
-  return apiFetch("/bids", { method: "POST", body: JSON.stringify(bid) });
+  return apiFetch("/bids", {
+    method: "POST",
+    body: JSON.stringify(bid),
+  });
 }
 export function approveBid(id: number) {
   return apiFetch(`/bids/${id}/approve`, { method: "POST" });
@@ -152,7 +174,11 @@ export function getVendorBids(): Promise<Bid[]> {
   return apiFetch("/vendor/bids");
 }
 
-export function completeMilestone(bidId: number, milestoneIndex: number, proof: string) {
+export function completeMilestone(
+  bidId: number,
+  milestoneIndex: number,
+  proof: string
+) {
   return apiFetch(`/bids/${bidId}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
@@ -163,8 +189,12 @@ export function getVendorPayments(): Promise<TransactionResult[]> {
   return apiFetch("/vendor/payments");
 }
 
-// ---- Admin functions (kept separate) ----
-export function adminCompleteMilestone(bidId: number, milestoneIndex: number, proof: string) {
+// ---- Admin functions ----
+export function adminCompleteMilestone(
+  bidId: number,
+  milestoneIndex: number,
+  proof: string
+) {
   return apiFetch(`/bids/${bidId}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
@@ -178,15 +208,53 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
+// ---- Proofs (Frontend Filtering) ----
+export async function getSubmittedProofs(): Promise<SubmittedProof[]> {
+  const bids = await getBids();
+  const proofs: SubmittedProof[] = [];
+
+  for (const bid of bids) {
+    bid.milestones.forEach((m, index) => {
+      if (m.proof && m.proof.trim().length > 0) {
+        proofs.push({
+          id: `${bid.bidId}-${index}`,
+          bidId: bid.bidId,
+          proposalId: bid.proposalId,
+          vendorName: bid.vendorName,
+          walletAddress: bid.walletAddress,
+          projectTitle: bid.title || "Untitled Project",
+          description: m.proof,
+          files: extractFileLinks(m.proof),
+          milestoneIndex: index,
+          amount: m.amount,
+          status: bid.status,
+        });
+      }
+    });
+  }
+
+  return proofs;
+}
+
+function extractFileLinks(proofText: string): string[] {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return proofText.match(urlRegex) || [];
+}
+
 // ---- IPFS ----
 export function uploadJsonToIPFS(data: any) {
-  return apiFetch(`/ipfs/upload-json`, { method: "POST", body: JSON.stringify(data) });
+  return apiFetch(`/ipfs/upload-json`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 export async function uploadFileToIPFS(file: File) {
-  // Use direct URL for file uploads
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch(`${API_BASE}/ipfs/upload-file`, { method: "POST", body: fd }).catch((e) => {
+  const r = await fetch(`${API_BASE}/ipfs/upload-file`, {
+    method: "POST",
+    body: fd,
+  }).catch((e) => {
     throw new Error(e?.message || "Failed to upload file");
   });
   if (!r.ok) {
@@ -216,14 +284,14 @@ export default {
   approveBid,
   rejectBid,
   getVendorBids,
-  completeMilestone, // Vendor version
+  completeMilestone,
   getVendorPayments,
-  adminCompleteMilestone, // Admin version
+  adminCompleteMilestone,
   payMilestone,
+  getSubmittedProofs,
   uploadJsonToIPFS,
   uploadFileToIPFS,
   healthCheck,
   testConnection,
   postJSON,
 };
-
