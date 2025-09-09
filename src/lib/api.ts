@@ -227,6 +227,7 @@ export function uploadJsonToIPFS(data: any) {
     body: JSON.stringify(data),
   });
 }
+
 export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
@@ -240,7 +241,17 @@ export async function uploadFileToIPFS(file: File) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j?.error || `HTTP ${r.status}`);
   }
-  return r.json();
+
+  const result = await r.json();
+
+  // 👇 rewrite using NEXT_PUBLIC_PINATA_GATEWAY
+  const gateway =
+    process.env.NEXT_PUBLIC_PINATA_GATEWAY || "gateway.pinata.cloud";
+  if (result.cid) {
+    result.url = `https://${gateway}/ipfs/${result.cid}`;
+  }
+
+  return result;
 }
 
 // ---- Health ----
