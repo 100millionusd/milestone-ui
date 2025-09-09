@@ -23,8 +23,11 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   logout: async () => {},
 });
 
+// 🔑 Read from env, fallback to a safe public endpoint
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC || '';
+const rpcUrl =
+  process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
+  'https://rpc.ankr.com/eth_sepolia/d6eaf3a3cd77223e0e2039350d0795b537ce3e7fb331a34c92d8b3854936ab33';
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -48,14 +51,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('🚨 Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
-        if (!rpcUrl) {
-          console.error('🚨 Missing NEXT_PUBLIC_SEPOLIA_RPC');
-          return;
-        }
 
-        console.log('🚀 Initializing Web3Auth...');
+        console.log('🚀 Initializing Web3Auth with Sepolia...');
 
-        // 👇 create the EVM provider
+        // 👇 Create the EVM private key provider
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
         const web3authInstance = new Web3Auth({
@@ -64,7 +63,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           privateKeyProvider,
         });
 
-        // 👇 add Openlogin adapter for Google/social login
+        // 👇 Add Openlogin adapter for Google/social login
         const openloginAdapter = new OpenloginAdapter({
           adapterSettings: {
             uxMode: 'popup',
