@@ -12,7 +12,7 @@ export default function VendorDashboard() {
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<string | null>(null);
-  const { address, logout, provider } = useWeb3Auth(); // assumes provider is exposed
+  const { address, logout, provider } = useWeb3Auth();
   const router = useRouter();
 
   useEffect(() => {
@@ -27,9 +27,13 @@ export default function VendorDashboard() {
   const loadBids = async () => {
     try {
       const allBids = await getBids();
-      const vendorBids = allBids.filter(
-        (bid) => bid.walletAddress.toLowerCase() === address?.toLowerCase()
-      );
+      const vendorBids = allBids
+        .filter((bid) => bid.walletAddress.toLowerCase() === address?.toLowerCase())
+        .map((bid) => ({
+          ...bid,
+          proofs: bid.proofs || [] // ✅ fallback so frontend always has an array
+        }));
+
       setBids(vendorBids);
     } catch (error) {
       console.error('Error loading bids:', error);
@@ -44,13 +48,9 @@ export default function VendorDashboard() {
       let ethersProvider: ethers.Provider;
 
       if (provider) {
-        // If Web3Auth exposes provider (SafeEventEmitterProvider), wrap it
         ethersProvider = new ethers.BrowserProvider(provider as any);
       } else {
-        // fallback to a public Sepolia RPC
-        ethersProvider = new ethers.JsonRpcProvider(
-          'https://rpc.ankr.com/eth_sepolia'
-        );
+        ethersProvider = new ethers.JsonRpcProvider('https://rpc.ankr.com/eth_sepolia');
       }
 
       const rawBalance = await ethersProvider.getBalance(address);
@@ -152,16 +152,14 @@ export default function VendorDashboard() {
                 <div>
                   <p className="font-medium text-gray-600">Milestones</p>
                   <p>
-                    {
-                      bid.milestones.filter((m: any) => m.completed).length
-                    }/{bid.milestones.length}{' '}
+                    {bid.milestones.filter((m: any) => m.completed).length}/{bid.milestones.length}{' '}
                     completed
                   </p>
                 </div>
               </div>
 
               {bid.status === 'approved' && (
-                <div className="flex gap-3">
+                <div className="flex gap-3 mb-4">
                   <Link
                     href={`/vendor/proof/${bid.bidId}`}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
@@ -169,13 +167,40 @@ export default function VendorDashboard() {
                     Submit Proof
                   </Link>
                   <button
-                    onClick={() =>
-                      navigator.clipboard.writeText(bid.walletAddress)
-                    }
+                    onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
                     className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
                   >
                     Copy Wallet Address
                   </button>
+                </div>
+              )}
+
+              {/* ✅ Show submitted proofs (fallback if backend not ready) */}
+              {bid.proofs.length > 0 && (
+                <div className="mt-4 border-t pt-4">
+                  <h3 className="font-medium text-gray-700 mb-2">Submitted Proofs</h3>
+                  {bid.proofs.map((proof: any, idx: number) => (
+                    <div key={idx} className="mb-3 p-3 border rounded bg-gray-50">
+                      <p className="text-sm text-gray-800 whitespace-pre-line">
+                        {proof.description || 'No description'}
+                      </p>
+                      {proof.files?.length > 0 && (
+                        <ul className="list-disc list-inside text-blue-600 mt-2">
+                          {proof.files.map((f: any, i: number) => (
+                            <li key={i}>
+                              <a href={f.url} target="_blank" rel="noopener noreferrer" className="underline">
+                                {f.name}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <span className="inline-block mt-2 px-2 py-1 text-xs rounded-full
+                        bg-yellow-100 text-yellow-800">
+                        {proof.status || 'pending'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

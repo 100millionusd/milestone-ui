@@ -16,6 +16,7 @@ export interface Proposal {
   status: "pending" | "approved" | "rejected";
   createdAt: string;
 }
+
 export interface Milestone {
   name: string;
   amount: number;
@@ -26,6 +27,7 @@ export interface Milestone {
   paymentTxHash: string | null;
   paymentDate: string | null;
 }
+
 export interface Bid {
   bidId: number;
   proposalId: number;
@@ -40,6 +42,7 @@ export interface Bid {
   status: "pending" | "approved" | "completed" | "rejected";
   createdAt: string;
 }
+
 export interface TransactionResult {
   success: boolean;
   transactionHash?: string;
@@ -47,6 +50,19 @@ export interface TransactionResult {
   amount?: number;
   toAddress?: string;
   currency?: string;
+}
+
+// Proof submitted by vendors
+export interface Proof {
+  bidId: number;
+  milestoneIndex: number;
+  vendorName: string;
+  walletAddress: string;
+  title: string;
+  description: string;
+  files: { name: string; url: string }[];
+  status: "pending" | "approved" | "rejected";
+  submittedAt: string;
 }
 
 // ---- Base URL resolution ----
@@ -190,7 +206,7 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
 }
 
 // ---- Proofs (Vendor submissions reviewed by Admin) ----
-export function getSubmittedProofs(): Promise<any[]> {
+export function getSubmittedProofs(): Promise<Proof[]> {
   return apiFetch("/proofs");
 }
 export function approveProof(bidId: number, milestoneIndex: number) {

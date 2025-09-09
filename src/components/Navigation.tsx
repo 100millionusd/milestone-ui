@@ -9,8 +9,7 @@ import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
-  const { address /*, role, logout, login */ } = useWeb3Auth(); 
-  // ^ if you have roles, you can destructure role here
+  const { address /*, role, logout, login */ } = useWeb3Auth();
 
   const isActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + '/');
@@ -25,7 +24,8 @@ export default function Navigation() {
     { href: '/new', label: 'Submit Proposal' },
     { href: '/admin/proposals', label: 'Admin' },
     { href: '/admin/bids', label: 'Manage Bids' },
-    { href: '/vendor/dashboard', label: 'Vendors' } // 👈 added vendors
+    { href: '/admin/proofs', label: 'Proofs' },   // 👈 NEW LINK for Admin Proofs
+    { href: '/vendor/dashboard', label: 'Vendors' }
   ];
 
   return (
