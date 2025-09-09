@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, SafeEventEmitterProvider } from '@web3auth/base';
+import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider'; // 👈 add this
 import { ethers } from 'ethers';
 
 interface Web3AuthContextType {
@@ -46,15 +47,20 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        console.log('🔄 Initializing Web3Auth with network sapphire_devnet...');
+        console.log('🔄 Initializing Web3Auth with sapphire_devnet...');
+
+        // 👇 create the EVM private key provider
+        const privateKeyProvider = new EthereumPrivateKeyProvider({
+          config: { chainConfig },
+        });
 
         const web3authInstance = new Web3Auth({
           clientId,
-          web3AuthNetwork: 'sapphire_devnet', // ✅ must match your Web3Auth dashboard
-          chainConfig,
+          web3AuthNetwork: 'sapphire_devnet', // must match your dashboard
+          privateKeyProvider, // 👈 required for EVM chains
         });
 
-        await web3authInstance.initModal(); // ✅ works in v10
+        await web3authInstance.initModal();
         console.log('✅ Web3Auth initialized');
 
         setWeb3auth(web3authInstance);
@@ -112,3 +118,4 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export const useWeb3Auth = () => useContext(Web3AuthContext);
+
