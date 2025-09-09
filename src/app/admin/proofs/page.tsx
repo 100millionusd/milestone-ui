@@ -1,57 +1,64 @@
-// src/app/admin/proofs/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getSubmittedProofs, approveProof, rejectProof } from '@/lib/api';
-
-interface Proof {
-  bidId: number;
-  milestoneIndex: number;
-  vendorName: string;
-  walletAddress: string;
-  title: string;
-  description: string;
-  files: { name: string; url: string }[];
-  status: 'pending' | 'approved' | 'rejected';
-  submittedAt: string;
-}
+import {
+  getBids,
+  payMilestone,
+  completeMilestone,   // ✅ use this to mark proof approved
+} from '@/lib/api';
 
 export default function AdminProofsPage() {
-  const [proofs, setProofs] = useState<Proof[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bids, setBids] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [processing, setProcessing] = useState<number | null>(null);
+  const [processing, setProcessing] = useState<string | null>(null);
 
   useEffect(() => {
     loadProofs();
   }, []);
 
   const loadProofs = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const data = await getSubmittedProofs();
-      setProofs(data);
-    } catch (err) {
-      console.error('Error fetching proofs:', err);
-      setError('Failed to fetch proofs');
+      const allBids = await getBids();
+      const withProofs = allBids.filter((b: any) =>
+        b.milestones.some((m: any) => m.proof && m.proof.length > 0)
+      );
+      setBids(withProofs);
+    } catch (e: any) {
+      console.error('Error fetching proofs:', e);
+      setError(e.message || 'Failed to load proofs');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAction = async (bidId: number, milestoneIndex: number, action: 'approve' | 'reject') => {
+  const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
+    if (!confirm('Approve this proof?')) return;
     try {
-      setProcessing(bidId);
-      if (action === 'approve') {
-        await approveProof(bidId, milestoneIndex);
-      } else {
-        await rejectProof(bidId, milestoneIndex);
-      }
-      await loadProofs();
-    } catch (err) {
-      console.error(`Error trying to ${action} proof:`, err);
-      alert(`Failed to ${action} proof`);
+      setProcessing(`approve-${bidId}-${milestoneIndex}`);
+      await completeMilestone(bidId, milestoneIndex, proof);
+      alert('Proof approved ✅');
+      loadProofs();
+    } catch (e: any) {
+      console.error('Error approving proof:', e);
+      alert(e.message || 'Failed to approve proof');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handlePay = async (bidId: number, milestoneIndex: number) => {
+    if (!confirm('Release payment for this milestone?')) return;
+    try {
+      setProcessing(`pay-${bidId}-${milestoneIndex}`);
+      await payMilestone(bidId, milestoneIndex);
+      alert('Payment released successfully ✅');
+      loadProofs();
+    } catch (e: any) {
+      console.error('Error paying milestone:', e);
+      alert(e.message || 'Payment failed');
     } finally {
       setProcessing(null);
     }
@@ -59,99 +66,89 @@ export default function AdminProofsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-600">Loading submitted proofs...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Loading submitted proofs...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-red-600">{error}</p>
+      <div className="min-h-screen flex items-center justify-center text-red-600">
+        <p>{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Submitted Proofs</h1>
-
-        {proofs.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-            <p className="text-gray-600">No proofs submitted yet.</p>
-          </div>
-        ) : (
-          <div className="grid gap-6">
-            {proofs.map((proof) => (
-              <div key={`${proof.bidId}-${proof.milestoneIndex}`} className="bg-white rounded-lg shadow-sm p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h2 className="text-xl font-semibold">{proof.title}</h2>
-                    <p className="text-gray-600">
-                      Vendor: {proof.vendorName} ({proof.walletAddress})
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Submitted: {new Date(proof.submittedAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      proof.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : proof.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}
+    <div className="max-w-5xl mx-auto py-8">
+      <h1 className="text-2xl font-bold mb-6">Submitted Proofs (Admin)</h1>
+      {bids.length === 0 ? (
+        <p>No submitted proofs yet.</p>
+      ) : (
+        <div className="space-y-6">
+          {bids.map((bid) => (
+            <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-semibold mb-2">
+                {bid.vendorName} — Proposal #{bid.proposalId}
+              </h2>
+              <p className="text-gray-600 mb-4">Bid ID: {bid.bidId}</p>
+              <div className="space-y-4">
+                {bid.milestones.map((m: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="border-t pt-4 mt-4 flex justify-between items-center"
                   >
-                    {proof.status.charAt(0).toUpperCase() + proof.status.slice(1)}
-                  </span>
-                </div>
+                    <div>
+                      <p className="font-medium">{m.name}</p>
+                      <p className="text-sm text-gray-600">
+                        Amount: ${m.amount} | Due: {m.dueDate}
+                      </p>
+                      {m.proof && (
+                        <p className="text-sm text-blue-600 break-words">
+                          Proof: {m.proof}
+                        </p>
+                      )}
+                      {m.paymentTxHash && (
+                        <p className="text-sm text-green-600">
+                          Paid ✅ Tx: {m.paymentTxHash}
+                        </p>
+                      )}
+                    </div>
 
-                <div className="mb-4">
-                  <h3 className="font-medium text-gray-700 mb-2">Description</h3>
-                  <p className="text-gray-600 whitespace-pre-line">{proof.description}</p>
-                </div>
+                    {/* Buttons */}
+                    <div className="flex gap-2">
+                      {!m.completed && m.proof && (
+                        <button
+                          onClick={() => handleApprove(bid.bidId, idx, m.proof)}
+                          disabled={processing === `approve-${bid.bidId}-${idx}`}
+                          className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                        >
+                          {processing === `approve-${bid.bidId}-${idx}`
+                            ? 'Approving...'
+                            : 'Approve Proof'}
+                        </button>
+                      )}
 
-                {proof.files.length > 0 && (
-                  <div className="mb-4">
-                    <h3 className="font-medium text-gray-700 mb-2">Files</h3>
-                    <ul className="list-disc list-inside text-blue-600">
-                      {proof.files.map((file, idx) => (
-                        <li key={idx}>
-                          <a href={file.url} target="_blank" rel="noopener noreferrer" className="underline">
-                            {file.name}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
+                      {!m.paymentTxHash && m.completed && (
+                        <button
+                          onClick={() => handlePay(bid.bidId, idx)}
+                          disabled={processing === `pay-${bid.bidId}-${idx}`}
+                          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                        >
+                          {processing === `pay-${bid.bidId}-${idx}`
+                            ? 'Paying...'
+                            : 'Release Payment'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
-
-                {proof.status === 'pending' && (
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => handleAction(proof.bidId, proof.milestoneIndex, 'approve')}
-                      disabled={processing === proof.bidId}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:bg-gray-400"
-                    >
-                      {processing === proof.bidId ? 'Approving...' : 'Approve'}
-                    </button>
-                    <button
-                      onClick={() => handleAction(proof.bidId, proof.milestoneIndex, 'reject')}
-                      disabled={processing === proof.bidId}
-                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded disabled:bg-gray-400"
-                    >
-                      {processing === proof.bidId ? 'Rejecting...' : 'Reject'}
-                    </button>
-                  </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
