@@ -4,15 +4,19 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
+  const { address /*, role, logout, login */ } = useWeb3Auth(); 
+  // ^ if you have roles, you can destructure role here
 
   const isActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + '/');
   };
 
+  // base navigation items
   const navItems = [
     { href: '/', label: 'Dashboard' },
     { href: '/projects', label: 'Projects' },
@@ -20,7 +24,8 @@ export default function Navigation() {
     { href: '/bids/new', label: 'Give a Bid' },
     { href: '/new', label: 'Submit Proposal' },
     { href: '/admin/proposals', label: 'Admin' },
-    { href: '/admin/bids', label: 'Manage Bids' } // ADDED THIS LINE
+    { href: '/admin/bids', label: 'Manage Bids' },
+    { href: '/vendor/dashboard', label: 'Vendors' } // 👈 added vendors
   ];
 
   return (
@@ -60,8 +65,18 @@ export default function Navigation() {
                 <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
                   3
                 </div>
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                  />
                 </svg>
               </div>
             </div>
@@ -69,10 +84,17 @@ export default function Navigation() {
             {/* User Profile */}
             <div className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700">
               <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                JD
+                {address ? address.slice(2, 4).toUpperCase() : 'JD'}
               </div>
-              <span className="text-sm text-gray-300">John Doe</span>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <span className="text-sm text-gray-300">
+                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'John Doe'}
+              </span>
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </div>
@@ -85,9 +107,21 @@ export default function Navigation() {
           >
             <span className="sr-only">Open main menu</span>
             <div className="w-6 h-6 space-y-1">
-              <span className={`block w-6 h-0.5 bg-current transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`}></span>
-              <span className={`block w-6 h-0.5 bg-current opacity-100 transition-opacity ${isMobileMenuOpen ? 'opacity-0' : ''}`}></span>
-              <span className={`block w-6 h-0.5 bg-current transition-transform ${isMobileMenuOpen ? '-rotate-45 -translate-y-1.5' : ''}`}></span>
+              <span
+                className={`block w-6 h-0.5 bg-current transition-transform ${
+                  isMobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''
+                }`}
+              ></span>
+              <span
+                className={`block w-6 h-0.5 bg-current opacity-100 transition-opacity ${
+                  isMobileMenuOpen ? 'opacity-0' : ''
+                }`}
+              ></span>
+              <span
+                className={`block w-6 h-0.5 bg-current transition-transform ${
+                  isMobileMenuOpen ? '-rotate-45 -translate-y-1.5' : ''
+                }`}
+              ></span>
             </div>
           </button>
         </div>
