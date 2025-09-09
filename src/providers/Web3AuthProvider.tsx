@@ -21,16 +21,16 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   logout: async () => {},
 });
 
-const clientId = "BKsOxNvXZMBcudeWw-IYI9keajS5gCOhAckboxkjIM5OGn5LqTa8IGKTF2_i7V9jhjBXRg8jy10aeYOsgKM6i9U";
+const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
-  chainId: "0xaa36a7", // Sepolia
-  rpcTarget: "https://rpc.ankr.com/eth_sepolia",
-  displayName: "Sepolia Testnet",
-  blockExplorerUrl: "https://sepolia.etherscan.io",
-  ticker: "ETH",
-  tickerName: "Ethereum Sepolia",
+  chainId: '0xaa36a7', // Sepolia
+  rpcTarget: 'https://rpc.ankr.com/eth_sepolia',
+  displayName: 'Sepolia Testnet',
+  blockExplorerUrl: 'https://sepolia.etherscan.io',
+  ticker: 'ETH',
+  tickerName: 'Ethereum Sepolia',
 };
 
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
@@ -43,7 +43,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const web3authInstance = new Web3Auth({
           clientId,
-          web3AuthNetwork: "testnet",
+          web3AuthNetwork: 'sapphire_devnet', // ✅ MUST match your dashboard
           chainConfig,
         });
 
@@ -60,6 +60,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('Web3Auth init error:', error);
       }
     };
+
     init();
   }, []);
 
@@ -68,6 +69,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const web3authProvider = await web3auth.connect();
       setProvider(web3authProvider);
+
       const ethersProvider = new ethers.BrowserProvider(web3authProvider);
       const signer = await ethersProvider.getSigner();
       setAddress(await signer.getAddress());

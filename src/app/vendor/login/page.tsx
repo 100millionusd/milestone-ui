@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
@@ -8,16 +9,29 @@ export default function VendorLogin() {
   const router = useRouter();
 
   const handleLogin = async () => {
-    await login();
-    router.push('/vendor/dashboard');
+    try {
+      await login();
+      // redirect happens in useEffect once address is set
+    } catch (err) {
+      console.error('Login failed:', err);
+    }
   };
+
+  // Redirect automatically once wallet address is available
+  useEffect(() => {
+    if (address) {
+      router.push('/vendor/dashboard');
+    }
+  }, [address, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-md text-center">
         <h1 className="text-2xl font-bold mb-6">Vendor Portal</h1>
-        <p className="text-gray-600 mb-6">Sign in to submit proof of work and manage your bids</p>
-        
+        <p className="text-gray-600 mb-6">
+          Sign in to submit proof of work and manage your bids
+        </p>
+
         <button
           onClick={handleLogin}
           className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
