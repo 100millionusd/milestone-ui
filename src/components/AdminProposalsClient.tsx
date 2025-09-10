@@ -24,8 +24,8 @@ interface Proposal {
   address?: string;
   city?: string;
   country?: string;
-  docs?: Attachment[]; // <— files saved with the proposal
-  cid?: string;        // <— optional folder CID on IPFS
+  docs?: Attachment[];
+  cid?: string;
 }
 
 interface AdminProposalsClientProps {
@@ -39,7 +39,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null); // image preview
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -326,4 +326,26 @@ function formatBytes(bytes: number, decimals = 1) {
 
 function copy(text: string) {
   try { navigator.clipboard?.writeText(text); } catch {}
+}
+
+// ✅ Added StatusPill here
+function StatusPill({ status }: { status: string }) {
+  const classes =
+    status === "approved"
+      ? "bg-green-100 text-green-800"
+      : status === "rejected"
+      ? "bg-red-100 text-red-800"
+      : status === "completed"
+      ? "bg-blue-100 text-blue-800"
+      : "bg-yellow-100 text-yellow-800";
+
+  const label = status.charAt(0).toUpperCase() + status.slice(1);
+
+  return (
+    <span
+      className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${classes}`}
+    >
+      {label}
+    </span>
+  );
 }
