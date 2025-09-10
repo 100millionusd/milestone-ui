@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getBids } from '@/lib/api';
@@ -40,8 +40,8 @@ export default function VendorDashboard() {
     try {
       const allBids = await getBids();
       const vendorBids = allBids
-        .filter((bid) => bid.walletAddress.toLowerCase() === address?.toLowerCase())
-        .map((bid) => ({
+        .filter((bid: any) => bid.walletAddress.toLowerCase() === address?.toLowerCase())
+        .map((bid: any) => ({
           ...bid,
           proofs: bid.proofs || []
         }));
@@ -106,149 +106,202 @@ export default function VendorDashboard() {
     return bid.status.charAt(0).toUpperCase() + bid.status.slice(1);
   };
 
+  const shortAddr = useMemo(() => {
+    if (!address) return '';
+    return address.slice(0, 6) + '…' + address.slice(-4);
+  }, [address]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">Loading your bids...</div>
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+        <div className="max-w-5xl mx-auto px-4 py-16">
+          <div className="animate-pulse space-y-6">
+            <div className="h-24 bg-white/70 rounded-2xl shadow-sm"></div>
+            <div className="h-20 bg-white/70 rounded-2xl shadow-sm"></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="h-48 bg-white/70 rounded-2xl shadow-sm"></div>
+              <div className="h-48 bg-white/70 rounded-2xl shadow-sm"></div>
+            </div>
+            <div className="h-64 bg-white/70 rounded-2xl shadow-sm"></div>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex justify-between items-center">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+      <div className="max-w-5xl mx-auto px-4 py-10">
+        {/* Top Bar Card */}
+        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold mb-2">Vendor Dashboard</h1>
-              <p className="text-gray-600">Wallet: {address}</p>
-              {balances.ETH && <p>ETH: {balances.ETH}</p>}
-              {balances.USDT && <p>USDT: {balances.USDT}</p>}
-              {balances.USDC && <p>USDC: {balances.USDC}</p>}
+              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
+                Vendor Dashboard
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Signed in as <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{shortAddr}</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-500 break-all">Wallet: {address}</p>
             </div>
-            <button
-              onClick={handleLogout}
-              className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
-            >
-              Sign Out
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigator.clipboard.writeText(address || '')}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+              >
+                <span>Copy Address</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] transition"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+
+          {/* Balances */}
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <BalanceCard label="ETH" value={balances.ETH} />
+            <BalanceCard label="USDT" value={balances.USDT} />
+            <BalanceCard label="USDC" value={balances.USDC} />
           </div>
         </div>
 
-        {/* Send Funds UI */}
-        <SendFunds />
+        {/* Send Funds UI (unchanged functionality) */}
+        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Send Funds</h2>
+          <SendFunds />
+        </div>
 
         {/* Bid List */}
-        <div className="grid gap-6 mt-6">
-          {bids.map((bid) => (
-            <div key={bid.bidId} className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h2 className="text-xl font-semibold">{bid.title}</h2>
-                  <p className="text-gray-600">Bid ID: {bid.bidId}</p>
-                  <p className="text-gray-600">Organization: {bid.orgName}</p>
-                </div>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    bid.status === 'approved'
-                      ? 'bg-green-100 text-green-800'
-                      : bid.status === 'completed'
-                      ? 'bg-blue-100 text-blue-800'
-                      : bid.status === 'rejected'
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-yellow-100 text-yellow-800'
-                  }`}
-                >
-                  {getBidStatus(bid)}
-                </span>
-              </div>
+        <div className="space-y-6">
+          {bids.map((bid) => {
+            const completed = bid.milestones.filter((m: any) => m.completed).length;
+            const total = bid.milestones.length;
+            const progress = total ? Math.round((completed / total) * 100) : 0;
 
-              {/* ✅ Show proof submission when approved */}
-              {bid.status?.toLowerCase() === 'approved' && (
-                <div className="flex gap-3 mb-4">
-                  <Link
-                    href={`/vendor/proof/${bid.bidId}`}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-                  >
-                    Submit Proof
-                  </Link>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                    className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
-                  >
-                    Copy Wallet Address
-                  </button>
-                </div>
-              )}
-
-              {/* Milestones summary */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <p className="font-medium text-gray-600">Your Bid</p>
-                  <p className="text-green-600 font-bold">
-                    ${bid.priceUSD.toLocaleString()}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-medium text-gray-600">Timeline</p>
-                  <p>{bid.days} days</p>
-                </div>
-                <div>
-                  <p className="font-medium text-gray-600">Payment</p>
-                  <p>
-                    {bid.preferredStablecoin} to: {bid.walletAddress}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-medium text-gray-600">Milestones</p>
-                  <p>
-                    {bid.milestones.filter((m: any) => m.completed).length}/{bid.milestones.length}{' '}
-                    completed
-                  </p>
-                </div>
-              </div>
-
-              {/* ✅ Show submitted proofs list */}
-              {bid.proofs.length > 0 && (
-                <div className="mt-4 border-t pt-4">
-                  <h3 className="font-medium text-gray-700 mb-2">Submitted Proofs</h3>
-                  {bid.proofs.map((proof: any, idx: number) => (
-                    <div key={idx} className="mb-3 p-3 border rounded bg-gray-50">
-                      <p className="text-sm text-gray-800 whitespace-pre-line">
-                        {proof.description || 'No description'}
-                      </p>
-                      {proof.files?.length > 0 && (
-                        <ul className="list-disc list-inside text-blue-600 mt-2">
-                          {proof.files.map((f: any, i: number) => (
-                            <li key={i}>
-                              <a href={f.url} target="_blank" rel="noopener noreferrer" className="underline">
-                                {f.name}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      <span className="inline-block mt-2 px-2 py-1 text-xs rounded-full
-                        bg-yellow-100 text-yellow-800">
-                        {proof.status || 'pending'}
+            return (
+              <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
+                  <div className="space-y-1">
+                    <h2 className="text-xl font-semibold text-slate-900">{bid.title}</h2>
+                    <div className="flex flex-wrap items-center gap-3 text-sm">
+                      <span className="text-slate-600">
+                        <span className="font-medium">Bid ID:</span> {bid.bidId}
+                      </span>
+                      <span className="text-slate-600">
+                        <span className="font-medium">Organization:</span> {bid.orgName}
                       </span>
                     </div>
-                  ))}
+                  </div>
+                  <StatusPill status={bid.status} label={getBidStatus(bid)} />
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Progress */}
+                <div className="mb-5">
+                  <div className="flex items-end justify-between mb-1">
+                    <p className="text-sm text-slate-600">
+                      Milestones: <span className="font-medium text-slate-900">{completed}</span> / {total}
+                    </p>
+                    <p className="text-sm tabular-nums text-slate-600">{progress}%</p>
+                  </div>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 to-blue-600 rounded-full transition-[width] duration-500"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Actions when approved */}
+                {bid.status?.toLowerCase() === 'approved' && (
+                  <div className="flex flex-wrap gap-3 mb-5">
+                    <Link
+                      href={`/vendor/proof/${bid.bidId}`}
+                      className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
+                    >
+                      Submit Proof
+                    </Link>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                    >
+                      Copy Wallet Address
+                    </button>
+                  </div>
+                )}
+
+                {/* Quick facts */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-2">
+                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-600" />
+                  <InfoTile label="Timeline" value={`${bid.days} days`} />
+                  <InfoTile
+                    label="Payment"
+                    value={`${bid.preferredStablecoin}`}
+                    helper={`to ${bid.walletAddress}`}
+                  />
+                  <InfoTile
+                    label="Status"
+                    value={getBidStatus(bid)}
+                  />
+                </div>
+
+                {/* Submitted proofs */}
+                {bid.proofs.length > 0 && (
+                  <div className="mt-6 border-t border-slate-200 pt-4">
+                    <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitted Proofs</h3>
+                    <div className="grid gap-3">
+                      {bid.proofs.map((proof: any, idx: number) => (
+                        <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-sm text-slate-800 whitespace-pre-line">
+                            {proof.description || 'No description'}
+                          </p>
+                          {proof.files?.length > 0 && (
+                            <ul className="mt-2 space-y-1">
+                              {proof.files.map((f: any, i: number) => (
+                                <li key={i} className="text-sm">
+                                  <a
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                                  >
+                                    {f.name}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <span
+                            className={`mt-3 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium
+                              ${proof.status === 'approved'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : proof.status === 'rejected'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-amber-100 text-amber-800'}`}
+                          >
+                            {proof.status || 'pending'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {bids.length === 0 && (
-            <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-              <div className="text-4xl mb-4">💼</div>
-              <h2 className="text-xl font-semibold mb-2">No Bids Yet</h2>
-              <p className="text-gray-600 mb-4">
-                You haven't submitted any bids yet.
+            <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center">
+              <div className="text-5xl mb-4">💼</div>
+              <h2 className="text-xl font-semibold text-slate-900 mb-2">No Bids Yet</h2>
+              <p className="text-slate-600 mb-6">
+                You haven&apos;t submitted any bids yet.
               </p>
               <Link
                 href="/projects"
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[.99] transition"
               >
                 Browse Projects
               </Link>
@@ -256,6 +309,54 @@ export default function VendorDashboard() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------- Presentational subcomponents (purely visual) ------- */
+
+function BalanceCard({ label, value }: { label: string; value?: string }) {
+  const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
+  return (
+    <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-4">
+      <div className="text-xs uppercase tracking-wider text-slate-500">{label} Balance</div>
+      <div className="mt-1 text-lg font-semibold text-slate-900 tabular-nums">{display}</div>
+    </div>
+  );
+}
+
+function StatusPill({ status, label }: { status: string; label: string }) {
+  const cls =
+    status === 'approved'
+      ? 'bg-emerald-100 text-emerald-800'
+      : status === 'completed'
+      ? 'bg-blue-100 text-blue-800'
+      : status === 'rejected'
+      ? 'bg-rose-100 text-rose-800'
+      : 'bg-amber-100 text-amber-800';
+  return (
+    <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function InfoTile({
+  label,
+  value,
+  helper,
+  accent
+}: {
+  label: string;
+  value: string;
+  helper?: string;
+  accent?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
+      <p className={`mt-1 text-base font-semibold text-slate-900 ${accent || ''}`}>{value}</p>
+      {helper && <p className="mt-0.5 text-xs text-slate-500 break-all">{helper}</p>}
     </div>
   );
 }
