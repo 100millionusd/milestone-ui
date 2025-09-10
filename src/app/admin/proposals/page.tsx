@@ -1,18 +1,20 @@
 // src/app/admin/proposals/page.tsx
-import { getProposals } from "@/lib/api";
 import AdminProposalsClient from "@/components/AdminProposalsClient";
+import { getProposals } from "@/lib/api";
 
 export const metadata = {
-  title: 'Admin - Proposals',
-  description: 'Manage project proposals',
+  title: "Admin - Proposals",
+  description: "Manage project proposals",
 };
 
 export default async function AdminProposalsPage() {
   try {
-    const proposals = await getProposalsServer();
+    // uses your existing API helper
+    const proposals = await getProposals();
     return <AdminProposalsClient initialProposals={proposals} />;
-  } catch (error) {
-    console.error('Failed to fetch proposals:', error);
-    return <AdminProposalsClient initialProposals={[]} error={error.message} />;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Failed to fetch proposals:", err);
+    return <AdminProposalsClient initialProposals={[]} error={message} />;
   }
 }
