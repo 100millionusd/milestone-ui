@@ -1,15 +1,6 @@
 // src/services/aiValidator.ts
-// Client-side AI validation using OpenAI API
-
-export type ValidationResult = {
-  valid: boolean;
-  issues: string[];
-  suggestions: string[];
-};
-
-export async function validateProposal(proposal: any): Promise<ValidationResult> {
+export async function validateProposal(proposal: any) {
   try {
-    // Extract text content we want AI to review
     const context = `
 Organization: ${proposal.orgName || "N/A"}
 Title: ${proposal.title || "N/A"}
@@ -20,65 +11,51 @@ Requested Budget: ${proposal.amountUSD || "N/A"}
 Attachments: ${(proposal.docs || []).map((d: any) => d.name).join(", ")}
     `;
 
-    // Call OpenAI API
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`, // ✅ keep in .env
+        Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: "You are an assistant that validates NGO project proposals for correctness.",
+            content: "You are an assistant that validates NGO project proposals. Return JSON only.",
           },
           {
             role: "user",
             content: `
-Please analyze the following project proposal data and check:
-1. Is the organization name and address plausible?
-2. Does the budget seem to match the description/attachments?
-3. Are there any missing or suspicious fields?
-4. Suggest improvements.
+Check the following proposal. Respond ONLY in strict JSON with keys:
+{ "orgNameValid": true/false,
+  "addressValid": true/false,
+  "budgetCheck": "ok/too high/too low/unknown",
+  "attachmentsValid": true/false,
+  "comments": "short summary of findings" }
 
-Proposal data:
+Proposal:
 ${context}
             `,
           },
         ],
-        temperature: 0.2,
+        temperature: 0,
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
 
     const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "";
-
-    // crude parse: split into "issues" and "suggestions"
-    const issues: string[] = [];
-    const suggestions: string[] = [];
-
-    text.split("\n").forEach((line: string) => {
-      if (/issue|problem|error|missing/i.test(line)) issues.push(line.trim());
-      else if (/suggest|improve|recommend/i.test(line)) suggestions.push(line.trim());
-    });
-
-    return {
-      valid: issues.length === 0,
-      issues,
-      suggestions,
-    };
-  } catch (err: any) {
+    const raw = data.choices?.[0]?.message?.content || "{}";
+    return JSON.parse(raw);
+  } catch (err) {
     console.error("AI validation failed:", err);
     return {
-      valid: false,
-      issues: ["AI validation could not be performed."],
-      suggestions: [],
+      orgNameValid: "unknown",
+      addressValid: "unknown",
+      budgetCheck: "unknown",
+      attachmentsValid: "unknown",
+      comments: "AI validation could not be performed.",
     };
   }
 }
