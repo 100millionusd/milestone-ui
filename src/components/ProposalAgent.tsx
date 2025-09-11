@@ -18,8 +18,9 @@ interface ProposalAgentProps {
 export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [open, setOpen] = useState(false);
 
+  // Initialize useChat hook unconditionally at the top level
   const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
-    api: '/api/validate-proposal/', // ✅ Fixed endpoint with trailing slash
+    api: '/api/validate-proposal/',
     body: { proposal },
     onError: (error) => {
       console.error('Chat error:', error);
@@ -32,10 +33,11 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
     }
   });
 
-  // Debug logs
+  // Debug logs - check if hook is working
   console.log('Messages:', messages);
   console.log('Loading:', isLoading);
   console.log('Error:', error);
+  console.log('Input:', input);
 
   if (!open) {
     return (
@@ -63,19 +65,32 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
       </div>
 
       <div className="p-3 max-h-64 overflow-y-auto text-sm space-y-2">
+        {messages.length === 0 && !isLoading && (
+          <div className="text-xs text-slate-400 text-center py-4">
+            Start a conversation with the AI validator...
+          </div>
+        )}
+        
         {messages.map((m, i) => (
           <div
             key={i}
             className={`p-2 rounded-lg ${
               m.role === 'user'
-                ? 'bg-blue-100 text-blue-800 self-end'
-                : 'bg-slate-100 text-slate-800'
+                ? 'bg-blue-100 text-blue-800 ml-8'
+                : 'bg-slate-100 text-slate-800 mr-8'
             }`}
           >
             {m.content}
           </div>
         ))}
-        {isLoading && <div className="text-xs text-slate-400">AI is thinking...</div>}
+        
+        {isLoading && (
+          <div className="text-xs text-slate-400 flex items-center">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
+            AI is thinking...
+          </div>
+        )}
+        
         {error && (
           <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
             Error: {error.message}
@@ -94,7 +109,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
         />
         <button
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || !input.trim()}
           className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
         >
           {isLoading ? 'Sending...' : 'Send'}
