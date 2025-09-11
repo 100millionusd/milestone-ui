@@ -1,45 +1,84 @@
-"use client";
+'use client';
 
-import { useChat } from "ai/react";
+import { useState } from 'react';
+import { useChat } from 'ai/react';
 
-export default function ProposalAgent({ proposal }: { proposal: any }) {
+interface ProposalAgentProps {
+  proposal: {
+    proposalId: number;
+    orgName: string;
+    address?: string;
+    contact: string;
+    amountUSD: number;
+    summary: string;
+    docs?: { name: string }[];
+  };
+}
+
+export default function ProposalAgent({ proposal }: ProposalAgentProps) {
+  const [open, setOpen] = useState(false);
+
   const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
-    api: "/api/chat",
-    initialMessages: [
-      {
-        role: "system",
-        content: "You are an assistant helping validate proposals. Ask clarifying questions if something looks incomplete or invalid."
-      },
-      {
-        role: "user",
-        content: `Here is a proposal:\nOrg: ${proposal.orgName}\nAddress: ${proposal.address}\nBudget: $${proposal.amountUSD}\nAttachments: ${(proposal.docs || []).map(d => d.name).join(", ") || "none"}`
-      }
-    ]
+    api: '/api/agent', // 👈 you’ll add this API route
+    body: { proposal }, // send proposal data as context
   });
 
-  return (
-    <div className="fixed bottom-5 right-5 w-96 rounded-2xl shadow-xl bg-white border border-slate-200 flex flex-col">
-      <div className="p-3 border-b text-sm font-medium bg-slate-100">AI Proposal Assistant</div>
+  if (!open) {
+    return (
+      <div className="mt-4">
+        <button
+          onClick={() => setOpen(true)}
+          className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          💬 Open AI Validator
+        </button>
+      </div>
+    );
+  }
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 text-sm">
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-            <span className={m.role === "user" ? "bg-blue-100 px-2 py-1 rounded-lg" : "bg-slate-100 px-2 py-1 rounded-lg"}>
-              {m.content}
-            </span>
-          </div>
-        ))}
-        {isLoading && <div className="text-slate-400">AI is typing...</div>}
+  return (
+    <div className="mt-4 border border-slate-200 rounded-xl bg-white shadow-sm">
+      <div className="p-3 flex items-center justify-between border-b border-slate-100">
+        <h4 className="font-semibold text-slate-800">AI Validation Agent</h4>
+        <button
+          onClick={() => setOpen(false)}
+          className="text-xs text-slate-500 hover:text-slate-700"
+        >
+          ✕ Close
+        </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
+      <div className="p-3 max-h-64 overflow-y-auto text-sm space-y-2">
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={`p-2 rounded-lg ${
+              m.role === 'user'
+                ? 'bg-blue-100 text-blue-800 self-end'
+                : 'bg-slate-100 text-slate-800'
+            }`}
+          >
+            {m.content}
+          </div>
+        ))}
+        {isLoading && <div className="text-xs text-slate-400">AI is thinking...</div>}
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-100 flex gap-2">
         <input
+          type="text"
           value={input}
           onChange={handleInputChange}
-          placeholder="Ask about this proposal..."
-          className="flex-1 border rounded-lg px-3 py-2 text-sm"
+          placeholder="Ask the AI validator..."
+          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
         />
-        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg">Send</button>
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400"
+        >
+          Send
+        </button>
       </form>
     </div>
   );

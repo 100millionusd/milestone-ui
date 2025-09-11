@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
-import ProposalAgent from '@/components/ProposalAgent'; // 👈 add import
+import ProposalAgent from './ProposalAgent';
 
 type Attachment = {
   cid?: string;
@@ -37,9 +37,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
-
-  // 👇 new: track which proposal the AI agent is open for
-  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -134,6 +131,9 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                 </p>
               </div>
 
+              {/* ✅ AI Chat Agent */}
+              <ProposalAgent proposal={p} />
+
               {/* Actions */}
               <div className="mt-5 flex flex-wrap gap-2">
                 <button
@@ -149,13 +149,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                   className="px-4 py-2 bg-rose-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-rose-700 transition-colors"
                 >
                   Reject
-                </button>
-                {/* 👇 New button to open chat agent */}
-                <button
-                  onClick={() => setSelectedProposal(p)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Chat with AI
                 </button>
               </div>
             </div>
@@ -178,11 +171,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={lightbox} alt="preview" className="mx-auto max-h-full rounded-xl shadow-2xl" />
         </div>
-      )}
-
-      {/* 👇 Floating AI Chat Agent */}
-      {selectedProposal && (
-        <ProposalAgent proposal={selectedProposal} />
       )}
     </div>
   );
