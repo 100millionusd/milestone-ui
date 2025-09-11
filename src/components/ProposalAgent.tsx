@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useChat } from 'ai/react';
+import { useChat } from 'ai';  // ✅ FIXED import
 
 interface ProposalAgentProps {
   proposal: {
@@ -19,8 +19,8 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [open, setOpen] = useState(false);
 
   const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
-    api: '/api/agent', // 👈 you’ll add this API route
-    body: { proposal }, // send proposal data as context
+    api: '/api/agent', // 👈 backend route
+    body: { proposal }, // send proposal as context
   });
 
   if (!open) {
