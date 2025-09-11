@@ -1,20 +1,20 @@
-import OpenAI from "openai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { streamText } from "ai";
 import { NextResponse } from "next/server";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // server-side only
+const openai = createOpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
 });
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages, proposal } = await req.json();
 
-  const completion = await client.chat.completions.create({
-    model: process.env.NEXT_PUBLIC_OPENAI_MODEL || "gpt-4o-mini",
+  const response = await streamText({
+    model: openai("gpt-4o-mini"),
     messages,
-    stream: true, // enable streaming
+    system: `You are an AI validator helping review funding proposals.
+    Context: ${JSON.stringify(proposal)}`,
   });
 
-  return new Response(completion.toReadableStream(), {
-    headers: { "Content-Type": "text/event-stream" },
-  });
+  return response.toAIStreamResponse();
 }
