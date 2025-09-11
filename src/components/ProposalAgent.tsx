@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useChat } from '@ai-sdk/react';
 
 interface ProposalAgentProps {
   proposal: {
@@ -15,42 +14,78 @@ interface ProposalAgentProps {
   };
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [open, setOpen] = useState(false);
-  const [localInput, setLocalInput] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Initialize useChat hook
-  const { messages, handleSubmit, isLoading, error } = useChat({
-    api: '/api/validate-proposal/',
-    body: { proposal },
-    onError: (error) => {
-      console.error('Chat error:', error);
-    },
-    onResponse: (response) => {
-      console.log('Response received, status:', response.status);
-    },
-    onFinish: (message) => {
-      console.log('Message finished:', message);
-      setLocalInput(''); // Clear input after sending
-    }
-  });
-
-  // Debug logs
-  console.log('Messages:', messages);
-  console.log('Loading:', isLoading);
-  console.log('Error:', error);
-
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (localInput.trim()) {
-      handleSubmit({
-        body: { messages: [{ role: 'user', content: localInput }], proposal }
-      });
-    }
-  };
+    if (!input.trim()) return;
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setLocalInput(e.target.value);
+    const userMessage = input;
+    setInput('');
+    setIsLoading(true);
+    setError(null);
+
+    // Add user message to chat
+    const newMessages: ChatMessage[] = [
+      ...messages,
+      { role: 'user', content: userMessage }
+    ];
+    setMessages(newMessages);
+
+    try {
+      const response = await fetch('/api/validate-proposal/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: newMessages,
+          proposal
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let assistantMessage = '';
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        assistantMessage += chunk;
+        
+        // Update the message in real-time
+        setMessages([
+          ...newMessages,
+          { role: 'assistant', content: assistantMessage }
+        ]);
+      }
+
+    } catch (err) {
+      console.error('Chat error:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!open) {
@@ -85,16 +120,16 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           </div>
         )}
         
-        {messages.map((m, i) => (
+        {messages.map((message, index) => (
           <div
-            key={i}
+            key={index}
             className={`p-2 rounded-lg ${
-              m.role === 'user'
+              message.role === 'user'
                 ? 'bg-blue-100 text-blue-800 ml-8'
                 : 'bg-slate-100 text-slate-800 mr-8'
             }`}
           >
-            {m.content}
+            {message.content}
           </div>
         ))}
         
@@ -107,23 +142,23 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
         
         {error && (
           <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
-            Error: {error.message}
+            Error: {error}
           </div>
         )}
       </div>
 
-      <form onSubmit={handleFormSubmit} className="p-3 border-t border-slate-100 flex gap-2">
+      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-100 flex gap-2">
         <input
           type="text"
-          value={localInput}
-          onChange={handleInputChange}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the AI validator..."
           className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
           disabled={isLoading}
         />
         <button
           type="submit"
-          disabled={isLoading || !localInput.trim()}
+          disabled={isLoading || !input.trim()}
           className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
         >
           {isLoading ? 'Sending...' : 'Send'}
