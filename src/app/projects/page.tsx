@@ -18,7 +18,9 @@ export default function ProjectsPage() {
           getBids(),
         ]);
 
-        // Only approved proposals become projects
+        console.log('📌 Proposals:', proposalsData);
+        console.log('📌 Bids:', bidsData);
+
         const approvedProjects = proposalsData.filter(
           (p: any) => p.status === 'approved' || p.status === 'completed'
         );
@@ -39,11 +41,21 @@ export default function ProjectsPage() {
 
   const isProjectCompleted = (project: any) => {
     if (project.status === 'completed') return true;
+
     const projectBids = getBidsForProject(project.proposalId);
     const acceptedBid = projectBids.find((b: any) => b.status === 'approved');
+
     if (!acceptedBid) return false;
-    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
-    return acceptedBid.milestones.every((m: any) => m.completed === true);
+
+    // If bid has milestones, check them
+    if (acceptedBid.milestones && acceptedBid.milestones.length > 0) {
+      return acceptedBid.milestones.every((m: any) => m.completed === true);
+    }
+
+    // If bid itself has status 'completed'
+    if (acceptedBid.status === 'completed') return true;
+
+    return false;
   };
 
   if (loading) {
