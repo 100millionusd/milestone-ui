@@ -17,9 +17,10 @@ interface ProposalAgentProps {
 
 export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [open, setOpen] = useState(false);
+  const [localInput, setLocalInput] = useState('');
 
-  // Initialize useChat hook unconditionally at the top level
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
+  // Initialize useChat hook
+  const { messages, handleSubmit, isLoading, error } = useChat({
     api: '/api/validate-proposal/',
     body: { proposal },
     onError: (error) => {
@@ -30,14 +31,27 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
     },
     onFinish: (message) => {
       console.log('Message finished:', message);
+      setLocalInput(''); // Clear input after sending
     }
   });
 
-  // Debug logs - check if hook is working
+  // Debug logs
   console.log('Messages:', messages);
   console.log('Loading:', isLoading);
   console.log('Error:', error);
-  console.log('Input:', input);
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (localInput.trim()) {
+      handleSubmit({
+        body: { messages: [{ role: 'user', content: localInput }], proposal }
+      });
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setLocalInput(e.target.value);
+  };
 
   if (!open) {
     return (
@@ -98,10 +112,10 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-100 flex gap-2">
+      <form onSubmit={handleFormSubmit} className="p-3 border-t border-slate-100 flex gap-2">
         <input
           type="text"
-          value={input}
+          value={localInput}
           onChange={handleInputChange}
           placeholder="Ask the AI validator..."
           className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
@@ -109,7 +123,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
         />
         <button
           type="submit"
-          disabled={isLoading || !input.trim()}
+          disabled={isLoading || !localInput.trim()}
           className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
         >
           {isLoading ? 'Sending...' : 'Send'}
