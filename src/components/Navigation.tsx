@@ -8,6 +8,7 @@ import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false); // ✅ for Admin dropdown
   const pathname = usePathname();
   const { address } = useWeb3Auth();
 
@@ -15,14 +16,18 @@ export default function Navigation() {
     return pathname === path || pathname.startsWith(path + '/');
   };
 
-  // base navigation items (removed Proposals + Give a Bid)
   const navItems = [
     { href: '/', label: 'Dashboard' },
     { href: '/projects', label: 'Projects' },
-    { href: '/new', label: 'Submit Proposal' }, // ✅ kept
-    { href: '/admin/proposals', label: 'Admin' },
-    { href: '/admin/bids', label: 'Manage Bids' },
-    { href: '/admin/proofs', label: 'Proofs' },
+    { href: '/new', label: 'Submit Proposal' },
+    {
+      label: 'Admin',
+      children: [
+        { href: '/admin/proposals', label: 'Proposals' },
+        { href: '/admin/bids', label: 'Bids' },
+        { href: '/admin/proofs', label: 'Proofs' }
+      ]
+    },
     { href: '/vendor/dashboard', label: 'Vendors' }
   ];
 
@@ -39,20 +44,67 @@ export default function Navigation() {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-1">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  isActive(item.href)
-                    ? 'text-cyan-400 bg-gray-700'
-                    : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
+          <nav className="hidden md:flex items-center space-x-1 relative">
+            {navItems.map((item) =>
+              item.children ? (
+                <div key={item.label} className="relative">
+                  <button
+                    onClick={() => setIsAdminOpen(!isAdminOpen)}
+                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
+                      pathname.startsWith('/admin')
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                    <svg
+                      className={`w-4 h-4 transform transition-transform ${
+                        isAdminOpen ? 'rotate-180' : ''
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </button>
+                  {isAdminOpen && (
+                    <div className="absolute mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                      {item.children.map((sub) => (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block px-4 py-2 text-sm ${
+                            isActive(sub.href)
+                              ? 'bg-gray-100 text-cyan-600'
+                              : 'hover:bg-gray-100'
+                          }`}
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive(item.href)
+                      ? 'text-cyan-400 bg-gray-700'
+                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              )
+            )}
           </nav>
 
           {/* User Actions */}
@@ -128,20 +180,40 @@ export default function Navigation() {
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive(item.href)
-                      ? 'text-cyan-400 bg-gray-700'
-                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {navItems.map((item) =>
+                item.children ? (
+                  <div key={item.label}>
+                    <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
+                    {item.children.map((sub) => (
+                      <Link
+                        key={sub.href}
+                        href={sub.href}
+                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                          isActive(sub.href)
+                            ? 'text-cyan-400 bg-gray-700'
+                            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                        }`}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                      >
+                        {sub.label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                      isActive(item.href)
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              )}
             </div>
           </div>
         )}
