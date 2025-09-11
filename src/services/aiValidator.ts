@@ -13,7 +13,15 @@ export async function validateProposal(proposal: any) {
       throw new Error(`Validation API error: ${resp.status}`);
     }
 
-    return await resp.json();
+    const data = await resp.json();
+
+    return {
+      orgNameValid: data.orgValid ?? "unknown",
+      addressValid: data.addressValid ?? "unknown",
+      budgetCheck: data.budgetCheck ?? "unknown",
+      attachmentsValid: data.attachmentsValid ?? "unknown",
+      comments: data.issues?.join(", ") || data.comments || "",
+    };
   } catch (err: any) {
     console.error("validateProposal error:", err);
     return {
