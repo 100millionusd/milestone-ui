@@ -40,6 +40,17 @@ export default function ProjectDetailPage() {
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
+  // ✅ Helper to check if project is completed
+  const isProjectCompleted = (project: any, bids: any[]) => {
+    if (project.status === 'completed') return true;
+    const acceptedBid = bids.find((b: any) => b.status === 'approved');
+    if (!acceptedBid) return false;
+    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
+    return acceptedBid.milestones.every((m: any) => m.completed === true);
+  };
+
+  const completed = isProjectCompleted(project, bids);
+
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
     const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
@@ -84,18 +95,31 @@ export default function ProjectDetailPage() {
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 className="text-2xl font-bold mb-2">{project.title}</h1>
-          <p className="text-gray-600 mb-1">{project.orgName}</p>
+          <div className="flex items-center gap-2 mb-2">
+            <h1 className="text-2xl font-bold">{project.title}</h1>
+            <span
+              className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                completed
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
+              {completed ? 'Completed' : 'Active'}
+            </span>
+          </div>
+          <p className="text-gray-600">{project.orgName}</p>
           <p className="text-green-600 font-medium text-lg">
             Budget: ${project.amountUSD}
           </p>
         </div>
-        <Link
-          href={`/bids/new?proposalId=${projectId}`}
-          className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-        >
-          Submit Bid
-        </Link>
+        {!completed && (
+          <Link
+            href={`/bids/new?proposalId=${projectId}`}
+            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
+          >
+            Submit Bid
+          </Link>
+        )}
       </div>
 
       {/* ✅ Project Description */}

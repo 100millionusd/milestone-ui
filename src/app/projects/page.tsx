@@ -20,7 +20,7 @@ export default function ProjectsPage() {
 
         // Only approved proposals become projects
         const approvedProjects = proposalsData.filter(
-          (p: any) => p.status === 'approved'
+          (p: any) => p.status === 'approved' || p.status === 'completed'
         );
         setProjects(approvedProjects);
         setBids(bidsData);
@@ -34,17 +34,15 @@ export default function ProjectsPage() {
     fetchData();
   }, []);
 
-  const getBidsForProject = (projectId: number) => {
-    return bids.filter((bid: any) => bid.proposalId === projectId);
-  };
+  const getBidsForProject = (projectId: number) =>
+    bids.filter((bid: any) => bid.proposalId === projectId);
 
-  const isProjectCompleted = (projectId: number) => {
-    const projectBids = getBidsForProject(projectId);
+  const isProjectCompleted = (project: any) => {
+    if (project.status === 'completed') return true;
+    const projectBids = getBidsForProject(project.proposalId);
     const acceptedBid = projectBids.find((b: any) => b.status === 'approved');
     if (!acceptedBid) return false;
     if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
-
-    // ✅ Completed if all milestones are marked completed
     return acceptedBid.milestones.every((m: any) => m.completed === true);
   };
 
@@ -52,8 +50,8 @@ export default function ProjectsPage() {
     return <div className="max-w-6xl mx-auto p-6">Loading projects...</div>;
   }
 
-  const activeProjects = projects.filter((p) => !isProjectCompleted(p.proposalId));
-  const completedProjects = projects.filter((p) => isProjectCompleted(p.proposalId));
+  const activeProjects = projects.filter((p) => !isProjectCompleted(p));
+  const completedProjects = projects.filter((p) => isProjectCompleted(p));
 
   return (
     <div className="max-w-6xl mx-auto p-6">
@@ -84,8 +82,9 @@ export default function ProjectsPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-gray-500 mb-3">
-                    {projectBids.length} {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
-                    {acceptedBid ? 'Contract awarded' : 'Currently accepting bids'}
+                    {projectBids.length}{' '}
+                    {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
+                    {acceptedBid ? 'Contract awarded' : 'Accepting bids'}
                   </p>
                   <div className="space-x-2">
                     <Link
@@ -99,7 +98,7 @@ export default function ProjectsPage() {
                         href={`/bids/new?proposalId=${project.proposalId}`}
                         className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
                       >
-                        Place a Bid
+                        Submit a Bid
                       </Link>
                     )}
                   </div>
@@ -109,7 +108,9 @@ export default function ProjectsPage() {
           );
         })}
         {activeProjects.length === 0 && (
-          <p className="text-gray-500 italic">There are no active projects at the moment.</p>
+          <p className="text-gray-500 italic">
+            There are no active projects at the moment.
+          </p>
         )}
       </div>
 
@@ -131,7 +132,9 @@ export default function ProjectsPage() {
             <p className="text-green-600 font-medium text-lg mt-2">
               Budget: ${project.amountUSD}
             </p>
-            <p className="text-sm text-gray-500 mt-3">✅ This project has been completed.</p>
+            <p className="text-sm text-gray-500 mt-3">
+              ✅ This project has been fully completed.
+            </p>
             <Link
               href={`/projects/${project.proposalId}`}
               className="text-blue-600 text-sm hover:underline mt-2 inline-block"
