@@ -70,6 +70,7 @@ export default function AdminProofsPage() {
   const renderProof = (m: any) => {
     if (!m.proof) return null;
 
+    // 1. Try JSON
     let parsed: any = null;
     try {
       parsed = JSON.parse(m.proof);
@@ -77,6 +78,7 @@ export default function AdminProofsPage() {
       /* not JSON */
     }
 
+    // 2. If JSON with files
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
@@ -135,28 +137,57 @@ export default function AdminProofsPage() {
       );
     }
 
-    // fallback: plain string with URLs clickable
+    // 3. Fallback: plain text with URLs
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const parts = m.proof.split(urlRegex);
+    const urls = [...m.proof.matchAll(urlRegex)].map((match) => match[0]);
 
     return (
-      <p className="text-sm text-blue-600 break-words">
-        {parts.map((part: string, i: number) =>
-          urlRegex.test(part) ? (
-            <a
-              key={i}
-              href={part}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline text-blue-600"
-            >
-              {part}
-            </a>
-          ) : (
-            <span key={i}>{part}</span>
-          )
+      <div className="mt-2 space-y-2">
+        <p className="text-sm text-gray-700 whitespace-pre-line">{m.proof}</p>
+        {urls.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {urls.map((url, i) => {
+              const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
+              if (isImage) {
+                return (
+                  <button
+                    key={i}
+                    onClick={() =>
+                      setLightbox({
+                        urls: urls.filter((u) =>
+                          /\.(png|jpe?g|gif|webp|svg)$/i.test(u)
+                        ),
+                        index: urls.findIndex((u) => u === url),
+                      })
+                    }
+                    className="group relative overflow-hidden rounded border"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`Proof ${i}`}
+                      className="h-32 w-full object-cover group-hover:scale-105 transition"
+                    />
+                  </button>
+                );
+              }
+              return (
+                <div key={i} className="p-3 rounded border bg-gray-50">
+                  <p className="truncate text-sm">Attachment</p>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Open
+                  </a>
+                </div>
+              );
+            })}
+          </div>
         )}
-      </p>
+      </div>
     );
   };
 
@@ -242,7 +273,7 @@ export default function AdminProofsPage() {
         </div>
       )}
 
-      {/* ✅ Lightbox modal with navigation */}
+      {/* ✅ Lightbox modal */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
