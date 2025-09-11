@@ -16,6 +16,7 @@
     "@web3auth/openlogin-adapter": "^8.12.4",
     "ethers": "^6.13.0",
     "next": "15.5.2",
+    "openai": "^5.20.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
