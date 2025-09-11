@@ -18,10 +18,24 @@ interface ProposalAgentProps {
 export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [open, setOpen] = useState(false);
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
-    api: '/api/agent',
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
+    api: '/api/validate-proposal/', // ✅ Fixed endpoint with trailing slash
     body: { proposal },
+    onError: (error) => {
+      console.error('Chat error:', error);
+    },
+    onResponse: (response) => {
+      console.log('Response received, status:', response.status);
+    },
+    onFinish: (message) => {
+      console.log('Message finished:', message);
+    }
   });
+
+  // Debug logs
+  console.log('Messages:', messages);
+  console.log('Loading:', isLoading);
+  console.log('Error:', error);
 
   if (!open) {
     return (
@@ -62,6 +76,11 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           </div>
         ))}
         {isLoading && <div className="text-xs text-slate-400">AI is thinking...</div>}
+        {error && (
+          <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
+            Error: {error.message}
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="p-3 border-t border-slate-100 flex gap-2">
@@ -71,13 +90,14 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           onChange={handleInputChange}
           placeholder="Ask the AI validator..."
           className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+          disabled={isLoading}
         />
         <button
           type="submit"
           disabled={isLoading}
-          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400"
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
         >
-          Send
+          {isLoading ? 'Sending...' : 'Send'}
         </button>
       </form>
     </div>
