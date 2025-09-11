@@ -12,6 +12,7 @@ export default function AdminProofsPage() {
   const [bids, setBids] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null); // ✅ new
 
   useEffect(() => {
     loadProofs();
@@ -74,7 +75,6 @@ export default function AdminProofsPage() {
       /* not JSON */
     }
 
-    // JSON-style proof
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
@@ -87,11 +87,9 @@ export default function AdminProofsPage() {
                 const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name || f.url);
                 if (isImage) {
                   return (
-                    <a
+                    <button
                       key={i}
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      onClick={() => setLightbox(f.url)} // ✅ open lightbox
                       className="group relative overflow-hidden rounded border"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -103,7 +101,7 @@ export default function AdminProofsPage() {
                       <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
                         {f.name}
                       </div>
-                    </a>
+                    </button>
                   );
                 }
                 return (
@@ -126,7 +124,7 @@ export default function AdminProofsPage() {
       );
     }
 
-    // Fallback: plain string, detect URLs
+    // fallback: plain string with URLs clickable
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const parts = m.proof.split(urlRegex);
 
@@ -230,6 +228,21 @@ export default function AdminProofsPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ✅ Lightbox modal */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="proof preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+          />
         </div>
       )}
     </div>
