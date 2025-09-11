@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
-import { validateProposal } from '@/services/aiValidator';
+import ProposalAgent from '@/components/ProposalAgent'; // 👈 add import
 
 type Attachment = {
   cid?: string;
@@ -32,15 +32,14 @@ interface AdminProposalsClientProps {
   initialProposals?: Proposal[];
 }
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
-
 export default function AdminProposalsClient({ initialProposals = [] }: AdminProposalsClientProps) {
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [validations, setValidations] = useState<Record<number, any>>({});
+
+  // 👇 new: track which proposal the AI agent is open for
+  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -51,17 +50,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
       setLoading(true);
       setError(null);
       const data = await getProposals();
-
-      const results: Record<number, any> = {};
-      for (const p of data) {
-        try {
-          results[p.proposalId] = await validateProposal(p);
-        } catch {
-          results[p.proposalId] = { comments: 'AI validation failed.' };
-        }
-      }
-
-      setValidations(results);
       setProposals(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
@@ -146,22 +134,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                 </p>
               </div>
 
-              {/* AI Validation */}
-              {validations[p.proposalId] && (
-                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
-                  <h4 className="font-medium text-blue-800 mb-1">AI Validation Report</h4>
-                  <ul className="list-disc ml-5 text-blue-700 space-y-1">
-                    <li>Org name valid: {String(validations[p.proposalId].orgNameValid ?? 'unknown')}</li>
-                    <li>Address valid: {String(validations[p.proposalId].addressValid ?? 'unknown')}</li>
-                    <li>Budget check: {String(validations[p.proposalId].budgetCheck ?? 'unknown')}</li>
-                    <li>Attachments valid: {String(validations[p.proposalId].attachmentsValid ?? 'unknown')}</li>
-                  </ul>
-                  <p className="mt-2 text-xs text-blue-600">
-                    {validations[p.proposalId].comments}
-                  </p>
-                </div>
-              )}
-
               {/* Actions */}
               <div className="mt-5 flex flex-wrap gap-2">
                 <button
@@ -177,6 +149,13 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                   className="px-4 py-2 bg-rose-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-rose-700 transition-colors"
                 >
                   Reject
+                </button>
+                {/* 👇 New button to open chat agent */}
+                <button
+                  onClick={() => setSelectedProposal(p)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Chat with AI
                 </button>
               </div>
             </div>
@@ -199,6 +178,11 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={lightbox} alt="preview" className="mx-auto max-h-full rounded-xl shadow-2xl" />
         </div>
+      )}
+
+      {/* 👇 Floating AI Chat Agent */}
+      {selectedProposal && (
+        <ProposalAgent proposal={selectedProposal} />
       )}
     </div>
   );
