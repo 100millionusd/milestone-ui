@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   getBids,
   payMilestone,
-  completeMilestone,   // ✅ use this to mark proof approved
+  completeMilestone,
 } from '@/lib/api';
 
 export default function AdminProofsPage() {
@@ -64,6 +64,93 @@ export default function AdminProofsPage() {
     }
   };
 
+  const renderProof = (m: any) => {
+    if (!m.proof) return null;
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(m.proof);
+    } catch {
+      /* not JSON */
+    }
+
+    // JSON-style proof
+    if (parsed && typeof parsed === 'object') {
+      return (
+        <div className="mt-2 space-y-2">
+          {parsed.description && (
+            <p className="text-sm text-gray-700">{parsed.description}</p>
+          )}
+          {parsed.files?.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {parsed.files.map((f: any, i: number) => {
+                const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name || f.url);
+                if (isImage) {
+                  return (
+                    <a
+                      key={i}
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative overflow-hidden rounded border"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={f.url}
+                        alt={f.name}
+                        className="h-32 w-full object-cover group-hover:scale-105 transition"
+                      />
+                      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
+                        {f.name}
+                      </div>
+                    </a>
+                  );
+                }
+                return (
+                  <div key={i} className="p-3 rounded border bg-gray-50">
+                    <p className="truncate text-sm">{f.name}</p>
+                    <a
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Open
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Fallback: plain string, detect URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = m.proof.split(urlRegex);
+
+    return (
+      <p className="text-sm text-blue-600 break-words">
+        {parts.map((part: string, i: number) =>
+          urlRegex.test(part) ? (
+            <a
+              key={i}
+              href={part}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-blue-600"
+            >
+              {part}
+            </a>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </p>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -95,10 +182,7 @@ export default function AdminProofsPage() {
               <p className="text-gray-600 mb-4">Bid ID: {bid.bidId}</p>
               <div className="space-y-4">
                 {bid.milestones.map((m: any, idx: number) => (
-                  <div
-                    key={idx}
-                    className="border-t pt-4 mt-4"
-                  >
+                  <div key={idx} className="border-t pt-4 mt-4">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
                         <p className="font-medium">{m.name}</p>
@@ -106,72 +190,7 @@ export default function AdminProofsPage() {
                           Amount: ${m.amount} | Due: {m.dueDate}
                         </p>
 
-                        {/* ✅ Proof rendering */}
-                        {m.proof && (() => {
-                          let parsed: any = null;
-                          try {
-                            parsed = JSON.parse(m.proof);
-                          } catch {
-                            /* leave as null if not JSON */
-                          }
-
-                          if (parsed && typeof parsed === 'object') {
-                            return (
-                              <div className="mt-2 space-y-2">
-                                <p className="text-sm text-gray-700">
-                                  {parsed.description || 'No description'}
-                                </p>
-                                {parsed.files?.length > 0 && (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                    {parsed.files.map((f: any, i: number) => {
-                                      const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name || f.url);
-                                      if (isImage) {
-                                        return (
-                                          <a
-                                            key={i}
-                                            href={f.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="group relative overflow-hidden rounded border"
-                                          >
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img
-                                              src={f.url}
-                                              alt={f.name}
-                                              className="h-32 w-full object-cover group-hover:scale-105 transition"
-                                            />
-                                            <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                                              {f.name}
-                                            </div>
-                                          </a>
-                                        );
-                                      }
-                                      return (
-                                        <div key={i} className="p-3 rounded border bg-gray-50">
-                                          <p className="truncate text-sm">{f.name}</p>
-                                          <a
-                                            href={f.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-xs text-blue-600 hover:underline"
-                                          >
-                                            Open
-                                          </a>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <p className="text-sm text-blue-600 break-words">
-                              Proof: {m.proof}
-                            </p>
-                          );
-                        })()}
+                        {renderProof(m)}
 
                         {m.paymentTxHash && (
                           <p className="text-sm text-green-600 mt-2">
@@ -180,7 +199,6 @@ export default function AdminProofsPage() {
                         )}
                       </div>
 
-                      {/* Buttons */}
                       <div className="flex flex-col gap-2 ml-4">
                         {!m.completed && m.proof && (
                           <button
