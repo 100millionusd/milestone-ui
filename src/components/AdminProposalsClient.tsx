@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
-import { validateProposal } from '@/services/aiValidator'; // ✅ AI service
+import { validateProposal } from '@/services/aiValidator';
 
 type Attachment = {
   cid?: string;
@@ -40,7 +40,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [validations, setValidations] = useState<Record<number, any>>({}); // ✅ AI results
+  const [validations, setValidations] = useState<Record<number, any>>({});
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -52,7 +52,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
       setError(null);
       const data = await getProposals();
 
-      // ✅ run AI validation for each proposal
       const results: Record<number, any> = {};
       for (const p of data) {
         try {
@@ -61,8 +60,8 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
           results[p.proposalId] = { comments: 'AI validation failed.' };
         }
       }
-      setValidations(results);
 
+      setValidations(results);
       setProposals(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
@@ -73,7 +72,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
   const handleApprove = async (proposalId: number) => {
     try {
-      setError(null);
       await approveProposal(proposalId);
       setProposals(prev =>
         prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'approved' } : p))
@@ -85,7 +83,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
   const handleReject = async (proposalId: number) => {
     try {
-      setError(null);
       await rejectProposal(proposalId);
       setProposals(prev =>
         prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'rejected' } : p))
@@ -149,143 +146,21 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                 </p>
               </div>
 
-              {/* ✅ AI Validation */}
+              {/* AI Validation */}
               {validations[p.proposalId] && (
                 <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
                   <h4 className="font-medium text-blue-800 mb-1">AI Validation Report</h4>
                   <ul className="list-disc ml-5 text-blue-700 space-y-1">
-                    <li>
-                      Org name valid:{' '}
-                      {String(validations[p.proposalId].orgNameValid ?? 'unknown')}
-                    </li>
-                    <li>
-                      Address valid:{' '}
-                      {String(validations[p.proposalId].addressValid ?? 'unknown')}
-                    </li>
-                    <li>Budget check: {validations[p.proposalId].budgetCheck ?? 'unknown'}</li>
-                    <li>
-                      Attachments valid:{' '}
-                      {String(validations[p.proposalId].attachmentsValid ?? 'unknown')}
-                    </li>
+                    <li>Org name valid: {String(validations[p.proposalId].orgNameValid ?? 'unknown')}</li>
+                    <li>Address valid: {String(validations[p.proposalId].addressValid ?? 'unknown')}</li>
+                    <li>Budget check: {String(validations[p.proposalId].budgetCheck ?? 'unknown')}</li>
+                    <li>Attachments valid: {String(validations[p.proposalId].attachmentsValid ?? 'unknown')}</li>
                   </ul>
                   <p className="mt-2 text-xs text-blue-600">
                     {validations[p.proposalId].comments}
                   </p>
                 </div>
               )}
-
-              {/* Attachments */}
-              <div className="mt-5">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold text-slate-900">Attachments</h4>
-                  {!((p.docs || []).length) && p.cid && (
-                    <a
-                      href={`${GATEWAY}/${p.cid}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 underline underline-offset-2"
-                    >
-                      Open IPFS folder
-                    </a>
-                  )}
-                </div>
-
-                {(p.docs && p.docs.length > 0) ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {p.docs.map((d, i) => {
-                      const href = d.url || (d.cid ? `${GATEWAY}/${d.cid}` : '#');
-                      const type = classifyType(d);
-                      const size = typeof d.size === 'number' ? formatBytes(d.size) : undefined;
-
-                      if (type === 'image') {
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => setLightbox(href)}
-                            className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white"
-                            title={d.name}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={href}
-                              alt={d.name}
-                              className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
-                              loading="lazy"
-                            />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                              <p className="truncate text-xs font-medium text-white">{d.name}</p>
-                              {size && <p className="text-[10px] text-white/80">{size}</p>}
-                            </div>
-                          </button>
-                        );
-                      }
-
-                      if (type === 'pdf') {
-                        return (
-                          <div key={i} className="rounded-xl border border-slate-200 bg-white p-3 flex flex-col" title={d.name}>
-                            <div className="h-40 overflow-hidden rounded-lg border border-slate-100">
-                              <object data={href} type="application/pdf" width="100%" height="100%">
-                                <div className="h-full w-full grid place-items-center text-xs text-slate-500">
-                                  PDF preview not available
-                                </div>
-                              </object>
-                            </div>
-                            <div className="mt-2">
-                              <p className="truncate text-sm font-medium text-slate-900">{d.name}</p>
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs text-slate-500">{size || 'PDF'}</p>
-                                <div className="flex gap-2">
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs text-blue-600 hover:text-blue-700 underline underline-offset-2"
-                                  >
-                                    Open
-                                  </a>
-                                  <button onClick={() => copy(href)} className="text-xs text-slate-600 hover:text-slate-900">
-                                    Copy
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // other file types
-                      return (
-                        <div key={i} className="rounded-xl border border-slate-200 bg-white p-3 flex items-start gap-3" title={d.name}>
-                          <div className="grid h-10 w-10 place-items-center rounded-lg bg-slate-50 border border-slate-200 text-slate-700">
-                            {fileEmoji(type)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-slate-900">{d.name}</p>
-                            <p className="text-xs text-slate-500">{size || type.toUpperCase()}</p>
-                            <div className="mt-1 flex items-center gap-3">
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-blue-600 hover:text-blue-700 underline underline-offset-2"
-                              >
-                                Open
-                              </a>
-                              <button onClick={() => copy(href)} className="text-xs text-slate-600 hover:text-slate-900">
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                    No files attached.
-                  </div>
-                )}
-              </div>
 
               {/* Actions */}
               <div className="mt-5 flex flex-wrap gap-2">
@@ -317,7 +192,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
       {/* Lightbox for images */}
       {lightbox && (
-        <div className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8" onClick={() => setLightbox(null)}>
+        <div
+          className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8"
+          onClick={() => setLightbox(null)}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={lightbox} alt="preview" className="mx-auto max-h-full rounded-xl shadow-2xl" />
         </div>
@@ -328,64 +206,19 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
 /* ---------------- helpers ---------------- */
 
-function classifyType(d: Attachment):
-  | 'image' | 'pdf' | 'doc' | 'sheet' | 'ppt' | 'zip' | 'audio' | 'video' | 'other' {
-  const n = (d.name || '').toLowerCase();
-  const mt = (d.mimetype || '').toLowerCase();
-  const is = (ext: RegExp, mime: RegExp) => ext.test(n) || mime.test(mt);
-  if (is(/\.(png|jpe?g|gif|webp|svg|bmp|tiff)$/, /^image\//)) return 'image';
-  if (is(/\.pdf$/, /^application\/pdf$/)) return 'pdf';
-  if (is(/\.(docx?|rtf|txt|md)$/, /msword|officedocument\.wordprocessingml|text\//)) return 'doc';
-  if (is(/\.(xlsx?|csv)$/, /spreadsheet|csv/)) return 'sheet';
-  if (is(/\.(pptx?)$/, /presentation/)) return 'ppt';
-  if (is(/\.(zip|rar|7z|tar|gz)$/, /(zip|x-rar|7z|gzip|tar)/)) return 'zip';
-  if (is(/\.(mp3|wav|aac|flac|ogg)$/, /^audio\//)) return 'audio';
-  if (is(/\.(mp4|mov|webm|mkv|avi)$/, /^video\//)) return 'video';
-  return 'other';
-}
-
-function fileEmoji(type: ReturnType<typeof classifyType>) {
-  switch (type) {
-    case 'doc': return '📄';
-    case 'sheet': return '📊';
-    case 'ppt': return '📈';
-    case 'zip': return '🗜️';
-    case 'audio': return '🎵';
-    case 'video': return '🎬';
-    default: return '📎';
-  }
-}
-
-function formatBytes(bytes: number, decimals = 1) {
-  if (!bytes) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B','KB','MB','GB','TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-}
-
-function copy(text: string) {
-  try { navigator.clipboard?.writeText(text); } catch {}
-}
-
 function StatusPill({ status }: { status: string }) {
   const classes =
-    status === "approved"
-      ? "bg-green-100 text-green-800"
-      : status === "rejected"
-      ? "bg-red-100 text-red-800"
-      : status === "completed"
-      ? "bg-blue-100 text-blue-800"
-      : "bg-yellow-100 text-yellow-800";
-
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
+    status === 'approved'
+      ? 'bg-green-100 text-green-800'
+      : status === 'rejected'
+      ? 'bg-red-100 text-red-800'
+      : status === 'completed'
+      ? 'bg-blue-100 text-blue-800'
+      : 'bg-yellow-100 text-yellow-800';
 
   return (
-    <span
-      className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${classes}`}
-    >
-      {label}
+    <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${classes}`}>
+      {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
 }
