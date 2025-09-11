@@ -15,11 +15,13 @@ export default function ProjectsPage() {
       try {
         const [proposalsData, bidsData] = await Promise.all([
           getProposals(),
-          getBids()
+          getBids(),
         ]);
 
-        // only proposals that were approved are actual projects
-        const approvedProjects = proposalsData.filter((p: any) => p.status === 'approved' || p.status === 'completed');
+        // Only approved proposals become projects
+        const approvedProjects = proposalsData.filter(
+          (p: any) => p.status === 'approved'
+        );
         setProjects(approvedProjects);
         setBids(bidsData);
       } catch (error) {
@@ -33,28 +35,24 @@ export default function ProjectsPage() {
   }, []);
 
   const getBidsForProject = (projectId: number) => {
-    return bids.filter((bid) => bid.proposalId === projectId);
+    return bids.filter((bid: any) => bid.proposalId === projectId);
   };
 
-  const isProjectCompleted = (project: any) => {
-    // Case 1: proposal explicitly marked completed
-    if (project.status === 'completed') return true;
+  const isProjectCompleted = (projectId: number) => {
+    const projectBids = getBidsForProject(projectId);
+    const acceptedBid = projectBids.find((b: any) => b.status === 'approved');
+    if (!acceptedBid) return false;
+    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
 
-    // Case 2: project has an accepted bid with all milestones done
-    const projectBids = getBidsForProject(project.proposalId);
-    const acceptedBid = projectBids.find((bid) => bid.status === 'approved');
-
-    if (acceptedBid && acceptedBid.milestones?.length) {
-      return acceptedBid.milestones.every((m: any) => m.completed);
-    }
-
-    return false;
+    // ✅ Completed if all milestones are marked completed
+    return acceptedBid.milestones.every((m: any) => m.completed === true);
   };
 
-  if (loading) return <div className="max-w-6xl mx-auto p-6">Loading projects...</div>;
+  if (loading)
+    return <div className="max-w-6xl mx-auto p-6">Loading projects...</div>;
 
-  const activeProjects = projects.filter((p) => p.status === 'approved' && !isProjectCompleted(p));
-  const completedProjects = projects.filter((p) => isProjectCompleted(p));
+  const activeProjects = projects.filter((p) => !isProjectCompleted(p.proposalId));
+  const completedProjects = projects.filter((p) => isProjectCompleted(p.proposalId));
 
   return (
     <div className="max-w-6xl mx-auto p-6">
@@ -71,11 +69,14 @@ export default function ProjectsPage() {
                 <div>
                   <h2 className="font-semibold text-xl mb-2">{project.title}</h2>
                   <p className="text-gray-600 mb-1">{project.orgName}</p>
-                  <p className="text-green-600 font-medium text-lg">Budget: ${project.amountUSD}</p>
+                  <p className="text-green-600 font-medium text-lg">
+                    Budget: ${project.amountUSD}
+                  </p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-gray-500 mb-2">
-                    {projectBids.length} bids • {acceptedBid ? 'Contract awarded' : 'Accepting bids'}
+                    {projectBids.length} bids •{' '}
+                    {acceptedBid ? 'Contract awarded' : 'Accepting bids'}
                   </p>
                   <div className="space-x-2">
                     <Link
@@ -95,72 +96,37 @@ export default function ProjectsPage() {
                   </div>
                 </div>
               </div>
-
-              {acceptedBid && (
-                <div className="bg-gray-50 p-3 rounded mt-3">
-                  <h4 className="font-medium mb-2">Accepted Bid:</h4>
-                  <p className="text-sm">
-                    <strong>{acceptedBid.vendorName}</strong> • ${acceptedBid.priceUSD} • {acceptedBid.days} days
-                  </p>
-                  <Link
-                    href={`/admin/proposals/${project.proposalId}/bids/${acceptedBid.bidId}`}
-                    className="text-blue-600 text-sm hover:underline mt-2 inline-block"
-                  >
-                    Manage project →
-                  </Link>
-                </div>
-              )}
             </div>
           );
         })}
+        {activeProjects.length === 0 && (
+          <p className="text-gray-500">No active projects.</p>
+        )}
       </div>
-      {activeProjects.length === 0 && (
-        <div className="text-center py-12 text-gray-500">No active projects available for bidding.</div>
-      )}
 
       {/* Completed Projects */}
-      <h1 className="text-2xl font-bold mt-12 mb-6">Completed Projects</h1>
+      <h2 className="text-2xl font-bold mt-12 mb-6">Completed Projects</h2>
       <div className="space-y-6">
-        {completedProjects.map((project) => {
-          const projectBids = getBidsForProject(project.proposalId);
-          const acceptedBid = projectBids.find((bid) => bid.status === 'approved');
-
-          return (
-            <div key={project.proposalId} className="border rounded-lg p-6 bg-gray-50">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h2 className="font-semibold text-xl mb-2">{project.title}</h2>
-                  <p className="text-gray-600 mb-1">{project.orgName}</p>
-                  <p className="text-green-600 font-medium text-lg">Budget: ${project.amountUSD}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-500 mb-2">
-                    {projectBids.length} bids • Completed
-                  </p>
-                  <Link
-                    href={`/projects/${project.proposalId}`}
-                    className="bg-gray-600 text-white px-4 py-2 rounded text-sm hover:bg-gray-700"
-                  >
-                    View Details
-                  </Link>
-                </div>
-              </div>
-
-              {acceptedBid && (
-                <div className="bg-white p-3 rounded mt-3">
-                  <h4 className="font-medium mb-2">Final Bid:</h4>
-                  <p className="text-sm">
-                    <strong>{acceptedBid.vendorName}</strong> • ${acceptedBid.priceUSD} • {acceptedBid.days} days
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {completedProjects.map((project) => (
+          <div key={project.proposalId} className="border rounded-lg p-6 bg-gray-50">
+            <h2 className="font-semibold text-xl mb-2">{project.title}</h2>
+            <p className="text-gray-600 mb-1">{project.orgName}</p>
+            <p className="text-green-600 font-medium text-lg">
+              Budget: ${project.amountUSD}
+            </p>
+            <p className="text-sm text-gray-500 mt-2">✅ Project Completed</p>
+            <Link
+              href={`/projects/${project.proposalId}`}
+              className="text-blue-600 text-sm hover:underline mt-2 inline-block"
+            >
+              View details →
+            </Link>
+          </div>
+        ))}
+        {completedProjects.length === 0 && (
+          <p className="text-gray-500">No completed projects yet.</p>
+        )}
       </div>
-      {completedProjects.length === 0 && (
-        <div className="text-center py-12 text-gray-500">No completed projects yet.</div>
-      )}
     </div>
   );
 }
