@@ -12,7 +12,9 @@ export default function AdminProofsPage() {
   const [bids, setBids] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null); // ✅ new
+
+  // ✅ Lightbox state
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
 
   useEffect(() => {
     loadProofs();
@@ -89,7 +91,16 @@ export default function AdminProofsPage() {
                   return (
                     <button
                       key={i}
-                      onClick={() => setLightbox(f.url)} // ✅ open lightbox
+                      onClick={() =>
+                        setLightbox({
+                          urls: parsed.files
+                            .filter((ff: any) =>
+                              /\.(png|jpe?g|gif|webp|svg)$/i.test(ff.name || ff.url)
+                            )
+                            .map((ff: any) => ff.url),
+                          index: parsed.files.findIndex((ff: any) => ff.url === f.url),
+                        })
+                      }
                       className="group relative overflow-hidden rounded border"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -231,18 +242,53 @@ export default function AdminProofsPage() {
         </div>
       )}
 
-      {/* ✅ Lightbox modal */}
+      {/* ✅ Lightbox modal with navigation */}
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={lightbox}
+            src={lightbox.urls[lightbox.index]}
             alt="proof preview"
             className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()} // prevent closing when clicking image
           />
+
+          {/* Prev button */}
+          {lightbox.index > 0 && (
+            <button
+              className="absolute left-4 text-white text-3xl font-bold"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ ...lightbox, index: lightbox.index - 1 });
+              }}
+            >
+              ‹
+            </button>
+          )}
+
+          {/* Next button */}
+          {lightbox.index < lightbox.urls.length - 1 && (
+            <button
+              className="absolute right-4 text-white text-3xl font-bold"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ ...lightbox, index: lightbox.index + 1 });
+              }}
+            >
+              ›
+            </button>
+          )}
+
+          {/* Close button */}
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
