@@ -1,22 +1,31 @@
-// src/app/admin/bids/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getBids, approveBid, rejectBid, getProposals } from '@/lib/api';
+import {
+  getBids,
+  approveBid,
+  rejectBid,
+  getProposals,
+} from '@/lib/api';
+
+const GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
 
 export default function AdminBidsPage() {
-  const [bids, setBids] = useState([]);
-  const [proposals, setProposals] = useState([]);
+  const [bids, setBids] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState({});
+  const [actionLoading, setActionLoading] = useState<Record<string, string | null>>({});
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [bidsData, proposalsData] = await Promise.all([
           getBids(),
-          getProposals()
+          getProposals(),
         ]);
         setBids(bidsData);
         setProposals(proposalsData);
@@ -30,48 +39,98 @@ export default function AdminBidsPage() {
     fetchData();
   }, []);
 
-  const getProposalTitle = (proposalId) => {
-    const proposal = proposals.find(p => p.proposalId === proposalId);
+  const getProposalTitle = (proposalId: number) => {
+    const proposal = proposals.find((p) => p.proposalId === proposalId);
     return proposal ? proposal.title : `Project #${proposalId}`;
   };
 
-  const handleApprove = async (bidId) => {
-    setActionLoading(prev => ({ ...prev, [bidId]: 'approving' }));
+  const handleApprove = async (bidId: number) => {
+    setActionLoading((prev) => ({ ...prev, [bidId]: 'approving' }));
     try {
       await approveBid(bidId);
-      setBids(prev => prev.map(bid => 
-        bid.bidId === bidId ? { ...bid, status: 'approved' } : bid
-      ));
-    } catch (error) {
+      setBids((prev) =>
+        prev.map((bid) =>
+          bid.bidId === bidId ? { ...bid, status: 'approved' } : bid
+        )
+      );
+    } catch (error: any) {
       console.error('Error approving bid:', error);
       alert('Failed to approve bid: ' + error.message);
     } finally {
-      setActionLoading(prev => ({ ...prev, [bidId]: null }));
+      setActionLoading((prev) => ({ ...prev, [bidId]: null }));
     }
   };
 
-  const handleReject = async (bidId) => {
-    setActionLoading(prev => ({ ...prev, [bidId]: 'rejecting' }));
+  const handleReject = async (bidId: number) => {
+    setActionLoading((prev) => ({ ...prev, [bidId]: 'rejecting' }));
     try {
       await rejectBid(bidId);
-      setBids(prev => prev.map(bid => 
-        bid.bidId === bidId ? { ...bid, status: 'rejected' } : bid
-      ));
-    } catch (error) {
+      setBids((prev) =>
+        prev.map((bid) =>
+          bid.bidId === bidId ? { ...bid, status: 'rejected' } : bid
+        )
+      );
+    } catch (error: any) {
       console.error('Error rejecting bid:', error);
       alert('Failed to reject bid: ' + error.message);
     } finally {
-      setActionLoading(prev => ({ ...prev, [bidId]: null }));
+      setActionLoading((prev) => ({ ...prev, [bidId]: null }));
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string) => {
     switch (status) {
-      case 'approved': return 'bg-green-100 text-green-800';
-      case 'rejected': return 'bg-red-100 text-red-800';
-      case 'completed': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-yellow-100 text-yellow-800';
+      case 'approved':
+        return 'bg-green-100 text-green-800';
+      case 'rejected':
+        return 'bg-red-100 text-red-800';
+      case 'completed':
+        return 'bg-blue-100 text-blue-800';
+      default:
+        return 'bg-yellow-100 text-yellow-800';
     }
+  };
+
+  const renderAttachment = (doc: any, idx: number) => {
+    if (!doc) return null;
+
+    const href =
+      doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
+    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+
+    if (isImage) {
+      return (
+        <button
+          key={idx}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={href}
+            alt={doc.name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+          />
+        </button>
+      );
+    }
+
+    return (
+      <div
+        key={idx}
+        className="p-2 rounded border bg-gray-50 text-xs text-gray-700"
+      >
+        <p className="truncate">{doc.name}</p>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
+          Open
+        </a>
+      </div>
+    );
   };
 
   if (loading) {
@@ -87,7 +146,7 @@ export default function AdminBidsPage() {
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Admin - Bids Management</h1>
-        <Link 
+        <Link
           href="/admin/proposals"
           className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700"
         >
@@ -113,6 +172,9 @@ export default function AdminBidsPage() {
                   Timeline
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Attachments
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -122,7 +184,7 @@ export default function AdminBidsPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {bids.map((bid) => (
-                <tr key={bid.bidId} className="hover:bg-gray-50">
+                <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
                       {getProposalTitle(bid.proposalId)}
@@ -136,7 +198,8 @@ export default function AdminBidsPage() {
                       {bid.vendorName}
                     </div>
                     <div className="text-sm text-gray-500">
-                      {bid.walletAddress?.slice(0, 8)}...{bid.walletAddress?.slice(-6)}
+                      {bid.walletAddress?.slice(0, 8)}...
+                      {bid.walletAddress?.slice(-6)}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -155,8 +218,23 @@ export default function AdminBidsPage() {
                       {bid.milestones?.length || 0} milestones
                     </div>
                   </td>
+                  <td className="px-6 py-4">
+                    {bid.doc ? (
+                      <div className="flex flex-wrap gap-2">
+                        {renderAttachment(bid.doc, 0)}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">
+                        No files
+                      </span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(bid.status)}`}>
+                    <span
+                      className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
+                        bid.status
+                      )}`}
+                    >
                       {bid.status}
                     </span>
                   </td>
@@ -168,14 +246,18 @@ export default function AdminBidsPage() {
                           disabled={actionLoading[bid.bidId]}
                           className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
                         >
-                          {actionLoading[bid.bidId] === 'approving' ? 'Approving...' : 'Approve'}
+                          {actionLoading[bid.bidId] === 'approving'
+                            ? 'Approving...'
+                            : 'Approve'}
                         </button>
                         <button
                           onClick={() => handleReject(bid.bidId)}
                           disabled={actionLoading[bid.bidId]}
                           className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
                         >
-                          {actionLoading[bid.bidId] === 'rejecting' ? 'Rejecting...' : 'Reject'}
+                          {actionLoading[bid.bidId] === 'rejecting'
+                            ? 'Rejecting...'
+                            : 'Reject'}
                         </button>
                       </div>
                     )}
@@ -188,7 +270,9 @@ export default function AdminBidsPage() {
                       </Link>
                     )}
                     {bid.status === 'rejected' && (
-                      <span className="text-gray-500 text-sm">Bid rejected</span>
+                      <span className="text-gray-500 text-sm">
+                        Bid rejected
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -200,10 +284,34 @@ export default function AdminBidsPage() {
         {bids.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 text-lg">No bids found.</p>
-            <p className="text-gray-400 mt-2">Bids will appear here when vendors submit them.</p>
+            <p className="text-gray-400 mt-2">
+              Bids will appear here when vendors submit them.
+            </p>
           </div>
         )}
       </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="attachment preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }
