@@ -1,8 +1,8 @@
-// src/components/AdminProposalsClient.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
+import { validateProposal } from '@/services/aiValidator'; // ✅ AI service
 
 type Attachment = {
   cid?: string;
@@ -40,6 +40,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [validations, setValidations] = useState<Record<number, any>>({}); // ✅ AI results
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -50,6 +51,18 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
       setLoading(true);
       setError(null);
       const data = await getProposals();
+
+      // ✅ run AI validation for each proposal
+      const results: Record<number, any> = {};
+      for (const p of data) {
+        try {
+          results[p.proposalId] = await validateProposal(p);
+        } catch {
+          results[p.proposalId] = { comments: 'AI validation failed.' };
+        }
+      }
+      setValidations(results);
+
       setProposals(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
@@ -92,7 +105,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
         <div className="grid gap-5">
           {proposals.map((p) => (
-            <div key={p.proposalId} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+            <div
+              key={p.proposalId}
+              className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6"
+            >
               {/* Header */}
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div>
@@ -132,6 +148,31 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                   Submitted: {new Date(p.createdAt).toLocaleString()}
                 </p>
               </div>
+
+              {/* ✅ AI Validation */}
+              {validations[p.proposalId] && (
+                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
+                  <h4 className="font-medium text-blue-800 mb-1">AI Validation Report</h4>
+                  <ul className="list-disc ml-5 text-blue-700 space-y-1">
+                    <li>
+                      Org name valid:{' '}
+                      {String(validations[p.proposalId].orgNameValid ?? 'unknown')}
+                    </li>
+                    <li>
+                      Address valid:{' '}
+                      {String(validations[p.proposalId].addressValid ?? 'unknown')}
+                    </li>
+                    <li>Budget check: {validations[p.proposalId].budgetCheck ?? 'unknown'}</li>
+                    <li>
+                      Attachments valid:{' '}
+                      {String(validations[p.proposalId].attachmentsValid ?? 'unknown')}
+                    </li>
+                  </ul>
+                  <p className="mt-2 text-xs text-blue-600">
+                    {validations[p.proposalId].comments}
+                  </p>
+                </div>
+              )}
 
               {/* Attachments */}
               <div className="mt-5">
@@ -285,7 +326,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   );
 }
 
-/* ---------------- helpers (inline, no extra files) ---------------- */
+/* ---------------- helpers ---------------- */
 
 function classifyType(d: Attachment):
   | 'image' | 'pdf' | 'doc' | 'sheet' | 'ppt' | 'zip' | 'audio' | 'video' | 'other' {
@@ -328,7 +369,6 @@ function copy(text: string) {
   try { navigator.clipboard?.writeText(text); } catch {}
 }
 
-// ✅ Added StatusPill here
 function StatusPill({ status }: { status: string }) {
   const classes =
     status === "approved"
