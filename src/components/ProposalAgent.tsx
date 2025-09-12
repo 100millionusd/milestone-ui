@@ -45,7 +45,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [{ role: 'user', content: 'Please validate this proposal automatically' }],
+          messages: [{ role: 'user', content: '' }], // Empty message triggers automatic validation
           proposal
         }),
       });
