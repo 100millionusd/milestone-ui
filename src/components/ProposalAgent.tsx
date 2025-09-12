@@ -38,6 +38,9 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
     setIsLoading(true);
     setError(null);
 
+    // Debug log to check what data is being sent
+    console.log("Sending proposal data to API:", proposal);
+
     try {
       const response = await fetch('/api/validate-proposal/', {
         method: 'POST',
@@ -46,7 +49,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
         },
         body: JSON.stringify({
           messages: [{ role: 'user', content: '' }], // Empty message triggers automatic validation
-          proposal
+          proposal // This should contain all the proposal data
         }),
       });
 
