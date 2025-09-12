@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ProposalAgentProps {
   proposal: {
@@ -25,6 +25,63 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Trigger automatic validation when chat opens
+  useEffect(() => {
+    if (open && messages.length === 0) {
+      // Auto-validate when chat opens for the first time
+      handleAutoValidate();
+    }
+  }, [open]);
+
+  const handleAutoValidate = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/validate-proposal/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Please validate this proposal automatically' }],
+          proposal
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let assistantMessage = '';
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        assistantMessage += chunk;
+        
+        // Update the message in real-time
+        setMessages([
+          { role: 'assistant', content: assistantMessage }
+        ]);
+      }
+
+    } catch (err) {
+      console.error('Auto-validation error:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred during validation');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +173,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
       <div className="p-3 max-h-64 overflow-y-auto text-sm space-y-2">
         {messages.length === 0 && !isLoading && (
           <div className="text-xs text-slate-400 text-center py-4">
-            Start a conversation with the AI validator...
+            Starting automatic validation...
           </div>
         )}
         
@@ -133,7 +190,14 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           </div>
         ))}
         
-        {isLoading && (
+        {isLoading && messages.length === 0 && (
+          <div className="text-xs text-slate-400 flex items-center">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
+            Analyzing proposal...
+          </div>
+        )}
+
+        {isLoading && messages.length > 0 && (
           <div className="text-xs text-slate-400 flex items-center">
             <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
             AI is thinking...
@@ -152,7 +216,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask the AI validator..."
+          placeholder="Ask follow-up questions..."
           className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
           disabled={isLoading}
         />
