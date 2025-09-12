@@ -1,4 +1,3 @@
-// src/app/bids/new/page.tsx
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
@@ -12,7 +11,7 @@ function NewBidPageContent() {
   const proposalId = searchParams.get('proposalId');
   
   const [loading, setLoading] = useState(false);
-  const [proposal, setProposal] = useState(null);
+  const [proposal, setProposal] = useState<any>(null);
   const [formData, setFormData] = useState({
     proposalId: proposalId ? parseInt(proposalId) : '',
     vendorName: '',
@@ -22,10 +21,10 @@ function NewBidPageContent() {
     walletAddress: '',
     preferredStablecoin: 'USDC',
     milestones: [
-      { name: 'Milestone 1', amount: '', dueDate: '' } // REMOVED: proof field
+      { name: 'Milestone 1', amount: '', dueDate: '' }
     ]
   });
-  const [docFile, setDocFile] = useState(null);
+  const [docFile, setDocFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (proposalId) {
@@ -41,7 +40,10 @@ function NewBidPageContent() {
 
     try {
       let doc = null;
+      let aiAnalysis: any = null;
+
       if (docFile) {
+        // 1. Upload to IPFS
         const uploadResult = await uploadFileToIPFS(docFile);
         doc = {
           cid: uploadResult.cid,
@@ -49,8 +51,28 @@ function NewBidPageContent() {
           name: docFile.name,
           size: docFile.size
         };
+
+        // 2. Send to Agent 2 (Railway backend)
+        const formDataAgent = new FormData();
+        formDataAgent.append("file", docFile);
+
+        try {
+          const agentRes = await fetch("https://vendor-agent-production.up.railway.app/upload-offer", {
+            method: "POST",
+            body: formDataAgent,
+          });
+
+          const agentData = await agentRes.json();
+          console.log("Agent 2 analysis:", agentData);
+
+          aiAnalysis = agentData.analysis || null;
+        } catch (err) {
+          console.error("Agent 2 call failed:", err);
+          aiAnalysis = null; // fallback if backend fails
+        }
       }
 
+      // 3. Build body
       const body = {
         ...formData,
         priceUSD: parseFloat(formData.priceUSD),
@@ -59,14 +81,26 @@ function NewBidPageContent() {
           name: m.name,
           amount: parseFloat(m.amount),
           dueDate: new Date(m.dueDate).toISOString()
-          // REMOVED: proof field - only used when completing milestones
         })),
-        doc
+        doc,
+        aiAnalysis  // ✅ Attach AI result here
       };
 
+      // 4. Save bid
       const res = await createBid(body);
       
       if (res.bidId) {
+        if (aiAnalysis) {
+          try {
+            // Try to parse AI JSON
+            const parsed = typeof aiAnalysis === "string" ? JSON.parse(aiAnalysis) : aiAnalysis;
+            const verdict = parsed?.overall_verdict || "Analysis completed. See project page for details.";
+            alert("AI Feedback on your bid:\n\n" + verdict);
+          } catch {
+            alert("AI Analysis completed, but format could not be parsed.");
+          }
+        }
+
         router.push(`/projects/${proposalId}`);
       }
     } catch (error) {
@@ -80,7 +114,7 @@ function NewBidPageContent() {
   const addMilestone = () => {
     setFormData(prev => ({
       ...prev,
-      milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }] // REMOVED: proof field
+      milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }]
     }));
   };
 
