@@ -2,12 +2,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids } from '@/lib/api';
 
-export default function ProjectDetailsPage() {
-  const { proposalId } = useParams();
+export default function ProjectDetailsPage({ params }: { params: { proposalId: string } }) {
+  const proposalId = params.proposalId;   // ✅ use params from props
   const router = useRouter();
 
   const [project, setProject] = useState<any | null>(null);
