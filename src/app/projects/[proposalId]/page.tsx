@@ -2,12 +2,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation'; // ✅ Add useParams
 import Link from 'next/link';
 import { getProposal, getBids } from '@/lib/api';
 
-export default function ProjectDetailsPage({ params }: { params: { proposalId: string } }) {
-  const proposalId = params.proposalId;   // ✅ use params from props
+export default function ProjectDetailsPage() {
+  const params = useParams(); // ✅ Use useParams hook
+  const proposalId = params.proposalId as string; // ✅ Type assertion
   const router = useRouter();
 
   const [project, setProject] = useState<any | null>(null);
