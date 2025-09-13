@@ -108,9 +108,8 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          {/* ✅ FIXED: Added optional chaining for amountUSD */}
           <p className="text-green-600 font-medium text-lg">
-            Budget: ${project.amountUSD?.toLocaleString() || '0'}
+            Budget: ${project.amountUSD}
           </p>
         </div>
         {!completed && (
@@ -146,44 +145,79 @@ export default function ProjectDetailPage() {
         <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
         {bids.length > 0 ? (
           <div className="space-y-3">
-            {bids.map((bid) => (
-              <div key={bid.bidId} className="border p-4 rounded">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-medium">{bid.vendorName}</h3>
-                    {/* ✅ FIXED: Added optional chaining for priceUSD */}
-                    <p className="text-gray-600">
-                      ${bid.priceUSD?.toLocaleString() || '0'} • {bid.days} days
-                    </p>
-                    <p className="text-sm text-gray-500">{bid.notes}</p>
+            {bids.map((bid) => {
+              const docs =
+                (bid.docs || (bid.doc ? [bid.doc] : []))?.filter(Boolean) || [];
+              const analysis = bid.aiAnalysis || {};
 
-                    {/* ✅ Bid Attachments */}
-                    {bid.doc || bid.docs ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {(bid.docs || [bid.doc]).map((d: any, i: number) =>
-                          renderAttachment(d, i)
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 mt-2">
-                        No attachments
+              return (
+                <div key={bid.bidId} className="border p-4 rounded">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium">{bid.vendorName}</h3>
+                      <p className="text-gray-600">
+                        ${bid.priceUSD} • {bid.days} days
                       </p>
-                    )}
+                      <p className="text-sm text-gray-500">{bid.notes}</p>
+
+                      {/* ✅ Bid Attachments */}
+                      {docs.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {docs.map((d: any, i: number) =>
+                            renderAttachment(d, i)
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-2">
+                          No attachments
+                        </p>
+                      )}
+
+                      {/* 🔹 Agent 2 Analysis */}
+                      {analysis.verdict ? (
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                          <h4 className="font-semibold text-sm mb-1">
+                            Agent 2 Analysis
+                          </h4>
+                          <p>
+                            <span className="font-medium">Verdict:</span>{' '}
+                            {analysis.verdict}
+                          </p>
+                          <p>
+                            <span className="font-medium">Reasoning:</span>{' '}
+                            {analysis.reasoning}
+                          </p>
+                          {analysis.suggestions?.length > 0 && (
+                            <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                              {analysis.suggestions.map(
+                                (s: string, i: number) => (
+                                  <li key={i}>{s}</li>
+                                )
+                              )}
+                            </ul>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-gray-400 italic">
+                          ⏳ Analysis pending...
+                        </p>
+                      )}
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded text-xs ${
+                        bid.status === 'approved'
+                          ? 'bg-green-100 text-green-800'
+                          : bid.status === 'rejected'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}
+                    >
+                      {bid.status}
+                    </span>
                   </div>
-                  <span
-                    className={`px-2 py-1 rounded text-xs ${
-                      bid.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : bid.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}
-                  >
-                    {bid.status}
-                  </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-gray-500">
