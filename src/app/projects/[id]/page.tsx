@@ -108,8 +108,9 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
+          {/* ✅ FIXED: Added optional chaining for amountUSD */}
           <p className="text-green-600 font-medium text-lg">
-            Budget: ${project.amountUSD}
+            Budget: ${project.amountUSD?.toLocaleString() || '0'}
           </p>
         </div>
         {!completed && (
@@ -150,8 +151,9 @@ export default function ProjectDetailPage() {
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-medium">{bid.vendorName}</h3>
+                    {/* ✅ FIXED: Added optional chaining for priceUSD */}
                     <p className="text-gray-600">
-                      ${bid.priceUSD} • {bid.days} days
+                      ${bid.priceUSD?.toLocaleString() || '0'} • {bid.days} days
                     </p>
                     <p className="text-sm text-gray-500">{bid.notes}</p>
 
@@ -165,34 +167,6 @@ export default function ProjectDetailPage() {
                     ) : (
                       <p className="text-xs text-gray-400 mt-2">
                         No attachments
-                      </p>
-                    )}
-
-                    {/* 🔹 Agent 2 Analysis */}
-                    {bid.aiAnalysis ? (
-                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                        <h4 className="font-semibold text-sm mb-1">
-                          Agent 2 Analysis
-                        </h4>
-                        <p>
-                          <span className="font-medium">Verdict:</span>{' '}
-                          {bid.aiAnalysis.verdict}
-                        </p>
-                        <p>
-                          <span className="font-medium">Reasoning:</span>{' '}
-                          {bid.aiAnalysis.reasoning}
-                        </p>
-                        {bid.aiAnalysis.suggestions?.length > 0 && (
-                          <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                            {bid.aiAnalysis.suggestions.map((s: string, i: number) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="mt-2 text-xs text-gray-400 italic">
-                        ⏳ Analysis pending...
                       </p>
                     )}
                   </div>
