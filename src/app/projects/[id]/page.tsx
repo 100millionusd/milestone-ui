@@ -167,6 +167,34 @@ export default function ProjectDetailPage() {
                         No attachments
                       </p>
                     )}
+
+                    {/* 🔹 Agent 2 Analysis */}
+                    {bid.aiAnalysis ? (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <h4 className="font-semibold text-sm mb-1">
+                          Agent 2 Analysis
+                        </h4>
+                        <p>
+                          <span className="font-medium">Verdict:</span>{' '}
+                          {bid.aiAnalysis.verdict}
+                        </p>
+                        <p>
+                          <span className="font-medium">Reasoning:</span>{' '}
+                          {bid.aiAnalysis.reasoning}
+                        </p>
+                        {bid.aiAnalysis.suggestions?.length > 0 && (
+                          <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                            {bid.aiAnalysis.suggestions.map((s: string, i: number) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-400 italic">
+                        ⏳ Analysis pending...
+                      </p>
+                    )}
                   </div>
                   <span
                     className={`px-2 py-1 rounded text-xs ${
