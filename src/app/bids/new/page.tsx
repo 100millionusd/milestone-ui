@@ -10,9 +10,9 @@ function NewBidPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const proposalId = searchParams.get('proposalId');
-  
+
   const [loading, setLoading] = useState(false);
-  const [proposal, setProposal] = useState(null);
+  const [proposal, setProposal] = useState<any | null>(null);
   const [formData, setFormData] = useState({
     proposalId: proposalId ? parseInt(proposalId) : '',
     vendorName: '',
@@ -25,7 +25,10 @@ function NewBidPageContent() {
       { name: 'Milestone 1', amount: '', dueDate: '' } // REMOVED: proof field
     ]
   });
-  const [docFile, setDocFile] = useState(null);
+  const [docFile, setDocFile] = useState<File | null>(null);
+
+  // ✅ New: AI feedback state
+  const [aiAnalysis, setAiAnalysis] = useState<any | null>(null);
 
   useEffect(() => {
     if (proposalId) {
@@ -38,6 +41,7 @@ function NewBidPageContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setAiAnalysis(null); // reset previous analysis
 
     try {
       let doc = null;
@@ -55,44 +59,58 @@ function NewBidPageContent() {
         ...formData,
         priceUSD: parseFloat(formData.priceUSD),
         days: parseInt(formData.days),
-        milestones: formData.milestones.map(m => ({
+        milestones: formData.milestones.map((m) => ({
           name: m.name,
           amount: parseFloat(m.amount),
           dueDate: new Date(m.dueDate).toISOString()
-          // REMOVED: proof field - only used when completing milestones
         })),
         doc
       };
 
       const res = await createBid(body);
-      
+
+      // ✅ Capture AI analysis if backend returns it
+      if (res.aiAnalysis) {
+        setAiAnalysis(res.aiAnalysis);
+      }
+
       if (res.bidId) {
         router.push(`/projects/${proposalId}`);
       }
     } catch (error) {
       console.error('Error creating bid:', error);
-      alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      alert(
+        'Failed to create bid: ' +
+          (error instanceof Error ? error.message : 'Unknown error')
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const addMilestone = () => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }] // REMOVED: proof field
+      milestones: [
+        ...prev.milestones,
+        {
+          name: `Milestone ${prev.milestones.length + 1}`,
+          amount: '',
+          dueDate: ''
+        }
+      ]
     }));
   };
 
   const removeMilestone = (index: number) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       milestones: prev.milestones.filter((_, i) => i !== index)
     }));
   };
 
   const updateMilestone = (index: number, field: string, value: string) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       milestones: prev.milestones.map((milestone, i) =>
         i === index ? { ...milestone, [field]: value } : milestone
@@ -101,18 +119,24 @@ function NewBidPageContent() {
   };
 
   if (!proposalId) {
-    return <div className="max-w-4xl mx-auto p-6">No project selected. Please go back to projects and click "Submit Bid".</div>;
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        No project selected. Please go back to projects and click "Submit Bid".
+      </div>
+    );
   }
 
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Submit Bid</h1>
-      
+
       {proposal && (
         <div className="bg-gray-50 p-4 rounded-lg mb-6">
           <h2 className="font-semibold mb-2">Project: {proposal.title}</h2>
           <p className="text-gray-600">Organization: {proposal.orgName}</p>
-          <p className="text-green-600 font-medium">Budget: ${proposal.amountUSD}</p>
+          <p className="text-green-600 font-medium">
+            Budget: ${proposal.amountUSD}
+          </p>
         </div>
       )}
 
@@ -120,23 +144,31 @@ function NewBidPageContent() {
         {/* Vendor Information */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Vendor Name *</label>
+            <label className="block text-sm font-medium mb-1">
+              Vendor Name *
+            </label>
             <input
               type="text"
               required
               value={formData.vendorName}
-              onChange={(e) => setFormData({...formData, vendorName: e.target.value})}
+              onChange={(e) =>
+                setFormData({ ...formData, vendorName: e.target.value })
+              }
               className="w-full p-2 border rounded"
               placeholder="Your company name"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Wallet Address *</label>
+            <label className="block text-sm font-medium mb-1">
+              Wallet Address *
+            </label>
             <input
               type="text"
               required
               value={formData.walletAddress}
-              onChange={(e) => setFormData({...formData, walletAddress: e.target.value})}
+              onChange={(e) =>
+                setFormData({ ...formData, walletAddress: e.target.value })
+              }
               className="w-full p-2 border rounded"
               placeholder="0x..."
             />
@@ -146,34 +178,49 @@ function NewBidPageContent() {
         {/* Bid Details */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Bid Price (USD) *</label>
+            <label className="block text-sm font-medium mb-1">
+              Bid Price (USD) *
+            </label>
             <input
               type="number"
               step="0.01"
               required
               value={formData.priceUSD}
-              onChange={(e) => setFormData({...formData, priceUSD: e.target.value})}
+              onChange={(e) =>
+                setFormData({ ...formData, priceUSD: e.target.value })
+              }
               className="w-full p-2 border rounded"
               placeholder="0.00"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Completion Days *</label>
+            <label className="block text-sm font-medium mb-1">
+              Completion Days *
+            </label>
             <input
               type="number"
               required
               value={formData.days}
-              onChange={(e) => setFormData({...formData, days: e.target.value})}
+              onChange={(e) =>
+                setFormData({ ...formData, days: e.target.value })
+              }
               className="w-full p-2 border rounded"
               placeholder="30"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Preferred Stablecoin *</label>
+            <label className="block text-sm font-medium mb-1">
+              Preferred Stablecoin *
+            </label>
             <select
               required
               value={formData.preferredStablecoin}
-              onChange={(e) => setFormData({...formData, preferredStablecoin: e.target.value})}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  preferredStablecoin: e.target.value
+                })
+              }
               className="w-full p-2 border rounded"
             >
               <option value="USDC">USDC</option>
@@ -184,21 +231,27 @@ function NewBidPageContent() {
 
         {/* Bid Notes */}
         <div>
-          <label className="block text-sm font-medium mb-1">Bid Proposal Details *</label>
+          <label className="block text-sm font-medium mb-1">
+            Bid Proposal Details *
+          </label>
           <textarea
             required
             value={formData.notes}
-            onChange={(e) => setFormData({...formData, notes: e.target.value})}
+            onChange={(e) =>
+              setFormData({ ...formData, notes: e.target.value })
+            }
             className="w-full p-2 border rounded"
             rows={4}
-            placeholder="Describe your approach, timeline, experience, why you're the best choice for this project..."
+            placeholder="Describe your approach, timeline, experience..."
           />
         </div>
 
         {/* Milestones */}
         <div>
           <div className="flex justify-between items-center mb-4">
-            <label className="block text-sm font-medium">Project Milestones *</label>
+            <label className="block text-sm font-medium">
+              Project Milestones *
+            </label>
             <button
               type="button"
               onClick={addMilestone}
@@ -207,10 +260,13 @@ function NewBidPageContent() {
               + Add Milestone
             </button>
           </div>
-          
+
           <div className="space-y-4">
             {formData.milestones.map((milestone, index) => (
-              <div key={index} className="border p-4 rounded-lg bg-gray-50">
+              <div
+                key={index}
+                className="border p-4 rounded-lg bg-gray-50"
+              >
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="font-medium">Milestone {index + 1}</h4>
                   {formData.milestones.length > 1 && (
@@ -223,38 +279,50 @@ function NewBidPageContent() {
                     </button>
                   )}
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1">Milestone Name *</label>
+                    <label className="block text-xs font-medium mb-1">
+                      Milestone Name *
+                    </label>
                     <input
                       type="text"
                       required
                       value={milestone.name}
-                      onChange={(e) => updateMilestone(index, 'name', e.target.value)}
+                      onChange={(e) =>
+                        updateMilestone(index, 'name', e.target.value)
+                      }
                       className="w-full p-2 border rounded text-sm"
                       placeholder="Design completion"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1">Amount ($) *</label>
+                    <label className="block text-xs font-medium mb-1">
+                      Amount ($) *
+                    </label>
                     <input
                       type="number"
                       step="0.01"
                       required
                       value={milestone.amount}
-                      onChange={(e) => updateMilestone(index, 'amount', e.target.value)}
+                      onChange={(e) =>
+                        updateMilestone(index, 'amount', e.target.value)
+                      }
                       className="w-full p-2 border rounded text-sm"
                       placeholder="0.00"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1">Due Date *</label>
+                    <label className="block text-xs font-medium mb-1">
+                      Due Date *
+                    </label>
                     <input
                       type="date"
                       required
                       value={milestone.dueDate}
-                      onChange={(e) => updateMilestone(index, 'dueDate', e.target.value)}
+                      onChange={(e) =>
+                        updateMilestone(index, 'dueDate', e.target.value)
+                      }
                       className="w-full p-2 border rounded text-sm"
                     />
                   </div>
@@ -266,15 +334,20 @@ function NewBidPageContent() {
 
         {/* Supporting Documents */}
         <div>
-          <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+          <label className="block text-sm font-medium mb-1">
+            Supporting Documents
+          </label>
           <input
             type="file"
-            onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+            onChange={(e) =>
+              setDocFile(e.target.files?.[0] || null)
+            }
             className="w-full p-2 border rounded"
             accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
           />
           <p className="text-sm text-gray-500 mt-1">
-            Upload portfolio, previous work examples, certifications, or other supporting documents (PDF, Word, Images)
+            Upload portfolio, previous work examples, certifications, or other
+            supporting documents
           </p>
         </div>
 
@@ -296,6 +369,20 @@ function NewBidPageContent() {
           </button>
         </div>
       </form>
+
+      {/* ✅ AI Analysis Feedback */}
+      {aiAnalysis && (
+        <div className="mt-8 border rounded-lg p-6 bg-gray-50">
+          <h2 className="text-xl font-semibold mb-3">
+            🤖 AI Feedback on Your Bid
+          </h2>
+          <pre className="whitespace-pre-wrap text-sm text-gray-800">
+            {typeof aiAnalysis === 'string'
+              ? aiAnalysis
+              : JSON.stringify(aiAnalysis, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -303,7 +390,11 @@ function NewBidPageContent() {
 // Main export with Suspense boundary
 export default function NewBidPage() {
   return (
-    <Suspense fallback={<div className="max-w-4xl mx-auto p-6">Loading bid form...</div>}>
+    <Suspense
+      fallback={
+        <div className="max-w-4xl mx-auto p-6">Loading bid form...</div>
+      }
+    >
       <NewBidPageContent />
     </Suspense>
   );
