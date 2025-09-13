@@ -13,7 +13,7 @@ export interface Proposal {
   amountUSD: number;
   docs: any[];
   cid: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "completed";
   createdAt: string;
 }
 
@@ -41,6 +41,7 @@ export interface Bid {
   doc: any | null;
   status: "pending" | "approved" | "completed" | "rejected";
   createdAt: string;
+  aiAnalysis?: any;
 }
 
 export interface TransactionResult {
@@ -52,7 +53,6 @@ export interface TransactionResult {
   currency?: string;
 }
 
-// Proof submitted by vendors
 export interface Proof {
   bidId: number;
   milestoneIndex: number;
@@ -80,7 +80,6 @@ const getApiBase = () => {
 };
 
 const API_BASE = getApiBase().replace(/\/+$/, "");
-
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
@@ -128,12 +127,44 @@ export const postJSON = async <T = any>(
 };
 
 // ---- Proposals ----
-export function getProposals(): Promise<Proposal[]> {
-  return apiFetch("/proposals");
+export async function getProposals(): Promise<Proposal[]> {
+  const rows = await apiFetch("/proposals");
+  return rows.map((p: any) => ({
+    proposalId: p.proposal_id,
+    orgName: p.org_name,
+    title: p.title,
+    summary: p.summary,
+    contact: p.contact,
+    address: p.address,
+    city: p.city,
+    country: p.country,
+    amountUSD: p.amount_usd ?? 0,
+    docs: p.docs || [],
+    cid: p.cid,
+    status: p.status,
+    createdAt: p.created_at,
+  }));
 }
-export function getProposal(id: number): Promise<Proposal> {
-  return apiFetch(`/proposals/${id}`);
+
+export async function getProposal(id: number): Promise<Proposal> {
+  const p = await apiFetch(`/proposals/${id}`);
+  return {
+    proposalId: p.proposal_id,
+    orgName: p.org_name,
+    title: p.title,
+    summary: p.summary,
+    contact: p.contact,
+    address: p.address,
+    city: p.city,
+    country: p.country,
+    amountUSD: p.amount_usd ?? 0,
+    docs: p.docs || [],
+    cid: p.cid,
+    status: p.status,
+    createdAt: p.created_at,
+  };
 }
+
 export function createProposal(
   proposal: Omit<Proposal, "proposalId" | "status" | "createdAt" | "cid">
 ): Promise<{ ok: boolean; proposalId: number; cid: string | null }> {
@@ -142,37 +173,89 @@ export function createProposal(
     body: JSON.stringify(proposal),
   });
 }
+
 export function approveProposal(id: number) {
   return apiFetch(`/proposals/${id}/approve`, { method: "POST" });
 }
+
 export function rejectProposal(id: number) {
   return apiFetch(`/proposals/${id}/reject`, { method: "POST" });
 }
 
 // ---- Bids ----
-export function getBids(proposalId?: number): Promise<Bid[]> {
+export async function getBids(proposalId?: number): Promise<Bid[]> {
   const q = proposalId ? `?proposalId=${proposalId}` : "";
-  return apiFetch(`/bids${q}`);
+  const rows = await apiFetch(`/bids${q}`);
+  return rows.map((b: any) => ({
+    bidId: b.bid_id,
+    proposalId: b.proposal_id,
+    vendorName: b.vendor_name,
+    priceUSD: b.price_usd ?? 0,
+    days: b.days,
+    notes: b.notes,
+    walletAddress: b.wallet_address,
+    preferredStablecoin: b.preferred_stablecoin,
+    milestones: b.milestones || [],
+    doc: b.doc || null,
+    status: b.status,
+    createdAt: b.created_at,
+    aiAnalysis: b.ai_analysis || null,
+  }));
 }
-export function getBid(id: number): Promise<Bid> {
-  return apiFetch(`/bids/${id}`);
+
+export async function getBid(id: number): Promise<Bid> {
+  const b = await apiFetch(`/bids/${id}`);
+  return {
+    bidId: b.bid_id,
+    proposalId: b.proposal_id,
+    vendorName: b.vendor_name,
+    priceUSD: b.price_usd ?? 0,
+    days: b.days,
+    notes: b.notes,
+    walletAddress: b.wallet_address,
+    preferredStablecoin: b.preferred_stablecoin,
+    milestones: b.milestones || [],
+    doc: b.doc || null,
+    status: b.status,
+    createdAt: b.created_at,
+    aiAnalysis: b.ai_analysis || null,
+  };
 }
+
 export function createBid(
   bid: Omit<Bid, "bidId" | "status" | "createdAt">
 ): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
   return apiFetch("/bids", { method: "POST", body: JSON.stringify(bid) });
 }
+
 export function approveBid(id: number) {
   return apiFetch(`/bids/${id}/approve`, { method: "POST" });
 }
+
 export function rejectBid(id: number) {
   return apiFetch(`/bids/${id}/reject`, { method: "POST" });
 }
 
 // ---- Vendor ----
-export function getVendorBids(): Promise<Bid[]> {
-  return apiFetch("/vendor/bids");
+export async function getVendorBids(): Promise<Bid[]> {
+  const rows = await apiFetch("/vendor/bids");
+  return rows.map((b: any) => ({
+    bidId: b.bid_id,
+    proposalId: b.proposal_id,
+    vendorName: b.vendor_name,
+    priceUSD: b.price_usd ?? 0,
+    days: b.days,
+    notes: b.notes,
+    walletAddress: b.wallet_address,
+    preferredStablecoin: b.preferred_stablecoin,
+    milestones: b.milestones || [],
+    doc: b.doc || null,
+    status: b.status,
+    createdAt: b.created_at,
+    aiAnalysis: b.ai_analysis || null,
+  }));
 }
+
 export function completeMilestone(
   bidId: number,
   milestoneIndex: number,
@@ -183,6 +266,7 @@ export function completeMilestone(
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
+
 export function getVendorPayments(): Promise<TransactionResult[]> {
   return apiFetch("/vendor/payments");
 }
@@ -198,6 +282,7 @@ export function adminCompleteMilestone(
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
+
 export function payMilestone(bidId: number, milestoneIndex: number) {
   return apiFetch(`/bids/${bidId}/pay-milestone`, {
     method: "POST",
@@ -205,15 +290,28 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
-// ---- Proofs (Vendor submissions reviewed by Admin) ----
-export function getSubmittedProofs(): Promise<Proof[]> {
-  return apiFetch("/proofs");
+// ---- Proofs ----
+export async function getSubmittedProofs(): Promise<Proof[]> {
+  const rows = await apiFetch("/proofs");
+  return rows.map((p: any) => ({
+    bidId: p.bid_id,
+    milestoneIndex: p.milestone_index,
+    vendorName: p.vendor_name,
+    walletAddress: p.wallet_address,
+    title: p.title,
+    description: p.description,
+    files: p.files || [],
+    status: p.status,
+    submittedAt: p.submitted_at,
+  }));
 }
+
 export function approveProof(bidId: number, milestoneIndex: number) {
   return apiFetch(`/proofs/${bidId}/${milestoneIndex}/approve`, {
     method: "POST",
   });
 }
+
 export function rejectProof(bidId: number, milestoneIndex: number) {
   return apiFetch(`/proofs/${bidId}/${milestoneIndex}/reject`, {
     method: "POST",
@@ -244,7 +342,6 @@ export async function uploadFileToIPFS(file: File) {
 
   const result = await r.json();
 
-  // 👇 rewrite using NEXT_PUBLIC_PINATA_GATEWAY
   const gateway =
     process.env.NEXT_PUBLIC_PINATA_GATEWAY || "gateway.pinata.cloud";
   if (result.cid) {
