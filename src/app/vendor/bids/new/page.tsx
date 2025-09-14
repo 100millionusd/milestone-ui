@@ -8,7 +8,7 @@ import { createBid, getBid, analyzeBid } from '@/lib/api';
 export default function Page() {
   const router = useRouter();
 
-  // Read proposalId from the URL (works on client)
+  // Read proposalId from the URL (client-only)
   const proposalId = Number(
     new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
       .get('proposalId') || '0'
@@ -29,10 +29,10 @@ export default function Page() {
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<any | null>(null);
 
-  async function pollAnalysis(bidId: number, timeoutMs = 30000, intervalMs = 2000) {
+  async function pollAnalysis(bidId: number, timeoutMs = 60000, intervalMs = 1200) {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
-      const b = await getBid(bidId);
+      const b = await getBid(bidId); // GETs in api.ts are cache-busted + no-store
       if (b?.aiAnalysis) return b.aiAnalysis;
       await new Promise(r => setTimeout(r, intervalMs));
     }
@@ -68,19 +68,30 @@ export default function Page() {
         doc: null,
       };
 
+      // 1) Create bid
       const created: any = await createBid(payload);
-      const bidId = created?.bidId || created?.bid_id;
+      const bidId = Number(created?.bidId ?? created?.bid_id);
+
+      // Prefer inline analysis from create (if backend already did it)
+      let found = created?.aiAnalysis ?? created?.ai_analysis ?? null;
 
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // Use inline analysis if backend already did it
-      let found = created?.aiAnalysis || created?.ai_analysis || null;
+      // 2) If not present, trigger analyze and use its response FIRST
+      if (!found && Number.isFinite(bidId)) {
+        try {
+          const analyzed = await analyzeBid(bidId).catch(() => null);
+          const fromAnalyze = analyzed?.aiAnalysis ?? analyzed?.ai_analysis ?? null;
+          if (fromAnalyze) found = fromAnalyze;
+        } catch {
+          // ignore; we’ll fall back to polling
+        }
+      }
 
-      // Otherwise trigger analyze and poll for result
-      if (!found && bidId) {
-        try { await analyzeBid(Number(bidId)); } catch {/* ignore */}
-        found = await pollAnalysis(Number(bidId));
+      // 3) If still not found, poll GET /bids/:id (now no-store and cache-busted)
+      if (!found && Number.isFinite(bidId)) {
+        found = await pollAnalysis(bidId);
       }
 
       if (found) {
@@ -92,7 +103,7 @@ export default function Page() {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Optional: redirect after a moment
+      // Optional redirect
       // setTimeout(() => router.push('/vendor/bids'), 1200);
     } catch (err: any) {
       setStep('error');
@@ -106,71 +117,33 @@ export default function Page() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Vendor name"
-            value={vendorName}
-            onChange={e => setVendorName(e.target.value)}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Price (USD)"
-            type="number"
-            min={0}
-            value={priceUSD}
-            onChange={e => setPriceUSD(Number(e.target.value))}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Days"
-            type="number"
-            min={1}
-            value={days}
-            onChange={e => setDays(Number(e.target.value))}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Wallet (0x…)"
-            value={walletAddress}
-            onChange={e => setWalletAddress(e.target.value)}
-            required
-          />
+          <input className="border rounded-lg px-3 py-2" placeholder="Vendor name"
+                 value={vendorName} onChange={e => setVendorName(e.target.value)} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Price (USD)" type="number" min={0}
+                 value={priceUSD} onChange={e => setPriceUSD(Number(e.target.value))} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Days" type="number" min={1}
+                 value={days} onChange={e => setDays(Number(e.target.value))} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Wallet (0x…)"
+                 value={walletAddress} onChange={e => setWalletAddress(e.target.value)} required />
         </div>
 
-        <textarea
-          className="border rounded-lg w-full px-3 py-2"
-          placeholder="Notes (optional)"
-          value={notes}
-          onChange={e => setNotes(e.target.value)}
-        />
+        <textarea className="border rounded-lg w-full px-3 py-2" placeholder="Notes (optional)"
+                  value={notes} onChange={e => setNotes(e.target.value)} />
 
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
           {milestones.map((m, i) => (
             <div key={i} className="grid gap-2 md:grid-cols-3 mb-2">
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Name"
-                value={m.name}
-                onChange={e => { const n=[...milestones]; n[i].name=e.target.value; setMilestones(n); }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Amount"
-                type="number"
-                min={0}
-                value={m.amount}
-                onChange={e => { const n=[...milestones]; n[i].amount=Number(e.target.value); setMilestones(n); }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                type="date"
-                value={m.dueDate.slice(0,10)}
-                onChange={e => { const n=[...milestones]; n[i].dueDate=new Date(e.target.value).toISOString(); setMilestones(n); }}
-              />
+              <input className="border rounded-lg px-3 py-2" placeholder="Name"
+                     value={m.name}
+                     onChange={e => { const n=[...milestones]; n[i].name=e.target.value; setMilestones(n); }} />
+              <input className="border rounded-lg px-3 py-2" placeholder="Amount"
+                     type="number" min={0}
+                     value={m.amount}
+                     onChange={e => { const n=[...milestones]; n[i].amount=Number(e.target.value); setMilestones(n); }} />
+              <input className="border rounded-lg px-3 py-2" type="date"
+                     value={m.dueDate.slice(0,10)}
+                     onChange={e => { const n=[...milestones]; n[i].dueDate=new Date(e.target.value).toISOString(); setMilestones(n); }} />
             </div>
           ))}
         </div>
