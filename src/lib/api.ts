@@ -164,6 +164,14 @@ function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
   const proposalId =
     b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
+
+  // ✅ robustly parse ai_analysis if backend sends it as a string
+  const raw = b?.aiAnalysis ?? b?.ai_analysis ?? null;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try { parsed = JSON.parse(raw); } catch { /* keep as string if bad JSON */ }
+  }
+
   return {
     bidId: Number(bidId),
     proposalId: Number(proposalId),
@@ -172,13 +180,12 @@ function toBid(b: any): Bid {
     days: Number(b?.days) || 0,
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
-    preferredStablecoin: (b?.preferredStablecoin ??
-      b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+    preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
     milestones: Array.isArray(b?.milestones) ? b.milestones : [],
     doc: b?.doc ?? null,
     status: (b?.status as Bid["status"]) ?? "pending",
     createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
-    aiAnalysis: b?.aiAnalysis ?? b?.ai_analysis ?? null,
+    aiAnalysis: parsed ?? null, // ✅ parsed object if possible
   };
 }
 

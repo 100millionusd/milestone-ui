@@ -8,7 +8,6 @@ import { createBid, getBid, analyzeBid } from '@/lib/api';
 export default function Page() {
   const router = useRouter();
 
-  // Read proposalId from the URL (client-only)
   const proposalId = Number(
     new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
       .get('proposalId') || '0'
@@ -23,17 +22,25 @@ export default function Page() {
     { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
   ]);
 
-  // Agent2 modal state
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<'submitting' | 'analyzing' | 'done' | 'error'>('submitting');
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<any | null>(null);
 
+  function coerceAnalysis(a: any) {
+    if (!a) return null;
+    if (typeof a === 'string') {
+      try { return JSON.parse(a); } catch { return null; }
+    }
+    return a;
+  }
+
   async function pollAnalysis(bidId: number, timeoutMs = 60000, intervalMs = 1200) {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
-      const b = await getBid(bidId); // GETs in api.ts are cache-busted + no-store
-      if (b?.aiAnalysis) return b.aiAnalysis;
+      const b = await getBid(bidId);
+      const a = coerceAnalysis(b?.aiAnalysis);
+      if (a) return a;
       await new Promise(r => setTimeout(r, intervalMs));
     }
     return null;
@@ -72,24 +79,29 @@ export default function Page() {
       const created: any = await createBid(payload);
       const bidId = Number(created?.bidId ?? created?.bid_id);
 
-      // Prefer inline analysis from create (if backend already did it)
-      let found = created?.aiAnalysis ?? created?.ai_analysis ?? null;
+      // Use any inline analysis from create response
+      let found = coerceAnalysis(created?.aiAnalysis ?? created?.ai_analysis ?? null);
 
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // 2) If not present, trigger analyze and use its response FIRST
+      // 2) If not present, trigger analyze and try to use its response
       if (!found && Number.isFinite(bidId)) {
         try {
-          const analyzed = await analyzeBid(bidId).catch(() => null);
-          const fromAnalyze = analyzed?.aiAnalysis ?? analyzed?.ai_analysis ?? null;
+          const analyzed: any = await analyzeBid(bidId).catch(() => null);
+          const fromAnalyze = coerceAnalysis(analyzed?.aiAnalysis ?? analyzed?.ai_analysis ?? null);
           if (fromAnalyze) found = fromAnalyze;
-        } catch {
-          // ignore; we’ll fall back to polling
-        }
+
+          // immediate refresh to catch near-simultaneous DB write
+          if (!found) {
+            const refreshed = await getBid(bidId);
+            const fromRefresh = coerceAnalysis(refreshed?.aiAnalysis);
+            if (fromRefresh) found = fromRefresh;
+          }
+        } catch {/* keep going to poll */}
       }
 
-      // 3) If still not found, poll GET /bids/:id (now no-store and cache-busted)
+      // 3) Fallback: poll until present or timeout
       if (!found && Number.isFinite(bidId)) {
         found = await pollAnalysis(bidId);
       }
@@ -103,7 +115,7 @@ export default function Page() {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Optional redirect
+      // Optional redirect after display:
       // setTimeout(() => router.push('/vendor/bids'), 1200);
     } catch (err: any) {
       setStep('error');
