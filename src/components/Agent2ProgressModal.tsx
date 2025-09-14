@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import * as api from '@/lib/api';
 
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
@@ -9,7 +10,12 @@ type Props = {
   step: Step;
   message?: string | null;
   onClose: () => void;
-  analysis?: any | null; // can be object or JSON string
+
+  // Existing prop: analysis may be object or JSON string (from parent)
+  analysis?: any | null;
+
+  // NEW (optional): if provided, the modal will poll the server for analysis when open
+  bidId?: number;
 };
 
 export default function Agent2ProgressModal({
@@ -18,17 +24,74 @@ export default function Agent2ProgressModal({
   message,
   onClose,
   analysis,
+  bidId,
 }: Props) {
-  if (!open) return null;
+  // local analysis (filled by polling if bidId provided)
+  const [fetchedAnalysis, setFetchedAnalysis] = useState<any | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
-  // Parse if stringified
-  const data = useMemo(() => {
+  // Parse if stringified (prop)
+  const analysisFromProp = useMemo(() => {
     if (!analysis) return null;
     if (typeof analysis === 'string') {
       try { return JSON.parse(analysis); } catch { return null; }
     }
     return analysis;
   }, [analysis]);
+
+  // Prefer parent-provided analysis; otherwise use polled one
+  const data = analysisFromProp ?? fetchedAnalysis ?? null;
+
+  // Simple readiness: if any analysis object exists, treat as ready (status field optional)
+  const ready = !!data;
+
+  // Polling for analysis if we have a bidId and no data yet
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clearTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+
+  const fetchOnce = useCallback(async () => {
+    if (!bidId) return;
+    try {
+      const bid = await (api as any).getBid(bidId);
+      const a = bid?.aiAnalysis ?? bid?.ai_analysis ?? null;
+      if (a) setFetchedAnalysis(a);
+      setErrMsg(null);
+    } catch (e: any) {
+      setErrMsg(String(e?.message ?? e));
+    }
+  }, [bidId]);
+
+  useEffect(() => {
+    if (!open) { clearTimer(); return; }
+    if (!ready && bidId && !timerRef.current) {
+      // seed one fetch immediately
+      fetchOnce();
+      // then poll until we have analysis
+      timerRef.current = setInterval(fetchOnce, 1500);
+    }
+    return () => { clearTimer(); };
+  }, [open, ready, bidId, fetchOnce]);
+
+  useEffect(() => {
+    if (ready) clearTimer();
+  }, [ready]);
+
+  const retryAnalysis = useCallback(async () => {
+    if (!bidId) return;
+    try {
+      setRetrying(true);
+      await (api as any).analyzeBid(bidId);
+      await fetchOnce();
+      if (!ready && !timerRef.current) {
+        timerRef.current = setInterval(fetchOnce, 1500);
+      }
+    } catch (e: any) {
+      setErrMsg(`Retry failed: ${String(e?.message ?? e)}`);
+    } finally {
+      setRetrying(false);
+    }
+  }, [bidId, fetchOnce, ready]);
 
   const statusColor =
     step === 'error' ? 'text-rose-700' :
@@ -49,7 +112,80 @@ export default function Agent2ProgressModal({
     </div>
   );
 
-  const pending = !data;
+  if (!open) return null;
+
+  // -------- Renderers for Agent2 V1 (verdict/reasoning) and V2 (fit/summary) --------
+  const AnalysisBlock = ({ a }: { a: any }) => {
+    if (!a) return null;
+    const isV1 = 'verdict' in a || 'reasoning' in a || 'suggestions' in a;
+    const isV2 = 'fit' in a || 'summary' in a || 'risks' in a || 'confidence' in a || 'milestoneNotes' in a;
+
+    return (
+      <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
+        <div className="font-medium">Agent2 — Summary</div>
+
+        {/* V2 fields */}
+        {isV2 && (
+          <>
+            {a.summary ? (
+              <p className="mt-1 whitespace-pre-wrap">{a.summary}</p>
+            ) : (
+              <p className="mt-1 text-slate-500">No summary provided.</p>
+            )}
+            <div className="mt-2">
+              <span className="font-medium">Fit:</span> {String(a.fit ?? '—')}
+              <span className="mx-2">·</span>
+              <span className="font-medium">Confidence:</span>{' '}
+              {typeof a.confidence === 'number'
+                ? `${Math.round(a.confidence * 100)}%`
+                : '—'}
+            </div>
+            {Array.isArray(a.risks) && a.risks.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium">Risks</div>
+                <ul className="list-disc pl-5">
+                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium">Milestone Notes</div>
+                <ul className="list-disc pl-5">
+                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* V1 fields */}
+        {isV1 && (
+          <>
+            <div className="mt-4 border-t pt-3">
+              <div className="text-sm opacity-70">Agent2 (V1)</div>
+              {'verdict' in a && <div className="text-base font-semibold">Verdict: {a.verdict}</div>}
+              {'reasoning' in a && <p className="mt-1 whitespace-pre-wrap">{a.reasoning}</p>}
+              {Array.isArray(a.suggestions) && a.suggestions.length > 0 && (
+                <div className="mt-2">
+                  <div className="font-medium">Suggestions</div>
+                  <ul className="list-disc pl-5">
+                    {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {!isV1 && !isV2 && (
+          <p className="mt-1 text-slate-500">Analysis format not recognized.</p>
+        )}
+      </div>
+    );
+  };
+
+  const showProgressBar = (step === 'submitting' || step === 'analyzing') && !ready;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -63,7 +199,7 @@ export default function Agent2ProgressModal({
           <div className="flex flex-col gap-3">
             {stepBadge(step !== 'submitting', 'Submitting your bid')}
             {stepBadge(step === 'done' || step === 'error' || step === 'analyzing', 'Agent2 analyzing')}
-            {stepBadge(!!data || step === 'done', 'Analysis ready')}
+            {stepBadge(ready || step === 'done', 'Analysis ready')}
           </div>
 
           <div className={`mt-2 text-sm ${statusColor}`}>
@@ -72,66 +208,44 @@ export default function Agent2ProgressModal({
               : step === 'analyzing'
               ? 'Agent2 is checking your milestones, timeline, and pricing...'
               : step === 'done'
-              ? 'Analysis complete.'
+              ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
               : 'Something went wrong.')}
           </div>
 
-          {(step === 'submitting' || step === 'analyzing') && pending && (
+          {showProgressBar && (
             <div className="mt-2 w-full h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-2 w-1/2 animate-pulse bg-slate-900 rounded-full" />
             </div>
           )}
 
-          {data && (
-            <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
-              <div className="font-medium">Agent2 — Summary</div>
-              {data.summary ? (
-                <p className="mt-1 whitespace-pre-wrap">{data.summary}</p>
-              ) : (
-                <p className="mt-1 text-slate-500">No summary provided.</p>
-              )}
+          {ready && <AnalysisBlock a={data} />}
 
-              <div className="mt-2">
-                <span className="font-medium">Fit:</span> {String(data.fit ?? '—')}
-                <span className="mx-2">·</span>
-                <span className="font-medium">Confidence:</span>{' '}
-                {typeof data.confidence === 'number'
-                  ? `${Math.round(data.confidence * 100)}%`
-                  : '—'}
-              </div>
-
-              {Array.isArray(data.risks) && data.risks.length > 0 && (
-                <div className="mt-2">
-                  <div className="font-medium">Risks</div>
-                  <ul className="list-disc pl-5">
-                    {data.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {Array.isArray(data.milestoneNotes) && data.milestoneNotes.length > 0 && (
-                <div className="mt-2">
-                  <div className="font-medium">Milestone Notes</div>
-                  <ul className="list-disc pl-5">
-                    {data.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                  </ul>
-                </div>
+          {!ready && (step === 'analyzing' || step === 'done') && (
+            <div className="flex items-center justify-between">
+              <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
+              {bidId && (
+                <button
+                  onClick={retryAnalysis}
+                  className="text-sm px-3 py-1.5 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+                  disabled={retrying}
+                  title="Re-run Agent2 analysis"
+                >
+                  {retrying ? 'Re-checking…' : 'Retry analysis'}
+                </button>
               )}
             </div>
           )}
 
-          {!data && (step === 'analyzing' || step === 'done') && (
-            <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
-          )}
+          {errMsg && <div className="text-sm text-rose-700">{errMsg}</div>}
         </div>
 
         <div className="mt-6 flex justify-end">
           <button
             className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
             onClick={onClose}
-            disabled={step === 'submitting' || (step === 'analyzing' && !data)}
+            disabled={step === 'submitting' || (step === 'analyzing' && !ready)}
           >
-            {(!!data || step === 'done') && step !== 'error' ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
+            {(ready || step === 'done') && step !== 'error' ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
           </button>
         </div>
       </div>
