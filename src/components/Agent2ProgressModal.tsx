@@ -11,11 +11,11 @@ type Props = {
   message?: string | null;
   onClose: () => void;
 
-  // Existing prop: analysis may be object or JSON string (from parent)
+  // Optional: parent-provided analysis (object or JSON string)
   analysis?: any | null;
 
-  // NEW (optional): if provided, the modal will poll the server for analysis when open
-  bidId?: number;
+  // Optional: if provided, the modal will poll the server for analysis when open
+  bidId?: number | null;
 };
 
 export default function Agent2ProgressModal({
@@ -26,16 +26,20 @@ export default function Agent2ProgressModal({
   analysis,
   bidId,
 }: Props) {
-  // local analysis (filled by polling if bidId provided)
+  // Local state (for polled analysis + errors)
   const [fetchedAnalysis, setFetchedAnalysis] = useState<any | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
-  // Parse if stringified (prop)
+  // Parse parent-provided analysis if it’s a string
   const analysisFromProp = useMemo(() => {
     if (!analysis) return null;
     if (typeof analysis === 'string') {
-      try { return JSON.parse(analysis); } catch { return null; }
+      try {
+        return JSON.parse(analysis);
+      } catch {
+        return null;
+      }
     }
     return analysis;
   }, [analysis]);
@@ -43,13 +47,25 @@ export default function Agent2ProgressModal({
   // Prefer parent-provided analysis; otherwise use polled one
   const data = analysisFromProp ?? fetchedAnalysis ?? null;
 
-  // Simple readiness: if any analysis object exists, treat as ready (status field optional)
+  // Treat analysis presence as "ready" (even if status === "error")
   const ready = !!data;
 
-  // Polling for analysis if we have a bidId and no data yet
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const clearTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  // Compute effective step (so UI reflects error/ready even if parent step lags)
+  const effectiveStep: Step = useMemo(() => {
+    if (!ready) return step;
+    if (data?.status === 'error') return 'error';
+    return step === 'analyzing' ? 'done' : step;
+  }, [ready, step, data?.status]);
 
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // One-shot fetch for a bid
   const fetchOnce = useCallback(async () => {
     if (!bidId) return;
     try {
@@ -62,27 +78,33 @@ export default function Agent2ProgressModal({
     }
   }, [bidId]);
 
+  // Start polling when modal opens without analysis yet
   useEffect(() => {
-    if (!open) { clearTimer(); return; }
+    if (!open) {
+      clearTimer();
+      return;
+    }
     if (!ready && bidId && !timerRef.current) {
-      // seed one fetch immediately
+      // Seed immediately, then poll
       fetchOnce();
-      // then poll until we have analysis
       timerRef.current = setInterval(fetchOnce, 1500);
     }
-    return () => { clearTimer(); };
+    return () => clearTimer();
   }, [open, ready, bidId, fetchOnce]);
 
+  // Stop polling once we have analysis
   useEffect(() => {
     if (ready) clearTimer();
   }, [ready]);
 
+  // Manual retry button: POST /bids/:id/analyze then fetch
   const retryAnalysis = useCallback(async () => {
     if (!bidId) return;
     try {
       setRetrying(true);
       await (api as any).analyzeBid(bidId);
       await fetchOnce();
+      // If still not ready, keep polling
       if (!ready && !timerRef.current) {
         timerRef.current = setInterval(fetchOnce, 1500);
       }
@@ -94,16 +116,16 @@ export default function Agent2ProgressModal({
   }, [bidId, fetchOnce, ready]);
 
   const statusColor =
-    step === 'error' ? 'text-rose-700' :
-    step === 'done' ? 'text-emerald-700' :
+    effectiveStep === 'error' ? 'text-rose-700' :
+    effectiveStep === 'done' ? 'text-emerald-700' :
     'text-slate-700';
 
   const stepBadge = (active: boolean, label: string) => (
     <div className="flex items-center gap-2">
       <span
         className={[
-          "inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
-          active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700",
+          'inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold',
+          active ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-700',
         ].join(' ')}
       >
         {active ? '✓' : '•'}
@@ -144,7 +166,9 @@ export default function Agent2ProgressModal({
               <div className="mt-2">
                 <div className="font-medium">Risks</div>
                 <ul className="list-disc pl-5">
-                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                  {a.risks.map((r: string, i: number) => (
+                    <li key={i}>{r}</li>
+                  ))}
                 </ul>
               </div>
             )}
@@ -152,7 +176,9 @@ export default function Agent2ProgressModal({
               <div className="mt-2">
                 <div className="font-medium">Milestone Notes</div>
                 <ul className="list-disc pl-5">
-                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                  {a.milestoneNotes.map((m: string, i: number) => (
+                    <li key={i}>{m}</li>
+                  ))}
                 </ul>
               </div>
             )}
@@ -164,18 +190,36 @@ export default function Agent2ProgressModal({
           <>
             <div className="mt-4 border-t pt-3">
               <div className="text-sm opacity-70">Agent2 (V1)</div>
-              {'verdict' in a && <div className="text-base font-semibold">Verdict: {a.verdict}</div>}
-              {'reasoning' in a && <p className="mt-1 whitespace-pre-wrap">{a.reasoning}</p>}
+              {'verdict' in a && (
+                <div className="text-base font-semibold">Verdict: {a.verdict}</div>
+              )}
+              {'reasoning' in a && (
+                <p className="mt-1 whitespace-pre-wrap">{a.reasoning}</p>
+              )}
               {Array.isArray(a.suggestions) && a.suggestions.length > 0 && (
                 <div className="mt-2">
                   <div className="font-medium">Suggestions</div>
                   <ul className="list-disc pl-5">
-                    {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                    {a.suggestions.map((s: string, i: number) => (
+                      <li key={i}>{s}</li>
+                    ))}
                   </ul>
                 </div>
               )}
             </div>
           </>
+        )}
+
+        {/* PDF debug (useful during integration) */}
+        {a?.pdfUsed !== undefined && (
+          <div className="mt-3 text-xs text-slate-500">
+            <div>
+              PDF used: <b>{String(a.pdfUsed)}</b>
+              {a.pdfChars ? ` (${a.pdfChars} chars)` : ''}
+            </div>
+            {a.pdfDebug?.reason && <div>reason: {a.pdfDebug.reason}</div>}
+            {a.pdfDebug?.error && <div>error: {a.pdfDebug.error}</div>}
+          </div>
         )}
 
         {!isV1 && !isV2 && (
@@ -185,31 +229,46 @@ export default function Agent2ProgressModal({
     );
   };
 
-  const showProgressBar = (step === 'submitting' || step === 'analyzing') && !ready;
+  const showProgressBar =
+    (effectiveStep === 'submitting' || effectiveStep === 'analyzing') && !ready;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold">Submitting Bid · Agent2 Checking</h3>
-          <button className="text-slate-500 hover:text-slate-900" onClick={onClose} aria-label="Close">✕</button>
+          <button
+            className="text-slate-500 hover:text-slate-900"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="mt-4 space-y-3">
           <div className="flex flex-col gap-3">
-            {stepBadge(step !== 'submitting', 'Submitting your bid')}
-            {stepBadge(step === 'done' || step === 'error' || step === 'analyzing', 'Agent2 analyzing')}
-            {stepBadge(ready || step === 'done', 'Analysis ready')}
+            {stepBadge(effectiveStep !== 'submitting', 'Submitting your bid')}
+            {stepBadge(
+              effectiveStep === 'done' ||
+                effectiveStep === 'error' ||
+                effectiveStep === 'analyzing',
+              'Agent2 analyzing',
+            )}
+            {stepBadge(ready || effectiveStep === 'done', 'Analysis ready')}
           </div>
 
           <div className={`mt-2 text-sm ${statusColor}`}>
-            {message || (step === 'submitting'
-              ? 'Sending your bid...'
-              : step === 'analyzing'
-              ? 'Agent2 is checking your milestones, timeline, and pricing...'
-              : step === 'done'
-              ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
-              : 'Something went wrong.')}
+            {message ||
+              (effectiveStep === 'submitting'
+                ? 'Sending your bid...'
+                : effectiveStep === 'analyzing'
+                ? 'Agent2 is checking your milestones, timeline, and pricing...'
+                : effectiveStep === 'done'
+                ? ready
+                  ? 'Analysis complete.'
+                  : 'Finalizing analysis…'
+                : 'Something went wrong.')}
           </div>
 
           {showProgressBar && (
@@ -220,10 +279,10 @@ export default function Agent2ProgressModal({
 
           {ready && <AnalysisBlock a={data} />}
 
-          {!ready && (step === 'analyzing' || step === 'done') && (
+          {!ready && (effectiveStep === 'analyzing' || effectiveStep === 'done') && (
             <div className="flex items-center justify-between">
               <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
-              {bidId && (
+              {bidId ? (
                 <button
                   onClick={retryAnalysis}
                   className="text-sm px-3 py-1.5 rounded-lg bg-slate-900 text-white disabled:opacity-50"
@@ -232,7 +291,7 @@ export default function Agent2ProgressModal({
                 >
                   {retrying ? 'Re-checking…' : 'Retry analysis'}
                 </button>
-              )}
+              ) : null}
             </div>
           )}
 
@@ -243,9 +302,13 @@ export default function Agent2ProgressModal({
           <button
             className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
             onClick={onClose}
-            disabled={step === 'submitting' || (step === 'analyzing' && !ready)}
+            disabled={effectiveStep === 'submitting' || (effectiveStep === 'analyzing' && !ready)}
           >
-            {(ready || step === 'done') && step !== 'error' ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
+            {effectiveStep === 'error'
+              ? 'Dismiss'
+              : ready || effectiveStep === 'done'
+              ? 'Close'
+              : 'Running…'}
           </button>
         </div>
       </div>
