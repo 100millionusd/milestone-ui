@@ -5,6 +5,11 @@ import { useSearchParams } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { createBid, getBid, analyzeBid } from '@/lib/api';
 
+// 🚫 disable static export / SSG for this page
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
 type LocalMilestone = {
@@ -37,15 +42,12 @@ export default function VendorBidNewPage() {
 
   const pollAnalysis = useCallback(async (bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
-    // keep showing “analyzing” until we truly get a result or time out
     while (Date.now() < stopAt) {
       try {
-        const b = await getBid(bidId); // api.ts already no-store + cache-bust
+        const b = await getBid(bidId); // api.ts does no-store + cache-bust
         const ai = b?.aiAnalysis ?? null;
         if (ai) return ai;
-      } catch (e) {
-        // ignore transient 404s or races
-      }
+      } catch {}
       await new Promise(r => setTimeout(r, intervalMs));
     }
     return null;
@@ -86,25 +88,25 @@ export default function VendorBidNewPage() {
       const bidId = Number(created?.bidId ?? created?.bid_id);
       if (!bidId) throw new Error('Failed to create bid (no id)');
 
-      // 2) Try to use inline analysis if backend already attached it
+      // 2) Inline analysis if backend already attached it
       let found = created?.aiAnalysis ?? created?.ai_analysis ?? null;
 
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // 3) If not present yet, trigger analyze and then poll
+      // 3) Otherwise trigger analyze and then poll
       if (!found) {
-        try { await analyzeBid(bidId); } catch {/* if it already ran, ignore */}
+        try { await analyzeBid(bidId); } catch {}
         found = await pollAnalysis(bidId);
       }
 
       if (found) {
-        setAnalysis(found);             // ✅ This immediately renders in the modal
+        setAnalysis(found); // ✅ modal shows immediately
         setStep('done');
         setMessage('Analysis complete.');
       } else {
         setStep('done');
-        setMessage('Analysis will appear shortly.'); // safety fallback
+        setMessage('Analysis will appear shortly.');
       }
     } catch (err: any) {
       setStep('error');
@@ -209,7 +211,7 @@ export default function VendorBidNewPage() {
         step={step}
         message={message}
         onClose={() => setOpen(false)}
-        analysis={analysis}   // ✅ modal renders as soon as this gets set
+        analysis={analysis}
       />
     </div>
   );
