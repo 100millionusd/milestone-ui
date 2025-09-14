@@ -17,7 +17,7 @@ interface Proposal {
   orgName: string;
   title: string;
   summary: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'completed';
   createdAt: string;
   contact: string;
   amountUSD: number;
@@ -42,12 +42,29 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     if (initialProposals.length === 0) fetchProposals();
   }, [initialProposals.length]);
 
+  // ✅ Normalize API snake_case → camelCase
+  const normalizeProposal = (raw: any): Proposal => ({
+    proposalId: raw.proposal_id,
+    orgName: raw.org_name,
+    title: raw.title,
+    summary: raw.summary,
+    status: raw.status,
+    createdAt: raw.created_at,
+    contact: raw.contact,
+    amountUSD: raw.amount_usd,
+    address: raw.address,
+    city: raw.city,
+    country: raw.country,
+    docs: raw.docs || [],
+    cid: raw.cid,
+  });
+
   const fetchProposals = async () => {
     try {
       setLoading(true);
       setError(null);
       const data = await getProposals();
-      setProposals(data);
+      setProposals(data.map(normalizeProposal));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
     } finally {
@@ -107,7 +124,9 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                   <div className="text-xs text-slate-500">#{p.proposalId}</div>
                   <div className="mt-2 text-sm">
                     <span className="text-slate-500">Requested: </span>
-                    <span className="font-semibold">${p.amountUSD.toLocaleString()}</span>
+                    <span className="font-semibold">
+                      ${Number(p.amountUSD).toLocaleString()}
+                    </span>
                   </div>
                   <div className="mt-2">
                     <StatusPill status={p.status} />
