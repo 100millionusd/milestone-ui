@@ -2,7 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { createBid, getBid, analyzeBid } from '@/lib/api';
+import { createBid, getBid, analyzeBid, uploadFileToIPFS } from '@/lib/api';
 
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
@@ -11,6 +11,14 @@ type LocalMilestone = {
   amount: number;
   dueDate: string; // ISO
 };
+
+function coerceAnalysis(a: any) {
+  if (!a) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
+  return a;
+}
 
 export default function VendorBidNewClient({ proposalId }: { proposalId: number }) {
   const [vendorName, setVendorName] = useState('');
@@ -22,20 +30,26 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
   ]);
 
+  // Optional PDF upload
+  const [docFile, setDocFile] = useState<File | null>(null);
+
   // Agent2 modal state
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('submitting');
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<any | null>(null);
+  const [bidIdForModal, setBidIdForModal] = useState<number | undefined>(undefined);
+
+  const [busy, setBusy] = useState(false);
 
   const pollAnalysis = useCallback(async (bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
     while (Date.now() < stopAt) {
       try {
-        const b = await getBid(bidId); // api.ts already no-store + cache-busts
-        const ai = b?.aiAnalysis ?? null;
+        const b = await getBid(bidId); // api.ts is no-store + adds _ts
+        const ai = coerceAnalysis((b as any)?.aiAnalysis ?? (b as any)?.ai_analysis);
         if (ai) return ai;
-      } catch {}
+      } catch { /* swallow and retry */ }
       await new Promise(r => setTimeout(r, intervalMs));
     }
     return null;
@@ -43,18 +57,35 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
 
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open this page with ?proposalId=<id>.');
       return;
     }
 
+    setBusy(true);
     setOpen(true);
     setStep('submitting');
-    setMessage(null);
+    setMessage('Sending your bid…');
     setAnalysis(null);
+    setBidIdForModal(undefined);
 
     try {
+      // 0) If a file was picked, upload to IPFS first
+      let doc: any = null;
+      if (docFile) {
+        const res = await uploadFileToIPFS(docFile); // returns { cid, url, name, size }
+        doc = {
+          cid: res.cid,
+          url: res.url,
+          name: res.name || docFile.name,
+          size: res.size ?? docFile.size,
+          mimetype: docFile.type || 'application/pdf',
+        };
+      }
+
+      // 1) Create bid
       const payload: any = {
         proposalId,
         vendorName,
@@ -68,37 +99,47 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           amount: Number(m.amount),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
-        doc: null,
+        doc, // may be null if no file
       };
 
-      // 1) Create bid
       const created: any = await createBid(payload);
       const bidId = Number(created?.bidId ?? created?.bid_id);
       if (!bidId) throw new Error('Failed to create bid (no id)');
+      setBidIdForModal(bidId);
 
-      // 2) Inline analysis if backend already attached it
-      let found = created?.aiAnalysis ?? created?.ai_analysis ?? null;
+      // 2) If backend already attached analysis inline, use it immediately
+      let found = coerceAnalysis(created?.aiAnalysis ?? created?.ai_analysis) ?? null;
 
+      if (found) {
+        setStep('done');
+        setMessage('Analysis complete.');
+        setAnalysis(found);
+        setBusy(false);
+        return;
+      }
+
+      // 3) Otherwise trigger analyze and then poll for a bit
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // 3) Otherwise trigger analyze and then poll
-      if (!found) {
-        try { await analyzeBid(bidId); } catch {}
-        found = await pollAnalysis(bidId);
-      }
+      try { await analyzeBid(bidId); } catch { /* non-fatal; polling will catch */ }
+
+      found = await pollAnalysis(bidId, 60000, 1500);
 
       if (found) {
-        setAnalysis(found); // ✅ show immediately in the modal
+        setAnalysis(found);
         setStep('done');
         setMessage('Analysis complete.');
       } else {
+        // Still no object — let modal keep polling itself (it can, if your modal has bidId polling)
         setStep('done');
         setMessage('Analysis will appear shortly.');
       }
     } catch (err: any) {
       setStep('error');
       setMessage(err?.message || 'Failed to submit bid');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -149,6 +190,18 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           onChange={e => setNotes(e.target.value)}
         />
 
+        {/* Optional PDF upload (recommended) */}
+        <div className="border rounded-xl p-3">
+          <div className="font-medium mb-2">Attach PDF (optional)</div>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+            className="block"
+          />
+          {docFile && <div className="text-xs text-slate-600 mt-1">Selected: {docFile.name}</div>}
+        </div>
+
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
           {milestones.map((m, i) => (
@@ -177,8 +230,12 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           ))}
         </div>
 
-        <button type="submit" className="px-4 py-2 rounded-lg bg-slate-900 text-white">
-          Submit bid
+        <button
+          type="submit"
+          disabled={busy}
+          className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+        >
+          {busy ? 'Submitting…' : 'Submit bid'}
         </button>
       </form>
 
@@ -187,7 +244,8 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         step={step}
         message={message}
         onClose={() => setOpen(false)}
-        analysis={analysis}
+        analysis={analysis}           // use inline analysis immediately when present
+        bidId={bidIdForModal}         // enables modal-side polling/retry if your modal supports it
       />
     </div>
   );

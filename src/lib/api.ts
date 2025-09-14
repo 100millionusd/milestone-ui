@@ -65,16 +65,42 @@ export interface Proof {
   submittedAt: string;
 }
 
-// ---- Base URL (safe for browser) ----
-// NEXT_PUBLIC_* are statically inlined by Next.js. API_BASE_URL is server-only (undefined in client bundle).
+// ---- Env-safe API base resolution (prevents `process is not defined`) ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
-const API_BASE = (
-  process.env.API_BASE_URL || // server
-  process.env.NEXT_PUBLIC_API_BASE || // client/server public
-  process.env.NEXT_PUBLIC_API_BASE_URL || // client/server public (alt name)
-  DEFAULT_API_BASE
-).replace(/\/+$/, "");
+
+function getApiBase(): string {
+  // Server: can read both private and public env
+  if (typeof window === "undefined") {
+    const s =
+      (typeof process !== "undefined" && process.env.API_BASE_URL) ||
+      (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
+      (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE) ||
+      DEFAULT_API_BASE;
+    return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
+  }
+  // Browser: only NEXT_PUBLIC_* are inlined at build time
+  const c =
+    (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) ||
+    (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE) ||
+    DEFAULT_API_BASE;
+  return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
+}
+
+const API_BASE = getApiBase();
 const url = (path: string) => `${API_BASE}${path}`;
+
+// ---- Helpers ----
+function coerceJson(val: any) {
+  if (!val) return null;
+  if (typeof val === "string") {
+    try { return JSON.parse(val); } catch { return null; }
+  }
+  return val;
+}
+
+function toIso(d: any): string {
+  try { return new Date(d).toISOString(); } catch { return new Date().toISOString(); }
+}
 
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
@@ -128,7 +154,7 @@ export const postJSON = async <T = any>(path: string, data: any): Promise<T> => 
   });
 };
 
-// ---- Normalizers (robust to mixed shapes) ----
+// ---- Normalizers ----
 function toProposal(p: any): Proposal {
   const id = p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID ?? null;
   const amount = p?.amountUSD ?? p?.amount_usd ?? p?.amount ?? 0;
@@ -158,24 +184,29 @@ function coerceAnalysis(a: any) {
   return a;
 }
 
+function toMilestones(raw: any): Milestone[] {
+  let arr: any[] = [];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === "string") {
+    try { arr = JSON.parse(raw); } catch { arr = []; }
+  }
+  return arr.map((m: any) => ({
+    name: m?.name ?? "",
+    amount: Number(m?.amount ?? 0),
+    dueDate: toIso(m?.dueDate ?? m?.due_date ?? new Date().toISOString()),
+    completed: !!m?.completed,
+    completionDate: m?.completionDate ?? null,
+    proof: m?.proof ?? "",
+    paymentTxHash: m?.paymentTxHash ?? null,
+    paymentDate: m?.paymentDate ?? null,
+  }));
+}
+
 function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
-
-  let milestones: Milestone[] = [];
-  if (Array.isArray(b?.milestones)) {
-    milestones = b.milestones.map((m: any) => ({
-      name: m?.name ?? "",
-      amount: Number(m?.amount ?? 0),
-      dueDate: m?.dueDate ?? m?.due_date ?? new Date().toISOString(),
-      completed: !!m?.completed,
-      completionDate: m?.completionDate ?? null,
-      proof: m?.proof ?? "",
-      paymentTxHash: m?.paymentTxHash ?? null,
-      paymentDate: m?.paymentDate ?? null,
-    }));
-  }
 
   return {
     bidId: Number(bidId),
@@ -186,8 +217,8 @@ function toBid(b: any): Bid {
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
     preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
-    milestones,
-    doc: b?.doc ?? null,
+    milestones: toMilestones(b?.milestones),
+    doc: coerceJson(b?.doc), // handle object or stringified JSON
     status: (b?.status as Bid["status"]) ?? "pending",
     createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(aiRaw),
@@ -262,7 +293,7 @@ export async function createBid(
   payload.milestones = (payload.milestones || []).map((m: any) => ({
     name: m.name,
     amount: Number(m.amount),
-    dueDate: new Date(m.dueDate).toISOString(),
+    dueDate: toIso(m.dueDate),
   }));
   const b = await apiFetch("/bids", { method: "POST", body: JSON.stringify(payload) });
   return toBid(b);
@@ -280,10 +311,14 @@ export async function rejectBid(id: number): Promise<Bid> {
   return toBid(b);
 }
 
-// Agent2 trigger (returns updated bid with aiAnalysis)
-export async function analyzeBid(id: number): Promise<Bid> {
+// Agent2 trigger (returns updated bid with aiAnalysis) — supports optional prompt
+export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, { method: "POST" });
+  const body = JSON.stringify(prompt ? { prompt } : {});
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, {
+    method: "POST",
+    body,
+  });
   return toBid(b);
 }
 
@@ -366,8 +401,10 @@ export async function uploadFileToIPFS(file: File) {
   }
   const result = await r.json();
   // Respect server-provided URL; only synthesize if missing
-  if (result.cid && !result.url) {
-    const gateway = process.env.NEXT_PUBLIC_PINATA_GATEWAY || "gateway.pinata.cloud";
+  if (result?.cid && !result?.url) {
+    const gateway =
+      (typeof process !== "undefined" && process.env.NEXT_PUBLIC_PINATA_GATEWAY) ||
+      "gateway.pinata.cloud";
     result.url = `https://${gateway}/ipfs/${result.cid}`;
   }
   return result;
