@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { createBid, getBid, analyzeBid } from '@/lib/api';
 
-// ✅ prevent static export attempts / caching
+// ✅ Force SSR / no static export on Netlify
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
@@ -34,7 +34,7 @@ export default function Page() {
 
   function isValidEth(addr: string) {
     return /^0x[a-fA-F0-9]{40}$/.test(addr.trim());
-  }
+    }
 
   async function pollAnalysis(bidId: number, timeoutMs = 30000, intervalMs = 1500) {
     const end = Date.now() + timeoutMs;
@@ -100,7 +100,7 @@ export default function Page() {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Optional redirect:
+      // Optional: redirect
       // setTimeout(() => router.push('/vendor/bids'), 1200);
     } catch (err: any) {
       setStep('error');
@@ -114,83 +114,32 @@ export default function Page() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Vendor name"
-            value={vendorName}
-            onChange={(e) => setVendorName(e.target.value)}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Price (USD)"
-            type="number"
-            min={0}
-            value={priceUSD}
-            onChange={(e) => setPriceUSD(Number(e.target.value))}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Days"
-            type="number"
-            min={1}
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            required
-          />
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Wallet (0x…)"
-            value={walletAddress}
-            onChange={(e) => setWalletAddress(e.target.value)}
-            required
-          />
+          <input className="border rounded-lg px-3 py-2" placeholder="Vendor name"
+                 value={vendorName} onChange={(e) => setVendorName(e.target.value)} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Price (USD)" type="number" min={0}
+                 value={priceUSD} onChange={(e) => setPriceUSD(Number(e.target.value))} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Days" type="number" min={1}
+                 value={days} onChange={(e) => setDays(Number(e.target.value))} required />
+          <input className="border rounded-lg px-3 py-2" placeholder="Wallet (0x…)"
+                 value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} required />
         </div>
 
-        <textarea
-          className="border rounded-lg w-full px-3 py-2"
-          placeholder="Notes (optional)"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-        />
+        <textarea className="border rounded-lg w-full px-3 py-2" placeholder="Notes (optional)"
+                  value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
           {milestones.map((m, i) => (
             <div key={i} className="grid gap-2 md:grid-cols-3 mb-2">
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Name"
-                value={m.name}
-                onChange={(e) => {
-                  const n = [...milestones];
-                  n[i].name = e.target.value;
-                  setMilestones(n);
-                }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Amount"
-                type="number"
-                min={0}
-                value={Number(m.amount)}
-                onChange={(e) => {
-                  const n = [...milestones];
-                  n[i].amount = Number(e.target.value);
-                  setMilestones(n);
-                }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                type="date"
-                value={(m.dueDate || '').slice(0, 10)}
-                onChange={(e) => {
-                  const n = [...milestones];
-                  n[i].dueDate = new Date(e.target.value).toISOString();
-                  setMilestones(n);
-                }}
-              />
+              <input className="border rounded-lg px-3 py-2" placeholder="Name"
+                     value={m.name}
+                     onChange={(e) => { const n=[...milestones]; n[i].name=e.target.value; setMilestones(n); }} />
+              <input className="border rounded-lg px-3 py-2" placeholder="Amount" type="number" min={0}
+                     value={Number(m.amount)}
+                     onChange={(e) => { const n=[...milestones]; n[i].amount=Number(e.target.value); setMilestones(n); }} />
+              <input className="border rounded-lg px-3 py-2" type="date"
+                     value={(m.dueDate || '').slice(0,10)}
+                     onChange={(e) => { const n=[...milestones]; n[i].dueDate=new Date(e.target.value).toISOString(); setMilestones(n); }} />
             </div>
           ))}
         </div>
