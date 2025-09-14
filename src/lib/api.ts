@@ -84,11 +84,23 @@ const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
-  const fullUrl = url(path);
+  const method = (options.method || "GET").toUpperCase();
+
+  // Bust caches on GETs
+  let fullPath = path;
+  if (method === "GET") {
+    const sep = path.includes("?") ? "&" : "?";
+    fullPath = `${path}${sep}_ts=${Date.now()}`;
+  }
+
+  const fullUrl = url(fullPath);
 
   const r = await fetch(fullUrl, {
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
+      "Pragma": "no-cache",
+      "Cache-Control": "no-cache",
       ...(options.headers || {}),
     },
     credentials: "include",
@@ -102,9 +114,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     try {
       const j = await r.json();
       msg = j?.error || j?.message || msg;
-    } catch {
-      // ignore
-    }
+    } catch {}
     throw new Error(msg);
   }
 
