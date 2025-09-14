@@ -1,4 +1,3 @@
-// src/app/vendor/VendorBidNewPage.tsx
 'use client';
 
 import React from 'react';
@@ -6,9 +5,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { createBid, getBid, analyzeBid } from '@/lib/api';
 
+// ✅ prevent static export attempts / caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
-export default function VendorBidNewPage() {
+export default function Page() {
   const router = useRouter();
   const params = useSearchParams();
   const proposalId = Number(params.get('proposalId') || '0');
@@ -72,7 +76,7 @@ export default function VendorBidNewPage() {
           amount: Number(m.amount || 0),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
-        doc: null, // add file upload later if needed
+        doc: null,
       };
 
       const created: any = await createBid(payload);
@@ -82,13 +86,8 @@ export default function VendorBidNewPage() {
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // If the inline analysis isn't present yet, trigger and poll.
       if (!found && Number.isFinite(bidId)) {
-        try {
-          await analyzeBid(bidId);
-        } catch {
-          /* no-op */
-        }
+        try { await analyzeBid(bidId); } catch {}
         found = await pollAnalysis(bidId);
       }
 
@@ -101,7 +100,7 @@ export default function VendorBidNewPage() {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Optional redirect after a short delay:
+      // Optional redirect:
       // setTimeout(() => router.push('/vendor/bids'), 1200);
     } catch (err: any) {
       setStep('error');
