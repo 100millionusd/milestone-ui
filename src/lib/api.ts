@@ -65,27 +65,15 @@ export interface Proof {
   submittedAt: string;
 }
 
-// ---- Base URL resolution ----
-const getApiBase = () => {
-  const DEFAULT = "https://milestone-api-production.up.railway.app";
-  if (typeof window === "undefined") {
-    // server: prefer server var, then public fallbacks, then default
-    return (
-      process.env.API_BASE_URL ||
-      process.env.NEXT_PUBLIC_API_BASE ||
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      DEFAULT
-    );
-  }
-  // client
-  return (
-    (process as any).env?.NEXT_PUBLIC_API_BASE ||
-    (process as any).env?.NEXT_PUBLIC_API_BASE_URL ||
-    DEFAULT
-  );
-};
-
-const API_BASE = getApiBase().replace(/\/+$/, "");
+// ---- Base URL (safe for browser) ----
+// NEXT_PUBLIC_* are statically inlined by Next.js. API_BASE_URL is server-only (undefined in client bundle).
+const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
+const API_BASE = (
+  process.env.API_BASE_URL || // server
+  process.env.NEXT_PUBLIC_API_BASE || // client/server public
+  process.env.NEXT_PUBLIC_API_BASE_URL || // client/server public (alt name)
+  DEFAULT_API_BASE
+).replace(/\/+$/, "");
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Fetch helper ----
@@ -175,7 +163,6 @@ function toBid(b: any): Bid {
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
 
-  // Normalize milestones just in case
   let milestones: Milestone[] = [];
   if (Array.isArray(b?.milestones)) {
     milestones = b.milestones.map((m: any) => ({
@@ -378,9 +365,9 @@ export async function uploadFileToIPFS(file: File) {
     throw new Error(j?.error || `HTTP ${r.status}`);
   }
   const result = await r.json();
-  // Respect server's chosen gateway; only fill if missing
+  // Respect server-provided URL; only synthesize if missing
   if (result.cid && !result.url) {
-    const gateway = (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY || "gateway.pinata.cloud";
+    const gateway = process.env.NEXT_PUBLIC_PINATA_GATEWAY || "gateway.pinata.cloud";
     result.url = `https://${gateway}/ipfs/${result.cid}`;
   }
   return result;
