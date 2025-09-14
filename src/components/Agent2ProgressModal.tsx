@@ -1,8 +1,16 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
+
+type Props = {
+  open: boolean;
+  step: Step;
+  message?: string | null;
+  onClose: () => void;
+  analysis?: any | null; // can be object or JSON string
+};
 
 export default function Agent2ProgressModal({
   open,
@@ -10,14 +18,17 @@ export default function Agent2ProgressModal({
   message,
   onClose,
   analysis,
-}: {
-  open: boolean;
-  step: Step;
-  message?: string | null;
-  onClose: () => void;
-  analysis?: any | null;
-}) {
+}: Props) {
   if (!open) return null;
+
+  // ✅ Coerce analysis in case DB/API returns a JSON string
+  const data = useMemo(() => {
+    if (!analysis) return null;
+    if (typeof analysis === 'string') {
+      try { return JSON.parse(analysis); } catch { return null; }
+    }
+    return analysis;
+  }, [analysis]);
 
   const statusColor =
     step === 'error' ? 'text-rose-700' :
@@ -37,6 +48,8 @@ export default function Agent2ProgressModal({
       <span className="text-sm">{label}</span>
     </div>
   );
+
+  const pending = !data;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -69,38 +82,54 @@ export default function Agent2ProgressModal({
               : 'Something went wrong.')}
           </div>
 
-          {(step === 'submitting' || step === 'analyzing') && (
+          {(step === 'submitting' || step === 'analyzing') && pending && (
             <div className="mt-2 w-full h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-2 w-1/2 animate-pulse bg-slate-900 rounded-full" />
             </div>
           )}
 
-          {analysis && step === 'done' && (
+          {/* ✅ Show analysis as soon as it exists (no step === 'done' gate) */}
+          {data && (
             <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
               <div className="font-medium">Agent2 — Summary</div>
-              <p className="mt-1">{analysis.summary}</p>
+              {data.summary ? (
+                <p className="mt-1 whitespace-pre-wrap">{data.summary}</p>
+              ) : (
+                <p className="mt-1 text-slate-500">No summary provided.</p>
+              )}
+
               <div className="mt-2">
-                <span className="font-medium">Fit:</span> {analysis.fit}
+                <span className="font-medium">Fit:</span> {String(data.fit ?? '—')}
                 <span className="mx-2">·</span>
-                <span className="font-medium">Confidence:</span> {analysis.confidence}
+                <span className="font-medium">Confidence:</span>{' '}
+                {typeof data.confidence === 'number'
+                  ? `${Math.round(data.confidence * 100)}%`
+                  : '—'}
               </div>
-              {!!analysis.risks?.length && (
+
+              {Array.isArray(data.risks) && data.risks.length > 0 && (
                 <div className="mt-2">
                   <div className="font-medium">Risks</div>
                   <ul className="list-disc pl-5">
-                    {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                    {data.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
                   </ul>
                 </div>
               )}
-              {!!analysis.milestoneNotes?.length && (
+
+              {Array.isArray(data.milestoneNotes) && data.milestoneNotes.length > 0 && (
                 <div className="mt-2">
                   <div className="font-medium">Milestone Notes</div>
                   <ul className="list-disc pl-5">
-                    {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                    {data.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
                   </ul>
                 </div>
               )}
             </div>
+          )}
+
+          {/* Still pending but analyzing/done — keep a tiny hint */}
+          {!data && (step === 'analyzing' || step === 'done') && (
+            <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
           )}
         </div>
 
@@ -108,9 +137,9 @@ export default function Agent2ProgressModal({
           <button
             className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
             onClick={onClose}
-            disabled={step === 'submitting' || step === 'analyzing'}
+            disabled={step === 'submitting' || (step === 'analyzing' && !data)}
           >
-            {step === 'done' ? 'Close' : step === 'error' ? 'Dismiss' : 'Running…'}
+            {(step === 'done' || (!!data && step !== 'error')) ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
           </button>
         </div>
       </div>
