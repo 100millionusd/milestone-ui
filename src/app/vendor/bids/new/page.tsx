@@ -1,47 +1,36 @@
 'use client';
 
-import React from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { createBid, getBid, analyzeBid } from '@/lib/api';
 
-// ✅ Force SSR / no static export on Netlify
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const fetchCache = 'force-no-store';
-
-type Step = 'submitting' | 'analyzing' | 'done' | 'error';
-
-export default function Page() {
+export default function VendorBidNewPage() {
   const router = useRouter();
-  const params = useSearchParams();
-  const proposalId = Number(params.get('proposalId') || '0');
 
-  const [vendorName, setVendorName] = React.useState('');
-  const [priceUSD, setPriceUSD] = React.useState<number>(0);
-  const [days, setDays] = React.useState<number>(30);
-  const [walletAddress, setWalletAddress] = React.useState('');
-  const [notes, setNotes] = React.useState('');
-  const [milestones, setMilestones] = React.useState([
-    { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
-  ]);
+  // ⚠️ Provide the proposalId (query, prop, or hardcoded while testing)
+  // If you navigate here with ?proposalId=123, you can read from URL:
+  const proposalId = Number(new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('proposalId') || '0');
+
+  const [vendorName, setVendorName] = useState('');
+  const [priceUSD, setPriceUSD] = useState<number>(0);
+  const [days, setDays] = useState<number>(30);
+  const [walletAddress, setWalletAddress] = useState('');
+  const [notes, setNotes] = useState('');
+  const [milestones, setMilestones] = useState([{ name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() }]);
 
   // Agent2 modal state
-  const [open, setOpen] = React.useState(false);
-  const [step, setStep] = React.useState<Step>('submitting');
-  const [message, setMessage] = React.useState<string | null>(null);
-  const [analysis, setAnalysis] = React.useState<any | null>(null);
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<'submitting' | 'analyzing' | 'done' | 'error'>('submitting');
+  const [message, setMessage] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<any | null>(null);
 
-  function isValidEth(addr: string) {
-    return /^0x[a-fA-F0-9]{40}$/.test(addr.trim());
-    }
-
-  async function pollAnalysis(bidId: number, timeoutMs = 30000, intervalMs = 1500) {
+  async function pollAnalysis(bidId: number, timeoutMs = 30000, intervalMs = 2000) {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
-      const b = await getBid(bidId); // cache-busted in api.ts
+      const b = await getBid(bidId);
       if (b?.aiAnalysis) return b.aiAnalysis;
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await new Promise(r => setTimeout(r, intervalMs));
     }
     return null;
   }
@@ -50,10 +39,6 @@ export default function Page() {
     e.preventDefault();
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open this page with ?proposalId=<id>.');
-      return;
-    }
-    if (!isValidEth(walletAddress)) {
-      alert('Please enter a valid Ethereum address (0x...).');
       return;
     }
 
@@ -65,30 +50,33 @@ export default function Page() {
     try {
       const payload: any = {
         proposalId,
-        vendorName: vendorName.trim(),
+        vendorName,
         priceUSD: Number(priceUSD),
         days: Number(days),
-        notes: (notes || '').trim(),
-        walletAddress: walletAddress.trim(),
+        notes,
+        walletAddress,
         preferredStablecoin: 'USDT',
-        milestones: (milestones || []).map((m) => ({
-          name: String(m.name || '').trim(),
-          amount: Number(m.amount || 0),
+        milestones: milestones.map(m => ({
+          name: m.name,
+          amount: Number(m.amount),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
         doc: null,
       };
 
       const created: any = await createBid(payload);
-      const bidId = Number(created?.bidId ?? created?.bid_id);
-      let found = created?.aiAnalysis ?? created?.ai_analysis ?? null;
+      const bidId = created?.bidId || created?.bid_id;
 
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      if (!found && Number.isFinite(bidId)) {
-        try { await analyzeBid(bidId); } catch {}
-        found = await pollAnalysis(bidId);
+      // Use inline analysis if backend already did it
+      let found = created?.aiAnalysis || created?.ai_analysis || null;
+
+      // Otherwise trigger analyze and poll for result
+      if (!found && bidId) {
+        try { await analyzeBid(Number(bidId)); } catch {/* ignore */}
+        found = await pollAnalysis(Number(bidId));
       }
 
       if (found) {
@@ -100,7 +88,7 @@ export default function Page() {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Optional: redirect
+      // Optional: redirect after a moment
       // setTimeout(() => router.push('/vendor/bids'), 1200);
     } catch (err: any) {
       setStep('error');
@@ -115,17 +103,17 @@ export default function Page() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input className="border rounded-lg px-3 py-2" placeholder="Vendor name"
-                 value={vendorName} onChange={(e) => setVendorName(e.target.value)} required />
+                 value={vendorName} onChange={e => setVendorName(e.target.value)} required />
           <input className="border rounded-lg px-3 py-2" placeholder="Price (USD)" type="number" min={0}
-                 value={priceUSD} onChange={(e) => setPriceUSD(Number(e.target.value))} required />
+                 value={priceUSD} onChange={e => setPriceUSD(Number(e.target.value))} required />
           <input className="border rounded-lg px-3 py-2" placeholder="Days" type="number" min={1}
-                 value={days} onChange={(e) => setDays(Number(e.target.value))} required />
+                 value={days} onChange={e => setDays(Number(e.target.value))} required />
           <input className="border rounded-lg px-3 py-2" placeholder="Wallet (0x…)"
-                 value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} required />
+                 value={walletAddress} onChange={e => setWalletAddress(e.target.value)} required />
         </div>
 
         <textarea className="border rounded-lg w-full px-3 py-2" placeholder="Notes (optional)"
-                  value={notes} onChange={(e) => setNotes(e.target.value)} />
+                  value={notes} onChange={e => setNotes(e.target.value)} />
 
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
@@ -133,13 +121,14 @@ export default function Page() {
             <div key={i} className="grid gap-2 md:grid-cols-3 mb-2">
               <input className="border rounded-lg px-3 py-2" placeholder="Name"
                      value={m.name}
-                     onChange={(e) => { const n=[...milestones]; n[i].name=e.target.value; setMilestones(n); }} />
-              <input className="border rounded-lg px-3 py-2" placeholder="Amount" type="number" min={0}
-                     value={Number(m.amount)}
-                     onChange={(e) => { const n=[...milestones]; n[i].amount=Number(e.target.value); setMilestones(n); }} />
+                     onChange={e => { const n=[...milestones]; n[i].name=e.target.value; setMilestones(n); }} />
+              <input className="border rounded-lg px-3 py-2" placeholder="Amount"
+                     type="number" min={0}
+                     value={m.amount}
+                     onChange={e => { const n=[...milestones]; n[i].amount=Number(e.target.value); setMilestones(n); }} />
               <input className="border rounded-lg px-3 py-2" type="date"
-                     value={(m.dueDate || '').slice(0,10)}
-                     onChange={(e) => { const n=[...milestones]; n[i].dueDate=new Date(e.target.value).toISOString(); setMilestones(n); }} />
+                     value={m.dueDate.slice(0,10)}
+                     onChange={e => { const n=[...milestones]; n[i].dueDate=new Date(e.target.value).toISOString(); setMilestones(n); }} />
             </div>
           ))}
         </div>
@@ -159,3 +148,4 @@ export default function Page() {
     </div>
   );
 }
+
