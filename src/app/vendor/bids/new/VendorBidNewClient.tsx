@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { createBid, getBid, analyzeBid, uploadFileToIPFS } from '@/lib/api';
+import { createBid, getBid, analyzeBid } from '@/lib/api';
 
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
@@ -14,13 +15,13 @@ type LocalMilestone = {
 
 function coerce(a: any) {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   return a;
 }
 
 export default function VendorBidNewClient({ proposalId }: { proposalId: number }) {
+  const router = useRouter();
+
   const [vendorName, setVendorName] = useState('');
   const [priceUSD, setPriceUSD] = useState<number>(0);
   const [days, setDays] = useState<number>(30);
@@ -30,20 +31,12 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
   ]);
 
-  // Optional: PDF file for Agent2
-  const [docFile, setDocFile] = useState<File | null>(null);
-
-  // NEW: Custom prompt for Agent2
-  const [agentPrompt, setAgentPrompt] = useState('');
-
   // Agent2 modal state
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('submitting');
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [bidIdForModal, setBidIdForModal] = useState<number | undefined>(undefined);
-
-  const [busy, setBusy] = useState(false);
 
   const pollAnalysis = useCallback(async (bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
@@ -60,35 +53,19 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
 
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open this page with ?proposalId=<id>.');
       return;
     }
 
-    setBusy(true);
     setOpen(true);
     setStep('submitting');
-    setMessage('Sending your bid…');
+    setMessage(null);
     setAnalysis(null);
     setBidIdForModal(undefined);
 
     try {
-      // 0) Upload file first (if provided)
-      let doc: any = null;
-      if (docFile) {
-        const res = await uploadFileToIPFS(docFile); // {cid, url, name, size}
-        doc = {
-          cid: res.cid,
-          url: res.url,
-          name: res.name || docFile.name,
-          size: res.size ?? docFile.size,
-          mimetype: docFile.type || 'application/pdf',
-        };
-      }
-
-      // 1) Create bid
       const payload: any = {
         proposalId,
         vendorName,
@@ -102,49 +79,42 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           amount: Number(m.amount),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
-        doc,
+        doc: null,
       };
 
+      // 1) Create bid
       const created: any = await createBid(payload);
       const bidId = Number(created?.bidId ?? created?.bid_id);
       if (!bidId) throw new Error('Failed to create bid (no id)');
       setBidIdForModal(bidId);
 
-      // 2) If API already attached analysis inline, use it immediately
+      // 2) Inline analysis? use immediately
       let found = coerce(created?.aiAnalysis ?? created?.ai_analysis);
 
-      if (found) {
-        setStep('done');
-        setMessage('Analysis complete.');
-        setAnalysis(found);
-        setBusy(false);
-        return;
-      }
-
-      // 3) Otherwise trigger analyze WITH PROMPT, then poll
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
-      try {
-        await analyzeBid(bidId, agentPrompt || undefined);
-      } catch {
-        // non-fatal, we’ll poll anyway
-      }
 
-      found = await pollAnalysis(bidId, 60000, 1500);
+      // 3) If not present, trigger analyze then poll
+      if (!found) {
+        try { await analyzeBid(bidId); } catch {}
+        found = await pollAnalysis(bidId);
+      }
 
       if (found) {
         setAnalysis(found);
         setStep('done');
         setMessage('Analysis complete.');
+        // 🔁 Make sure any server components that list bids re-fetch fresh data
+        router.refresh();
       } else {
         setStep('done');
         setMessage('Analysis will appear shortly.');
+        // still refresh to pick up eventual async write
+        router.refresh();
       }
     } catch (err: any) {
       setStep('error');
       setMessage(err?.message || 'Failed to submit bid');
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -195,39 +165,37 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           onChange={e => setNotes(e.target.value)}
         />
 
-        {/* Optional PDF */}
         <div className="border rounded-xl p-3">
-          <div className="font-medium mb-2">Attach PDF (optional)</div>
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
-            className="block"
-          />
-          {docFile && <div className="text-xs text-slate-600 mt-1">Selected: {docFile.name}</div>}
+          <div className="font-medium mb-2">Milestones</div>
+          {milestones.map((m, i) => (
+            <div key={i} className="grid gap-2 md:grid-cols-3 mb-2">
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Name"
+                value={m.name}
+                onChange={e => { const n = [...milestones]; n[i].name = e.target.value; setMilestones(n); }}
+              />
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Amount"
+                type="number"
+                min={0}
+                value={m.amount}
+                onChange={e => { const n = [...milestones]; n[i].amount = Number(e.target.value); setMilestones(n); }}
+              />
+              <input
+                className="border rounded-lg px-3 py-2"
+                type="date"
+                value={m.dueDate.slice(0,10)}
+                onChange={e => { const n = [...milestones]; n[i].dueDate = new Date(e.target.value).toISOString(); setMilestones(n); }}
+              />
+            </div>
+          ))}
         </div>
 
-        {/* NEW: Custom Agent2 prompt */}
-        <div className="border rounded-xl p-3">
-          <div className="font-medium mb-2">Agent2 custom prompt (optional)</div>
-          <textarea
-            className="w-full min-h-24 rounded-lg border p-3"
-            placeholder={`Optional instructions for Agent2.\nExamples:\n- Focus on pricing realism and vendor credibility.\n- Summarize in Spanish.\n- Compare against the proposal scope.\n(Leave blank to use default prompt.)`}
-            value={agentPrompt}
-            onChange={(e) => setAgentPrompt(e.target.value)}
-          />
-          <p className="text-xs text-slate-500 mt-1">This prompt is sent with the first analysis run.</p>
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={busy}
-            className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-          >
-            {busy ? 'Submitting…' : 'Submit bid'}
-          </button>
-        </div>
+        <button type="submit" className="px-4 py-2 rounded-lg bg-slate-900 text-white">
+          Submit bid
+        </button>
       </form>
 
       <Agent2ProgressModal
@@ -236,7 +204,7 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         message={message}
         onClose={() => setOpen(false)}
         analysis={analysis}
-        bidId={bidIdForModal}
+        bidId={bidIdForModal}  // ✅ critical for polling
       />
     </div>
   );

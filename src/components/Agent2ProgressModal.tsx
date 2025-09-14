@@ -10,33 +10,24 @@ type Props = {
   step: Step;
   message?: string | null;
   onClose: () => void;
-  analysis?: any | null;     // object or JSON string
-  bidId?: number;            // when provided, modal will poll /bids/:id until analysis exists
+  analysis?: any | null;   // may be object or JSON string
+  bidId?: number;          // when provided, modal will poll /bids/:id until analysis exists
 };
 
 function coerce(a: any) {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   return a;
 }
 
-export default function Agent2ProgressModal({
-  open,
-  step,
-  message,
-  onClose,
-  analysis,
-  bidId,
-}: Props) {
+export default function Agent2ProgressModal({ open, step, message, onClose, analysis, bidId }: Props) {
   const [fetched, setFetched] = useState<any | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
   const fromProp = useMemo(() => coerce(analysis), [analysis]);
   const data = fromProp ?? fetched ?? null;
-  const ready = !!data; // ANY object counts as ready (even {status: 'error'})
+  const ready = !!data; // any defined object means “stop spinning”
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clearTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
@@ -56,7 +47,7 @@ export default function Agent2ProgressModal({
   useEffect(() => {
     if (!open) { clearTimer(); return; }
     if (!ready && bidId && !timerRef.current) {
-      fetchOnce(); // seed
+      fetchOnce(); // immediate
       timerRef.current = setInterval(fetchOnce, 1500);
     }
     return () => { clearTimer(); };
@@ -68,11 +59,9 @@ export default function Agent2ProgressModal({
     if (!bidId) return;
     try {
       setRetrying(true);
-      await api.analyzeBid(bidId); // no prompt here; prompt handled on the form page
+      await api.analyzeBid(bidId); // fire-and-forget; modal keeps polling
       await fetchOnce();
-      if (!ready && !timerRef.current) {
-        timerRef.current = setInterval(fetchOnce, 1500);
-      }
+      if (!ready && !timerRef.current) timerRef.current = setInterval(fetchOnce, 1500);
     } catch (e: any) {
       setErrMsg(`Retry failed: ${String(e?.message ?? e)}`);
     } finally {
@@ -89,21 +78,16 @@ export default function Agent2ProgressModal({
 
   const stepBadge = (active: boolean, label: string) => (
     <div className="flex items-center gap-2">
-      <span
-        className={[
-          "inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
-          active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700",
-        ].join(' ')}
-      >
-        {active ? '✓' : '•'}
-      </span>
+      <span className={[
+        "inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
+        active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700",
+      ].join(' ')}>{active ? '✓' : '•'}</span>
       <span className="text-sm">{label}</span>
     </div>
   );
 
   const AnalysisBlock = ({ a }: { a: any }) => {
     if (!a) return null;
-
     const isV2 = 'fit' in a || 'summary' in a || 'risks' in a || 'confidence' in a || 'milestoneNotes' in a;
     const isV1 = 'verdict' in a || 'reasoning' in a || 'suggestions' in a;
 
@@ -111,42 +95,30 @@ export default function Agent2ProgressModal({
       <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
         <div className="font-medium">Agent2 — Summary</div>
 
-        {/* V2 */}
         {isV2 && (
           <>
-            {a.summary ? (
-              <p className="mt-1 whitespace-pre-wrap">{a.summary}</p>
-            ) : (
-              <p className="mt-1 text-slate-500">No summary provided.</p>
-            )}
+            {a.summary ? <p className="mt-1 whitespace-pre-wrap">{a.summary}</p>
+                        : <p className="mt-1 text-slate-500">No summary provided.</p>}
             <div className="mt-2">
               <span className="font-medium">Fit:</span> {String(a.fit ?? '—')}
               <span className="mx-2">·</span>
-              <span className="font-medium">Confidence:</span>{' '}
-              {typeof a.confidence === 'number' ? `${Math.round(a.confidence * 100)}%` : '—'}
+              <span className="font-medium">Confidence:</span>{typeof a.confidence === 'number' ? `${Math.round(a.confidence * 100)}%` : '—'}
             </div>
-
             {Array.isArray(a.risks) && a.risks.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Risks</div>
-                <ul className="list-disc pl-5">
-                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                </ul>
+                <ul className="list-disc pl-5">{a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
               </div>
             )}
-
             {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Milestone Notes</div>
-                <ul className="list-disc pl-5">
-                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                </ul>
+                <ul className="list-disc pl-5">{a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}</ul>
               </div>
             )}
           </>
         )}
 
-        {/* V1 */}
         {isV1 && (
           <div className="mt-4 border-t pt-3">
             <div className="text-sm opacity-70">Agent2 (V1)</div>
@@ -155,23 +127,16 @@ export default function Agent2ProgressModal({
             {Array.isArray(a.suggestions) && a.suggestions.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Suggestions</div>
-                <ul className="list-disc pl-5">
-                  {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
-                </ul>
+                <ul className="list-disc pl-5">{a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
               </div>
             )}
           </div>
         )}
 
-        {!isV1 && !isV2 && (
-          <p className="mt-1 text-slate-500">Analysis format not recognized.</p>
-        )}
+        {!isV1 && !isV2 && <p className="mt-1 text-slate-500">Analysis format not recognized.</p>}
 
-        {/* Debug (optional): show if available */}
         {a?.pdfUsed !== undefined && (
-          <div className="mt-3 text-xs text-slate-500">
-            PDF used: <b>{String(a.pdfUsed)}</b>
-          </div>
+          <div className="mt-3 text-xs text-slate-500">PDF used: <b>{String(a.pdfUsed)}</b></div>
         )}
       </div>
     );
@@ -195,13 +160,10 @@ export default function Agent2ProgressModal({
           </div>
 
           <div className={`mt-2 text-sm ${statusColor}`}>
-            {message || (step === 'submitting'
-              ? 'Sending your bid...'
-              : step === 'analyzing'
-              ? 'Agent2 is checking your milestones, timeline, pricing, and PDF…'
-              : step === 'done'
-              ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
-              : 'Something went wrong.')}
+            {message || (step === 'submitting' ? 'Sending your bid…'
+                    : step === 'analyzing' ? 'Agent2 is checking your bid…'
+                    : step === 'done' ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
+                    : 'Something went wrong.')}
           </div>
 
           {showProgressBar && (
@@ -220,7 +182,6 @@ export default function Agent2ProgressModal({
                   onClick={retryAnalysis}
                   className="text-sm px-3 py-1.5 rounded-lg bg-slate-900 text-white disabled:opacity-50"
                   disabled={retrying}
-                  title="Re-run Agent2 analysis"
                 >
                   {retrying ? 'Re-checking…' : 'Retry analysis'}
                 </button>
