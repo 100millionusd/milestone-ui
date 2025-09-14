@@ -131,8 +131,7 @@ function toProposal(p: any): Proposal {
   const id =
     p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID ?? null;
 
-  const amount =
-    p?.amountUSD ?? p?.amount_usd ?? p?.amount ?? 0;
+  const amount = p?.amountUSD ?? p?.amount_usd ?? p?.amount ?? 0;
 
   return {
     proposalId: Number(id),
@@ -153,7 +152,8 @@ function toProposal(p: any): Proposal {
 
 function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
-  const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
+  const proposalId =
+    b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   return {
     bidId: Number(bidId),
     proposalId: Number(proposalId),
@@ -162,7 +162,8 @@ function toBid(b: any): Bid {
     days: Number(b?.days) || 0,
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
-    preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+    preferredStablecoin: (b?.preferredStablecoin ??
+      b?.preferred_stablecoin) as Bid["preferredStablecoin"],
     milestones: Array.isArray(b?.milestones) ? b.milestones : [],
     doc: b?.doc ?? null,
     status: (b?.status as Bid["status"]) ?? "pending",
@@ -221,7 +222,9 @@ export function rejectProposal(id: number) {
 
 // ---- Bids ----
 export async function getBids(proposalId?: number): Promise<Bid[]> {
-  const q = Number.isFinite(proposalId as number) ? `?proposalId=${proposalId}` : "";
+  const q = Number.isFinite(proposalId as number)
+    ? `?proposalId=${proposalId}`
+    : "";
   const rows = await apiFetch(`/bids${q}`);
   return (Array.isArray(rows) ? rows : []).map(toBid);
 }
@@ -234,7 +237,16 @@ export async function getBid(id: number): Promise<Bid> {
 export function createBid(
   bid: Omit<Bid, "bidId" | "status" | "createdAt">
 ): Promise<{ ok: boolean; bidId: number; proposalId: number }> {
-  return apiFetch("/bids", { method: "POST", body: JSON.stringify(bid) });
+  // normalize payload to what the API expects
+  const payload: any = { ...bid };
+  payload.priceUSD = Number(payload.priceUSD);
+  payload.days = Number(payload.days);
+  payload.milestones = (payload.milestones || []).map((m: any) => ({
+    name: m.name,
+    amount: Number(m.amount),
+    dueDate: new Date(m.dueDate).toISOString(),
+  }));
+  return apiFetch("/bids", { method: "POST", body: JSON.stringify(payload) });
 }
 
 export function approveBid(id: number) {
@@ -251,10 +263,24 @@ export function rejectBid(id: number) {
   });
 }
 
+// ✅ Agent2 trigger
+export function analyzeBid(id: number) {
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, {
+    method: "POST",
+  });
+}
+
 // ---- Vendor ----
 export async function getVendorBids(): Promise<Bid[]> {
-  const rows = await apiFetch("/vendor/bids");
-  return (Array.isArray(rows) ? rows : []).map(toBid);
+  // Prefer vendor route; fall back to all bids if not available
+  try {
+    const rows = await apiFetch("/vendor/bids");
+    return (Array.isArray(rows) ? rows : []).map(toBid);
+  } catch {
+    const rows = await apiFetch("/bids");
+    return (Array.isArray(rows) ? rows : []).map(toBid);
+  }
 }
 
 export function completeMilestone(
@@ -263,10 +289,13 @@ export function completeMilestone(
   proof: string
 ) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/complete-milestone`, {
-    method: "POST",
-    body: JSON.stringify({ milestoneIndex, proof }),
-  });
+  return apiFetch(
+    `/bids/${encodeURIComponent(String(bidId))}/complete-milestone`,
+    {
+      method: "POST",
+      body: JSON.stringify({ milestoneIndex, proof }),
+    }
+  );
 }
 
 export function getVendorPayments(): Promise<TransactionResult[]> {
@@ -280,10 +309,13 @@ export function adminCompleteMilestone(
   proof: string
 ) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/complete-milestone`, {
-    method: "POST",
-    body: JSON.stringify({ milestoneIndex, proof }),
-  });
+  return apiFetch(
+    `/bids/${encodeURIComponent(String(bidId))}/complete-milestone`,
+    {
+      method: "POST",
+      body: JSON.stringify({ milestoneIndex, proof }),
+    }
+  );
 }
 
 export function payMilestone(bidId: number, milestoneIndex: number) {
@@ -302,16 +334,26 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
 
 export function approveProof(bidId: number, milestoneIndex: number) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(`/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/approve`, {
-    method: "POST",
-  });
+  return apiFetch(
+    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
+      String(milestoneIndex)
+    )}/approve`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 export function rejectProof(bidId: number, milestoneIndex: number) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(`/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/reject`, {
-    method: "POST",
-  });
+  return apiFetch(
+    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
+      String(milestoneIndex)
+    )}/reject`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 // ---- IPFS ----
@@ -366,6 +408,7 @@ export default {
   createBid,
   approveBid,
   rejectBid,
+  analyzeBid, // ✅ exported
   getVendorBids,
   completeMilestone,
   getVendorPayments,
