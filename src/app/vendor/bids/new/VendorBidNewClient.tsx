@@ -12,7 +12,7 @@ type LocalMilestone = {
   dueDate: string; // ISO
 };
 
-function coerceAnalysis(a: any) {
+function coerce(a: any) {
   if (!a) return null;
   if (typeof a === 'string') {
     try { return JSON.parse(a); } catch { return null; }
@@ -30,8 +30,11 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
   ]);
 
-  // Optional PDF upload
+  // Optional: PDF file for Agent2
   const [docFile, setDocFile] = useState<File | null>(null);
+
+  // NEW: Custom prompt for Agent2
+  const [agentPrompt, setAgentPrompt] = useState('');
 
   // Agent2 modal state
   const [open, setOpen] = useState(false);
@@ -46,10 +49,10 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     const stopAt = Date.now() + timeoutMs;
     while (Date.now() < stopAt) {
       try {
-        const b = await getBid(bidId); // api.ts is no-store + adds _ts
-        const ai = coerceAnalysis((b as any)?.aiAnalysis ?? (b as any)?.ai_analysis);
+        const b = await getBid(bidId);
+        const ai = coerce((b as any)?.aiAnalysis ?? (b as any)?.ai_analysis);
         if (ai) return ai;
-      } catch { /* swallow and retry */ }
+      } catch {}
       await new Promise(r => setTimeout(r, intervalMs));
     }
     return null;
@@ -72,10 +75,10 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     setBidIdForModal(undefined);
 
     try {
-      // 0) If a file was picked, upload to IPFS first
+      // 0) Upload file first (if provided)
       let doc: any = null;
       if (docFile) {
-        const res = await uploadFileToIPFS(docFile); // returns { cid, url, name, size }
+        const res = await uploadFileToIPFS(docFile); // {cid, url, name, size}
         doc = {
           cid: res.cid,
           url: res.url,
@@ -99,7 +102,7 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           amount: Number(m.amount),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
-        doc, // may be null if no file
+        doc,
       };
 
       const created: any = await createBid(payload);
@@ -107,8 +110,8 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
       if (!bidId) throw new Error('Failed to create bid (no id)');
       setBidIdForModal(bidId);
 
-      // 2) If backend already attached analysis inline, use it immediately
-      let found = coerceAnalysis(created?.aiAnalysis ?? created?.ai_analysis) ?? null;
+      // 2) If API already attached analysis inline, use it immediately
+      let found = coerce(created?.aiAnalysis ?? created?.ai_analysis);
 
       if (found) {
         setStep('done');
@@ -118,11 +121,14 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         return;
       }
 
-      // 3) Otherwise trigger analyze and then poll for a bit
+      // 3) Otherwise trigger analyze WITH PROMPT, then poll
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
-
-      try { await analyzeBid(bidId); } catch { /* non-fatal; polling will catch */ }
+      try {
+        await analyzeBid(bidId, agentPrompt || undefined);
+      } catch {
+        // non-fatal, we’ll poll anyway
+      }
 
       found = await pollAnalysis(bidId, 60000, 1500);
 
@@ -131,7 +137,6 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         setStep('done');
         setMessage('Analysis complete.');
       } else {
-        // Still no object — let modal keep polling itself (it can, if your modal has bidId polling)
         setStep('done');
         setMessage('Analysis will appear shortly.');
       }
@@ -190,7 +195,7 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           onChange={e => setNotes(e.target.value)}
         />
 
-        {/* Optional PDF upload (recommended) */}
+        {/* Optional PDF */}
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Attach PDF (optional)</div>
           <input
@@ -202,41 +207,27 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           {docFile && <div className="text-xs text-slate-600 mt-1">Selected: {docFile.name}</div>}
         </div>
 
+        {/* NEW: Custom Agent2 prompt */}
         <div className="border rounded-xl p-3">
-          <div className="font-medium mb-2">Milestones</div>
-          {milestones.map((m, i) => (
-            <div key={i} className="grid gap-2 md:grid-cols-3 mb-2">
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Name"
-                value={m.name}
-                onChange={e => { const n = [...milestones]; n[i].name = e.target.value; setMilestones(n); }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Amount"
-                type="number"
-                min={0}
-                value={m.amount}
-                onChange={e => { const n = [...milestones]; n[i].amount = Number(e.target.value); setMilestones(n); }}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                type="date"
-                value={m.dueDate.slice(0,10)}
-                onChange={e => { const n = [...milestones]; n[i].dueDate = new Date(e.target.value).toISOString(); setMilestones(n); }}
-              />
-            </div>
-          ))}
+          <div className="font-medium mb-2">Agent2 custom prompt (optional)</div>
+          <textarea
+            className="w-full min-h-24 rounded-lg border p-3"
+            placeholder={`Optional instructions for Agent2.\nExamples:\n- Focus on pricing realism and vendor credibility.\n- Summarize in Spanish.\n- Compare against the proposal scope.\n(Leave blank to use default prompt.)`}
+            value={agentPrompt}
+            onChange={(e) => setAgentPrompt(e.target.value)}
+          />
+          <p className="text-xs text-slate-500 mt-1">This prompt is sent with the first analysis run.</p>
         </div>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-        >
-          {busy ? 'Submitting…' : 'Submit bid'}
-        </button>
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+          >
+            {busy ? 'Submitting…' : 'Submit bid'}
+          </button>
+        </div>
       </form>
 
       <Agent2ProgressModal
@@ -244,8 +235,8 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         step={step}
         message={message}
         onClose={() => setOpen(false)}
-        analysis={analysis}           // use inline analysis immediately when present
-        bidId={bidIdForModal}         // enables modal-side polling/retry if your modal supports it
+        analysis={analysis}
+        bidId={bidIdForModal}
       />
     </div>
   );
