@@ -7,12 +7,12 @@ export interface Proposal {
   title: string;
   summary: string;
   contact: string;
-  address?: string;
-  city?: string;
-  country?: string;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
   amountUSD: number;
   docs: any[];
-  cid: string;
+  cid: string | null;
   status: "pending" | "approved" | "rejected" | "completed";
   createdAt: string;
 }
@@ -101,7 +101,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     let msg = `HTTP ${r.status}`;
     try {
       const j = await r.json();
-      msg = j?.error || msg;
+      msg = j?.error || j?.message || msg;
     } catch {
       // ignore
     }
@@ -126,43 +126,74 @@ export const postJSON = async <T = any>(
   });
 };
 
+// ---- Normalizers (robust to mixed shapes) ----
+function toProposal(p: any): Proposal {
+  const id =
+    p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID ?? null;
+
+  const amount =
+    p?.amountUSD ?? p?.amount_usd ?? p?.amount ?? 0;
+
+  return {
+    proposalId: Number(id),
+    orgName: p?.orgName ?? p?.org_name ?? p?.organization ?? "",
+    title: p?.title ?? "",
+    summary: p?.summary ?? p?.description ?? "",
+    contact: p?.contact ?? p?.contact_email ?? "",
+    address: p?.address ?? null,
+    city: p?.city ?? null,
+    country: p?.country ?? null,
+    amountUSD: Number(amount) || 0,
+    docs: Array.isArray(p?.docs) ? p.docs : [],
+    cid: p?.cid ?? null,
+    status: (p?.status as Proposal["status"]) ?? "pending",
+    createdAt: p?.createdAt ?? p?.created_at ?? new Date().toISOString(),
+  };
+}
+
+function toBid(b: any): Bid {
+  const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
+  const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
+  return {
+    bidId: Number(bidId),
+    proposalId: Number(proposalId),
+    vendorName: b?.vendorName ?? b?.vendor_name ?? "",
+    priceUSD: Number(b?.priceUSD ?? b?.price_usd ?? b?.price) || 0,
+    days: Number(b?.days) || 0,
+    notes: b?.notes ?? "",
+    walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
+    preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+    milestones: Array.isArray(b?.milestones) ? b.milestones : [],
+    doc: b?.doc ?? null,
+    status: (b?.status as Bid["status"]) ?? "pending",
+    createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
+    aiAnalysis: b?.aiAnalysis ?? b?.ai_analysis ?? null,
+  };
+}
+
+function toProof(p: any): Proof {
+  return {
+    bidId: Number(p?.bidId ?? p?.bid_id),
+    milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
+    vendorName: p?.vendorName ?? p?.vendor_name ?? "",
+    walletAddress: p?.walletAddress ?? p?.wallet_address ?? "",
+    title: p?.title ?? "",
+    description: p?.description ?? "",
+    files: Array.isArray(p?.files) ? p.files : [],
+    status: p?.status ?? "pending",
+    submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
+  };
+}
+
 // ---- Proposals ----
 export async function getProposals(): Promise<Proposal[]> {
   const rows = await apiFetch("/proposals");
-  return rows.map((p: any) => ({
-    proposalId: p.proposal_id,
-    orgName: p.org_name,
-    title: p.title,
-    summary: p.summary,
-    contact: p.contact,
-    address: p.address,
-    city: p.city,
-    country: p.country,
-    amountUSD: p.amount_usd ?? 0,
-    docs: p.docs || [],
-    cid: p.cid,
-    status: p.status,
-    createdAt: p.created_at,
-  }));
+  return (Array.isArray(rows) ? rows : []).map(toProposal);
 }
 
 export async function getProposal(id: number): Promise<Proposal> {
-  const p = await apiFetch(`/proposals/${id}`);
-  return {
-    proposalId: p.proposal_id,
-    orgName: p.org_name,
-    title: p.title,
-    summary: p.summary,
-    contact: p.contact,
-    address: p.address,
-    city: p.city,
-    country: p.country,
-    amountUSD: p.amount_usd ?? 0,
-    docs: p.docs || [],
-    cid: p.cid,
-    status: p.status,
-    createdAt: p.created_at,
-  };
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}`);
+  return toProposal(p);
 }
 
 export function createProposal(
@@ -175,51 +206,29 @@ export function createProposal(
 }
 
 export function approveProposal(id: number) {
-  return apiFetch(`/proposals/${id}/approve`, { method: "POST" });
+  if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
+  return apiFetch(`/proposals/${encodeURIComponent(String(id))}/approve`, {
+    method: "POST",
+  });
 }
 
 export function rejectProposal(id: number) {
-  return apiFetch(`/proposals/${id}/reject`, { method: "POST" });
+  if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
+  return apiFetch(`/proposals/${encodeURIComponent(String(id))}/reject`, {
+    method: "POST",
+  });
 }
 
 // ---- Bids ----
 export async function getBids(proposalId?: number): Promise<Bid[]> {
-  const q = proposalId ? `?proposalId=${proposalId}` : "";
+  const q = Number.isFinite(proposalId as number) ? `?proposalId=${proposalId}` : "";
   const rows = await apiFetch(`/bids${q}`);
-  return rows.map((b: any) => ({
-    bidId: b.bid_id,
-    proposalId: b.proposal_id,
-    vendorName: b.vendor_name,
-    priceUSD: b.price_usd ?? 0,
-    days: b.days,
-    notes: b.notes,
-    walletAddress: b.wallet_address,
-    preferredStablecoin: b.preferred_stablecoin,
-    milestones: b.milestones || [],
-    doc: b.doc || null,
-    status: b.status,
-    createdAt: b.created_at,
-    aiAnalysis: b.ai_analysis || null,
-  }));
+  return (Array.isArray(rows) ? rows : []).map(toBid);
 }
 
 export async function getBid(id: number): Promise<Bid> {
-  const b = await apiFetch(`/bids/${id}`);
-  return {
-    bidId: b.bid_id,
-    proposalId: b.proposal_id,
-    vendorName: b.vendor_name,
-    priceUSD: b.price_usd ?? 0,
-    days: b.days,
-    notes: b.notes,
-    walletAddress: b.wallet_address,
-    preferredStablecoin: b.preferred_stablecoin,
-    milestones: b.milestones || [],
-    doc: b.doc || null,
-    status: b.status,
-    createdAt: b.created_at,
-    aiAnalysis: b.ai_analysis || null,
-  };
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}`);
+  return toBid(b);
 }
 
 export function createBid(
@@ -229,31 +238,23 @@ export function createBid(
 }
 
 export function approveBid(id: number) {
-  return apiFetch(`/bids/${id}/approve`, { method: "POST" });
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(id))}/approve`, {
+    method: "POST",
+  });
 }
 
 export function rejectBid(id: number) {
-  return apiFetch(`/bids/${id}/reject`, { method: "POST" });
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(id))}/reject`, {
+    method: "POST",
+  });
 }
 
 // ---- Vendor ----
 export async function getVendorBids(): Promise<Bid[]> {
   const rows = await apiFetch("/vendor/bids");
-  return rows.map((b: any) => ({
-    bidId: b.bid_id,
-    proposalId: b.proposal_id,
-    vendorName: b.vendor_name,
-    priceUSD: b.price_usd ?? 0,
-    days: b.days,
-    notes: b.notes,
-    walletAddress: b.wallet_address,
-    preferredStablecoin: b.preferred_stablecoin,
-    milestones: b.milestones || [],
-    doc: b.doc || null,
-    status: b.status,
-    createdAt: b.created_at,
-    aiAnalysis: b.ai_analysis || null,
-  }));
+  return (Array.isArray(rows) ? rows : []).map(toBid);
 }
 
 export function completeMilestone(
@@ -261,7 +262,8 @@ export function completeMilestone(
   milestoneIndex: number,
   proof: string
 ) {
-  return apiFetch(`/bids/${bidId}/complete-milestone`, {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
   });
@@ -277,14 +279,16 @@ export function adminCompleteMilestone(
   milestoneIndex: number,
   proof: string
 ) {
-  return apiFetch(`/bids/${bidId}/complete-milestone`, {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/complete-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex, proof }),
   });
 }
 
 export function payMilestone(bidId: number, milestoneIndex: number) {
-  return apiFetch(`/bids/${bidId}/pay-milestone`, {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/pay-milestone`, {
     method: "POST",
     body: JSON.stringify({ milestoneIndex }),
   });
@@ -293,27 +297,19 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
 // ---- Proofs ----
 export async function getSubmittedProofs(): Promise<Proof[]> {
   const rows = await apiFetch("/proofs");
-  return rows.map((p: any) => ({
-    bidId: p.bid_id,
-    milestoneIndex: p.milestone_index,
-    vendorName: p.vendor_name,
-    walletAddress: p.wallet_address,
-    title: p.title,
-    description: p.description,
-    files: p.files || [],
-    status: p.status,
-    submittedAt: p.submitted_at,
-  }));
+  return (Array.isArray(rows) ? rows : []).map(toProof);
 }
 
 export function approveProof(bidId: number, milestoneIndex: number) {
-  return apiFetch(`/proofs/${bidId}/${milestoneIndex}/approve`, {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/approve`, {
     method: "POST",
   });
 }
 
 export function rejectProof(bidId: number, milestoneIndex: number) {
-  return apiFetch(`/proofs/${bidId}/${milestoneIndex}/reject`, {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/reject`, {
     method: "POST",
   });
 }
