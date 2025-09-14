@@ -1,32 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import type { Proposal } from '@/lib/api';
 import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
-
-type Attachment = {
-  cid?: string;
-  url?: string;
-  name: string;
-  size?: number;
-  mimetype?: string;
-};
-
-interface Proposal {
-  proposalId: number;
-  orgName: string;
-  title: string;
-  summary: string;
-  status: 'pending' | 'approved' | 'rejected' | 'completed';
-  createdAt: string;
-  contact: string;
-  amountUSD: number;
-  address?: string;
-  city?: string;
-  country?: string;
-  docs?: Attachment[];
-  cid?: string;
-}
 
 interface AdminProposalsClientProps {
   initialProposals?: Proposal[];
@@ -40,31 +17,15 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposals.length]);
-
-  // ✅ Normalize API snake_case → camelCase
-  const normalizeProposal = (raw: any): Proposal => ({
-    proposalId: raw.proposal_id,
-    orgName: raw.org_name,
-    title: raw.title,
-    summary: raw.summary,
-    status: raw.status,
-    createdAt: raw.created_at,
-    contact: raw.contact,
-    amountUSD: raw.amount_usd,
-    address: raw.address,
-    city: raw.city,
-    country: raw.country,
-    docs: raw.docs || [],
-    cid: raw.cid,
-  });
 
   const fetchProposals = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await getProposals();
-      setProposals(data.map(normalizeProposal));
+      const data = await getProposals(); // already camelCased from the API layer
+      setProposals(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
     } finally {
@@ -73,6 +34,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   };
 
   const handleApprove = async (proposalId: number) => {
+    if (!Number.isFinite(proposalId)) {
+      setError('Invalid proposal ID');
+      return;
+    }
     try {
       await approveProposal(proposalId);
       setProposals(prev =>
@@ -84,6 +49,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   };
 
   const handleReject = async (proposalId: number) => {
+    if (!Number.isFinite(proposalId)) {
+      setError('Invalid proposal ID');
+      return;
+    }
     try {
       await rejectProposal(proposalId);
       setProposals(prev =>
