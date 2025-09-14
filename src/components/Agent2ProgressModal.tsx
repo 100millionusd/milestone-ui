@@ -21,7 +21,7 @@ export default function Agent2ProgressModal({
 }: Props) {
   if (!open) return null;
 
-  // ✅ Coerce analysis in case DB/API returns a JSON string
+  // Parse if stringified
   const data = useMemo(() => {
     if (!analysis) return null;
     if (typeof analysis === 'string') {
@@ -56,20 +56,14 @@ export default function Agent2ProgressModal({
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold">Submitting Bid · Agent2 Checking</h3>
-          <button
-            className="text-slate-500 hover:text-slate-900"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <button className="text-slate-500 hover:text-slate-900" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div className="mt-4 space-y-3">
           <div className="flex flex-col gap-3">
             {stepBadge(step !== 'submitting', 'Submitting your bid')}
             {stepBadge(step === 'done' || step === 'error' || step === 'analyzing', 'Agent2 analyzing')}
-            {stepBadge(step === 'done', 'Analysis ready')}
+            {stepBadge(!!data || step === 'done', 'Analysis ready')}
           </div>
 
           <div className={`mt-2 text-sm ${statusColor}`}>
@@ -88,7 +82,6 @@ export default function Agent2ProgressModal({
             </div>
           )}
 
-          {/* ✅ Show analysis as soon as it exists (no step === 'done' gate) */}
           {data && (
             <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
               <div className="font-medium">Agent2 — Summary</div>
@@ -127,7 +120,6 @@ export default function Agent2ProgressModal({
             </div>
           )}
 
-          {/* Still pending but analyzing/done — keep a tiny hint */}
           {!data && (step === 'analyzing' || step === 'done') && (
             <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
           )}
@@ -139,7 +131,7 @@ export default function Agent2ProgressModal({
             onClick={onClose}
             disabled={step === 'submitting' || (step === 'analyzing' && !data)}
           >
-            {(step === 'done' || (!!data && step !== 'error')) ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
+            {(!!data || step === 'done') && step !== 'error' ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
           </button>
         </div>
       </div>
