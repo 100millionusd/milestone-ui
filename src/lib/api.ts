@@ -314,11 +314,8 @@ export async function rejectBid(id: number): Promise<Bid> {
 // Agent2 trigger (returns updated bid with aiAnalysis) — supports optional prompt
 export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const body = prompt ? JSON.stringify({ prompt }) : '{}';
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, {
-    method: "POST",
-    body,
-  });
+  const body = prompt ? { method: "POST", body: JSON.stringify({ prompt }) } : { method: "POST" };
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, body);
   return toBid(b);
 }
 
