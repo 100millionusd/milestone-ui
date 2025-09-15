@@ -2,7 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import type { Proposal } from '@/lib/api';
-import { getProposals, approveProposal, rejectProposal } from '@/lib/api';
+import {
+  getProposals,
+  approveProposal,
+  rejectProposal,
+  archiveProposal,
+  deleteProposal,
+} from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
 interface AdminProposalsClientProps {
@@ -24,7 +30,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     try {
       setLoading(true);
       setError(null);
-      const data = await getProposals(); // already camelCased from the API layer
+      const data = await getProposals();
       setProposals(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
@@ -34,32 +40,45 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   };
 
   const handleApprove = async (proposalId: number) => {
-    if (!Number.isFinite(proposalId)) {
-      setError('Invalid proposal ID');
-      return;
-    }
+    if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
       await approveProposal(proposalId);
-      setProposals(prev =>
-        prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'approved' } : p))
-      );
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'approved' } : p)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve proposal');
     }
   };
 
   const handleReject = async (proposalId: number) => {
-    if (!Number.isFinite(proposalId)) {
-      setError('Invalid proposal ID');
-      return;
-    }
+    if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
       await rejectProposal(proposalId);
-      setProposals(prev =>
-        prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'rejected' } : p))
-      );
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'rejected' } : p)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject proposal');
+    }
+  };
+
+  const handleArchive = async (proposalId: number) => {
+    if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
+    if (!confirm('Archive this proposal? You can restore by changing status server-side.')) return;
+    try {
+      const updated = await archiveProposal(proposalId);
+      // reflect status locally even if backend hides archived from default list
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: (updated as any).status ?? 'archived' } : p)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive proposal');
+    }
+  };
+
+  const handleDelete = async (proposalId: number) => {
+    if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
+    if (!confirm('Permanently DELETE this proposal (and its bids/proofs)? This cannot be undone.')) return;
+    try {
+      await deleteProposal(proposalId);
+      setProposals(prev => prev.filter(p => p.proposalId !== proposalId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete proposal');
     }
   };
 
@@ -120,6 +139,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
               </div>
 
               {/* ✅ AI Chat Agent */}
+              {/* Keep this as-is */}
               <ProposalAgent proposal={p} />
 
               {/* Actions */}
@@ -137,6 +157,19 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                   className="px-4 py-2 bg-rose-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-rose-700 transition-colors"
                 >
                   Reject
+                </button>
+                <button
+                  onClick={() => handleArchive(p.proposalId)}
+                  disabled={p.status === 'archived'}
+                  className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
+                >
+                  Archive
+                </button>
+                <button
+                  onClick={() => handleDelete(p.proposalId)}
+                  className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors"
+                >
+                  Delete
                 </button>
               </div>
             </div>
@@ -174,6 +207,8 @@ function StatusPill({ status }: { status: string }) {
       ? 'bg-red-100 text-red-800'
       : status === 'completed'
       ? 'bg-blue-100 text-blue-800'
+      : status === 'archived'
+      ? 'bg-slate-200 text-slate-700'
       : 'bg-yellow-100 text-yellow-800';
 
   return (
