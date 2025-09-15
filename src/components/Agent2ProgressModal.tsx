@@ -135,8 +135,40 @@ export default function Agent2ProgressModal({ open, step, message, onClose, anal
 
         {!isV1 && !isV2 && <p className="mt-1 text-slate-500">Analysis format not recognized.</p>}
 
+        {/* ✅ PDF Debug Info */}
         {a?.pdfUsed !== undefined && (
-          <div className="mt-3 text-xs text-slate-500">PDF used: <b>{String(a.pdfUsed)}</b></div>
+          <div className="mt-3 text-xs text-slate-600 border-t pt-2">
+            <div>
+              <span className="font-medium">PDF parsed:</span> {a.pdfUsed ? "Yes" : "No"}
+            </div>
+            {a?.pdfDebug && (
+              <ul className="mt-1 space-y-1 list-disc pl-5">
+                {a.pdfDebug.url && (
+                  <li>
+                    <span className="font-medium">URL:</span>{" "}
+                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                      {a.pdfDebug.url}
+                    </a>
+                  </li>
+                )}
+                {a.pdfDebug.name && (
+                  <li><span className="font-medium">File:</span> {a.pdfDebug.name}</li>
+                )}
+                {a.pdfDebug.bytes !== undefined && (
+                  <li><span className="font-medium">Size:</span> {a.pdfDebug.bytes} bytes</li>
+                )}
+                {a.pdfDebug.first5 && (
+                  <li><span className="font-medium">Header:</span> “{a.pdfDebug.first5}”</li>
+                )}
+                {a.pdfDebug.reason && (
+                  <li><span className="font-medium">Reason:</span> {a.pdfDebug.reason}</li>
+                )}
+                {a.pdfDebug.error && (
+                  <li><span className="font-medium">Error:</span> {a.pdfDebug.error}</li>
+                )}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     );
