@@ -1,46 +1,141 @@
 // src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids } from '@/lib/api';
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+
+type AnalysisV2 = {
+  status?: 'ready' | 'error' | string;
+  summary?: string;
+  fit?: 'low' | 'medium' | 'high';
+  risks?: string[];
+  milestoneNotes?: string[];
+  confidence?: number;
+  pdfUsed?: boolean;
+  pdfDebug?: any;
+};
+
+type AnalysisV1 = {
+  verdict?: string;
+  reasoning?: string;
+  suggestions?: string[];
+  status?: 'ready' | 'error' | string;
+};
+
+function coerceAnalysis(a: any): AnalysisV2 & AnalysisV1 | null {
+  if (!a) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
+  return a;
+}
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectId = params.id;
+  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPoll = () => {
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current);
+      pollTimer.current = null;
+    }
+  };
+
+  // Initial fetch
   useEffect(() => {
-    const fetchData = async () => {
+    let active = true;
+    if (!Number.isFinite(projectIdNum)) return;
+    (async () => {
       try {
         const [projectData, bidsData] = await Promise.all([
-          getProposal(projectId),
-          getBids(projectId),
+          getProposal(projectIdNum),
+          getBids(projectIdNum),
         ]);
+        if (!active) return;
         setProject(projectData);
         setBids(bidsData);
-      } catch (error) {
-        console.error('Error fetching project:', error);
+      } catch (e) {
+        console.error('Error fetching project:', e);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectIdNum]);
+
+  // Poll bids until all analyses are terminal (ready/error) or 90s passes
+  useEffect(() => {
+    if (!Number.isFinite(projectIdNum)) return;
+    let stopped = false;
+    const start = Date.now();
+
+    const needsMore = (rows: any[]) => {
+      return rows.some((b) => {
+        const a = coerceAnalysis(b?.aiAnalysis ?? b?.ai_analysis);
+        // pending if no analysis, or has a status not ready/error
+        return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+      });
+    };
+
+    const tick = async () => {
+      try {
+        const next = await getBids(projectIdNum);
+        if (stopped) return;
+        setBids(next);
+        if (Date.now() - start < 90_000 && needsMore(next)) {
+          pollTimer.current = setTimeout(tick, 1500);
+        } else {
+          clearPoll();
+        }
+      } catch {
+        // try again briefly unless timed out
+        if (Date.now() - start < 90_000) {
+          pollTimer.current = setTimeout(tick, 2000);
+        } else {
+          clearPoll();
+        }
       }
     };
 
-    fetchData();
-  }, [projectId]);
+    // Kick off if any current bid is pending, otherwise do nothing
+    if (needsMore(bids)) {
+      clearPoll();
+      pollTimer.current = setTimeout(tick, 1500);
+    }
+
+    // Also refresh when tab comes back into focus
+    const onFocus = () => {
+      if (needsMore(bids)) {
+        clearPoll();
+        pollTimer.current = setTimeout(tick, 0);
+      }
+    };
+    window.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      stopped = true;
+      clearPoll();
+      window.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [projectIdNum, bids]);
 
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
-  // ✅ Helper to check if project is completed
+  // ✅ Project completed helper
   const isProjectCompleted = (project: any, bids: any[]) => {
     if (project.status === 'completed') return true;
     const acceptedBid = bids.find((b: any) => b.status === 'approved');
@@ -74,19 +169,98 @@ export default function ProjectDetailPage() {
     }
 
     return (
-      <div
-        key={idx}
-        className="p-2 rounded border bg-gray-50 text-xs text-gray-700"
-      >
+      <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate">{doc.name}</p>
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline"
-        >
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
           Open
         </a>
+      </div>
+    );
+  };
+
+  const renderAnalysis = (raw: any) => {
+    const analysis = coerceAnalysis(raw);
+    const isPending =
+      !analysis ||
+      (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
+
+    if (isPending) {
+      return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    }
+
+    if (!analysis) {
+      return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
+    }
+
+    const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
+    const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
+
+    return (
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+        {isV2 && (
+          <>
+            {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
+            <div className="text-sm">
+              {analysis.fit && (
+                <>
+                  <span className="font-medium">Fit:</span> {String(analysis.fit)}{' '}
+                </>
+              )}
+              {typeof analysis.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                </>
+              )}
+            </div>
+            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Risks</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Milestone Notes</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {/* Optional tiny debug badge if the server sent pdfUsed */}
+            {typeof analysis.pdfUsed === 'boolean' && (
+              <div className="mt-2 text-[11px] text-gray-600">
+                PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}
+              </div>
+            )}
+          </>
+        )}
+
+        {isV1 && (
+          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+            {analysis.verdict && (
+              <p className="text-sm">
+                <span className="font-medium">Verdict:</span> {analysis.verdict}
+              </p>
+            )}
+            {analysis.reasoning && (
+              <p className="text-sm">
+                <span className="font-medium">Reasoning:</span> {analysis.reasoning}
+              </p>
+            )}
+            {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
+              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
       </div>
     );
   };
@@ -99,24 +273,17 @@ export default function ProjectDetailPage() {
             <h1 className="text-2xl font-bold">{project.title}</h1>
             <span
               className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                completed
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-yellow-100 text-yellow-800'
+                completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
               }`}
             >
               {completed ? 'Completed' : 'Active'}
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">
-            Budget: ${project.amountUSD}
-          </p>
+          <p className="text-green-600 font-medium text-lg">Budget: ${project.amountUSD}</p>
         </div>
         {!completed && (
-          <Link
-            href={`/bids/new?proposalId=${projectId}`}
-            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-          >
+          <Link href={`/bids/new?proposalId=${projectIdNum}`} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">
             Submit Bid
           </Link>
         )}
@@ -146,62 +313,28 @@ export default function ProjectDetailPage() {
         {bids.length > 0 ? (
           <div className="space-y-3">
             {bids.map((bid) => {
-              const docs =
-                (bid.docs || (bid.doc ? [bid.doc] : []))?.filter(Boolean) || [];
-              const analysis = bid.aiAnalysis || {};
+              const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
+              const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
 
               return (
                 <div key={bid.bidId} className="border p-4 rounded">
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-medium">{bid.vendorName}</h3>
-                      <p className="text-gray-600">
-                        ${bid.priceUSD} • {bid.days} days
-                      </p>
+                      <p className="text-gray-600">${bid.priceUSD} • {bid.days} days</p>
                       <p className="text-sm text-gray-500">{bid.notes}</p>
 
                       {/* ✅ Bid Attachments */}
                       {docs.length > 0 ? (
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {docs.map((d: any, i: number) =>
-                            renderAttachment(d, i)
-                          )}
+                          {docs.map((d: any, i: number) => renderAttachment(d, i))}
                         </div>
                       ) : (
-                        <p className="text-xs text-gray-400 mt-2">
-                          No attachments
-                        </p>
+                        <p className="text-xs text-gray-400 mt-2">No attachments</p>
                       )}
 
-                      {/* 🔹 Agent 2 Analysis */}
-                      {analysis.verdict ? (
-                        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                          <h4 className="font-semibold text-sm mb-1">
-                            Agent 2 Analysis
-                          </h4>
-                          <p>
-                            <span className="font-medium">Verdict:</span>{' '}
-                            {analysis.verdict}
-                          </p>
-                          <p>
-                            <span className="font-medium">Reasoning:</span>{' '}
-                            {analysis.reasoning}
-                          </p>
-                          {analysis.suggestions?.length > 0 && (
-                            <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                              {analysis.suggestions.map(
-                                (s: string, i: number) => (
-                                  <li key={i}>{s}</li>
-                                )
-                              )}
-                            </ul>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-gray-400 italic">
-                          ⏳ Analysis pending...
-                        </p>
-                      )}
+                      {/* 🔹 Agent 2 Analysis (supports V2 + V1 + pending) */}
+                      {renderAnalysis(analysisRaw)}
                     </div>
                     <span
                       className={`px-2 py-1 rounded text-xs ${
@@ -220,15 +353,11 @@ export default function ProjectDetailPage() {
             })}
           </div>
         ) : (
-          <p className="text-gray-500">
-            No bids yet. Be the first to bid on this project!
-          </p>
+          <p className="text-gray-500">No bids yet. Be the first to bid on this project!</p>
         )}
       </div>
 
-      <Link href="/projects" className="text-blue-600 hover:underline">
-        ← Back to Projects
-      </Link>
+      <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
 
       {/* ✅ Lightbox */}
       {lightbox && (
