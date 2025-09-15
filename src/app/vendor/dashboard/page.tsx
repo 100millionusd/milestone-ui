@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getBids } from '@/lib/api';
+import { getBids, archiveBid } from '@/lib/api'; // 👈 added archiveBid
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { ethers } from 'ethers';
 import SendFunds from '@/components/SendFunds';
@@ -20,14 +20,11 @@ const TOKENS: Record<string, string> = {
   USDC: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 };
 
-type Tab = 'pending' | 'approved' | 'rejected' | 'completed' | 'history';
-
 export default function VendorDashboard() {
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState<{ ETH?: string; USDT?: string; USDC?: string }>({});
-  const [activeTab, setActiveTab] = useState<Tab>('pending');
-
+  const [archivingId, setArchivingId] = useState<number | null>(null); // 👈 new
   const { address, logout, provider } = useWeb3Auth();
   const router = useRouter();
 
@@ -38,14 +35,13 @@ export default function VendorDashboard() {
     }
     loadBids();
     loadBalances();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
 
   const loadBids = async () => {
     try {
       const allBids = await getBids();
       const vendorBids = allBids
-        .filter((bid: any) => bid.walletAddress?.toLowerCase() === address?.toLowerCase())
+        .filter((bid: any) => bid.walletAddress?.toLowerCase?.() === address?.toLowerCase())
         .map((bid: any) => ({
           ...bid,
           proofs: bid.proofs || []
@@ -101,14 +97,27 @@ export default function VendorDashboard() {
     router.push('/vendor/login');
   };
 
-  const getBidStatusReadable = (bid: any) => {
+  const doArchive = async (bidId: number) => { // 👈 new
+    try {
+      setArchivingId(bidId);
+      const updated = await archiveBid(bidId);
+      setBids(prev => prev.map(b => b.bidId === bidId ? { ...b, status: updated.status } : b));
+    } catch (e) {
+      console.error('Archive failed:', e);
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
+  const getBidStatus = (bid: any) => {
+    if (bid.status === 'archived') return 'Archived';
     if (bid.status === 'completed') return 'Completed';
     if (bid.status === 'approved') {
-      const completed = (bid.milestones || []).filter((m: any) => m.completed).length;
-      const total = (bid.milestones || []).length;
+      const completed = bid.milestones.filter((m: any) => m.completed).length;
+      const total = bid.milestones.length;
       return `In Progress (${completed}/${total} milestones)`;
     }
-    return String(bid.status || '').charAt(0).toUpperCase() + String(bid.status || '').slice(1);
+    return bid.status.charAt(0).toUpperCase() + bid.status.slice(1);
   };
 
   const shortAddr = useMemo(() => {
@@ -116,28 +125,8 @@ export default function VendorDashboard() {
     return address.slice(0, 6) + '…' + address.slice(-4);
   }, [address]);
 
-  const counts = useMemo(() => {
-    const pending = bids.filter(b => b.status === 'pending').length;
-    const approved = bids.filter(b => b.status === 'approved').length;
-    const rejected = bids.filter(b => b.status === 'rejected').length;
-    const completed = bids.filter(b => b.status === 'completed').length;
-    const history = rejected + completed;
-    return { pending, approved, rejected, completed, history, total: bids.length };
-  }, [bids]);
-
-  const filteredBids = useMemo(() => {
-    if (activeTab === 'history') {
-      // Rejected + Completed, most recent first
-      return [...bids]
-        .filter(b => b.status === 'rejected' || b.status === 'completed')
-        .sort((a, b) => {
-          const da = Date.parse(a.createdAt || a.updatedAt || a.date || 0);
-          const db = Date.parse(b.createdAt || b.updatedAt || b.date || 0);
-          return db - da;
-        });
-    }
-    return bids.filter(b => b.status === activeTab);
-  }, [bids, activeTab]);
+  const activeBids = useMemo(() => bids.filter(b => b.status !== 'archived'), [bids]); // 👈 new
+  const archivedBids = useMemo(() => bids.filter(b => b.status === 'archived'), [bids]); // 👈 new
 
   if (loading) {
     return (
@@ -202,59 +191,28 @@ export default function VendorDashboard() {
           <SendFunds />
         </div>
 
-        {/* Tabs */}
-        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-4 mb-6">
-          <div className="flex flex-wrap gap-4 border-b">
-            {([
-              { key: 'pending', label: 'Pending', count: counts.pending },
-              { key: 'approved', label: 'Approved', count: counts.approved },
-              { key: 'rejected', label: 'Rejected', count: counts.rejected },
-              { key: 'completed', label: 'Completed', count: counts.completed },
-              { key: 'history', label: 'History', count: counts.history },
-            ] as { key: Tab; label: string; count: number }[]).map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setActiveTab(t.key)}
-                className={`pb-2 px-3 text-sm font-medium border-b-2 -mb-[1px] ${
-                  activeTab === t.key
-                    ? 'border-blue-600 text-blue-700'
-                    : 'border-transparent text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {t.label}
-                <span className="ml-1 text-xs text-slate-400">({t.count})</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Filtered Bid List */}
+        {/* Bid List (active only) */}
         <div className="space-y-6">
-          {filteredBids.map((bid) => {
-            const milestones = Array.isArray(bid.milestones) ? bid.milestones : [];
-            const completed = milestones.filter((m: any) => m.completed).length;
-            const total = milestones.length;
+          {activeBids.map((bid) => {
+            const completed = bid.milestones.filter((m: any) => m.completed).length;
+            const total = bid.milestones.length;
             const progress = total ? Math.round((completed / total) * 100) : 0;
-
-            const projectTitle =
-              bid.title || bid.proposalTitle || `Proposal #${bid.proposalId}`;
-            const orgName = bid.orgName || bid.organization || '—';
 
             return (
               <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
                   <div className="space-y-1">
-                    <h2 className="text-xl font-semibold text-slate-900">{projectTitle}</h2>
+                    <h2 className="text-xl font-semibold text-slate-900">{bid.title}</h2>
                     <div className="flex flex-wrap items-center gap-3 text-sm">
                       <span className="text-slate-600">
                         <span className="font-medium">Bid ID:</span> {bid.bidId}
                       </span>
                       <span className="text-slate-600">
-                        <span className="font-medium">Organization:</span> {orgName}
+                        <span className="font-medium">Organization:</span> {bid.orgName}
                       </span>
                     </div>
                   </div>
-                  <StatusPill status={bid.status} label={getBidStatusReadable(bid)} />
+                  <StatusPill status={bid.status} label={getBidStatus(bid)} />
                 </div>
 
                 {/* Progress */}
@@ -274,7 +232,7 @@ export default function VendorDashboard() {
                 </div>
 
                 {/* Actions when approved */}
-                {String(bid.status || '').toLowerCase() === 'approved' && (
+                {bid.status?.toLowerCase() === 'approved' && (
                   <div className="flex flex-wrap gap-3 mb-5">
                     <Link
                       href={`/vendor/proof/${bid.bidId}`}
@@ -291,6 +249,19 @@ export default function VendorDashboard() {
                   </div>
                 )}
 
+                {/* Archive action for non-approved (pending/rejected) */}
+                {bid.status !== 'approved' && bid.status !== 'archived' && (
+                  <div className="flex flex-wrap gap-3 mb-5">
+                    <button
+                      onClick={() => doArchive(bid.bidId)}
+                      disabled={archivingId === bid.bidId}
+                      className="inline-flex items-center justify-center rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] disabled:opacity-60 transition"
+                    >
+                      {archivingId === bid.bidId ? 'Archiving…' : 'Move to Archived'}
+                    </button>
+                  </div>
+                )}
+
                 {/* Quick facts */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-2">
                   <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-600" />
@@ -302,12 +273,12 @@ export default function VendorDashboard() {
                   />
                   <InfoTile
                     label="Status"
-                    value={getBidStatusReadable(bid)}
+                    value={getBidStatus(bid)}
                   />
                 </div>
 
                 {/* Submitted proofs */}
-                {Array.isArray(bid.proofs) && bid.proofs.length > 0 && (
+                {bid.proofs.length > 0 && (
                   <div className="mt-6 border-t border-slate-200 pt-4">
                     <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitted Proofs</h3>
                     <div className="grid gap-3">
@@ -351,16 +322,12 @@ export default function VendorDashboard() {
             );
           })}
 
-          {filteredBids.length === 0 && (
+          {activeBids.length === 0 && (
             <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center">
               <div className="text-5xl mb-4">💼</div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">
-                {activeTab === 'history' ? 'No History Yet' : `No ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Bids`}
-              </h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-2">No Active Bids</h2>
               <p className="text-slate-600 mb-6">
-                {activeTab === 'history'
-                  ? 'You do not have any rejected or completed bids yet.'
-                  : `You don’t have any ${activeTab} bids right now.`}
+                You haven&apos;t submitted any active bids yet.
               </p>
               <Link
                 href="/projects"
@@ -371,6 +338,41 @@ export default function VendorDashboard() {
             </div>
           )}
         </div>
+
+        {/* Archived section (collapsible, non-breaking) */}
+        {archivedBids.length > 0 && (
+          <div className="mt-10">
+            <details className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200">
+              <summary className="cursor-pointer select-none px-6 py-4 text-sm font-semibold text-slate-900">
+                Archived ({archivedBids.length})
+              </summary>
+              <div className="px-6 pb-6 pt-2 space-y-4">
+                {archivedBids.map((bid) => (
+                  <div key={bid.bidId} className="rounded-xl border border-slate-200 p-4 bg-slate-50">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-slate-900">{bid.title}</div>
+                        <div className="text-sm text-slate-600">{bid.orgName}</div>
+                      </div>
+                      <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-200 text-slate-800">
+                        Archived
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Bid ID: {bid.bidId} · ${Number(bid.priceUSD).toLocaleString()} · {bid.days} days
+                    </div>
+                    <Link
+                      href={`/projects/${bid.proposalId}`}
+                      className="mt-2 inline-block text-sm text-blue-600 hover:underline"
+                    >
+                      View Project →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -396,6 +398,8 @@ function StatusPill({ status, label }: { status: string; label: string }) {
       ? 'bg-blue-100 text-blue-800'
       : status === 'rejected'
       ? 'bg-rose-100 text-rose-800'
+      : status === 'archived'
+      ? 'bg-slate-200 text-slate-800'
       : 'bg-amber-100 text-amber-800';
   return (
     <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${cls}`}>

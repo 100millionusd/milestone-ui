@@ -39,7 +39,7 @@ export interface Bid {
   preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
-  status: "pending" | "approved" | "completed" | "rejected";
+  status: "pending" | "approved" | "completed" | "rejected" | "archived"; // 👈 added 'archived'
   createdAt: string;
   aiAnalysis?: any;
 }
@@ -340,6 +340,13 @@ export async function rejectBid(id: number): Promise<Bid> {
   return toBid(b);
 }
 
+// NEW: archive bid (soft-hide for vendors, keeps data intact)
+export async function archiveBid(id: number): Promise<Bid> {
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/archive`, { method: "POST" });
+  return toBid(b);
+}
+
 // Agent2 trigger (returns updated bid with aiAnalysis) — supports optional prompt
 export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
@@ -446,7 +453,7 @@ export default {
   approveProposal, rejectProposal, archiveProposal, deleteProposal,
 
   // bids
-  getBids, getBid, createBid, approveBid, rejectBid, analyzeBid,
+  getBids, getBid, createBid, approveBid, rejectBid, analyzeBid, archiveBid, // 👈 added archiveBid
 
   // vendor/admin
   getVendorBids, completeMilestone, getVendorPayments,
