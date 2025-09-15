@@ -1,32 +1,44 @@
+// src/app/vendor/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getBids, archiveBid } from '@/lib/api'; // 👈 added archiveBid
-import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { ethers } from 'ethers';
+import { getBids, archiveBid } from '@/lib/api';
+import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import SendFunds from '@/components/SendFunds';
 
-// ERC20 ABI
+// --- ERC20 + Tokens (unchanged) ---
 const ERC20_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function decimals() view returns (uint8)"
+  'function balanceOf(address) view returns (uint256)',
+  'function decimals() view returns (uint8)',
 ];
-
-// Sepolia token addresses
 const TOKENS: Record<string, string> = {
-  USDT: "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06",
-  USDC: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  USDT: '0x7169D38820dfd117C3FA1f22a697dBA58d90BA06',
+  USDC: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
 };
 
+// --- Tabs ---
+const TABS = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },      // pending or approved + not fully completed
+  { key: 'awarded', label: 'Awarded' },    // approved
+  { key: 'completed', label: 'Completed' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'archived', label: 'Archived' },
+] as const;
+type TabKey = typeof TABS[number]['key'];
+
 export default function VendorDashboard() {
+  const router = useRouter();
+  const { address, logout, provider } = useWeb3Auth();
+
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState<{ ETH?: string; USDT?: string; USDC?: string }>({});
-  const [archivingId, setArchivingId] = useState<number | null>(null); // 👈 new
-  const { address, logout, provider } = useWeb3Auth();
-  const router = useRouter();
+  const [tab, setTab] = useState<TabKey>('all');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     if (!address) {
@@ -39,17 +51,13 @@ export default function VendorDashboard() {
 
   const loadBids = async () => {
     try {
-      const allBids = await getBids();
-      const vendorBids = allBids
-        .filter((bid: any) => bid.walletAddress?.toLowerCase?.() === address?.toLowerCase())
-        .map((bid: any) => ({
-          ...bid,
-          proofs: bid.proofs || []
-        }));
-
-      setBids(vendorBids);
-    } catch (error) {
-      console.error('Error loading bids:', error);
+      const all = await getBids();
+      const mine = all
+        .filter((b: any) => b?.walletAddress?.toLowerCase() === address?.toLowerCase())
+        .map((b: any) => ({ ...b, proofs: b.proofs || [] }));
+      setBids(mine);
+    } catch (e) {
+      console.error('Error loading bids:', e);
     } finally {
       setLoading(false);
     }
@@ -59,32 +67,22 @@ export default function VendorDashboard() {
     if (!address) return;
     try {
       let ethersProvider: ethers.Provider;
+      if (provider) ethersProvider = new ethers.BrowserProvider(provider as any);
+      else ethersProvider = new ethers.JsonRpcProvider('https://rpc.ankr.com/eth_sepolia');
 
-      if (provider) {
-        ethersProvider = new ethers.BrowserProvider(provider as any);
-      } else {
-        ethersProvider = new ethers.JsonRpcProvider('https://rpc.ankr.com/eth_sepolia');
-      }
-
-      // ETH balance
       const rawBalance = await ethersProvider.getBalance(address);
       const ethBal = ethers.formatEther(rawBalance);
 
-      // ERC20 balances
       const results: any = { ETH: ethBal };
       for (const [symbol, tokenAddr] of Object.entries(TOKENS)) {
         try {
           const contract = new ethers.Contract(tokenAddr, ERC20_ABI, ethersProvider);
-          const [raw, decimals] = await Promise.all([
-            contract.balanceOf(address),
-            contract.decimals()
-          ]);
+          const [raw, decimals] = await Promise.all([contract.balanceOf(address), contract.decimals()]);
           results[symbol] = ethers.formatUnits(raw, decimals);
         } catch (err) {
           console.error(`Error fetching ${symbol} balance:`, err);
         }
       }
-
       setBalances(results);
     } catch (err) {
       console.error('Error fetching balances:', err);
@@ -97,36 +95,62 @@ export default function VendorDashboard() {
     router.push('/vendor/login');
   };
 
-  const doArchive = async (bidId: number) => { // 👈 new
-    try {
-      setArchivingId(bidId);
-      const updated = await archiveBid(bidId);
-      setBids(prev => prev.map(b => b.bidId === bidId ? { ...b, status: updated.status } : b));
-    } catch (e) {
-      console.error('Archive failed:', e);
-    } finally {
-      setArchivingId(null);
-    }
+  const shortAddr = useMemo(() => (address ? address.slice(0, 6) + '…' + address.slice(-4) : ''), [address]);
+
+  const isBidCompleted = (bid: any) => {
+    if (bid?.status === 'completed') return true;
+    const ms = Array.isArray(bid?.milestones) ? bid.milestones : [];
+    return ms.length > 0 && ms.every((m: any) => !!m.completed);
   };
 
-  const getBidStatus = (bid: any) => {
-    if (bid.status === 'archived') return 'Archived';
-    if (bid.status === 'completed') return 'Completed';
+  const computedStatusLabel = (bid: any) => {
+    if (bid.status === 'completed' || isBidCompleted(bid)) return 'Completed';
     if (bid.status === 'approved') {
-      const completed = bid.milestones.filter((m: any) => m.completed).length;
-      const total = bid.milestones.length;
-      return `In Progress (${completed}/${total} milestones)`;
+      const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+      const done = ms.filter((m: any) => m.completed).length;
+      return `In Progress (${done}/${ms.length || 0})`;
     }
-    return bid.status.charAt(0).toUpperCase() + bid.status.slice(1);
+    if (bid.status === 'archived') return 'Archived';
+    return bid.status?.charAt(0).toUpperCase() + bid.status?.slice(1);
   };
 
-  const shortAddr = useMemo(() => {
-    if (!address) return '';
-    return address.slice(0, 6) + '…' + address.slice(-4);
-  }, [address]);
+  const filtered = useMemo(() => {
+    const lowerQ = query.trim().toLowerCase();
+    const base = bids.filter((b) => {
+      if (!lowerQ) return true;
+      const hay =
+        `${b.title || ''} ${b.orgName || ''} ${b.vendorName || ''} ${b.notes || ''}`.toLowerCase();
+      return hay.includes(lowerQ);
+    });
 
-  const activeBids = useMemo(() => bids.filter(b => b.status !== 'archived'), [bids]); // 👈 new
-  const archivedBids = useMemo(() => bids.filter(b => b.status === 'archived'), [bids]); // 👈 new
+    switch (tab) {
+      case 'active':
+        return base.filter(
+          (b) =>
+            (b.status === 'pending') ||
+            (b.status === 'approved' && !isBidCompleted(b))
+        );
+      case 'awarded':
+        return base.filter((b) => b.status === 'approved');
+      case 'completed':
+        return base.filter((b) => b.status === 'completed' || isBidCompleted(b));
+      case 'rejected':
+        return base.filter((b) => b.status === 'rejected');
+      case 'archived':
+        return base.filter((b) => b.status === 'archived');
+      default:
+        return base;
+    }
+  }, [bids, tab, query]);
+
+  const onArchive = async (bidId: number) => {
+    try {
+      const updated = await archiveBid(bidId); // safe: if backend lacks route, this shows a 404 error below
+      setBids((prev) => prev.map((b) => (b.bidId === bidId ? updated : b)));
+    } catch (e: any) {
+      alert('Failed to archive bid: ' + (e?.message || 'Unknown error'));
+    }
+  };
 
   if (loading) {
     return (
@@ -149,7 +173,7 @@ export default function VendorDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
       <div className="max-w-5xl mx-auto px-4 py-10">
-        {/* Top Bar Card */}
+        {/* Header + balances */}
         <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
@@ -164,20 +188,20 @@ export default function VendorDashboard() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigator.clipboard.writeText(address || '')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                <span>Copy Address</span>
+                Copy Address
               </button>
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] transition"
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900"
               >
                 Sign Out
               </button>
             </div>
           </div>
 
-          {/* Balances */}
+          {/* balances */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
             <BalanceCard label="ETH" value={balances.ETH} />
             <BalanceCard label="USDT" value={balances.USDT} />
@@ -185,18 +209,50 @@ export default function VendorDashboard() {
           </div>
         </div>
 
-        {/* Send Funds UI (unchanged functionality) */}
+        {/* Send funds */}
         <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Send Funds</h2>
           <SendFunds />
         </div>
 
-        {/* Bid List (active only) */}
+        {/* Tabs + search */}
+        <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={[
+                  'px-3 py-1.5 rounded-full text-sm font-medium border',
+                  tab === t.key
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+                ].join(' ')}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="w-full md:w-72">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search bids…"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
+          </div>
+        </div>
+
+        {/* Bid list */}
         <div className="space-y-6">
-          {activeBids.map((bid) => {
-            const completed = bid.milestones.filter((m: any) => m.completed).length;
-            const total = bid.milestones.length;
-            const progress = total ? Math.round((completed / total) * 100) : 0;
+          {filtered.map((bid) => {
+            const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+            const done = ms.filter((m: any) => m.completed).length;
+            const total = ms.length;
+            const progress = total ? Math.round((done / total) * 100) : 0;
+
+            const canArchive =
+              bid.status !== 'archived' && bid.status !== 'approved'; // keep awarded bids visible; tweak as you like
 
             return (
               <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
@@ -207,19 +263,21 @@ export default function VendorDashboard() {
                       <span className="text-slate-600">
                         <span className="font-medium">Bid ID:</span> {bid.bidId}
                       </span>
-                      <span className="text-slate-600">
-                        <span className="font-medium">Organization:</span> {bid.orgName}
-                      </span>
+                      {bid.orgName && (
+                        <span className="text-slate-600">
+                          <span className="font-medium">Organization:</span> {bid.orgName}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <StatusPill status={bid.status} label={getBidStatus(bid)} />
+                  <StatusPill status={bid.status} label={computedStatusLabel(bid)} />
                 </div>
 
                 {/* Progress */}
                 <div className="mb-5">
                   <div className="flex items-end justify-between mb-1">
                     <p className="text-sm text-slate-600">
-                      Milestones: <span className="font-medium text-slate-900">{completed}</span> / {total}
+                      Milestones: <span className="font-medium text-slate-900">{done}</span> / {total}
                     </p>
                     <p className="text-sm tabular-nums text-slate-600">{progress}%</p>
                   </div>
@@ -231,72 +289,57 @@ export default function VendorDashboard() {
                   </div>
                 </div>
 
-                {/* Actions when approved */}
-                {bid.status?.toLowerCase() === 'approved' && (
-                  <div className="flex flex-wrap gap-3 mb-5">
-                    <Link
-                      href={`/vendor/proof/${bid.bidId}`}
-                      className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
-                    >
-                      Submit Proof
-                    </Link>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                      className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
-                    >
-                      Copy Wallet Address
-                    </button>
-                  </div>
-                )}
+                {/* Actions */}
+                <div className="flex flex-wrap gap-3 mb-5">
+                  {bid.status?.toLowerCase() === 'approved' && (
+                    <>
+                      <Link
+                        href={`/vendor/proof/${bid.bidId}`}
+                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                      >
+                        Submit Proof
+                      </Link>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Copy Wallet Address
+                      </button>
+                    </>
+                  )}
 
-                {/* Archive action for non-approved (pending/rejected) */}
-                {bid.status !== 'approved' && bid.status !== 'archived' && (
-                  <div className="flex flex-wrap gap-3 mb-5">
+                  {canArchive && (
                     <button
-                      onClick={() => doArchive(bid.bidId)}
-                      disabled={archivingId === bid.bidId}
-                      className="inline-flex items-center justify-center rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] disabled:opacity-60 transition"
+                      onClick={() => onArchive(bid.bidId)}
+                      className="inline-flex items-center justify-center rounded-xl border border-amber-200 text-amber-800 px-4 py-2 text-sm font-medium hover:bg-amber-50"
+                      title="Move this bid to Archived"
                     >
-                      {archivingId === bid.bidId ? 'Archiving…' : 'Move to Archived'}
+                      Move to Archived
                     </button>
-                  </div>
-                )}
-
-                {/* Quick facts */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-2">
-                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-600" />
-                  <InfoTile label="Timeline" value={`${bid.days} days`} />
-                  <InfoTile
-                    label="Payment"
-                    value={`${bid.preferredStablecoin}`}
-                    helper={`to ${bid.walletAddress}`}
-                  />
-                  <InfoTile
-                    label="Status"
-                    value={getBidStatus(bid)}
-                  />
+                  )}
                 </div>
 
-                {/* Submitted proofs */}
-                {bid.proofs.length > 0 && (
+                {/* Quick facts */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-600" />
+                  <InfoTile label="Timeline" value={`${bid.days} days`} />
+                  <InfoTile label="Payment" value={`${bid.preferredStablecoin}`} helper={`to ${bid.walletAddress}`} />
+                  <InfoTile label="Status" value={computedStatusLabel(bid)} />
+                </div>
+
+                {/* Proofs */}
+                {bid.proofs?.length > 0 && (
                   <div className="mt-6 border-t border-slate-200 pt-4">
                     <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitted Proofs</h3>
                     <div className="grid gap-3">
-                      {bid.proofs.map((proof: any, idx: number) => (
-                        <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-sm text-slate-800 whitespace-pre-line">
-                            {proof.description || 'No description'}
-                          </p>
-                          {proof.files?.length > 0 && (
+                      {bid.proofs.map((p: any, i: number) => (
+                        <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-sm text-slate-800 whitespace-pre-line">{p.description || 'No description'}</p>
+                          {p.files?.length > 0 && (
                             <ul className="mt-2 space-y-1">
-                              {proof.files.map((f: any, i: number) => (
-                                <li key={i} className="text-sm">
-                                  <a
-                                    href={f.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-700 underline underline-offset-2"
-                                  >
+                              {p.files.map((f: any, j: number) => (
+                                <li key={j} className="text-sm">
+                                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                                     {f.name}
                                   </a>
                                 </li>
@@ -305,13 +348,13 @@ export default function VendorDashboard() {
                           )}
                           <span
                             className={`mt-3 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium
-                              ${proof.status === 'approved'
+                              ${p.status === 'approved'
                                 ? 'bg-emerald-100 text-emerald-800'
-                                : proof.status === 'rejected'
+                                : p.status === 'rejected'
                                 ? 'bg-rose-100 text-rose-800'
                                 : 'bg-amber-100 text-amber-800'}`}
                           >
-                            {proof.status || 'pending'}
+                            {p.status || 'pending'}
                           </span>
                         </div>
                       ))}
@@ -322,63 +365,26 @@ export default function VendorDashboard() {
             );
           })}
 
-          {activeBids.length === 0 && (
+          {filtered.length === 0 && (
             <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center">
-              <div className="text-5xl mb-4">💼</div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">No Active Bids</h2>
-              <p className="text-slate-600 mb-6">
-                You haven&apos;t submitted any active bids yet.
-              </p>
+              <div className="text-5xl mb-4">🗂️</div>
+              <h2 className="text-xl font-semibold text-slate-900 mb-2">No bids in this view</h2>
+              <p className="text-slate-600 mb-6">Try a different tab or clear your search.</p>
               <Link
                 href="/projects"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[.99] transition"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
               >
                 Browse Projects
               </Link>
             </div>
           )}
         </div>
-
-        {/* Archived section (collapsible, non-breaking) */}
-        {archivedBids.length > 0 && (
-          <div className="mt-10">
-            <details className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200">
-              <summary className="cursor-pointer select-none px-6 py-4 text-sm font-semibold text-slate-900">
-                Archived ({archivedBids.length})
-              </summary>
-              <div className="px-6 pb-6 pt-2 space-y-4">
-                {archivedBids.map((bid) => (
-                  <div key={bid.bidId} className="rounded-xl border border-slate-200 p-4 bg-slate-50">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-slate-900">{bid.title}</div>
-                        <div className="text-sm text-slate-600">{bid.orgName}</div>
-                      </div>
-                      <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-200 text-slate-800">
-                        Archived
-                      </span>
-                    </div>
-                    <div className="mt-1 text-sm text-slate-600">
-                      Bid ID: {bid.bidId} · ${Number(bid.priceUSD).toLocaleString()} · {bid.days} days
-                    </div>
-                    <Link
-                      href={`/projects/${bid.proposalId}`}
-                      className="mt-2 inline-block text-sm text-blue-600 hover:underline"
-                    >
-                      View Project →
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            </details>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-/* ------- Presentational subcomponents (purely visual) ------- */
+/* ---------------- Presentation bits ---------------- */
 
 function BalanceCard({ label, value }: { label: string; value?: string }) {
   const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
@@ -399,20 +405,16 @@ function StatusPill({ status, label }: { status: string; label: string }) {
       : status === 'rejected'
       ? 'bg-rose-100 text-rose-800'
       : status === 'archived'
-      ? 'bg-slate-200 text-slate-800'
+      ? 'bg-slate-200 text-slate-700'
       : 'bg-amber-100 text-amber-800';
-  return (
-    <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${cls}`}>
-      {label}
-    </span>
-  );
+  return <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${cls}`}>{label}</span>;
 }
 
 function InfoTile({
   label,
   value,
   helper,
-  accent
+  accent,
 }: {
   label: string;
   value: string;
