@@ -40,6 +40,9 @@ export default function VendorDashboard() {
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
+  // ✅ track archiving to disable button and show spinner text
+  const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     if (!address) {
       router.push('/vendor/login');
@@ -47,6 +50,7 @@ export default function VendorDashboard() {
     }
     loadBids();
     loadBalances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
 
   const loadBids = async () => {
@@ -127,7 +131,7 @@ export default function VendorDashboard() {
       case 'active':
         return base.filter(
           (b) =>
-            (b.status === 'pending') ||
+            b.status === 'pending' ||
             (b.status === 'approved' && !isBidCompleted(b))
         );
       case 'awarded':
@@ -144,11 +148,22 @@ export default function VendorDashboard() {
   }, [bids, tab, query]);
 
   const onArchive = async (bidId: number) => {
+    // simple confirmation, no UX changes elsewhere
+    const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
+    if (!ok) return;
+
+    setArchivingIds((prev) => new Set(prev).add(bidId));
     try {
-      const updated = await archiveBid(bidId); // safe: if backend lacks route, this shows a 404 error below
+      const updated = await archiveBid(bidId);
       setBids((prev) => prev.map((b) => (b.bidId === bidId ? updated : b)));
     } catch (e: any) {
       alert('Failed to archive bid: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setArchivingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(bidId);
+        return next;
+      });
     }
   };
 
@@ -251,8 +266,9 @@ export default function VendorDashboard() {
             const total = ms.length;
             const progress = total ? Math.round((done / total) * 100) : 0;
 
-            const canArchive =
-              bid.status !== 'archived' && bid.status !== 'approved'; // keep awarded bids visible; tweak as you like
+            // keep awarded bids visible; allow archiving others (pending/rejected/completed)
+            const canArchive = bid.status !== 'archived' && bid.status !== 'approved';
+            const isArchiving = archivingIds.has(bid.bidId);
 
             return (
               <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
@@ -311,10 +327,14 @@ export default function VendorDashboard() {
                   {canArchive && (
                     <button
                       onClick={() => onArchive(bid.bidId)}
-                      className="inline-flex items-center justify-center rounded-xl border border-amber-200 text-amber-800 px-4 py-2 text-sm font-medium hover:bg-amber-50"
+                      disabled={isArchiving}
+                      className={[
+                        'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
+                        'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
+                      ].join(' ')}
                       title="Move this bid to Archived"
                     >
-                      Move to Archived
+                      {isArchiving ? 'Archiving…' : 'Move to Archived'}
                     </button>
                   )}
                 </div>
