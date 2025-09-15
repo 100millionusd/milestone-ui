@@ -156,11 +156,18 @@ export const postJSON = async <T = any>(path: string, data: any): Promise<T> => 
 
 // ---- Normalizers ----
 function toProposal(p: any): Proposal {
-  const id = p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID ?? null;
-  const amount = p?.amountUSD ?? p?.amount_usd ?? p?.amount ?? 0;
+  const rawId =
+    p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID;
+
+  const parsedId =
+    typeof rawId === "number"
+      ? rawId
+      : rawId != null && rawId !== ""
+        ? Number(rawId)
+        : NaN;
 
   return {
-    proposalId: Number(id),
+    proposalId: Number.isFinite(parsedId) ? parsedId : NaN, // avoid turning null into 0
     orgName: p?.orgName ?? p?.org_name ?? p?.organization ?? "",
     title: p?.title ?? "",
     summary: p?.summary ?? p?.description ?? "",
@@ -168,7 +175,7 @@ function toProposal(p: any): Proposal {
     address: p?.address ?? null,
     city: p?.city ?? null,
     country: p?.country ?? null,
-    amountUSD: Number(amount) || 0,
+    amountUSD: Number(p?.amountUSD ?? p?.amount_usd ?? p?.amount) || 0,
     docs: Array.isArray(p?.docs) ? p.docs : [],
     cid: p?.cid ?? null,
     status: (p?.status as Proposal["status"]) ?? "pending",
