@@ -83,7 +83,6 @@ export default function ProjectDetailPage() {
     const needsMore = (rows: any[]) => {
       return rows.some((b) => {
         const a = coerceAnalysis(b?.aiAnalysis ?? b?.ai_analysis);
-        // pending if no analysis, or has a status not ready/error
         return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
       });
     };
@@ -99,7 +98,6 @@ export default function ProjectDetailPage() {
           clearPoll();
         }
       } catch {
-        // try again briefly unless timed out
         if (Date.now() - start < 90_000) {
           pollTimer.current = setTimeout(tick, 2000);
         } else {
@@ -108,13 +106,11 @@ export default function ProjectDetailPage() {
       }
     };
 
-    // Kick off if any current bid is pending, otherwise do nothing
     if (needsMore(bids)) {
       clearPoll();
       pollTimer.current = setTimeout(tick, 1500);
     }
 
-    // Also refresh when tab comes back into focus
     const onFocus = () => {
       if (needsMore(bids)) {
         clearPoll();
@@ -135,7 +131,6 @@ export default function ProjectDetailPage() {
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
-  // ✅ Project completed helper
   const isProjectCompleted = (project: any, bids: any[]) => {
     if (project.status === 'completed') return true;
     const acceptedBid = bids.find((b: any) => b.status === 'approved');
@@ -153,17 +148,9 @@ export default function ProjectDetailPage() {
 
     if (isImage) {
       return (
-        <button
-          key={idx}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-        >
+        <button key={idx} onClick={() => setLightbox(href)} className="group relative overflow-hidden rounded border">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={href}
-            alt={doc.name}
-            className="h-24 w-24 object-cover group-hover:scale-105 transition"
-          />
+          <img src={href} alt={doc.name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
         </button>
       );
     }
@@ -171,26 +158,17 @@ export default function ProjectDetailPage() {
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate">{doc.name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-          Open
-        </a>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
       </div>
     );
   };
 
   const renderAnalysis = (raw: any) => {
     const analysis = coerceAnalysis(raw);
-    const isPending =
-      !analysis ||
-      (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
+    const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
 
-    if (isPending) {
-      return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
-    }
-
-    if (!analysis) {
-      return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-    }
+    if (isPending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    if (!analysis) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
 
     const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
     const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
@@ -203,16 +181,9 @@ export default function ProjectDetailPage() {
           <>
             {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
             <div className="text-sm">
-              {analysis.fit && (
-                <>
-                  <span className="font-medium">Fit:</span> {String(analysis.fit)}{' '}
-                </>
-              )}
+              {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
               {typeof analysis.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
-                </>
+                <><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%</>
               )}
             </div>
             {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
@@ -231,10 +202,22 @@ export default function ProjectDetailPage() {
                 </ul>
               </div>
             )}
-            {/* Optional tiny debug badge if the server sent pdfUsed */}
+            {/* ✅ Expanded PDF Debug Info */}
             {typeof analysis.pdfUsed === 'boolean' && (
-              <div className="mt-2 text-[11px] text-gray-600">
-                PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}
+              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
+                {analysis.pdfDebug?.url && (
+                  <div>
+                    File:{" "}
+                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                      {analysis.pdfDebug.name || "open"}
+                    </a>
+                  </div>
+                )}
+                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
+                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
+                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
+                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
               </div>
             )}
           </>
@@ -242,16 +225,8 @@ export default function ProjectDetailPage() {
 
         {isV1 && (
           <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
-            {analysis.verdict && (
-              <p className="text-sm">
-                <span className="font-medium">Verdict:</span> {analysis.verdict}
-              </p>
-            )}
-            {analysis.reasoning && (
-              <p className="text-sm">
-                <span className="font-medium">Reasoning:</span> {analysis.reasoning}
-              </p>
-            )}
+            {analysis.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {analysis.verdict}</p>)}
+            {analysis.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {analysis.reasoning}</p>)}
             {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
               <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
                 {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
@@ -271,11 +246,7 @@ export default function ProjectDetailPage() {
         <div>
           <div className="flex items-center gap-2 mb-2">
             <h1 className="text-2xl font-bold">{project.title}</h1>
-            <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-              }`}
-            >
+            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
               {completed ? 'Completed' : 'Active'}
             </span>
           </div>
@@ -299,9 +270,7 @@ export default function ProjectDetailPage() {
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-3">Project Attachments</h2>
         {project.docs?.length > 0 ? (
-          <div className="flex flex-wrap gap-3">
-            {project.docs.map((doc: any, i: number) => renderAttachment(doc, i))}
-          </div>
+          <div className="flex flex-wrap gap-3">{project.docs.map((doc: any, i: number) => renderAttachment(doc, i))}</div>
         ) : (
           <p className="text-sm text-gray-500">No attachments provided.</p>
         )}
@@ -324,29 +293,21 @@ export default function ProjectDetailPage() {
                       <p className="text-gray-600">${bid.priceUSD} • {bid.days} days</p>
                       <p className="text-sm text-gray-500">{bid.notes}</p>
 
-                      {/* ✅ Bid Attachments */}
                       {docs.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {docs.map((d: any, i: number) => renderAttachment(d, i))}
-                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">{docs.map((d: any, i: number) => renderAttachment(d, i))}</div>
                       ) : (
                         <p className="text-xs text-gray-400 mt-2">No attachments</p>
                       )}
 
-                      {/* 🔹 Agent 2 Analysis (supports V2 + V1 + pending) */}
                       {renderAnalysis(analysisRaw)}
                     </div>
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${
-                        bid.status === 'approved'
-                          ? 'bg-green-100 text-green-800'
-                          : bid.status === 'rejected'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {bid.status}
-                    </span>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      bid.status === 'approved'
+                        ? 'bg-green-100 text-green-800'
+                        : bid.status === 'rejected'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                    }`}>{bid.status}</span>
                   </div>
                 </div>
               );
@@ -359,25 +320,11 @@ export default function ProjectDetailPage() {
 
       <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
 
-      {/* ✅ Lightbox */}
       {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-        >
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightbox}
-            alt="attachment preview"
-            className="max-h-full max-w-full rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            className="absolute top-4 right-4 text-white text-2xl"
-            onClick={() => setLightbox(null)}
-          >
-            ✕
-          </button>
+          <img src={lightbox} alt="attachment preview" className="max-h-full max-w-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>✕</button>
         </div>
       )}
     </div>
