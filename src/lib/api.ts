@@ -13,7 +13,7 @@ export interface Proposal {
   amountUSD: number;
   docs: any[];
   cid: string | null;
-  status: "pending" | "approved" | "rejected" | "completed";
+  status: "pending" | "approved" | "rejected" | "completed" | "archived";
   createdAt: string;
 }
 
@@ -240,9 +240,17 @@ function toProof(p: any): Proof {
 }
 
 // ---- Proposals ----
-export async function getProposals(): Promise<Proposal[]> {
-  const rows = await apiFetch("/proposals");
+export async function listProposals(params?: { status?: Proposal["status"] | string; includeArchived?: boolean }): Promise<Proposal[]> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", String(params.status));
+  if (params?.includeArchived) q.set("includeArchived", "true");
+  const rows = await apiFetch(`/proposals${q.toString() ? `?${q.toString()}` : ""}`);
   return (Array.isArray(rows) ? rows : []).map(toProposal);
+}
+
+export async function getProposals(): Promise<Proposal[]> {
+  // default: hide archived (server does this by default as well)
+  return listProposals();
 }
 
 export async function getProposal(id: number): Promise<Proposal> {
@@ -270,6 +278,20 @@ export async function rejectProposal(id: number): Promise<Proposal> {
   if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
   const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/reject`, { method: "POST" });
   return toProposal(p);
+}
+
+// NEW: archive (soft-delete)
+export async function archiveProposal(id: number): Promise<Proposal> {
+  if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/archive`, { method: "POST" });
+  return toProposal(p);
+}
+
+// NEW: delete (hard delete)
+export async function deleteProposal(id: number): Promise<boolean> {
+  if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
+  await apiFetch(`/proposals/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+  return true;
 }
 
 // ---- Bids ----
@@ -412,11 +434,21 @@ export function healthCheck() { return apiFetch("/health"); }
 export function testConnection() { return apiFetch("/test"); }
 
 export default {
-  getProposals, getProposal, createProposal, approveProposal, rejectProposal,
+  // proposals
+  listProposals, getProposals, getProposal, createProposal,
+  approveProposal, rejectProposal, archiveProposal, deleteProposal,
+
+  // bids
   getBids, getBid, createBid, approveBid, rejectBid, analyzeBid,
+
+  // vendor/admin
   getVendorBids, completeMilestone, getVendorPayments,
   adminCompleteMilestone, payMilestone,
+
+  // proofs
   getSubmittedProofs, approveProof, rejectProof,
+
+  // ipfs & misc
   uploadJsonToIPFS, uploadFileToIPFS,
   healthCheck, testConnection, postJSON,
 };
