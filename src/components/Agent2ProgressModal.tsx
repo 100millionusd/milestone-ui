@@ -1,3 +1,4 @@
+// src/components/Agent2ProgressModal.tsx
 'use client';
 
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
@@ -10,8 +11,12 @@ type Props = {
   step: Step;
   message?: string | null;
   onClose: () => void;
-  analysis?: any | null;   // may be object or JSON string
-  bidId?: number;          // when provided, modal will poll /bids/:id until analysis exists
+  /** ✅ NEW: called when user closes after analysis is ready (or on error) */
+  onFinalized?: (payload: { bidId?: number; analysis: any | null }) => void;
+  /** may be object or JSON string */
+  analysis?: any | null;
+  /** when provided, modal will poll /bids/:id until analysis exists */
+  bidId?: number;
 };
 
 function coerce(a: any) {
@@ -20,7 +25,15 @@ function coerce(a: any) {
   return a;
 }
 
-export default function Agent2ProgressModal({ open, step, message, onClose, analysis, bidId }: Props) {
+export default function Agent2ProgressModal({
+  open,
+  step,
+  message,
+  onClose,
+  onFinalized,
+  analysis,
+  bidId
+}: Props) {
   const [fetched, setFetched] = useState<any | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -68,6 +81,14 @@ export default function Agent2ProgressModal({ open, step, message, onClose, anal
       setRetrying(false);
     }
   }, [bidId, fetchOnce, ready]);
+
+  // ✅ Only allow closing when ready or error; and notify parent once.
+  const canClose = ready || step === 'error';
+  const handleClose = () => {
+    if (!canClose) return;
+    if (onFinalized) onFinalized({ bidId, analysis: data ?? null });
+    onClose();
+  };
 
   if (!open) return null;
 
@@ -181,7 +202,15 @@ export default function Agent2ProgressModal({ open, step, message, onClose, anal
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold">Submitting Bid · Agent2 Checking</h3>
-          <button className="text-slate-500 hover:text-slate-900" onClick={onClose} aria-label="Close">✕</button>
+          <button
+            className={`text-slate-500 hover:text-slate-900 ${!canClose ? 'cursor-not-allowed opacity-50' : ''}`}
+            onClick={handleClose}
+            aria-label="Close"
+            disabled={!canClose}
+            title={canClose ? 'Close' : 'Please wait…'}
+          >
+            ✕
+          </button>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -227,10 +256,10 @@ export default function Agent2ProgressModal({ open, step, message, onClose, anal
         <div className="mt-6 flex justify-end">
           <button
             className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-            onClick={onClose}
-            disabled={step === 'submitting' || (step === 'analyzing' && !ready)}
+            onClick={handleClose}
+            disabled={!canClose}
           >
-            {(ready || step === 'done') && step !== 'error' ? 'Close' : (step === 'error' ? 'Dismiss' : 'Running…')}
+            {step === 'error' ? 'Dismiss' : (canClose ? 'Close & Continue' : 'Running…')}
           </button>
         </div>
       </div>

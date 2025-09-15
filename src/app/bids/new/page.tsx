@@ -11,6 +11,7 @@ function NewBidPageContent() {
   const proposalId = searchParams.get('proposalId');
 
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);                 // ✅ NEW: lock form after finalize
   const [proposal, setProposal] = useState<any | null>(null);
 
   const [formData, setFormData] = useState({
@@ -35,7 +36,9 @@ function NewBidPageContent() {
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- helpers ---
-  const clearPoll = () => { if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; } };
+  const clearPoll = () => {
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+  };
 
   const pollUntilAnalysis = useCallback((bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
@@ -55,7 +58,6 @@ function NewBidPageContent() {
           clearPoll();
         }
       } catch {
-        // ignore transient fetch errors and keep polling
         if (Date.now() > stopAt) {
           setStep('done');
           setMessage('Analysis will appear shortly.');
@@ -75,6 +77,7 @@ function NewBidPageContent() {
   // --- submit handler ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitted) return; // ✅ already finalized; block repeat
     if (!proposalId) {
       alert('No project selected. Open this page with ?proposalId=<id>.');
       return;
@@ -118,16 +121,11 @@ function NewBidPageContent() {
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // Try server-side analyze now (optional: pass a prompt, e.g. from notes)
-      const userPrompt = ''; // or: formData.notes
-      try { await analyzeBid(bidId, userPrompt); } catch {}
+      // Trigger server analysis (safe if it already ran inline)
+      try { await analyzeBid(bidId, ''); } catch {}
 
       // Start polling until aiAnalysis appears
       pollUntilAnalysis(bidId);
-
-      // Optional: if you want to redirect after creation, do it after analysis resolves,
-      // or keep the user on page until they close the modal.
-      // router.push(`/projects/${proposalId}`);
     } catch (error: any) {
       console.error('Error creating bid:', error);
       setStep('error');
@@ -147,9 +145,17 @@ function NewBidPageContent() {
     );
   }
 
+  const disabled = loading || submitted; // ✅ all inputs/buttons respect this
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Submit Bid</h1>
+
+      {submitted && (
+        <div className="mb-6 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-emerald-800">
+          ✅ Your bid has been submitted{createdBidId ? ` (ID: ${createdBidId})` : ''}. You can safely leave this page.
+        </div>
+      )}
 
       {proposal && (
         <div className="bg-gray-50 p-4 rounded-lg mb-6">
@@ -160,204 +166,228 @@ function NewBidPageContent() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Vendor Information */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Vendor Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.vendorName}
-              onChange={(e) => setFormData({ ...formData, vendorName: e.target.value })}
-              className="w-full p-2 border rounded"
-              placeholder="Your company name"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Wallet Address *</label>
-            <input
-              type="text"
-              required
-              value={formData.walletAddress}
-              onChange={(e) => setFormData({ ...formData, walletAddress: e.target.value })}
-              className="w-full p-2 border rounded"
-              placeholder="0x..."
-            />
-          </div>
-        </div>
-
-        {/* Bid Details */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Bid Price (USD) *</label>
-            <input
-              type="number"
-              step="0.01"
-              required
-              value={formData.priceUSD}
-              onChange={(e) => setFormData({ ...formData, priceUSD: e.target.value })}
-              className="w-full p-2 border rounded"
-              placeholder="0.00"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Completion Days *</label>
-            <input
-              type="number"
-              required
-              value={formData.days}
-              onChange={(e) => setFormData({ ...formData, days: e.target.value })}
-              className="w-full p-2 border rounded"
-              placeholder="30"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Preferred Stablecoin *</label>
-            <select
-              required
-              value={formData.preferredStablecoin}
-              onChange={(e) => setFormData({ ...formData, preferredStablecoin: e.target.value })}
-              className="w-full p-2 border rounded"
-            >
-              <option value="USDC">USDC</option>
-              <option value="USDT">USDT</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Bid Notes */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Bid Proposal Details *</label>
-          <textarea
-            required
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            className="w-full p-2 border rounded"
-            rows={4}
-            placeholder="Describe your approach, timeline, experience..."
-          />
-        </div>
-
-        {/* Milestones */}
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <label className="block text-sm font-medium">Project Milestones *</label>
-            <button
-              type="button"
-              onClick={() =>
-                setFormData((prev) => ({
-                  ...prev,
-                  milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }],
-                }))
-              }
-              className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-            >
-              + Add Milestone
-            </button>
+        {/* ✅ Disable everything in one shot after finalize */}
+        <fieldset disabled={disabled} className={disabled ? 'opacity-70 pointer-events-none' : ''}>
+          {/* Vendor Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Vendor Name *</label>
+              <input
+                type="text"
+                required
+                value={formData.vendorName}
+                onChange={(e) => setFormData({ ...formData, vendorName: e.target.value })}
+                className="w-full p-2 border rounded"
+                placeholder="Your company name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Wallet Address *</label>
+              <input
+                type="text"
+                required
+                value={formData.walletAddress}
+                onChange={(e) => setFormData({ ...formData, walletAddress: e.target.value })}
+                className="w-full p-2 border rounded"
+                placeholder="0x..."
+              />
+            </div>
           </div>
 
-          <div className="space-y-4">
-            {formData.milestones.map((milestone, index) => (
-              <div key={index} className="border p-4 rounded-lg bg-gray-50">
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-medium">Milestone {index + 1}</h4>
-                  {formData.milestones.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setFormData((prev) => ({ ...prev, milestones: prev.milestones.filter((_, i) => i !== index) }))}
-                      className="text-red-600 text-sm hover:text-red-800"
-                    >
-                      Remove
-                    </button>
-                  )}
+          {/* Bid Details */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Bid Price (USD) *</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={formData.priceUSD}
+                onChange={(e) => setFormData({ ...formData, priceUSD: e.target.value })}
+                className="w-full p-2 border rounded"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Completion Days *</label>
+              <input
+                type="number"
+                required
+                value={formData.days}
+                onChange={(e) => setFormData({ ...formData, days: e.target.value })}
+                className="w-full p-2 border rounded"
+                placeholder="30"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Preferred Stablecoin *</label>
+              <select
+                required
+                value={formData.preferredStablecoin}
+                onChange={(e) => setFormData({ ...formData, preferredStablecoin: e.target.value })}
+                className="w-full p-2 border rounded"
+              >
+                <option value="USDC">USDC</option>
+                <option value="USDT">USDT</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Bid Notes */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Bid Proposal Details *</label>
+            <textarea
+              required
+              value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              className="w-full p-2 border rounded"
+              rows={4}
+              placeholder="Describe your approach, timeline, experience..."
+            />
+          </div>
+
+          {/* Milestones */}
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <label className="block text-sm font-medium">Project Milestones *</label>
+              <button
+                type="button"
+                onClick={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    milestones: [...prev.milestones, { name: `Milestone ${prev.milestones.length + 1}`, amount: '', dueDate: '' }],
+                  }))
+                }
+                className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+              >
+                + Add Milestone
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {formData.milestones.map((milestone, index) => (
+                <div key={index} className="border p-4 rounded-lg bg-gray-50">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-medium">Milestone {index + 1}</h4>
+                    {formData.milestones.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            milestones: prev.milestones.filter((_, i) => i !== index),
+                          }))
+                        }
+                        className="text-red-600 text-sm hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Milestone Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={milestone.name}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            milestones: prev.milestones.map((m, i) => (i === index ? { ...m, name: e.target.value } : m)),
+                          }))
+                        }
+                        className="w-full p-2 border rounded text-sm"
+                        placeholder="Design completion"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Amount ($) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={milestone.amount}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            milestones: prev.milestones.map((m, i) => (i === index ? { ...m, amount: e.target.value } : m)),
+                          }))
+                        }
+                        className="w-full p-2 border rounded text-sm"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Due Date *</label>
+                      <input
+                        type="date"
+                        required
+                        value={milestone.dueDate}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            milestones: prev.milestones.map((m, i) => (i === index ? { ...m, dueDate: e.target.value } : m)),
+                          }))
+                        }
+                        className="w-full p-2 border rounded text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Milestone Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={milestone.name}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          milestones: prev.milestones.map((m, i) => (i === index ? { ...m, name: e.target.value } : m)),
-                        }))
-                      }
-                      className="w-full p-2 border rounded text-sm"
-                      placeholder="Design completion"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Amount ($) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={milestone.amount}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          milestones: prev.milestones.map((m, i) => (i === index ? { ...m, amount: e.target.value } : m)),
-                        }))
-                      }
-                      className="w-full p-2 border rounded text-sm"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Due Date *</label>
-                    <input
-                      type="date"
-                      required
-                      value={milestone.dueDate}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          milestones: prev.milestones.map((m, i) => (i === index ? { ...m, dueDate: e.target.value } : m)),
-                        }))
-                      }
-                      className="w-full p-2 border rounded text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Supporting Documents */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Supporting Documents</label>
-          <input
-            type="file"
-            onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-            className="w-full p-2 border rounded"
-            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-          />
-          <p className="text-sm text-gray-500 mt-1">Upload portfolio, previous work, certifications, etc.</p>
-        </div>
+          {/* Supporting Documents */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+            <input
+              type="file"
+              onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+              className="w-full p-2 border rounded"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
+            <p className="text-sm text-gray-500 mt-1">Upload portfolio, previous work, certifications, etc.</p>
+          </div>
+        </fieldset>
 
-        {/* Submit */}
+        {/* Submit / Cancel */}
         <div className="flex gap-4 pt-4">
-          <button type="submit" disabled={loading} className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium">
-            {loading ? 'Submitting Bid...' : 'Submit Bid'}
+          <button
+            type="submit"
+            disabled={loading || submitted}
+            className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
+          >
+            {submitted ? 'Bid submitted' : (loading ? 'Submitting Bid...' : 'Submit Bid')}
           </button>
-          <button type="button" onClick={() => router.back()} className="bg-gray-500 text-white px-6 py-3 rounded-lg">
+
+          <button
+            type="button"
+            onClick={() => router.back()}
+            disabled={loading}
+            className="bg-gray-500 text-white px-6 py-3 rounded-lg disabled:opacity-60"
+          >
             Cancel
           </button>
         </div>
       </form>
 
-      {/* ✅ Agent2 modal — now with bidId so it can poll server */}
+      {/* ✅ Agent2 modal — pass onFinalized to lock the form AFTER user closes */}
       <Agent2ProgressModal
         open={modalOpen}
         step={step}
         message={message}
-        onClose={() => { setModalOpen(false); clearPoll(); }}
         analysis={analysis}
         bidId={createdBidId ?? undefined}
+        onClose={() => { setModalOpen(false); clearPoll(); }}
+        onFinalized={() => {                     // <-- key bit
+          setSubmitted(true);                    // lock the form
+          clearPoll();
+          setModalOpen(false);
+          // Optionally navigate: router.push(`/bids/${createdBidId}`);
+        }}
       />
     </div>
   );
