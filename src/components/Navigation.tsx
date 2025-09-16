@@ -1,16 +1,17 @@
-// src/components/Navigation.tsx
 'use client';
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false); // ✅ for Admin dropdown
+  const [isAdminOpen, setIsAdminOpen] = useState(false); // Admin dropdown
+  const [isProfileOpen, setIsProfileOpen] = useState(false); // Profile dropdown
   const pathname = usePathname();
-  const { address } = useWeb3Auth();
+  const router = useRouter();
+  const { address, logout } = useWeb3Auth();
 
   const isActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + '/');
@@ -25,17 +26,17 @@ export default function Navigation() {
       children: [
         { href: '/admin/proposals', label: 'Proposals' },
         { href: '/admin/bids', label: 'Bids' },
-        { href: '/admin/proofs', label: 'Proofs' }
-      ]
+        { href: '/admin/proofs', label: 'Proofs' },
+      ],
     },
-    { href: '/vendor/dashboard', label: 'Vendors' }
+    { href: '/vendor/dashboard', label: 'Vendors' },
   ];
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          {/* ✅ Logo */}
+          {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
@@ -108,7 +109,7 @@ export default function Navigation() {
           </nav>
 
           {/* User Actions */}
-          <div className="hidden md:flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-4 relative">
             {/* Notification Bell */}
             <div className="relative cursor-pointer p-2 rounded-md hover:bg-gray-700">
               <div className="w-5 h-5 relative">
@@ -131,22 +132,50 @@ export default function Navigation() {
               </div>
             </div>
 
-            {/* User Profile */}
-            <div className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700">
-              <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                {address ? address.slice(2, 4).toUpperCase() : 'JD'}
-              </div>
-              <span className="text-sm text-gray-300">
-                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'John Doe'}
-              </span>
-              <svg
-                className="w-4 h-4 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            {/* User Profile with Dropdown */}
+            <div className="relative">
+              <div
+                className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+                <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  {address ? address.slice(2, 4).toUpperCase() : 'G'}
+                </div>
+                <span className="text-sm text-gray-300">
+                  {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Guest'}
+                </span>
+                <svg
+                  className="w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+
+              {isProfileOpen && (
+                <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                  {address ? (
+                    <button
+                      onClick={async () => {
+                        await logout();
+                        router.push('/vendor/login');
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Logout
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => router.push('/vendor/login')}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Login
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
