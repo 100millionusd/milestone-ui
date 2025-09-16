@@ -9,12 +9,14 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
             <h1 className="text-4xl md:text-5xl font-bold mb-6">
-              Powering the Future—Uplifting Bolivia with
+              Powering the Future–Uplifting Bolivia with
               <br />
               <span className="text-cyan-400">Lithium Social Mining</span>
             </h1>
             <p className="text-xl text-gray-300 mb-8 max-w-3xl mx-auto">
-              Proof, not Promises. Transparent funding for schools, hospitals, roads, infrastructure, and every cornerstone of society — secured with USDT/USDC transactions.
+              Proof, not Promises. Transparent funding for schools, hospitals, roads,
+              infrastructure, and every cornerstone of society — secured with
+              USDT/USDC transactions.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
