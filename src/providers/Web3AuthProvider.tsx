@@ -11,6 +11,7 @@ interface Web3AuthContextType {
   web3auth: Web3Auth | null;
   provider: SafeEventEmitterProvider | null;
   address: string | null;
+  role: 'admin' | 'vendor' | 'guest';
   login: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -19,11 +20,11 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   web3auth: null,
   provider: null,
   address: null,
+  role: 'guest',
   login: async () => {},
   logout: async () => {},
 });
 
-// 🔑 Read from env, fallback to a safe public endpoint
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 const rpcUrl =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
@@ -43,6 +44,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [web3auth, setWeb3auth] = useState<Web3Auth | null>(null);
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
+  const [role, setRole] = useState<'admin' | 'vendor' | 'guest'>('guest');
 
   useEffect(() => {
     const init = async () => {
@@ -52,9 +54,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        console.log('🚀 Initializing Web3Auth with Sepolia...');
-
-        // 👇 Create the EVM private key provider
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
         const web3authInstance = new Web3Auth({
@@ -63,24 +62,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           privateKeyProvider,
         });
 
-        // 👇 Add Openlogin adapter for Google/social login
         const openloginAdapter = new OpenloginAdapter({
-          adapterSettings: {
-            uxMode: 'popup',
-          },
+          adapterSettings: { uxMode: 'popup' },
         });
         web3authInstance.configureAdapter(openloginAdapter);
 
         await web3authInstance.initModal();
-        console.log('✅ Web3Auth initialized');
-
         setWeb3auth(web3authInstance);
 
         if (web3authInstance.provider) {
-          setProvider(web3authInstance.provider);
-          const ethersProvider = new ethers.BrowserProvider(web3authInstance.provider);
-          const signer = await ethersProvider.getSigner();
-          setAddress(await signer.getAddress());
+          await hydrateSession(web3authInstance.provider);
         }
       } catch (error) {
         console.error('❌ Web3Auth init error:', error);
@@ -90,23 +81,35 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
+  const hydrateSession = async (prov: SafeEventEmitterProvider) => {
+    setProvider(prov);
+    const ethersProvider = new ethers.BrowserProvider(prov);
+    const signer = await ethersProvider.getSigner();
+    const addr = await signer.getAddress();
+    setAddress(addr);
+
+    // ✅ ask backend for role
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/auth/role`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: addr }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setRole(data.role || 'vendor');
+      localStorage.setItem('userRole', data.role || 'vendor');
+    } else {
+      setRole('vendor');
+    }
+  };
+
   const login = async () => {
     if (!web3auth) return;
     try {
-      console.log('🔑 Opening Web3Auth modal...');
       const web3authProvider = await web3auth.connect();
-      if (!web3authProvider) {
-        throw new Error('No provider returned from Web3Auth connect()');
-      }
-
-      setProvider(web3authProvider);
-
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider);
-      const signer = await ethersProvider.getSigner();
-      const addr = await signer.getAddress();
-      setAddress(addr);
-
-      console.log('✅ Logged in as:', addr);
+      if (!web3authProvider) throw new Error('No provider returned');
+      await hydrateSession(web3authProvider);
     } catch (error) {
       console.error('❌ Login error:', error);
     }
@@ -118,6 +121,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       await web3auth.logout();
       setProvider(null);
       setAddress(null);
+      setRole('guest');
+      localStorage.removeItem('userRole');
       console.log('✅ Logged out');
     } catch (error) {
       console.error('❌ Logout error:', error);
@@ -125,7 +130,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <Web3AuthContext.Provider value={{ web3auth, provider, address, login, logout }}>
+    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, login, logout }}>
       {children}
     </Web3AuthContext.Provider>
   );
