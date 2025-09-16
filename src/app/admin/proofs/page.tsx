@@ -1,11 +1,8 @@
+// src/app/admin/proofs/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  getBids,
-  payMilestone,
-  completeMilestone,
-} from '@/lib/api';
+import { getBids, payMilestone, completeMilestone } from '@/lib/api';
 
 export default function AdminProofsPage() {
   const [loading, setLoading] = useState(true);
@@ -13,7 +10,7 @@ export default function AdminProofsPage() {
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
 
-  // ✅ Lightbox state
+  // Lightbox for image previews
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
 
   useEffect(() => {
@@ -25,13 +22,15 @@ export default function AdminProofsPage() {
     setError(null);
     try {
       const allBids = await getBids();
+      // Keep only bids where at least one milestone has a proof (JSON or plain text/URL)
       const withProofs = allBids.filter((b: any) =>
-        b.milestones.some((m: any) => m.proof && m.proof.length > 0)
+        Array.isArray(b.milestones) &&
+        b.milestones.some((m: any) => !!m.proof && String(m.proof).length > 0)
       );
       setBids(withProofs);
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
-      setError(e.message || 'Failed to load proofs');
+      setError(e?.message || 'Failed to load proofs');
     } finally {
       setLoading(false);
     }
@@ -43,10 +42,10 @@ export default function AdminProofsPage() {
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
       alert('Proof approved ✅');
-      loadProofs();
+      await loadProofs();
     } catch (e: any) {
       console.error('Error approving proof:', e);
-      alert(e.message || 'Failed to approve proof');
+      alert(e?.message || 'Failed to approve proof');
     } finally {
       setProcessing(null);
     }
@@ -58,19 +57,19 @@ export default function AdminProofsPage() {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
       await payMilestone(bidId, milestoneIndex);
       alert('Payment released successfully ✅');
-      loadProofs();
+      await loadProofs();
     } catch (e: any) {
       console.error('Error paying milestone:', e);
-      alert(e.message || 'Payment failed');
+      alert(e?.message || 'Payment failed');
     } finally {
       setProcessing(null);
     }
   };
 
   const renderProof = (m: any) => {
-    if (!m.proof) return null;
+    if (!m?.proof) return null;
 
-    // 1. Try JSON
+    // Try JSON shape first
     let parsed: any = null;
     try {
       parsed = JSON.parse(m.proof);
@@ -78,50 +77,43 @@ export default function AdminProofsPage() {
       /* not JSON */
     }
 
-    // 2. If JSON with files
+    // JSON with { description, files: [{name,url}] }
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && (
-            <p className="text-sm text-gray-700">{parsed.description}</p>
-          )}
-          {parsed.files?.length > 0 && (
+          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
+          {Array.isArray(parsed.files) && parsed.files.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {parsed.files.map((f: any, i: number) => {
-                const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name || f.url);
+                const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
                 if (isImage) {
+                  const imageUrls = parsed.files
+                    .filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
+                    .map((ff: any) => ff.url);
+                  const startIndex = imageUrls.findIndex((u: string) => u === f.url);
                   return (
                     <button
                       key={i}
-                      onClick={() =>
-                        setLightbox({
-                          urls: parsed.files
-                            .filter((ff: any) =>
-                              /\.(png|jpe?g|gif|webp|svg)$/i.test(ff.name || ff.url)
-                            )
-                            .map((ff: any) => ff.url),
-                          index: parsed.files.findIndex((ff: any) => ff.url === f.url),
-                        })
-                      }
+                      onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
                       className="group relative overflow-hidden rounded border"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={f.url}
-                        alt={f.name}
+                        alt={f.name || `Proof ${i}`}
                         className="h-32 w-full object-cover group-hover:scale-105 transition"
                       />
                       <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                        {f.name}
+                        {f.name || 'Image'}
                       </div>
                     </button>
                   );
                 }
                 return (
                   <div key={i} className="p-3 rounded border bg-gray-50">
-                    <p className="truncate text-sm">{f.name}</p>
+                    <p className="truncate text-sm">{f?.name || 'Attachment'}</p>
                     <a
-                      href={f.url}
+                      href={f?.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-blue-600 hover:underline"
@@ -137,29 +129,25 @@ export default function AdminProofsPage() {
       );
     }
 
-    // 3. Fallback: plain text with URLs
+    // Fallback: plain text that may contain URLs
+    const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = [...m.proof.matchAll(urlRegex)].map((match) => match[0]);
+    const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
 
     return (
       <div className="mt-2 space-y-2">
-        <p className="text-sm text-gray-700 whitespace-pre-line">{m.proof}</p>
+        <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>
         {urls.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {urls.map((url, i) => {
               const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
               if (isImage) {
+                const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
+                const startIndex = imageUrls.findIndex((u) => u === url);
                 return (
                   <button
                     key={i}
-                    onClick={() =>
-                      setLightbox({
-                        urls: urls.filter((u) =>
-                          /\.(png|jpe?g|gif|webp|svg)$/i.test(u)
-                        ),
-                        index: urls.findIndex((u) => u === url),
-                      })
-                    }
+                    onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
                     className="group relative overflow-hidden rounded border"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -210,6 +198,7 @@ export default function AdminProofsPage() {
   return (
     <div className="max-w-5xl mx-auto py-8">
       <h1 className="text-2xl font-bold mb-6">Submitted Proofs (Admin)</h1>
+
       {bids.length === 0 ? (
         <p>No submitted proofs yet.</p>
       ) : (
@@ -220,60 +209,76 @@ export default function AdminProofsPage() {
                 {bid.vendorName} — Proposal #{bid.proposalId}
               </h2>
               <p className="text-gray-600 mb-4">Bid ID: {bid.bidId}</p>
+
               <div className="space-y-4">
-                {bid.milestones.map((m: any, idx: number) => (
-                  <div key={idx} className="border-t pt-4 mt-4">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <p className="font-medium">{m.name}</p>
-                        <p className="text-sm text-gray-600">
-                          Amount: ${m.amount} | Due: {m.dueDate}
-                        </p>
+                {bid.milestones.map((m: any, idx: number) => {
+                  const canApprove = !!m.proof && !m.completed;
+                  // 🔑 Always allow payment when milestone is completed and not yet paid,
+                  // regardless of the *bid* status:
+                  const canPay = m.completed && !m.paymentTxHash;
 
-                        {renderProof(m)}
-
-                        {m.paymentTxHash && (
-                          <p className="text-sm text-green-600 mt-2">
-                            Paid ✅ Tx: {m.paymentTxHash}
+                  return (
+                    <div key={idx} className="border-t pt-4 mt-4">
+                      <div className="flex justify-between items-start gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{m.name}</p>
+                            {m.completed && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
+                                Approved
+                              </span>
+                            )}
+                            {m.paymentTxHash && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                                Paid
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            Amount: ${m.amount} | Due: {m.dueDate}
                           </p>
-                        )}
-                      </div>
 
-                      <div className="flex flex-col gap-2 ml-4">
-                        {!m.completed && m.proof && (
-                          <button
-                            onClick={() => handleApprove(bid.bidId, idx, m.proof)}
-                            disabled={processing === `approve-${bid.bidId}-${idx}`}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                          >
-                            {processing === `approve-${bid.bidId}-${idx}`
-                              ? 'Approving...'
-                              : 'Approve Proof'}
-                          </button>
-                        )}
+                          {renderProof(m)}
 
-                        {!m.paymentTxHash && m.completed && (
-                          <button
-                            onClick={() => handlePay(bid.bidId, idx)}
-                            disabled={processing === `pay-${bid.bidId}-${idx}`}
-                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
-                          >
-                            {processing === `pay-${bid.bidId}-${idx}`
-                              ? 'Paying...'
-                              : 'Release Payment'}
-                          </button>
-                        )}
+                          {m.paymentTxHash && (
+                            <p className="text-sm text-green-600 mt-2 break-all">
+                              Paid ✅ Tx: {m.paymentTxHash}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {canApprove && (
+                            <button
+                              onClick={() => handleApprove(bid.bidId, idx, m.proof)}
+                              disabled={processing === `approve-${bid.bidId}-${idx}`}
+                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                            >
+                              {processing === `approve-${bid.bidId}-${idx}` ? 'Approving...' : 'Approve Proof'}
+                            </button>
+                          )}
+
+                          {canPay && (
+                            <button
+                              onClick={() => handlePay(bid.bidId, idx)}
+                              disabled={processing === `pay-${bid.bidId}-${idx}`}
+                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                            >
+                              {processing === `pay-${bid.bidId}-${idx}` ? 'Paying...' : 'Release Payment'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* ✅ Lightbox modal */}
+      {/* Lightbox modal */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
@@ -284,10 +289,10 @@ export default function AdminProofsPage() {
             src={lightbox.urls[lightbox.index]}
             alt="proof preview"
             className="max-h-full max-w-full rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()} // prevent closing when clicking image
+            onClick={(e) => e.stopPropagation()}
           />
 
-          {/* Prev button */}
+          {/* Prev */}
           {lightbox.index > 0 && (
             <button
               className="absolute left-4 text-white text-3xl font-bold"
@@ -300,7 +305,7 @@ export default function AdminProofsPage() {
             </button>
           )}
 
-          {/* Next button */}
+          {/* Next */}
           {lightbox.index < lightbox.urls.length - 1 && (
             <button
               className="absolute right-4 text-white text-3xl font-bold"
@@ -313,7 +318,7 @@ export default function AdminProofsPage() {
             </button>
           )}
 
-          {/* Close button */}
+          {/* Close */}
           <button
             className="absolute top-4 right-4 text-white text-2xl"
             onClick={() => setLightbox(null)}
