@@ -265,8 +265,7 @@ export default function VendorDashboard() {
             // ✅ allow archive if not already archived AND
             // either it is not approved OR it is fully completed.
             const canArchive =
-              bid.status !== 'archived' &&
-              (bid.status !== 'approved' || isBidCompleted(bid));
+              bid.status !== 'archived';
 
             const isArchiving = archivingIds.has(bid.bidId);
 
