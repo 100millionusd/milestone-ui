@@ -40,7 +40,7 @@ export default function VendorDashboard() {
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
-  // ✅ track archiving to disable button and show spinner text
+  // Track archiving state per-bid to disable button + show "Archiving…"
   const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -122,17 +122,14 @@ export default function VendorDashboard() {
     const lowerQ = query.trim().toLowerCase();
     const base = bids.filter((b) => {
       if (!lowerQ) return true;
-      const hay =
-        `${b.title || ''} ${b.orgName || ''} ${b.vendorName || ''} ${b.notes || ''}`.toLowerCase();
+      const hay = `${b.title || ''} ${b.orgName || ''} ${b.vendorName || ''} ${b.notes || ''}`.toLowerCase();
       return hay.includes(lowerQ);
     });
 
     switch (tab) {
       case 'active':
         return base.filter(
-          (b) =>
-            b.status === 'pending' ||
-            (b.status === 'approved' && !isBidCompleted(b))
+          (b) => b.status === 'pending' || (b.status === 'approved' && !isBidCompleted(b))
         );
       case 'awarded':
         return base.filter((b) => b.status === 'approved');
@@ -148,7 +145,6 @@ export default function VendorDashboard() {
   }, [bids, tab, query]);
 
   const onArchive = async (bidId: number) => {
-    // simple confirmation, no UX changes elsewhere
     const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
     if (!ok) return;
 
@@ -188,7 +184,7 @@ export default function VendorDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
       <div className="max-w-5xl mx-auto px-4 py-10">
-        {/* Header + balances */}
+        {/* Top Bar Card */}
         <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
@@ -203,20 +199,20 @@ export default function VendorDashboard() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigator.clipboard.writeText(address || '')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
               >
-                Copy Address
+                <span>Copy Address</span>
               </button>
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900"
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] transition"
               >
                 Sign Out
               </button>
             </div>
           </div>
 
-          {/* balances */}
+          {/* Balances */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
             <BalanceCard label="ETH" value={balances.ETH} />
             <BalanceCard label="USDT" value={balances.USDT} />
@@ -224,7 +220,7 @@ export default function VendorDashboard() {
           </div>
         </div>
 
-        {/* Send funds */}
+        {/* Send Funds UI */}
         <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Send Funds</h2>
           <SendFunds />
@@ -266,8 +262,12 @@ export default function VendorDashboard() {
             const total = ms.length;
             const progress = total ? Math.round((done / total) * 100) : 0;
 
-            // keep awarded bids visible; allow archiving others (pending/rejected/completed)
-            const canArchive = bid.status !== 'archived' && bid.status !== 'approved';
+            // ✅ allow archive if not already archived AND
+            // either it is not approved OR it is fully completed.
+            const canArchive =
+              bid.status !== 'archived' &&
+              (bid.status !== 'approved' || isBidCompleted(bid));
+
             const isArchiving = archivingIds.has(bid.bidId);
 
             return (
@@ -311,13 +311,13 @@ export default function VendorDashboard() {
                     <>
                       <Link
                         href={`/vendor/proof/${bid.bidId}`}
-                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
                       >
                         Submit Proof
                       </Link>
                       <button
                         onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
                       >
                         Copy Wallet Address
                       </button>
@@ -347,7 +347,7 @@ export default function VendorDashboard() {
                   <InfoTile label="Status" value={computedStatusLabel(bid)} />
                 </div>
 
-                {/* Proofs */}
+                {/* Submitted proofs */}
                 {bid.proofs?.length > 0 && (
                   <div className="mt-6 border-t border-slate-200 pt-4">
                     <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitted Proofs</h3>
@@ -359,7 +359,12 @@ export default function VendorDashboard() {
                             <ul className="mt-2 space-y-1">
                               {p.files.map((f: any, j: number) => (
                                 <li key={j} className="text-sm">
-                                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                  <a
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline underline-offset-2"
+                                  >
                                     {f.name}
                                   </a>
                                 </li>
@@ -392,7 +397,7 @@ export default function VendorDashboard() {
               <p className="text-slate-600 mb-6">Try a different tab or clear your search.</p>
               <Link
                 href="/projects"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[.99] transition"
               >
                 Browse Projects
               </Link>
