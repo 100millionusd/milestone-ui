@@ -2,16 +2,42 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getBids, payMilestone, completeMilestone } from '@/lib/api';
+
+interface File {
+  name?: string;
+  url: string;
+}
+
+interface Proof {
+  description?: string;
+  files?: File[];
+}
+
+interface Milestone {
+  name: string;
+  amount: number;
+  dueDate: string;
+  proof?: string | Proof;
+  completed: boolean;
+  paymentTxHash?: string;
+}
+
+interface Bid {
+  bidId: number;
+  proposalId: number;
+  vendorName: string;
+  vendorWallet?: string;
+  milestones: Milestone[];
+}
 
 export default function AdminProofsPage() {
   const [loading, setLoading] = useState(true);
-  const [bids, setBids] = useState<any[]>([]);
+  const [bids, setBids] = useState<Bid[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-
-  // Lightbox for image previews
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [activeTab, setActiveTab] = useState<'All' | 'Needs Approval' | 'Ready to Pay' | 'Paid' | 'No Proof'>('All');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadProofs();
@@ -22,12 +48,7 @@ export default function AdminProofsPage() {
     setError(null);
     try {
       const allBids = await getBids();
-      // Keep only bids where at least one milestone has a proof (JSON or plain text/URL)
-      const withProofs = allBids.filter((b: any) =>
-        Array.isArray(b.milestones) &&
-        b.milestones.some((m: any) => !!m.proof && String(m.proof).length > 0)
-      );
-      setBids(withProofs);
+      setBids(allBids);
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
@@ -66,30 +87,28 @@ export default function AdminProofsPage() {
     }
   };
 
-  const renderProof = (m: any) => {
+  const renderProof = (m: Milestone) => {
     if (!m?.proof) return null;
 
-    // Try JSON shape first
-    let parsed: any = null;
+    let parsed: Proof | null = null;
     try {
-      parsed = JSON.parse(m.proof);
+      parsed = JSON.parse(m.proof as string);
     } catch {
       /* not JSON */
     }
 
-    // JSON with { description, files: [{name,url}] }
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
           {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
           {Array.isArray(parsed.files) && parsed.files.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {parsed.files.map((f: any, i: number) => {
+              {parsed.files.map((f: File, i: number) => {
                 const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
                 if (isImage) {
                   const imageUrls = parsed.files
-                    .filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
-                    .map((ff: any) => ff.url);
+                    .filter((ff: File) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
+                    .map((ff: File) => ff.url);
                   const startIndex = imageUrls.findIndex((u: string) => u === f.url);
                   return (
                     <button
@@ -97,10 +116,9 @@ export default function AdminProofsPage() {
                       onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
                       className="group relative overflow-hidden rounded border"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={f.url}
-                        alt={f.name || `Proof ${i}`}
+                        alt={f.name || `Proof image ${i + 1} for milestone ${m.name}`}
                         className="h-32 w-full object-cover group-hover:scale-105 transition"
                       />
                       <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
@@ -129,7 +147,6 @@ export default function AdminProofsPage() {
       );
     }
 
-    // Fallback: plain text that may contain URLs
     const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
@@ -150,10 +167,9 @@ export default function AdminProofsPage() {
                     onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
                     className="group relative overflow-hidden rounded border"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={url}
-                      alt={`Proof ${i}`}
+                      alt={`Proof image ${i + 1} for milestone ${m.name}`}
                       className="h-32 w-full object-cover group-hover:scale-105 transition"
                     />
                   </button>
@@ -179,6 +195,40 @@ export default function AdminProofsPage() {
     );
   };
 
+  const filterMilestones = (milestones: Milestone[]): Milestone[] => {
+    return milestones.filter((m) => {
+      if (activeTab === 'All') return true;
+      if (activeTab === 'Needs Approval') return !!m.proof && !m.completed;
+      if (activeTab === 'Ready to Pay') return m.completed && !m.paymentTxHash;
+      if (activeTab === 'Paid') return !!m.paymentTxHash;
+      if (activeTab === 'No Proof') return !m.proof || String(m.proof).length === 0;
+      return false;
+    });
+  };
+
+  const filterBids = (bids: Bid[]): Bid[] => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return bids;
+
+    return bids
+      .map((bid) => ({
+        ...bid,
+        milestones: bid.milestones.filter(
+          (m) =>
+            bid.vendorName.toLowerCase().includes(query) ||
+            bid.proposalId.toString().includes(query) ||
+            (bid.vendorWallet?.toLowerCase() || '').includes(query) ||
+            m.name.toLowerCase().includes(query)
+        ),
+      }))
+      .filter((bid) => bid.milestones.length > 0);
+  };
+
+  const filteredBids = filterBids(bids).map((bid) => ({
+    ...bid,
+    milestones: filterMilestones(bid.milestones),
+  })).filter((bid) => bid.milestones.length > 0);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -199,11 +249,39 @@ export default function AdminProofsPage() {
     <div className="max-w-5xl mx-auto py-8">
       <h1 className="text-2xl font-bold mb-6">Submitted Proofs (Admin)</h1>
 
-      {bids.length === 0 ? (
-        <p>No submitted proofs yet.</p>
+      {/* Tabs */}
+      <div className="flex border-b mb-6">
+        {['All', 'Needs Approval', 'Ready to Pay', 'Paid', 'No Proof'].map((tab) => (
+          <button
+            key={tab}
+            className={`px-4 py-2 -mb-px border-b-2 font-medium ${
+              activeTab === tab
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-blue-600'
+            }`}
+            onClick={() => setActiveTab(tab as any)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Search Box */}
+      <div className="mb-6">
+        <input
+          type="text"
+          placeholder="Search by vendor, project ID, wallet, or milestone name"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      {filteredBids.length === 0 ? (
+        <p>No milestones match the selected tab or search criteria.</p>
       ) : (
         <div className="space-y-6">
-          {bids.map((bid) => (
+          {filteredBids.map((bid) => (
             <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
               <h2 className="text-xl font-semibold mb-2">
                 {bid.vendorName} — Proposal #{bid.proposalId}
@@ -211,10 +289,8 @@ export default function AdminProofsPage() {
               <p className="text-gray-600 mb-4">Bid ID: {bid.bidId}</p>
 
               <div className="space-y-4">
-                {bid.milestones.map((m: any, idx: number) => {
+                {bid.milestones.map((m, idx) => {
                   const canApprove = !!m.proof && !m.completed;
-                  // 🔑 Always allow payment when milestone is completed and not yet paid,
-                  // regardless of the *bid* status:
                   const canPay = m.completed && !m.paymentTxHash;
 
                   return (
@@ -250,7 +326,7 @@ export default function AdminProofsPage() {
                         <div className="flex flex-col gap-2">
                           {canApprove && (
                             <button
-                              onClick={() => handleApprove(bid.bidId, idx, m.proof)}
+                              onClick={() => handleApprove(bid.bidId, idx, m.proof as string)}
                               disabled={processing === `approve-${bid.bidId}-${idx}`}
                               className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
                             >
@@ -278,21 +354,17 @@ export default function AdminProofsPage() {
         </div>
       )}
 
-      {/* Lightbox modal */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightbox.urls[lightbox.index]}
-            alt="proof preview"
+            alt={`Proof preview ${lightbox.index + 1}`}
             className="max-h-full max-w-full rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
-
-          {/* Prev */}
           {lightbox.index > 0 && (
             <button
               className="absolute left-4 text-white text-3xl font-bold"
@@ -304,8 +376,6 @@ export default function AdminProofsPage() {
               ‹
             </button>
           )}
-
-          {/* Next */}
           {lightbox.index < lightbox.urls.length - 1 && (
             <button
               className="absolute right-4 text-white text-3xl font-bold"
@@ -317,8 +387,6 @@ export default function AdminProofsPage() {
               ›
             </button>
           )}
-
-          {/* Close */}
           <button
             className="absolute top-4 right-4 text-white text-2xl"
             onClick={() => setLightbox(null)}
@@ -330,3 +398,10 @@ export default function AdminProofsPage() {
     </div>
   );
 }
+
+// Mock API functions (replace with actual implementations)
+async function getBids(): Promise<Bid[]> {
+  return [];
+}
+async function completeMilestone(bidId: number, milestoneIndex: number, proof: string): Promise<void> {}
+async function payMilestone(bidId: number, milestoneIndex: number): Promise<void> {}
