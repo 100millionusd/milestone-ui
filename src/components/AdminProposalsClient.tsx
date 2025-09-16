@@ -1,15 +1,28 @@
+// src/components/AdminProposalsClient.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Proposal } from '@/lib/api';
 import {
-  getProposals,
+  listProposals,           // 👈 fetch with includeArchived so "Archived" tab works
+  getProposals,            // (kept to not break other imports/usages)
   approveProposal,
   rejectProposal,
   archiveProposal,
   deleteProposal,
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
+
+type TabKey = 'all' | 'pending' | 'approved' | 'rejected' | 'completed' | 'archived';
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'archived', label: 'Archived' },
+];
 
 interface AdminProposalsClientProps {
   initialProposals?: Proposal[];
@@ -21,6 +34,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
+  // Tabs + search
+  const [tab, setTab] = useState<TabKey>('all');
+  const [query, setQuery] = useState('');
+
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -30,8 +47,9 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     try {
       setLoading(true);
       setError(null);
-      const data = await getProposals();
-      setProposals(data);
+      // 👇 include archived so the "Archived" tab has data
+      const data = await listProposals({ includeArchived: true });
+      setProposals(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch proposals');
     } finally {
@@ -42,8 +60,8 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const handleApprove = async (proposalId: number) => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
-      await approveProposal(proposalId);
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'approved' } : p)));
+      const updated = await approveProposal(proposalId);
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve proposal');
     }
@@ -52,8 +70,8 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   const handleReject = async (proposalId: number) => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
-      await rejectProposal(proposalId);
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: 'rejected' } : p)));
+      const updated = await rejectProposal(proposalId);
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject proposal');
     }
@@ -61,11 +79,10 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
 
   const handleArchive = async (proposalId: number) => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
-    if (!confirm('Archive this proposal? You can restore by changing status server-side.')) return;
+    if (!confirm('Archive this proposal?')) return;
     try {
       const updated = await archiveProposal(proposalId);
-      // reflect status locally even if backend hides archived from default list
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, status: (updated as any).status ?? 'archived' } : p)));
+      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to archive proposal');
     }
@@ -82,6 +99,39 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     }
   };
 
+  const counts = useMemo(() => {
+    const c: Record<TabKey, number> = {
+      all: proposals.length,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      completed: 0,
+      archived: 0,
+    };
+    for (const p of proposals) {
+      const s = (p.status || 'pending') as TabKey;
+      if (s in c) c[s] += 1;
+    }
+    return c;
+  }, [proposals]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = proposals.filter(p => {
+      if (!q) return true;
+      const hay = `${p.title || ''} ${p.orgName || ''} ${p.summary || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+    switch (tab) {
+      case 'pending': return base.filter(p => p.status === 'pending');
+      case 'approved': return base.filter(p => p.status === 'approved');
+      case 'rejected': return base.filter(p => p.status === 'rejected');
+      case 'completed': return base.filter(p => p.status === 'completed');
+      case 'archived': return base.filter(p => p.status === 'archived');
+      default: return base;
+    }
+  }, [proposals, tab, query]);
+
   if (loading) return <div className="p-6">Loading proposals...</div>;
   if (error) return <div className="p-6 text-red-600">Error: {error}</div>;
 
@@ -90,8 +140,39 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
       <div className="max-w-5xl mx-auto px-4 py-10">
         <h1 className="text-2xl font-bold mb-6">Admin — Proposals Management</h1>
 
+        {/* Tabs + search */}
+        <div className="mb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {TABS.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={[
+                  'px-3 py-1.5 rounded-full text-sm font-medium border',
+                  tab === t.key
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+                ].join(' ')}
+              >
+                {t.label}
+                <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  {t.key === 'all' ? counts.all : counts[t.key] || 0}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="w-full md:w-80">
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search proposals…"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
+          </div>
+        </div>
+
         <div className="grid gap-5">
-          {proposals.map((p) => (
+          {filtered.map((p) => (
             <div
               key={p.proposalId}
               className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6"
@@ -138,8 +219,7 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
                 </p>
               </div>
 
-              {/* ✅ AI Chat Agent */}
-              {/* Keep this as-is */}
+              {/* ✅ Keep AI Chat Agent */}
               <ProposalAgent proposal={p} />
 
               {/* Actions */}
@@ -175,15 +255,15 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
             </div>
           ))}
 
-          {proposals.length === 0 && (
+          {filtered.length === 0 && (
             <div className="text-center py-10 text-slate-500 bg-white border border-slate-200 rounded-2xl">
-              No proposals found.
+              No proposals match this view.
             </div>
           )}
         </div>
       </div>
 
-      {/* Lightbox for images */}
+      {/* Lightbox (kept) */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8"
