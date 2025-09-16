@@ -1,6 +1,7 @@
+// src/app/admin/bids/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   getBids,
@@ -13,12 +14,27 @@ const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://gateway.pinata.cloud/ipfs';
 
+// Admin tabs
+const TABS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'archived', label: 'Archived' },
+] as const;
+type TabKey = typeof TABS[number]['key'];
+
 export default function AdminBidsPage() {
   const [bids, setBids] = useState<any[]>([]);
   const [proposals, setProposals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<Record<string, string | null>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // NEW: tabs + search
+  const [tab, setTab] = useState<TabKey>('all');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,6 +59,47 @@ export default function AdminBidsPage() {
     const proposal = proposals.find((p) => p.proposalId === proposalId);
     return proposal ? proposal.title : `Project #${proposalId}`;
   };
+
+  const isBidCompleted = (bid: any) => {
+    if (bid?.status === 'completed') return true;
+    const ms = Array.isArray(bid?.milestones) ? bid.milestones : [];
+    return ms.length > 0 && ms.every((m: any) => !!m.completed);
+  };
+
+  // Filter by tab + search
+  const filteredBids = useMemo(() => {
+    const lowerQ = query.trim().toLowerCase();
+
+    const withSearch = bids.filter((b) => {
+      if (!lowerQ) return true;
+      const hay = [
+        getProposalTitle(b.proposalId),
+        String(b.proposalId || ''),
+        b.vendorName || '',
+        b.walletAddress || '',
+        String(b.priceUSD || ''),
+        b.status || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(lowerQ);
+    });
+
+    switch (tab) {
+      case 'pending':
+        return withSearch.filter((b) => b.status === 'pending');
+      case 'approved':
+        return withSearch.filter((b) => b.status === 'approved');
+      case 'completed':
+        return withSearch.filter((b) => b.status === 'completed' || isBidCompleted(b));
+      case 'rejected':
+        return withSearch.filter((b) => b.status === 'rejected');
+      case 'archived':
+        return withSearch.filter((b) => b.status === 'archived');
+      default:
+        return withSearch;
+    }
+  }, [bids, proposals, tab, query]); // proposals used via getProposalTitle in search
 
   const handleApprove = async (bidId: number) => {
     setActionLoading((prev) => ({ ...prev, [bidId]: 'approving' }));
@@ -86,6 +143,8 @@ export default function AdminBidsPage() {
         return 'bg-red-100 text-red-800';
       case 'completed':
         return 'bg-blue-100 text-blue-800';
+      case 'archived':
+        return 'bg-slate-200 text-slate-700';
       default:
         return 'bg-yellow-100 text-yellow-800';
     }
@@ -154,6 +213,34 @@ export default function AdminBidsPage() {
         </Link>
       </div>
 
+      {/* Tabs + Search */}
+      <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={[
+                'px-3 py-1.5 rounded-full text-sm font-medium border',
+                tab === t.key
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+              ].join(' ')}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="w-full md:w-80">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by project, vendor, wallet, status…"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+          />
+        </div>
+      </div>
+
       <div className="bg-white shadow rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -183,7 +270,7 @@ export default function AdminBidsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {bids.map((bid) => (
+              {filteredBids.map((bid) => (
                 <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
@@ -243,7 +330,7 @@ export default function AdminBidsPage() {
                       <div className="flex space-x-2">
                         <button
                           onClick={() => handleApprove(bid.bidId)}
-                          disabled={actionLoading[bid.bidId]}
+                          disabled={!!actionLoading[bid.bidId]}
                           className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
                         >
                           {actionLoading[bid.bidId] === 'approving'
@@ -252,7 +339,7 @@ export default function AdminBidsPage() {
                         </button>
                         <button
                           onClick={() => handleReject(bid.bidId)}
-                          disabled={actionLoading[bid.bidId]}
+                          disabled={!!actionLoading[bid.bidId]}
                           className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
                         >
                           {actionLoading[bid.bidId] === 'rejecting'
@@ -274,6 +361,9 @@ export default function AdminBidsPage() {
                         Bid rejected
                       </span>
                     )}
+                    {bid.status === 'archived' && (
+                      <span className="text-slate-500 text-sm">Archived</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -281,11 +371,11 @@ export default function AdminBidsPage() {
           </table>
         </div>
 
-        {bids.length === 0 && (
+        {filteredBids.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">No bids found.</p>
+            <p className="text-gray-500 text-lg">No bids in this view.</p>
             <p className="text-gray-400 mt-2">
-              Bids will appear here when vendors submit them.
+              Try a different tab or clear your search.
             </p>
           </div>
         )}
