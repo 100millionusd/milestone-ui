@@ -10,6 +10,10 @@ import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 
 type Role = 'admin' | 'vendor' | 'guest';
+const normalizeRole = (v: any): Role => {
+  const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  return s === 'admin' || s === 'vendor' ? (s as Role) : 'guest';
+};
 
 interface Web3AuthContextType {
   web3auth: Web3Auth | null;
@@ -33,9 +37,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 
 // ---- Env ----
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const rpcUrl =
-  process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
-  'https://rpc.ankr.com/eth_sepolia';
+const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC || 'https://rpc.ankr.com/eth_sepolia';
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
 const chainConfig = {
@@ -59,12 +61,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('guest');
   const [token, setToken] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
-  // Restore session
+  // Restore session (normalize role)
   useEffect(() => {
     setToken(localStorage.getItem('lx_jwt'));
-    setRole((localStorage.getItem('lx_role') as Role) || 'guest');
+    setRole(normalizeRole(localStorage.getItem('lx_role')));
     setAddress(localStorage.getItem('lx_addr'));
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -82,38 +86,28 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           clientId,
           web3AuthNetwork: 'sapphire_devnet',
           privateKeyProvider,
-          // optional: tweak which sections show
-          uiConfig: {
-            // appLogo: '/logo.png',
-            // theme: 'dark',
-          },
+          uiConfig: {},
         });
 
         // Openlogin (social/email)
-        const openlogin = new OpenloginAdapter({
-          adapterSettings: { uxMode: 'popup' },
-        });
-        w3a.configureAdapter(openlogin);
+        w3a.configureAdapter(new OpenloginAdapter({ adapterSettings: { uxMode: 'popup' } }));
 
         // MetaMask
-        const metamask = new MetamaskAdapter();
-        w3a.configureAdapter(metamask);
+        w3a.configureAdapter(new MetamaskAdapter());
 
-        // WalletConnect v2 (required projectId)
+        // WalletConnect v2 (requires projectId)
         if (wcProjectId) {
-          const wc = new WalletConnectV2Adapter({
-            adapterSettings: {
-              projectId: wcProjectId,
-              // optional: show QR modal by default
-              qrcodeModalOptions: { themeMode: 'dark' },
-            },
-          });
-          w3a.configureAdapter(wc);
+          w3a.configureAdapter(
+            new WalletConnectV2Adapter({
+              adapterSettings: {
+                projectId: wcProjectId,
+                qrcodeModalOptions: { themeMode: 'dark' },
+              },
+            })
+          );
         }
 
-        // (Coinbase adapter removed)
-
-        await w3a.initModal(); // <- init after configuring adapters
+        await w3a.initModal(); // init after configuring adapters
         setWeb3auth(w3a);
 
         if (w3a.provider) {
@@ -134,7 +128,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     if (!web3auth) return;
     try {
-      const web3authProvider = await web3auth.connect(); // user picks social OR wallet adapter here
+      const web3authProvider = await web3auth.connect(); // user picks social OR wallet adapter
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
 
       setProvider(web3authProvider);
@@ -158,10 +152,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       if (!loginRes.ok) throw new Error('Auth login failed');
       const { token: jwt, role: srvRole } = await loginRes.json();
 
+      const normRole = normalizeRole(srvRole);
       setToken(jwt);
-      setRole(srvRole as Role);
+      setRole(normRole);
       localStorage.setItem('lx_jwt', jwt);
-      localStorage.setItem('lx_role', srvRole);
+      localStorage.setItem('lx_role', normRole);
     } catch (e) {
       console.error('Login error:', e);
     }
@@ -179,6 +174,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
   };
+
+  // Avoid hydration flicker when reading localStorage
+  if (!mounted) return null;
 
   return (
     <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout }}>
