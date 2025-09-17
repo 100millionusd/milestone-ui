@@ -86,7 +86,7 @@ function getApiBase(): string {
   return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
-const API_BASE = getApiBase();
+export const API_BASE = getApiBase();
 const url = (path: string) => `${API_BASE}${path}`;
 
 // ---- Helpers ----
@@ -110,6 +110,15 @@ function toIso(d: any): string {
   }
 }
 
+function getJwt(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem("lx_jwt");
+  } catch {
+    return null;
+  }
+}
+
 // ---- Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
@@ -123,6 +132,9 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const fullUrl = url(fullPath);
 
+  // 🔑 attach JWT token if present
+  const token = getJwt();
+
   const r = await fetch(fullUrl, {
     cache: "no-store",
     headers: {
@@ -130,9 +142,10 @@ async function apiFetch(path: string, options: RequestInit = {}) {
       Accept: "application/json",
       Pragma: "no-cache",
       "Cache-Control": "no-cache",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), // <-- add Bearer automatically
       ...(options.headers || {}),
     },
-    credentials: "include",
+    credentials: "include", // also send auth cookie if present
     ...options,
   }).catch((e) => {
     throw new Error(e?.message || "Failed to fetch");
@@ -485,9 +498,15 @@ export function uploadJsonToIPFS(data: any) {
 export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
+
+  const token = getJwt();
   const r = await fetch(`${API_BASE}/ipfs/upload-file`, {
     method: "POST",
     body: fd,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
   }).catch((e) => {
     throw new Error(e?.message || "Failed to upload file");
   });
