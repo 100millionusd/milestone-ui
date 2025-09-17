@@ -20,9 +20,10 @@ interface Web3AuthContextType {
   provider: SafeEventEmitterProvider | null;
   address: string | null;
   role: Role;
-  token: string | null;
+  token: string | null; // kept for compatibility; server uses cookie
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshRole: () => Promise<void>;
 }
 
 const Web3AuthContext = createContext<Web3AuthContextType>({
@@ -33,6 +34,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   token: null,
   login: async () => {},
   logout: async () => {},
+  refreshRole: async () => {},
 });
 
 // ---- Env ----
@@ -60,17 +62,20 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('guest');
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null); // not used by server; kept for compatibility
   const [mounted, setMounted] = useState(false);
 
   // Restore session (normalize role)
   useEffect(() => {
-    setToken(localStorage.getItem('lx_jwt'));
+    // We still restore any existing token if you later add Bearer support,
+    // but the server today authenticates via the cookie it sets on /auth/verify.
+    setToken(localStorage.getItem('lx_jwt') || null);
     setRole(normalizeRole(localStorage.getItem('lx_role')));
     setAddress(localStorage.getItem('lx_addr'));
     setMounted(true);
   }, []);
 
+  // Init Web3Auth
   useEffect(() => {
     const init = async () => {
       try {
@@ -78,10 +83,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
-
-        // EVM PK provider
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
-
         const w3a = new Web3Auth({
           clientId,
           web3AuthNetwork: 'sapphire_devnet',
@@ -89,25 +91,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           uiConfig: {},
         });
 
-        // Openlogin (social/email)
         w3a.configureAdapter(new OpenloginAdapter({ adapterSettings: { uxMode: 'popup' } }));
-
-        // MetaMask
         w3a.configureAdapter(new MetamaskAdapter());
 
-        // WalletConnect v2 (requires projectId)
         if (wcProjectId) {
           w3a.configureAdapter(
             new WalletConnectV2Adapter({
-              adapterSettings: {
-                projectId: wcProjectId,
-                qrcodeModalOptions: { themeMode: 'dark' },
-              },
+              adapterSettings: { projectId: wcProjectId, qrcodeModalOptions: { themeMode: 'dark' } },
             })
           );
         }
 
-        await w3a.initModal(); // init after configuring adapters
+        await w3a.initModal();
         setWeb3auth(w3a);
 
         if (w3a.provider) {
@@ -125,10 +120,36 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
+  // Read role from the server (prefers cookie)
+  const refreshRole = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/role`, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include', // send cookie; server reads auth_token
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const norm = normalizeRole(data?.role);
+      setRole(norm);
+      localStorage.setItem('lx_role', norm);
+    } catch (e) {
+      console.warn('refreshRole failed:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted) {
+      // keep frontend role in sync with cookie on first paint
+      refreshRole();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
+
   const login = async () => {
     if (!web3auth) return;
     try {
-      const web3authProvider = await web3auth.connect(); // user picks social OR wallet adapter
+      const web3authProvider = await web3auth.connect();
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
 
       setProvider(web3authProvider);
@@ -139,24 +160,41 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // ---- Secure login with your API (nonce -> sign -> jwt) ----
-      const nonceRes = await fetch(`${API_BASE}/auth/nonce?address=${addr}`);
-      const { nonce } = await nonceRes.json();
-
-      const sig = await signer.signMessage(nonce);
-      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+      // 1) Ask server for a nonce (POST /auth/nonce with JSON body)
+      const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: addr, signature: sig }),
+        credentials: 'include',
+        body: JSON.stringify({ address: addr }),
       });
-      if (!loginRes.ok) throw new Error('Auth login failed');
-      const { token: jwt, role: srvRole } = await loginRes.json();
+      if (!nonceRes.ok) throw new Error('Failed to get nonce');
+      const { nonce } = await nonceRes.json();
 
+      // 2) Sign the nonce
+      const signature = await signer.signMessage(nonce);
+
+      // 3) Verify on server (sets httpOnly auth_token cookie; returns role)
+      const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // IMPORTANT: set cookie cross-site
+        body: JSON.stringify({ address: addr, signature }),
+      });
+      if (!verifyRes.ok) throw new Error('Auth verify failed');
+
+      const { role: srvRole } = await verifyRes.json();
       const normRole = normalizeRole(srvRole);
-      setToken(jwt);
+
+      // We keep token support here if you later add Bearer on the server,
+      // but for now role is derived from the cookie.
+      setToken(null);
+      localStorage.removeItem('lx_jwt');
+
       setRole(normRole);
-      localStorage.setItem('lx_jwt', jwt);
       localStorage.setItem('lx_role', normRole);
+
+      // extra: confirm with /auth/role (reads cookie)
+      await refreshRole();
     } catch (e) {
       console.error('Login error:', e);
     }
@@ -165,6 +203,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       await web3auth?.logout();
+    } catch {}
+    try {
+      await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch {}
     setProvider(null);
     setAddress(null);
@@ -175,11 +216,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_role');
   };
 
-  // Avoid hydration flicker when reading localStorage
   if (!mounted) return null;
 
   return (
-    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout }}>
+    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}>
       {children}
     </Web3AuthContext.Provider>
   );
