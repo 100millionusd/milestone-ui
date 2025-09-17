@@ -7,7 +7,6 @@ import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
 import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
 import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
-import { CoinbaseAdapter } from '@web3auth/coinbase-adapter';
 import { ethers } from 'ethers';
 
 type Role = 'admin' | 'vendor' | 'guest';
@@ -112,9 +111,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           w3a.configureAdapter(wc);
         }
 
-        // Coinbase Wallet
-        const coinbase = new CoinbaseAdapter();
-        w3a.configureAdapter(coinbase);
+        // (Coinbase adapter removed)
 
         await w3a.initModal(); // <- init after configuring adapters
         setWeb3auth(w3a);
