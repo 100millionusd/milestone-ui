@@ -5,22 +5,13 @@ import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, SafeEventEmitterProvider } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
 import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
-import { MetamaskAdapter } from '@web3auth/metamask-adapter';
-import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
-
-type Role = 'admin' | 'vendor' | 'guest';
-const normalizeRole = (v: any): Role => {
-  const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  return s === 'admin' || s === 'vendor' ? (s as Role) : 'guest';
-};
 
 interface Web3AuthContextType {
   web3auth: Web3Auth | null;
   provider: SafeEventEmitterProvider | null;
   address: string | null;
-  role: Role;
-  token: string | null;
+  role: 'admin' | 'vendor' | 'guest';
   login: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -30,15 +21,14 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   provider: null,
   address: null,
   role: 'guest',
-  token: null,
   login: async () => {},
   logout: async () => {},
 });
 
-// ---- Env ----
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC || 'https://rpc.ankr.com/eth_sepolia';
-const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
+const rpcUrl =
+  process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
+  'https://rpc.ankr.com/eth_sepolia/d6eaf3a3cd77223e0e2039350d0795b537ce3e7fb331a34c92d8b3854936ab33';
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -50,136 +40,97 @@ const chainConfig = {
   tickerName: 'Ethereum Sepolia',
 };
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  'https://milestone-api-production.up.railway.app';
-
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [web3auth, setWeb3auth] = useState<Web3Auth | null>(null);
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
-  const [role, setRole] = useState<Role>('guest');
-  const [token, setToken] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  // Restore session (normalize role)
-  useEffect(() => {
-    setToken(localStorage.getItem('lx_jwt'));
-    setRole(normalizeRole(localStorage.getItem('lx_role')));
-    setAddress(localStorage.getItem('lx_addr'));
-    setMounted(true);
-  }, []);
+  const [role, setRole] = useState<'admin' | 'vendor' | 'guest'>('guest');
 
   useEffect(() => {
     const init = async () => {
       try {
         if (!clientId) {
-          console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
+          console.error('🚨 Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
 
-        // EVM PK provider
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        const w3a = new Web3Auth({
+        const web3authInstance = new Web3Auth({
           clientId,
           web3AuthNetwork: 'sapphire_devnet',
           privateKeyProvider,
-          uiConfig: {},
         });
 
-        // Openlogin (social/email)
-        w3a.configureAdapter(new OpenloginAdapter({ adapterSettings: { uxMode: 'popup' } }));
+        const openloginAdapter = new OpenloginAdapter({
+          adapterSettings: { uxMode: 'popup' },
+        });
+        web3authInstance.configureAdapter(openloginAdapter);
 
-        // MetaMask
-        w3a.configureAdapter(new MetamaskAdapter());
+        await web3authInstance.initModal();
+        setWeb3auth(web3authInstance);
 
-        // WalletConnect v2 (requires projectId)
-        if (wcProjectId) {
-          w3a.configureAdapter(
-            new WalletConnectV2Adapter({
-              adapterSettings: {
-                projectId: wcProjectId,
-                qrcodeModalOptions: { themeMode: 'dark' },
-              },
-            })
-          );
+        if (web3authInstance.provider) {
+          await hydrateSession(web3authInstance.provider);
         }
-
-        await w3a.initModal(); // init after configuring adapters
-        setWeb3auth(w3a);
-
-        if (w3a.provider) {
-          setProvider(w3a.provider);
-          const ethersProvider = new ethers.BrowserProvider(w3a.provider as any);
-          const signer = await ethersProvider.getSigner();
-          const addr = await signer.getAddress();
-          setAddress(addr);
-          localStorage.setItem('lx_addr', addr);
-        }
-      } catch (e) {
-        console.error('Web3Auth init error:', e);
+      } catch (error) {
+        console.error('❌ Web3Auth init error:', error);
       }
     };
+
     init();
   }, []);
+
+  const hydrateSession = async (prov: SafeEventEmitterProvider) => {
+    setProvider(prov);
+    const ethersProvider = new ethers.BrowserProvider(prov);
+    const signer = await ethersProvider.getSigner();
+    const addr = await signer.getAddress();
+    setAddress(addr);
+
+    // ✅ ask backend for role
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/auth/role`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: addr }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setRole(data.role || 'vendor');
+      localStorage.setItem('userRole', data.role || 'vendor');
+    } else {
+      setRole('vendor');
+    }
+  };
 
   const login = async () => {
     if (!web3auth) return;
     try {
-      const web3authProvider = await web3auth.connect(); // user picks social OR wallet adapter
-      if (!web3authProvider) throw new Error('No provider from Web3Auth');
-
-      setProvider(web3authProvider);
-
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-      const signer = await ethersProvider.getSigner();
-      const addr = await signer.getAddress();
-      setAddress(addr);
-      localStorage.setItem('lx_addr', addr);
-
-      // ---- Secure login with your API (nonce -> sign -> jwt) ----
-      const nonceRes = await fetch(`${API_BASE}/auth/nonce?address=${addr}`);
-      const { nonce } = await nonceRes.json();
-
-      const sig = await signer.signMessage(nonce);
-      const loginRes = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: addr, signature: sig }),
-      });
-      if (!loginRes.ok) throw new Error('Auth login failed');
-      const { token: jwt, role: srvRole } = await loginRes.json();
-
-      const normRole = normalizeRole(srvRole);
-      setToken(jwt);
-      setRole(normRole);
-      localStorage.setItem('lx_jwt', jwt);
-      localStorage.setItem('lx_role', normRole);
-    } catch (e) {
-      console.error('Login error:', e);
+      const web3authProvider = await web3auth.connect();
+      if (!web3authProvider) throw new Error('No provider returned');
+      await hydrateSession(web3authProvider);
+    } catch (error) {
+      console.error('❌ Login error:', error);
     }
   };
 
   const logout = async () => {
+    if (!web3auth) return;
     try {
-      await web3auth?.logout();
-    } catch {}
-    setProvider(null);
-    setAddress(null);
-    setToken(null);
-    setRole('guest');
-    localStorage.removeItem('lx_addr');
-    localStorage.removeItem('lx_jwt');
-    localStorage.removeItem('lx_role');
+      await web3auth.logout();
+      setProvider(null);
+      setAddress(null);
+      setRole('guest');
+      localStorage.removeItem('userRole');
+      console.log('✅ Logged out');
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+    }
   };
 
-  // Avoid hydration flicker when reading localStorage
-  if (!mounted) return null;
-
   return (
-    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout }}>
+    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, login, logout }}>
       {children}
     </Web3AuthContext.Provider>
   );
