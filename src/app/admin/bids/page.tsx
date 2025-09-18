@@ -325,46 +325,61 @@ export default function AdminBidsPage() {
                       {bid.status}
                     </span>
                   </td>
+
+                  {/* UPDATED ACTIONS CELL: includes "View" link to /admin/bids/[id] */}
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    {bid.status === 'pending' && (
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleApprove(bid.bidId)}
-                          disabled={!!actionLoading[bid.bidId]}
-                          className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
-                        >
-                          {actionLoading[bid.bidId] === 'approving'
-                            ? 'Approving...'
-                            : 'Approve'}
-                        </button>
-                        <button
-                          onClick={() => handleReject(bid.bidId)}
-                          disabled={!!actionLoading[bid.bidId]}
-                          className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
-                        >
-                          {actionLoading[bid.bidId] === 'rejecting'
-                            ? 'Rejecting...'
-                            : 'Reject'}
-                        </button>
-                      </div>
-                    )}
-                    {bid.status === 'approved' && (
+                    <div className="flex flex-wrap gap-2">
+                      {/* Always show the detail page link */}
                       <Link
-                        href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
-                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                        href={`/admin/bids/${bid.bidId}`}
+                        className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
                       >
-                        Manage
+                        View
                       </Link>
-                    )}
-                    {bid.status === 'rejected' && (
-                      <span className="text-gray-500 text-sm">
-                        Bid rejected
-                      </span>
-                    )}
-                    {bid.status === 'archived' && (
-                      <span className="text-slate-500 text-sm">Archived</span>
-                    )}
+
+                      {bid.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApprove(bid.bidId)}
+                            disabled={!!actionLoading[bid.bidId]}
+                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
+                          >
+                            {actionLoading[bid.bidId] === 'approving'
+                              ? 'Approving...'
+                              : 'Approve'}
+                          </button>
+                          <button
+                            onClick={() => handleReject(bid.bidId)}
+                            disabled={!!actionLoading[bid.bidId]}
+                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
+                          >
+                            {actionLoading[bid.bidId] === 'rejecting'
+                              ? 'Rejecting...'
+                              : 'Reject'}
+                          </button>
+                        </>
+                      )}
+
+                      {bid.status === 'approved' && (
+                        <Link
+                          href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                        >
+                          Manage
+                        </Link>
+                      )}
+
+                      {bid.status === 'rejected' && (
+                        <span className="text-gray-500 text-sm">
+                          Bid rejected
+                        </span>
+                      )}
+                      {bid.status === 'archived' && (
+                        <span className="text-slate-500 text-sm">Archived</span>
+                      )}
+                    </div>
                   </td>
+                  {/* END actions cell */}
                 </tr>
               ))}
             </tbody>
