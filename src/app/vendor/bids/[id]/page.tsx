@@ -1,90 +1,210 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import * as api from '@/lib/api';
 import Agent2PromptBox from '@/components/Agent2PromptBox';
+import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
-export default function VendorBidDetailPage({ params }: { params: { id: string } }) {
-  const bidId = Number(params.id);
+type Loaded = 'idle' | 'loading' | 'ready' | 'error';
+
+export default function VendorBidDetailPage() {
+  const params = useParams<{ id: string }>();
+  const bidId = Number(params?.id);
+  const router = useRouter();
+  const { address } = useWeb3Auth();
+
+  const [status, setStatus] = useState<Loaded>('loading');
+  const [error, setError] = useState<string | null>(null);
   const [bid, setBid] = useState<any>(null);
-  const [err, setErr] = useState<string|null>(null);
-  const [loading, setLoading] = useState(true);
 
-  async function load() {
-    setLoading(true);
-    setErr(null);
-    try {
-      const b = await api.getBid(bidId);
-      setBid(b);
-    } catch (e:any) {
-      setErr(String(e?.message ?? e));
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    (async () => {
+      if (!Number.isFinite(bidId)) {
+        setError('Invalid bid id');
+        setStatus('error');
+        return;
+      }
+      try {
+        setStatus('loading');
+        const b = await api.getBid(bidId);
+        setBid(b);
+        setStatus('ready');
+      } catch (e: any) {
+        setError(e?.message || 'Failed to load bid');
+        setStatus('error');
+      }
+    })();
+  }, [bidId]);
+
+  const isOwner = useMemo(() => {
+    if (!bid?.walletAddress || !address) return false;
+    return bid.walletAddress.toLowerCase() === address.toLowerCase();
+  }, [bid, address]);
+
+  function onAfterAnalyze(updated: any) {
+    setBid(updated);
   }
 
-  useEffect(() => { if (Number.isFinite(bidId)) load(); }, [bidId]);
+  if (status === 'loading') {
+    return (
+      <main className="max-w-5xl mx-auto p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-semibold">My Bid #{bidId}</h1>
+          <Link href="/vendor/dashboard" className="underline">← Back</Link>
+        </div>
+        <div className="py-20 text-center text-gray-500">Loading…</div>
+      </main>
+    );
+  }
 
-  if (!Number.isFinite(bidId)) return <div>Invalid bid id.</div>;
+  if (status === 'error') {
+    return (
+      <main className="max-w-5xl mx-auto p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-semibold">My Bid #{bidId}</h1>
+          <Link href="/vendor/dashboard" className="underline">← Back</Link>
+        </div>
+        <div className="p-4 rounded border bg-rose-50 text-rose-700">
+          {error}
+        </div>
+      </main>
+    );
+  }
+
+  const analysis = bid?.aiAnalysis || null;
+  const ms = Array.isArray(bid?.milestones) ? bid.milestones : [];
 
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-6">
-      <h1 className="text-xl font-semibold">Bid #{bidId}</h1>
+    <main className="max-w-5xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">My Bid #{bidId}</h1>
+        <Link href="/vendor/dashboard" className="underline">← Back</Link>
+      </div>
 
-      {loading && <div>Loading…</div>}
-      {err && <div className="text-rose-700">{err}</div>}
-
-      {bid && (
-        <>
-          <div className="rounded-xl border p-4">
-            <div className="text-sm text-slate-500">Proposal #{bid.proposalId}</div>
-            <div className="mt-1 font-medium">{bid.vendorName}</div>
-            <div className="mt-2 text-sm">
-              <span className="font-medium">Price:</span> ${bid.priceUSD.toLocaleString()} ·{' '}
-              <span className="font-medium">Days:</span> {bid.days} ·{' '}
-              <span className="font-medium">Status:</span> {bid.status}
+      {/* Bid Summary */}
+      <section className="rounded border bg-white p-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <div className="text-sm text-gray-500">Project</div>
+            <div className="font-medium">#{bid.proposalId}</div>
+          </div>
+          <div>
+            <div className="text-sm text-gray-500">Vendor</div>
+            <div className="font-medium">{bid.vendorName}</div>
+          </div>
+          <div>
+            <div className="text-sm text-gray-500">Price</div>
+            <div className="font-medium">
+              ${bid.priceUSD} {bid.preferredStablecoin}
             </div>
           </div>
+          <div>
+            <div className="text-sm text-gray-500">Timeline</div>
+            <div className="font-medium">{bid.days} days</div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="text-sm text-gray-500">Notes</div>
+            <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
+          </div>
+        </div>
 
-          {/* Agent 2 analysis */}
-          <div className="rounded-xl border p-4">
-            <div className="font-semibold mb-1">Agent 2 Analysis</div>
-            <div className="prose max-w-none whitespace-pre-wrap">
-              {bid.aiAnalysis?.summary || 'No analysis yet.'}
-            </div>
-            <div className="mt-2 text-sm text-slate-600">
-              Fit: {bid.aiAnalysis?.fit ?? '—'} · Confidence:{' '}
-              {Math.round(((bid.aiAnalysis?.confidence ?? 0) * 100))}%
+        {/* Milestones */}
+        <div className="mt-4">
+          <div className="text-sm text-gray-500 mb-1">Milestones</div>
+          <ul className="space-y-2">
+            {ms.map((m: any, i: number) => (
+              <li key={i} className="rounded border p-3">
+                <div className="font-medium">{m.name}</div>
+                <div className="text-sm text-gray-600">
+                  Amount: ${m.amount} · Due: {new Date(m.dueDate).toLocaleDateString()}
+                  {m.completed ? ' · Completed' : ''}
+                </div>
+                {m.proof && (
+                  <div className="text-sm text-gray-500 mt-1">Proof: {m.proof}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* Agent 2 Analysis */}
+      <section className="rounded border bg-white p-4">
+        <h2 className="text-lg font-semibold mb-2">Agent 2 Analysis</h2>
+
+        {!analysis && (
+          <div className="text-sm text-gray-500">
+            No analysis yet. You can run it below.
+          </div>
+        )}
+
+        {analysis && (
+          <div className="space-y-3">
+            {analysis.summary && (
+              <div>
+                <div className="text-sm text-gray-500 mb-1">Summary</div>
+                <div className="whitespace-pre-wrap">{analysis.summary}</div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-3 text-sm">
+              <span className="px-2 py-1 rounded bg-slate-100">
+                Fit: <strong>{analysis.fit}</strong>
+              </span>
+              {'confidence' in analysis && (
+                <span className="px-2 py-1 rounded bg-slate-100">
+                  Confidence: <strong>{Math.round((analysis.confidence ?? 0) * 100)}%</strong>
+                </span>
+              )}
+              {'pdfUsed' in analysis && (
+                <span className="px-2 py-1 rounded bg-slate-100">
+                  PDF parsed: <strong>{analysis.pdfUsed ? 'Yes' : 'No'}</strong>
+                </span>
+              )}
             </div>
 
-            {!!(bid.aiAnalysis?.risks?.length) && (
-              <div className="mt-3">
-                <div className="font-medium">Risks</div>
-                <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.risks.map((r:string, i:number) => <li key={i}>{r}</li>)}
+            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
+              <div>
+                <div className="text-sm text-gray-500 mb-1">Risks</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  {analysis.risks.map((r: string, i: number) => (
+                    <li key={i}>{r}</li>
+                  ))}
                 </ul>
               </div>
             )}
 
-            {!!(bid.aiAnalysis?.milestoneNotes?.length) && (
-              <div className="mt-3">
-                <div className="font-medium">Milestone Notes</div>
-                <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.milestoneNotes.map((m:string, i:number) => <li key={i}>{m}</li>)}
+            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
+              <div>
+                <div className="text-sm text-gray-500 mb-1">Milestone Notes</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  {analysis.milestoneNotes.map((m: string, i: number) => (
+                    <li key={i}>{m}</li>
+                  ))}
                 </ul>
               </div>
             )}
 
-            <div className="mt-3 text-xs text-slate-500">
-              PDF parsed: {bid.aiAnalysis?.pdfUsed ? 'Yes' : 'No'}
-              {bid.aiAnalysis?.pdfDebug?.name ? <> · File: {bid.aiAnalysis.pdfDebug.name}</> : null}
-            </div>
+            {/* debug line, optional */}
+            {analysis.pdfDebug?.name && (
+              <div className="text-xs text-slate-500">
+                File: {analysis.pdfDebug.name}
+              </div>
+            )}
           </div>
+        )}
 
-          {/* Interactive prompt box (vendor can clarify/re-run if allowed) */}
-          <Agent2PromptBox bidId={bidId} onAfter={(updated:any) => setBid(updated)} />
-        </>
-      )}
-    </div>
+        {/* Vendor can interact with Agent 2 iff they own the bid */}
+        {isOwner ? (
+          <Agent2PromptBox bidId={bidId} onAfter={onAfterAnalyze} />
+        ) : (
+          <div className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
+            You can view the analysis, but only the bid owner can send prompts to Agent 2.
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
