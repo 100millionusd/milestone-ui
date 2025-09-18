@@ -65,6 +65,11 @@ export interface Proof {
   submittedAt: string;
 }
 
+export interface AuthInfo {
+  address?: string;
+  role: "admin" | "vendor" | "guest";
+}
+
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -177,6 +182,18 @@ export const postJSON = async <T = any>(path: string, data: any): Promise<T> => 
     body: JSON.stringify(data),
   });
 };
+
+// ---- Auth ----
+export async function getAuthRole(): Promise<AuthInfo> {
+  try {
+    const info = await apiFetch("/auth/role");
+    const role = (info?.role ?? "guest") as AuthInfo["role"];
+    const address = typeof info?.address === "string" ? info.address : undefined;
+    return { address, role };
+  } catch {
+    return { role: "guest" };
+  }
+}
 
 // ---- Normalizers ----
 function toProposal(p: any): Proposal {
@@ -499,6 +516,9 @@ export function testConnection() {
 }
 
 export default {
+  // auth
+  getAuthRole,
+
   // proposals
   listProposals,
   getProposals,
@@ -537,4 +557,3 @@ export default {
   testConnection,
   postJSON,
 };
-

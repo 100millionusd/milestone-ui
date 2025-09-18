@@ -1,3 +1,4 @@
+// src/components/Agent2PromptBox.tsx
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
@@ -9,7 +10,7 @@ interface Props {
   bidId: number;
   analysis?: any;
   role?: Role;
-  /** Pass true if the viewer is allowed to run Agent2 (e.g., admin OR bid owner) */
+  /** Pass true if viewer may run Agent2 (admin or bid owner). If omitted, only admins can run. */
   canRun?: boolean;
   onAfter?: (updatedBid: any) => void;
 }
@@ -46,10 +47,10 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
     }
   }
 
-  const allowRun = canRun || effectiveRole === 'admin';
+  const allowRun = Boolean(canRun || effectiveRole === 'admin');
 
   return (
-    <section className="rounded-xl border border-slate-200 p-4 bg-white shadow-sm">
+    <section className="relative z-10 rounded-xl border border-slate-200 p-4 bg-white shadow-sm pointer-events-auto">
       <header className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-slate-900 text-white grid place-items-center text-xs font-bold">A2</div>
@@ -58,6 +59,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
         <RoleBadge role={effectiveRole} />
       </header>
 
+      {/* Analysis */}
       {localAnalysis ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -67,13 +69,9 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
                 {String(localAnalysis?.fit ?? '').toLowerCase() || '—'}
               </b>
             </span>
-            <span>
-              Confidence: <b>{prettyConfidence ?? '—'}</b>
-            </span>
+            <span>Confidence: <b>{prettyConfidence ?? '—'}</b></span>
             {'pdfUsed' in (localAnalysis || {}) && (
-              <span className="text-slate-500">
-                PDF used: <b>{localAnalysis.pdfUsed ? 'yes' : 'no'}</b>
-              </span>
+              <span className="text-slate-500">PDF used: <b>{localAnalysis.pdfUsed ? 'yes' : 'no'}</b></span>
             )}
           </div>
 
@@ -88,9 +86,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
             <div>
               <div className="text-sm font-semibold mb-1">Risks</div>
               <ul className="list-disc list-inside text-sm space-y-1">
-                {localAnalysis.risks.map((r: string, i: number) => (
-                  <li key={i}>{r}</li>
-                ))}
+                {localAnalysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
               </ul>
             </div>
           )}
@@ -99,9 +95,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
             <div>
               <div className="text-sm font-semibold mb-1">Milestone Notes</div>
               <ul className="list-disc list-inside text-sm space-y-1">
-                {localAnalysis.milestoneNotes.map((m: string, i: number) => (
-                  <li key={i}>{m}</li>
-                ))}
+                {localAnalysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
               </ul>
             </div>
           )}
@@ -112,17 +106,13 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
               {localAnalysis?.promptExcerpt && (
                 <div className="mt-2">
                   <div className="font-medium mb-1">Prompt excerpt</div>
-                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">
-                    {localAnalysis.promptExcerpt}
-                  </pre>
+                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">{localAnalysis.promptExcerpt}</pre>
                 </div>
               )}
               {localAnalysis?.pdfSnippet && (
                 <div className="mt-3">
                   <div className="font-medium mb-1">PDF snippet (truncated)</div>
-                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">
-                    {localAnalysis.pdfSnippet}
-                  </pre>
+                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">{localAnalysis.pdfSnippet}</pre>
                 </div>
               )}
             </details>
@@ -132,32 +122,32 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
         <p className="text-sm text-slate-500">No Agent2 analysis available yet for this bid.</p>
       )}
 
-      {/* ✅ Admin OR Owner can run */}
-      {allowRun ? (
-        <div className="mt-5">
-          <div className="font-semibold mb-2">Custom Prompt</div>
-          <textarea
-            className="w-full min-h-28 rounded-lg border p-3 text-sm"
-            placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank to use the default prompt)`}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={run}
-              disabled={busy}
-              className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-            >
-              {busy ? 'Analyzing…' : 'Run Agent2'}
-            </button>
-            {err && <span className="text-sm text-rose-700">{err}</span>}
+      {/* Prompt runner (disabled if not allowed) */}
+      <div className="mt-5">
+        <div className="font-semibold mb-2">Custom Prompt</div>
+        <textarea
+          className="w-full min-h-28 rounded-lg border p-3 text-sm"
+          placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank to use the default prompt)`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          disabled={!allowRun}
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            onClick={run}
+            disabled={!allowRun || busy}
+            className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+          >
+            {busy ? 'Analyzing…' : 'Run Agent2'}
+          </button>
+          {err && <span className="text-sm text-rose-700">{err}</span>}
+        </div>
+        {!allowRun && (
+          <div className="mt-2 text-xs text-amber-700">
+            You can view the analysis, but only the bid owner or an admin can run Agent&nbsp;2.
           </div>
-        </div>
-      ) : (
-        <div className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
-          You can view the analysis, but only the bid owner (or an admin) can send prompts to Agent 2.
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }
