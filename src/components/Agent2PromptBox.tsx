@@ -1,3 +1,4 @@
+// src/components/Agent2PromptBox.tsx
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
@@ -11,13 +12,22 @@ interface Props {
   analysis?: any;
   /** Optional explicit role; defaults to Web3Auth context if omitted */
   role?: Role;
+  /**
+   * Controls whether the prompt UI (textarea + Run button) is visible.
+   * - Defaults: admins = true, others = false
+   * - For vendors, pass canRun={true} only if they own the bid.
+   */
+  canRun?: boolean;
   /** Called after a successful re-run; receives the updated bid */
   onAfter?: (updatedBid: any) => void;
 }
 
-export default function Agent2PromptBox({ bidId, analysis, role, onAfter }: Props) {
+export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter }: Props) {
   const { role: ctxRole } = useWeb3Auth();
   const effectiveRole: Role = (role ?? ctxRole ?? 'guest') as Role;
+
+  // default: admins can run, vendors/guests cannot unless canRun is explicitly true
+  const allowRun = canRun ?? (effectiveRole === 'admin');
 
   const [prompt, setPrompt] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -50,7 +60,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, onAfter }: Prop
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 p-4 bg-white shadow-sm">
+    <section className="rounded-xl border border-slate-200 p-4 bg-white shadow-sm relative z-20">
       <header className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-slate-900 text-white grid place-items-center text-xs font-bold">A2</div>
@@ -75,7 +85,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, onAfter }: Prop
             </span>
             {localAnalysis?.pdfUsed !== undefined && (
               <span className="text-slate-500">
-                PDF used: <b>{localAnalysis.pdfUsed ? 'yes' : 'no'}</b>
+                PDF parsed: <b>{localAnalysis.pdfUsed ? 'Yes' : 'No'}</b>
               </span>
             )}
           </div>
@@ -144,17 +154,17 @@ export default function Agent2PromptBox({ bidId, analysis, role, onAfter }: Prop
         </p>
       )}
 
-      {/* Admin-only prompt runner */}
-      {effectiveRole === 'admin' && (
-        <div className="mt-5">
+      {/* Prompt runner — visible for admins, or for vendors when canRun={true} */}
+      {allowRun ? (
+        <div className="mt-5 relative z-20">
           <div className="font-semibold mb-2">Custom Prompt</div>
           <textarea
-            className="w-full min-h-28 rounded-lg border p-3 text-sm"
+            className="w-full min-h-28 rounded-lg border p-3 text-sm relative z-20 pointer-events-auto focus:outline-none focus:ring-2 focus:ring-slate-300"
             placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank to use the default prompt)`}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2 relative z-20">
             <button
               onClick={run}
               disabled={busy}
@@ -164,6 +174,12 @@ export default function Agent2PromptBox({ bidId, analysis, role, onAfter }: Prop
             </button>
             {err && <span className="text-sm text-rose-700">{err}</span>}
           </div>
+          {/* Shield against any stretched-link overlays */}
+          <div className="absolute inset-0 z-10 pointer-events-none" />
+        </div>
+      ) : (
+        <div className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
+          You can view the analysis, but only the bid owner (or an admin) can send prompts to Agent 2.
         </div>
       )}
     </section>
