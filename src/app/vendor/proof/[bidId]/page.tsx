@@ -1,279 +1,307 @@
-// src/app/vendor/proof/[bidId]/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import * as api from '@/lib/api';
-
-type Loaded = 'idle' | 'loading' | 'ready' | 'error';
-type ProofFile = { file: File; previewUrl?: string };
+import { getBid, uploadFileToIPFS, submitProof } from '@/lib/api';
 
 export default function VendorProofPage() {
   const params = useParams<{ bidId: string }>();
   const router = useRouter();
-  const bidId = Number(params?.bidId);
-
   const [bid, setBid] = useState<any>(null);
-  const [loadState, setLoadState] = useState<Loaded>('loading');
-  const [err, setErr] = useState<string>('');
-
-  // compose proof
-  const [desc, setDesc] = useState('');
-  const [files, setFiles] = useState<ProofFile[]>([]);
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // created proof + analysis (returned from server)
-  const [proof, setProof] = useState<any | null>(null);
-  const analysis = proof?.aiAnalysis || proof?.ai_analysis || null;
+  // we’ll keep originalIndex for each pending milestone
+  const [pending, setPending] = useState<Array<{ originalIndex: number; name: string; amount: number; dueDate: string }>>([]);
 
-  // re-run Agent2 on this proof
-  const [prompt, setPrompt] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [runErr, setRunErr] = useState<string | null>(null);
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null);
+  const [proofDescription, setProofDescription] = useState('');
+  const [proofFiles, setProofFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<{[key: string]: number}>({});
+  const [error, setError] = useState<string>('');
+
+  const bidIdStr = params?.bidId || '';
+  const bidId = Number(bidIdStr);
 
   useEffect(() => {
     if (!Number.isFinite(bidId)) {
-      setErr('Invalid bid id');
-      setLoadState('error');
+      setError('Invalid bid id');
+      setLoading(false);
       return;
     }
-    (async () => {
-      try {
-        setLoadState('loading');
-        const b = await api.getBid(bidId);
-        setBid(b);
-        setLoadState('ready');
-      } catch (e: any) {
-        setErr(e?.message || 'Failed to load bid');
-        setLoadState('error');
-      }
-    })();
+    loadBid();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bidId]);
 
-  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files || []);
-    const next = picked.map((file) => ({
-      file,
-      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
-    }));
-    setFiles((prev) => [...prev, ...next]);
-    e.currentTarget.value = '';
-  }
-  function removeFile(i: number) {
-    setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  async function loadBid() {
+    try {
+      setLoading(true);
+      setError('');
+      const b = await getBid(bidId);
+      setBid(b);
+
+      // Build pending list with original indices preserved
+      const list: Array<{ originalIndex: number; name: string; amount: number; dueDate: string }> = [];
+      (Array.isArray(b?.milestones) ? b.milestones : []).forEach((m: any, idx: number) => {
+        if (!m?.completed) {
+          list.push({ originalIndex: idx, name: m.name, amount: Number(m.amount || 0), dueDate: m.dueDate });
+        }
+      });
+      setPending(list);
+      setSelectedOriginalIndex(list.length ? list[0].originalIndex : null);
+    } catch (e: any) {
+      console.error('Error loading bid:', e);
+      setError(e?.message || 'Failed to load bid details. Please check the bid ID and try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function submitProof() {
-    if (!desc.trim() && files.length === 0) {
-      setErr('Please add a description or upload at least one file.');
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files);
+      setProofFiles(prev => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setProofFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  async function handleSubmitProof() {
+    if (!Number.isFinite(bidId)) {
+      setError('Invalid bid id');
       return;
     }
+    if (selectedOriginalIndex == null) {
+      setError('Please select a milestone');
+      return;
+    }
+    if (!proofDescription.trim() && proofFiles.length === 0) {
+      setError('Please provide either a description or upload files as proof');
+      return;
+    }
+
     setSubmitting(true);
-    setErr('');
+    setError('');
+
     try {
-      // NEW: use proofs API (runs Agent2 inline on description + PDFs)
-      const created = await api.submitProof(bidId, desc, files.map((f) => f.file));
-      setProof(created);
-      // optional: clear form
-      setFiles([]);
-      setDesc('');
+      // 1) Upload all files to IPFS (collect names + urls)
+      const uploaded: { name: string; url: string }[] = [];
+      for (const file of proofFiles) {
+        setUploadProgress(prev => ({ ...prev, [file.name]: 10 }));
+        try {
+          const res = await uploadFileToIPFS(file);
+          uploaded.push({ name: file.name, url: res.url });
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        } catch (err) {
+          console.error('Error uploading file:', err);
+          // still push a failed marker so admin sees it
+          uploaded.push({ name: file.name, url: 'upload-failed' });
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        }
+      }
+
+      // 2) Submit proof via API — this CALL sends bidId (non-null) + milestone index (original)
+      await submitProof(bidId, selectedOriginalIndex, proofDescription.trim(), uploaded);
+
+      alert('Proof submitted successfully! The admin will review and release payment.');
+      router.push('/vendor/dashboard');
     } catch (e: any) {
-      setErr(e?.message || 'Failed to submit proof');
+      setError(e?.message || 'Failed to submit proof. Please try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function runAgent2() {
-    if (!proof?.proofId && !proof?.id) return;
-    setBusy(true);
-    setRunErr(null);
-    try {
-      const updated = await api.analyzeProof(proof.proofId ?? proof.id, prompt.trim() || undefined);
-      setProof(updated); // contains updated ai_analysis
-    } catch (e: any) {
-      setRunErr(e?.message || 'Failed to run Agent 2');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (loadState === 'loading') {
+  if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center text-slate-600">Loading…</div>
-    );
-  }
-  if (loadState === 'error' || !bid) {
-    return (
-      <div className="min-h-screen grid place-items-center">
-        <div className="max-w-md bg-white rounded-xl border p-6 text-center">
-          <div className="text-rose-600 font-semibold mb-2">Error</div>
-          <div className="text-slate-700 mb-4">{err || 'Bid not found.'}</div>
-          <Link href="/vendor/dashboard" className="underline">Back to Dashboard</Link>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading bid details...</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <main className="max-w-5xl mx-auto p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Submit Proof — Bid #{bid.bidId}</h1>
-        <Link href="/vendor/dashboard" className="underline">← Back</Link>
-      </div>
-
-      {/* Bid quick facts */}
-      <section className="rounded-xl border bg-white p-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <Info label="Project" value={`#${bid.proposalId}`} />
-          <Info label="Vendor" value={bid.vendorName} />
-          <Info label="Payment" value={`${bid.preferredStablecoin} → ${bid.walletAddress}`} />
-          <Info label="Your Bid" value={`$${bid.priceUSD}`} />
-        </div>
-      </section>
-
-      {/* Submit proof (only if we don't have one just created) */}
-      {!proof && (
-        <section className="rounded-xl border bg-white p-4">
-          <h2 className="text-lg font-semibold mb-3">Your Proof</h2>
-
-          <label className="block text-sm text-slate-600 mb-1">Description</label>
-          <textarea
-            className="w-full min-h-28 rounded-lg border p-3 mb-4"
-            placeholder="Describe the work completed. Add links, context, etc."
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-          />
-
-          <label className="block text-sm text-slate-600 mb-1">Files (images / PDFs)</label>
-          <input type="file" multiple accept="image/*,.pdf" onChange={onPickFiles} />
-          {files.length > 0 && (
-            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {files.map((f, i) => (
-                <div key={i} className="rounded border p-2">
-                  {f.previewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={f.previewUrl} alt={f.file.name} className="h-24 w-full object-cover rounded" />
-                  ) : (
-                    <div className="h-24 grid place-items-center text-xs text-slate-500 bg-slate-50 rounded">
-                      {f.file.name}
-                    </div>
-                  )}
-                  <div className="mt-1 flex items-center justify-between text-xs">
-                    <span className="truncate">{f.file.name}</span>
-                    <button onClick={() => removeFile(i)} className="text-rose-600 hover:underline">remove</button>
-                  </div>
-                </div>
-              ))}
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-4">
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="text-red-600 text-center mb-4">
+              <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
             </div>
-          )}
-
-          {err && <div className="mt-3 text-sm text-rose-700">{err}</div>}
-
-          <div className="mt-4">
+            <h2 className="text-xl font-bold text-center mb-4">Error</h2>
+            <p className="text-gray-600 mb-4">{error}</p>
             <button
-              onClick={submitProof}
-              disabled={submitting}
-              className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              onClick={() => router.push('/vendor/dashboard')}
+              className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium"
             >
-              {submitting ? 'Submitting…' : 'Submit Proof'}
+              Go to Dashboard
             </button>
-            <p className="mt-2 text-xs text-slate-500">
-              After submitting, Agent 2 will analyze your description and any PDFs. You can refine with a custom prompt below.
-            </p>
           </div>
-        </section>
-      )}
+        </div>
+      </div>
+    );
+  }
 
-      {/* After submit: show analysis + prompt to re-run */}
-      {proof && (
-        <section className="rounded-xl border bg-white p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Agent 2 Analysis (Proof #{proof.proofId ?? proof.id})</h2>
-            <div className="text-sm text-slate-600">Admin sees this before paying.</div>
-          </div>
+  if (!bid) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center text-red-600">Bid not found</div>
+      </div>
+    );
+  }
 
-          {!analysis && <div className="text-sm text-slate-600">No analysis yet.</div>}
-
-          {analysis && (
-            <div className="space-y-3 rounded-lg border bg-slate-50 p-3 mb-4">
-              {analysis.summary && (
-                <div>
-                  <div className="text-sm text-slate-500 mb-1">Summary</div>
-                  <p className="whitespace-pre-wrap">{analysis.summary}</p>
-                </div>
-              )}
-              <div className="flex flex-wrap gap-3 text-sm">
-                {'fit' in analysis && (
-                  <span className="px-2 py-1 rounded bg-white border">Fit: <b>{analysis.fit}</b></span>
-                )}
-                {'confidence' in analysis && (
-                  <span className="px-2 py-1 rounded bg-white border">
-                    Confidence: <b>{Math.round((analysis.confidence ?? 0) * 100)}%</b>
-                  </span>
-                )}
-                {'pdfUsed' in analysis && (
-                  <span className="px-2 py-1 rounded bg-white border">
-                    PDF parsed: <b>{analysis.pdfUsed ? 'Yes' : 'No'}</b>
-                  </span>
-                )}
-              </div>
-              {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
-                <div>
-                  <div className="text-sm text-slate-500 mb-1">Risks</div>
-                  <ul className="list-disc pl-5 space-y-1">
-                    {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                  </ul>
-                </div>
-              )}
-              {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
-                <div>
-                  <div className="text-sm text-slate-500 mb-1">Notes</div>
-                  <ul className="list-disc pl-5 space-y-1">
-                    {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Prompt to re-run Agent 2 on this proof */}
-          <div className="mt-2">
-            <div className="font-semibold mb-2">Custom Prompt</div>
-            <textarea
-              className="w-full min-h-28 rounded-lg border p-3 text-sm"
-              placeholder={`Optional. Use {{CONTEXT}} to inject proof text + PDF extracts.\nExample:\n"Check if the delivered scope matches the milestone. {{CONTEXT}}"\n(Leave blank to use the default prompt)`}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                onClick={runAgent2}
-                disabled={busy}
-                className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-              >
-                {busy ? 'Analyzing…' : 'Run Agent 2 on this Proof'}
-              </button>
-              {runErr && <span className="text-sm text-rose-700">{runErr}</span>}
-            </div>
-          </div>
-
-          <div className="mt-6 flex items-center gap-4">
-            <Link href="/vendor/dashboard" className="underline">Back to Dashboard</Link>
-            <Link href={`/vendor/bids/${bidId}`} className="underline">Go to Bid</Link>
-          </div>
-        </section>
-      )}
-    </main>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="font-medium break-all">{value}</div>
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-sm p-6">
+        <div className="mb-6">
+          <button
+            onClick={() => router.back()}
+            className="text-blue-600 hover:text-blue-800 flex items-center text-sm font-medium"
+          >
+            ← Back to Dashboard
+          </button>
+          <h1 className="text-2xl font-bold text-gray-900 mt-4">Submit Proof of Work</h1>
+          <p className="text-gray-600">Bid ID: {bid.bidId} • {bid.vendorName}</p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-blue-800 mb-2">Project: {bid.title}</h2>
+          <p className="text-blue-600 text-sm">
+            You will be paid in {bid.preferredStablecoin} to: {bid.walletAddress}
+          </p>
+        </div>
+
+        {pending.length === 0 ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+            <p className="text-green-800 font-semibold">✅ All milestones completed!</p>
+            <p className="text-green-600">All payments have been processed for this project.</p>
+          </div>
+        ) : (
+          <>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Milestone to Verify *
+              </label>
+              <select
+                value={selectedOriginalIndex ?? ''}
+                onChange={(e) => setSelectedOriginalIndex(Number(e.target.value))}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {pending.map((m) => (
+                  <option key={m.originalIndex} value={m.originalIndex}>
+                    {m.name} - ${m.amount} (Due: {new Date(m.dueDate).toLocaleDateString()})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Proof Description
+              </label>
+              <textarea
+                placeholder="Describe the work you completed. Include details, links to repositories, or any other evidence..."
+                value={proofDescription}
+                onChange={(e) => setProofDescription(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                rows={4}
+              />
+              <p className="text-xs text-gray-500 mt-1">Optional but recommended</p>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Upload Proof Files *
+              </label>
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                <input
+                  type="file"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="proof-files"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.txt,.xls,.xlsx"
+                />
+                <label
+                  htmlFor="proof-files"
+                  className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Choose Files
+                </label>
+                <p className="text-sm text-gray-500 mt-2">
+                  Upload screenshots, documents, or other proof files (Max 50MB each)
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Supported formats: PDF, Word, Images, Excel, ZIP, Text
+                </p>
+              </div>
+
+              {proofFiles.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Selected files:</p>
+                  {proofFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-600">{file.name}</span>
+                        <span className="text-xs text-gray-400">
+                          ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {uploadProgress[file.name] > 0 && uploadProgress[file.name] < 100 && (
+                          <div className="w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-500 h-2 rounded-full"
+                              style={{ width: `${uploadProgress[file.name]}%` }}
+                            ></div>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <h3 className="font-semibold text-yellow-800 mb-2">Important Information</h3>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                <li>• Admin will review your proof before releasing payment</li>
+                <li>• Include clear evidence of completed work</li>
+                <li>• Payment will be sent in {bid.preferredStablecoin}</li>
+                <li>• You’ll receive ${pending.find(p => p.originalIndex === selectedOriginalIndex)?.amount ?? 0} upon approval</li>
+              </ul>
+            </div>
+
+            <button
+              onClick={handleSubmitProof}
+              disabled={submitting || proofFiles.length === 0}
+              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? 'Submitting Proof...' : 'Submit Proof for Review'}
+            </button>
+
+            {proofFiles.length === 0 && (
+              <p className="text-red-600 text-sm mt-2 text-center">
+                Please upload at least one file as proof of work
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
