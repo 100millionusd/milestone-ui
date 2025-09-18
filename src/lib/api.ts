@@ -72,6 +72,18 @@ export interface AuthInfo {
   role: "admin" | "vendor" | "guest";
 }
 
+export interface ProofFile {
+  name: string;
+  url: string;
+}
+
+export interface SubmitProofPayload {
+  title?: string;
+  description?: string;
+  files?: ProofFile[];
+  prompt?: string;
+}
+
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -466,24 +478,27 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
   }
 }
 
-// Create/submit a proof (text + optional files) for a specific milestone
-export async function submitProof(input: {
-  bidId: number;
-  milestoneIndex: number;
-  title?: string;
-  description: string;
-  files?: { name: string; url: string }[];
-}): Promise<Proof> {
-  const payload = {
-    bidId: Number(input.bidId),
-    milestoneIndex: Number(input.milestoneIndex),
-    title: input.title || "",
-    description: input.description || "",
-    files: Array.isArray(input.files) ? input.files : [],
+// Create/submit a proof (text + optional files + optional Agent2 prompt)
+export async function submitProof(
+  bidId: number,
+  milestoneIndex: number,
+  payload: SubmitProofPayload
+): Promise<Proof> {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  if (!Number.isFinite(milestoneIndex)) throw new Error("Invalid milestone index");
+
+  const body = {
+    bidId: Number(bidId),
+    milestoneIndex: Number(milestoneIndex),
+    title: payload?.title ?? "",
+    description: payload?.description ?? "",
+    files: Array.isArray(payload?.files) ? payload.files : [],
+    prompt: payload?.prompt ?? "",
   };
+
   const p = await apiFetch("/proofs", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   return toProof(p);
 }
