@@ -479,26 +479,42 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
 }
 
 // Create/submit a proof (text + optional files + optional Agent2 prompt)
-export async function submitProof(
-  bidId: number,
-  milestoneIndex: number,
-  payload: SubmitProofPayload
-): Promise<Proof> {
-  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  if (!Number.isFinite(milestoneIndex)) throw new Error("Invalid milestone index");
+export async function submitProof(input: {
+  bidId: number;
+  milestoneIndex: number;
+  title?: string;
+  description: string;
+  files?: { name: string; url: string }[];
+  prompt?: string;
+}): Promise<Proof> {
+  const files = Array.isArray(input.files) ? input.files : [];
 
-  const body = {
-    bidId: Number(bidId),
-    milestoneIndex: Number(milestoneIndex),
-    title: payload?.title ?? "",
-    description: payload?.description ?? "",
-    files: Array.isArray(payload?.files) ? payload.files : [],
-    prompt: payload?.prompt ?? "",
+  // Legacy-compatible "proof" string (old server expects this)
+  let legacyProof = (input.description || "").trim();
+  if (files.length) {
+    legacyProof += "\n\nAttachments:\n" + files.map(f => `- ${f.name || "file"}: ${f.url}`).join("\n");
+  }
+
+  const payload = {
+    // required by both
+    bidId: Number(input.bidId),
+    milestoneIndex: Number(input.milestoneIndex),
+
+    // new shape (if your newer server is running, it will use these)
+    title: input.title || "",
+    description: input.description || "",
+    files,
+
+    // optional Agent2 custom prompt for proof analysis
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+
+    // legacy field so older server won’t 400
+    proof: legacyProof,
   };
 
   const p = await apiFetch("/proofs", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   return toProof(p);
 }
