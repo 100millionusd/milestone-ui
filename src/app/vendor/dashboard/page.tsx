@@ -262,11 +262,8 @@ export default function VendorDashboard() {
             const total = ms.length;
             const progress = total ? Math.round((done / total) * 100) : 0;
 
-            // ✅ allow archive if not already archived AND
-            // either it is not approved OR it is fully completed.
-            const canArchive =
-              bid.status !== 'archived';
-
+            // ✅ allow archive if not already archived
+            const canArchive = bid.status !== 'archived';
             const isArchiving = archivingIds.has(bid.bidId);
 
             return (
@@ -306,6 +303,15 @@ export default function VendorDashboard() {
 
                 {/* Actions */}
                 <div className="flex flex-wrap gap-3 mb-5">
+                  {/* NEW: open the vendor bid detail page with Agent 2 panel */}
+                  <Link
+                    href={`/vendor/bids/${bid.bidId}`}
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                    title="Open bid details and interact with Agent 2"
+                  >
+                    View / Agent 2
+                  </Link>
+
                   {bid.status?.toLowerCase() === 'approved' && (
                     <>
                       <Link
