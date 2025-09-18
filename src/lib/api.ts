@@ -54,6 +54,7 @@ export interface TransactionResult {
 }
 
 export interface Proof {
+  proofId?: number; // server may return proof_id / id
   bidId: number;
   milestoneIndex: number;
   vendorName: string;
@@ -63,6 +64,7 @@ export interface Proof {
   files: { name: string; url: string }[];
   status: "pending" | "approved" | "rejected";
   submittedAt: string;
+  aiAnalysis?: any; // Agent 2 output for proofs
 }
 
 export interface AuthInfo {
@@ -282,6 +284,7 @@ function toBid(b: any): Bid {
 
 function toProof(p: any): Proof {
   return {
+    proofId: Number(p?.proofId ?? p?.id ?? p?.proof_id) || undefined,
     bidId: Number(p?.bidId ?? p?.bid_id),
     milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
     vendorName: p?.vendorName ?? p?.vendor_name ?? "",
@@ -291,6 +294,7 @@ function toProof(p: any): Proof {
     files: Array.isArray(p?.files) ? p.files : [],
     status: p?.status ?? "pending",
     submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
+    aiAnalysis: coerceAnalysis(p?.aiAnalysis ?? p?.ai_analysis),
   };
 }
 
@@ -450,6 +454,8 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
 }
 
 // ---- Proofs ----
+
+// Admin (legacy list)
 export async function getSubmittedProofs(): Promise<Proof[]> {
   try {
     const rows = await apiFetch("/proofs");
@@ -458,6 +464,45 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
     if (isAuthError(e)) return [];
     throw e;
   }
+}
+
+// Create/submit a proof (text + optional files) for a specific milestone
+export async function submitProof(input: {
+  bidId: number;
+  milestoneIndex: number;
+  title?: string;
+  description: string;
+  files?: { name: string; url: string }[];
+}): Promise<Proof> {
+  const payload = {
+    bidId: Number(input.bidId),
+    milestoneIndex: Number(input.milestoneIndex),
+    title: input.title || "",
+    description: input.description || "",
+    files: Array.isArray(input.files) ? input.files : [],
+  };
+  const p = await apiFetch("/proofs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return toProof(p);
+}
+
+// Optional: re-run Agent2 on a proof (admin or owner)
+export async function analyzeProof(proofId: number, prompt?: string): Promise<Proof> {
+  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
+  const p = await apiFetch(`/proofs/${encodeURIComponent(String(proofId))}/analyze`, {
+    method: "POST",
+    body: JSON.stringify(prompt ? { prompt } : {}),
+  });
+  return toProof(p);
+}
+
+// Optional: list proofs (scope by bid when provided)
+export async function getProofs(bidId?: number): Promise<Proof[]> {
+  const q = Number.isFinite(bidId as number) ? `?bidId=${bidId}` : "";
+  const rows = await apiFetch(`/proofs${q}`);
+  return (Array.isArray(rows) ? rows : []).map(toProof);
 }
 
 export function approveProof(bidId: number, milestoneIndex: number) {
@@ -549,6 +594,9 @@ export default {
   getSubmittedProofs,
   approveProof,
   rejectProof,
+  submitProof,
+  analyzeProof,
+  getProofs,
 
   // ipfs & misc
   uploadJsonToIPFS,
