@@ -1,15 +1,25 @@
+// src/app/admin/bids/[id]/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import * as api from '@/lib/api';
+import Agent2PromptBox from '@/components/Agent2PromptBox';
 
-export default function AdminBidDetailPage({ params }: { params: { id: string } }) {
-  const bidId = Number(params.id);
+export default function AdminBidDetailPage(props: { params?: { id: string } }) {
+  // Accept both styles: props.params (if Next passes it) and useParams()
+  const routeParams = useParams();
+  const bidId = Number(
+    (props.params as any)?.id ?? (routeParams as any)?.id
+  );
+
   const [loading, setLoading] = useState(true);
   const [bid, setBid] = useState<any>(null);
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
+
+  // Per-proof prompt + busy state
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
 
@@ -17,9 +27,10 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
     (async () => {
       try {
         setLoading(true);
+        setErr(null);
         const [b, pf] = await Promise.all([
           api.getBid(bidId),
-          api.getProofs(bidId) // admin-protected on server
+          api.getProofs(bidId), // server guards: admin-only
         ]);
         setBid(b);
         setProofs(pf);
@@ -31,16 +42,18 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
     })();
   }, [bidId]);
 
-  async function runProofAnalysis(id: number) {
+  async function runProofAnalysis(proofId: number) {
     try {
-      setBusyById(prev => ({ ...prev, [id]: true }));
-      const prompt = promptById[id] || '';
-      const updated = await api.analyzeProof(id, prompt || undefined);
-      setProofs(prev => prev.map(p => (Number(p.proofId ?? p.id) === id ? updated : p)));
+      setBusyById((prev) => ({ ...prev, [proofId]: true }));
+      const prompt = promptById[proofId] || '';
+      const updated = await api.analyzeProof(proofId, prompt || undefined);
+      setProofs((prev) =>
+        prev.map((p) => (Number(p.proofId ?? p.id) === proofId ? updated : p))
+      );
     } catch (e: any) {
       alert(e?.message || 'Failed to run Agent 2 on proof');
     } finally {
-      setBusyById(prev => ({ ...prev, [id]: false }));
+      setBusyById((prev) => ({ ...prev, [proofId]: false }));
     }
   }
 
@@ -49,7 +62,9 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
       <main className="max-w-5xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-          <Link href="/admin/bids" className="underline">← Back</Link>
+          <Link href="/admin/bids" className="underline">
+            ← Back
+          </Link>
         </div>
         <div className="py-20 text-center text-gray-500">Loading…</div>
       </main>
@@ -61,7 +76,9 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
       <main className="max-w-5xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-          <Link href="/admin/bids" className="underline">← Back</Link>
+          <Link href="/admin/bids" className="underline">
+            ← Back
+          </Link>
         </div>
         <div className="p-4 rounded border bg-rose-50 text-rose-700">
           {err || 'Bid not found'}
@@ -70,11 +87,15 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
     );
   }
 
+  const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-        <Link href="/admin/bids" className="underline">← Back</Link>
+        <Link href="/admin/bids" className="underline">
+          ← Back
+        </Link>
       </div>
 
       {/* Bid summary */}
@@ -82,12 +103,50 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
         <div className="grid sm:grid-cols-2 gap-4">
           <Info label="Project" value={`#${bid.proposalId}`} />
           <Info label="Vendor" value={bid.vendorName} />
-          <Info label="Price" value={`$${bid.priceUSD} ${bid.preferredStablecoin}`} />
+          <Info
+            label="Price"
+            value={`$${Number(bid.priceUSD).toLocaleString()} ${bid.preferredStablecoin}`}
+          />
           <Info label="Timeline" value={`${bid.days} days`} />
+          <div className="sm:col-span-2">
+            <div className="text-sm text-gray-500">Notes</div>
+            <div className="font-medium whitespace-pre-wrap">
+              {bid.notes || '—'}
+            </div>
+          </div>
         </div>
+
+        {/* Milestones quick view */}
+        {ms.length > 0 && (
+          <div className="mt-4">
+            <div className="text-sm text-gray-500 mb-1">Milestones</div>
+            <ul className="space-y-2">
+              {ms.map((m: any, i: number) => (
+                <li key={i} className="rounded border p-3">
+                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+                  <div className="text-sm text-gray-600">
+                    Amount: ${m.amount} · Due:{' '}
+                    {new Date(m.dueDate).toLocaleDateString()}
+                    {m.completed ? ' · Completed' : ''}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
-      {/* Proofs for this bid (with Agent 2) */}
+      {/* Agent 2 — Bid-level analysis & prompt (admin has full control) */}
+      <section className="rounded border p-4 bg-white">
+        <Agent2PromptBox
+          bidId={bidId}
+          analysis={bid.aiAnalysis}
+          role="admin"
+          onAfter={(updated) => setBid(updated)}
+        />
+      </section>
+
+      {/* Proofs for this bid (with Agent 2 per-proof) */}
       <section className="rounded border p-4 bg-white">
         <h2 className="font-semibold mb-3">Submitted Proofs</h2>
 
@@ -103,21 +162,26 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
+                  {p.title || `Proof #${id}`} · Milestone{' '}
+                  {Number(p.milestoneIndex ?? p.milestone_index) + 1}
                 </div>
-                <span className={`text-xs rounded px-2 py-0.5 border ${
-                  p.status === 'approved'
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                    : p.status === 'rejected'
-                    ? 'bg-rose-100 text-rose-800 border-rose-200'
-                    : 'bg-amber-100 text-amber-800 border-amber-200'
-                }`}>
+                <span
+                  className={`text-xs rounded px-2 py-0.5 border ${
+                    p.status === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      : p.status === 'rejected'
+                      ? 'bg-rose-100 text-rose-800 border-rose-200'
+                      : 'bg-amber-100 text-amber-800 border-amber-200'
+                  }`}
+                >
                   {p.status}
                 </span>
               </div>
 
               {p.description && (
-                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
+                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">
+                  {p.description}
+                </p>
               )}
 
               {/* files */}
@@ -125,7 +189,12 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
                 <ul className="mt-2 space-y-1">
                   {p.files.map((f: any, i: number) => (
                     <li key={i} className="text-sm">
-                      <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
+                      <a
+                        className="text-blue-600 hover:underline"
+                        href={f.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {f.name || f.url}
                       </a>
                     </li>
@@ -151,7 +220,9 @@ export default function AdminBidDetailPage({ params }: { params: { id: string } 
                 <div className="mt-3">
                   <textarea
                     value={promptById[id] || ''}
-                    onChange={(e) => setPromptById(prev => ({ ...prev, [id]: e.target.value }))}
+                    onChange={(e) =>
+                      setPromptById((prev) => ({ ...prev, [id]: e.target.value }))
+                    }
                     className="w-full p-2 rounded border"
                     rows={3}
                     placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
@@ -188,9 +259,24 @@ function AnalysisView({ a }: { a: any }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        {'fit' in a && <span>Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b></span>}
-        {'confidence' in a && <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>}
-        {'pdfUsed' in a && <span className="text-slate-500">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>}
+        {'fit' in a && (
+          <span>
+            Fit:{' '}
+            <b className={fitColor(a.fit)}>
+              {String(a.fit || '').toLowerCase() || '—'}
+            </b>
+          </span>
+        )}
+        {'confidence' in a && (
+          <span>
+            Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b>
+          </span>
+        )}
+        {'pdfUsed' in a && (
+          <span className="text-slate-500">
+            PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b>
+          </span>
+        )}
       </div>
 
       {a.summary && (
@@ -204,7 +290,9 @@ function AnalysisView({ a }: { a: any }) {
         <div>
           <div className="text-sm font-semibold mb-1">Risks</div>
           <ul className="list-disc list-inside text-sm space-y-1">
-            {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+            {a.risks.map((r: string, i: number) => (
+              <li key={i}>{r}</li>
+            ))}
           </ul>
         </div>
       )}
@@ -213,7 +301,9 @@ function AnalysisView({ a }: { a: any }) {
         <div>
           <div className="text-sm font-semibold mb-1">Milestone Notes</div>
           <ul className="list-disc list-inside text-sm space-y-1">
-            {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+            {a.milestoneNotes.map((m: string, i: number) => (
+              <li key={i}>{m}</li>
+            ))}
           </ul>
         </div>
       )}

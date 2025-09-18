@@ -1,3 +1,4 @@
+// src/app/vendor/proof/[bidId]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -21,7 +22,7 @@ export default function VendorProofPage() {
   const [selectedPendingIdx, setSelectedPendingIdx] = useState<number>(0);
   const [proofTitle, setProofTitle] = useState('');
   const [proofDescription, setProofDescription] = useState('');
-  const [agentPrompt, setAgentPrompt] = useState(''); // NEW: optional Agent 2 prompt
+  const [agentPrompt, setAgentPrompt] = useState(''); // optional Agent 2 prompt
 
   // files & progress
   const [proofFiles, setProofFiles] = useState<File[]>([]);
@@ -343,7 +344,7 @@ export default function VendorProofPage() {
                 <li>• Admin will review your proof before releasing payment</li>
                 <li>• Include clear evidence of completed work</li>
                 <li>• Payment will be sent in {bid.preferredStablecoin}</li>
-                <li>• You&apos;ll receive ${bid.milestones[selectedOriginalIndex].amount} upon approval</li>
+                <li>• You&apos;ll receive ${Number(bid?.milestones?.[selectedOriginalIndex]?.amount ?? 0)} upon approval</li>
               </ul>
             </div>
 
@@ -371,6 +372,10 @@ export default function VendorProofPage() {
               {lastProof?.proofId ? (
                 <span className="text-xs rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 border border-emerald-200">
                   Stored proof #{lastProof.proofId}
+                </span>
+              ) : lastProof?.aiAnalysis ? (
+                <span className="text-xs rounded bg-blue-100 text-blue-800 px-2 py-0.5 border border-blue-200">
+                  Analyzed (no id returned)
                 </span>
               ) : (
                 <span className="text-xs rounded bg-amber-100 text-amber-800 px-2 py-0.5 border border-amber-200">

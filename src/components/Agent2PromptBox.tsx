@@ -1,4 +1,3 @@
-// src/components/Agent2PromptBox.tsx
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
@@ -10,7 +9,7 @@ interface Props {
   bidId: number;
   analysis?: any;
   role?: Role;
-  /** Pass true if viewer may run Agent2 (admin or bid owner). If omitted, only admins can run. */
+  /** Optional explicit override. If omitted, we allow admin or vendor (owner) by default. */
   canRun?: boolean;
   onAfter?: (updatedBid: any) => void;
 }
@@ -19,17 +18,23 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
   const { role: ctxRole } = useWeb3Auth();
   const effectiveRole: Role = (role ?? ctxRole ?? 'guest') as Role;
 
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [localAnalysis, setLocalAnalysis] = useState<any>(analysis ?? null);
 
+  const [localAnalysis, setLocalAnalysis] = useState<any>(analysis ?? null);
   useEffect(() => setLocalAnalysis(analysis ?? null), [analysis]);
+
+  // Default permission: admins and vendors can run; allow override via prop
+  const allowRun = (typeof canRun === 'boolean')
+    ? canRun
+    : (effectiveRole === 'admin' || effectiveRole === 'vendor');
 
   const prettyConfidence = useMemo(() => {
     const c = Number(localAnalysis?.confidence);
     if (!Number.isFinite(c)) return null;
-    return `${Math.round(Math.max(0, Math.min(1, c)) * 100)}%`;
+    const pct = Math.round(Math.max(0, Math.min(1, c)) * 100);
+    return `${pct}%`;
   }, [localAnalysis]);
 
   async function run() {
@@ -37,7 +42,7 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
     setBusy(true);
     setErr(null);
     try {
-      const updated = await api.analyzeBid(bidId, prompt.trim() || undefined);
+      const updated = await api.analyzeBid(bidId, prompt?.trim() || undefined);
       setLocalAnalysis(updated?.aiAnalysis ?? null);
       onAfter?.(updated);
     } catch (e: any) {
@@ -47,19 +52,16 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
     }
   }
 
-  const allowRun = Boolean(canRun || effectiveRole === 'admin');
-
   return (
-    <section className="relative z-10 rounded-xl border border-slate-200 p-4 bg-white shadow-sm pointer-events-auto">
+    <section className="rounded-xl border border-slate-200 p-4 bg-white shadow-sm">
       <header className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-slate-900 text-white grid place-items-center text-xs font-bold">A2</div>
-          <h3 className="font-semibold">Agent2 Analysis</h3>
+          <h3 className="font-semibold">Agent 2 Analysis</h3>
         </div>
         <RoleBadge role={effectiveRole} />
       </header>
 
-      {/* Analysis */}
       {localAnalysis ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -70,15 +72,19 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
               </b>
             </span>
             <span>Confidence: <b>{prettyConfidence ?? '—'}</b></span>
-            {'pdfUsed' in (localAnalysis || {}) && (
-              <span className="text-slate-500">PDF used: <b>{localAnalysis.pdfUsed ? 'yes' : 'no'}</b></span>
+            {localAnalysis?.pdfUsed !== undefined && (
+              <span className="text-slate-500">
+                PDF parsed: <b>{localAnalysis.pdfUsed ? 'Yes' : 'No'}</b>
+              </span>
             )}
           </div>
 
           {localAnalysis?.summary && (
             <div>
               <div className="text-sm font-semibold mb-1">Summary</div>
-              <p className="whitespace-pre-line text-sm leading-relaxed">{localAnalysis.summary}</p>
+              <p className="whitespace-pre-line text-sm leading-relaxed">
+                {localAnalysis.summary}
+              </p>
             </div>
           )}
 
@@ -99,55 +105,35 @@ export default function Agent2PromptBox({ bidId, analysis, role, canRun, onAfter
               </ul>
             </div>
           )}
-
-          {effectiveRole === 'admin' && (localAnalysis?.promptExcerpt || localAnalysis?.pdfSnippet) && (
-            <details className="mt-1 rounded-lg bg-slate-50 p-3 text-sm">
-              <summary className="cursor-pointer text-slate-600">Details</summary>
-              {localAnalysis?.promptExcerpt && (
-                <div className="mt-2">
-                  <div className="font-medium mb-1">Prompt excerpt</div>
-                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">{localAnalysis.promptExcerpt}</pre>
-                </div>
-              )}
-              {localAnalysis?.pdfSnippet && (
-                <div className="mt-3">
-                  <div className="font-medium mb-1">PDF snippet (truncated)</div>
-                  <pre className="text-xs bg-white border rounded p-2 overflow-auto">{localAnalysis.pdfSnippet}</pre>
-                </div>
-              )}
-            </details>
-          )}
         </div>
       ) : (
-        <p className="text-sm text-slate-500">No Agent2 analysis available yet for this bid.</p>
+        <p className="text-sm text-slate-500">
+          No Agent 2 analysis available yet for this bid.
+        </p>
       )}
 
-      {/* Prompt runner (disabled if not allowed) */}
-      <div className="mt-5">
-        <div className="font-semibold mb-2">Custom Prompt</div>
-        <textarea
-          className="w-full min-h-28 rounded-lg border p-3 text-sm"
-          placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank to use the default prompt)`}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          disabled={!allowRun}
-        />
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            onClick={run}
-            disabled={!allowRun || busy}
-            className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-          >
-            {busy ? 'Analyzing…' : 'Run Agent2'}
-          </button>
-          {err && <span className="text-sm text-rose-700">{err}</span>}
-        </div>
-        {!allowRun && (
-          <div className="mt-2 text-xs text-amber-700">
-            You can view the analysis, but only the bid owner or an admin can run Agent&nbsp;2.
+      {/* Prompt UI — visible if allowRun */}
+      {allowRun && (
+        <div className="mt-5">
+          <div className="font-semibold mb-2">Custom Prompt</div>
+          <textarea
+            className="w-full min-h-28 rounded-lg border p-3 text-sm"
+            placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank for the default prompt)`}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={run}
+              disabled={busy}
+              className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+            >
+              {busy ? 'Analyzing…' : 'Run Agent 2'}
+            </button>
+            {err && <span className="text-sm text-rose-700">{err}</span>}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
