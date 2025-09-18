@@ -18,6 +18,7 @@ export default function VendorBidDetailPage() {
   const [status, setStatus] = useState<Loaded>('loading');
   const [error, setError] = useState<string | null>(null);
   const [bid, setBid] = useState<any>(null);
+  const [genBusy, setGenBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -45,6 +46,18 @@ export default function VendorBidDetailPage() {
 
   function onAfterAnalyze(updated: any) {
     setBid(updated);
+  }
+
+  async function generateDefaultAnalysis() {
+    try {
+      setGenBusy(true);
+      const updated = await api.analyzeBid(bidId); // no prompt -> default
+      setBid(updated);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to run Agent 2');
+    } finally {
+      setGenBusy(false);
+    }
   }
 
   if (status === 'loading') {
@@ -132,11 +145,22 @@ export default function VendorBidDetailPage() {
 
       {/* Agent 2 Analysis */}
       <section className="rounded border bg-white p-4">
-        <h2 className="text-lg font-semibold mb-2">Agent 2 Analysis</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Agent 2 Analysis</h2>
+          {!analysis && isOwner && (
+            <button
+              onClick={generateDefaultAnalysis}
+              disabled={genBusy}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+            >
+              {genBusy ? 'Generating…' : 'Generate Analysis'}
+            </button>
+          )}
+        </div>
 
         {!analysis && (
           <div className="text-sm text-gray-500">
-            No analysis yet. You can run it below.
+            No analysis yet. Generate a default analysis or run with a custom prompt below.
           </div>
         )}
 
