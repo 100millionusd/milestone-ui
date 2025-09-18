@@ -1,135 +1,145 @@
-// src/app/vendor/proof/[bidId]/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { getBid, uploadFileToIPFS, submitProof } from '@/lib/api';
-
-type UploadedRow = { name: string; url: string };
+import {
+  getBid,
+  uploadFileToIPFS,
+  submitProof,
+  analyzeProof,
+  Proof,
+} from '@/lib/api';
 
 export default function VendorProofPage() {
   const params = useParams();
   const router = useRouter();
-  const bidId = Number(params.bidId);
-
   const [bid, setBid] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // --- form state
+  const [selectedPendingIdx, setSelectedPendingIdx] = useState<number>(0);
+  const [proofTitle, setProofTitle] = useState('');
+  const [proofDescription, setProofDescription] = useState('');
+  const [agentPrompt, setAgentPrompt] = useState(''); // NEW: optional Agent 2 prompt
+
+  // files & progress
+  const [proofFiles, setProofFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+
+  // last submitted proof returned by server (to show analysis / re-run)
+  const [lastProof, setLastProof] = useState<Proof | null>(null);
+  const [rerunBusy, setRerunBusy] = useState(false);
   const [error, setError] = useState<string>('');
 
-  // selection uses ORIGINAL index from bid.milestones
-  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number>(0);
-
-  // proof composer
-  const [proofDescription, setProofDescription] = useState('');
-  const [localFiles, setLocalFiles] = useState<File[]>([]);
-  const [uploaded, setUploaded] = useState<UploadedRow[]>([]);
-  const [uploading, setUploading] = useState(false);
-
-  // Agent 2
-  const [a2Prompt, setA2Prompt] = useState('');
+  const bidId = Number(params.bidId);
 
   useEffect(() => {
-    if (!Number.isFinite(bidId)) return;
-    loadBid();
+    (async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const bidData = await getBid(bidId);
+        setBid(bidData);
+      } catch (e: any) {
+        console.error('Error loading bid:', e);
+        setError('Failed to load bid details. Please check the bid ID and try again.');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [bidId]);
 
-  async function loadBid() {
-    try {
-      setLoading(true);
-      setError('');
-      const bidData = await getBid(bidId);
-      setBid(bidData);
+  // Map pending milestones WITH original index so we submit the correct index
+  const pending = useMemo(() => {
+    if (!bid?.milestones) return [];
+    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    return ms
+      .map((m, i) => ({ m, originalIndex: i }))
+      .filter(({ m }) => !m?.completed);
+  }, [bid]);
 
-      // default to first pending milestone’s ORIGINAL index
-      const ms = Array.isArray(bidData?.milestones) ? bidData.milestones : [];
-      const firstPendingIdx = ms.findIndex((m: any) => !m.completed);
-      setSelectedOriginalIndex(firstPendingIdx >= 0 ? firstPendingIdx : 0);
-    } catch (e: any) {
-      console.error('Error loading bid:', e);
-      setError('Failed to load bid details. Please check the bid ID and try again.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const milestones: any[] = Array.isArray(bid?.milestones) ? bid.milestones : [];
-
-  // list shown to user, but KEEP original indices
-  const pending = useMemo(
-    () =>
-      milestones
-        .map((m, i) => ({ ...m, _idx: i }))
-        .filter((m) => !m.completed),
-    [milestones]
-  );
+  const selectedOriginalIndex = useMemo(() => {
+    const row = pending[selectedPendingIdx];
+    return row ? row.originalIndex : 0;
+  }, [pending, selectedPendingIdx]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
-      setLocalFiles((prev) => [...prev, ...files]);
-    }
+    if (!e.target.files) return;
+    const newFiles = Array.from(e.target.files);
+    setProofFiles(prev => [...prev, ...newFiles]);
   };
 
-  const removeLocal = (i: number) => {
-    setLocalFiles((prev) => prev.filter((_, idx) => idx !== i));
+  const removeFile = (index: number) => {
+    setProofFiles(prev => prev.filter((_, i) => i !== index));
   };
-
-  const removeUploaded = (i: number) => {
-    setUploaded((prev) => prev.filter((_, idx) => idx !== i));
-  };
-
-  async function uploadAll() {
-    if (localFiles.length === 0) return;
-    setUploading(true);
-    try {
-      const rows: UploadedRow[] = [];
-      for (const f of localFiles) {
-        const res = await uploadFileToIPFS(f); // -> { cid, url }
-        if (!res?.url) throw new Error('Upload failed (no URL returned)');
-        rows.push({ name: f.name, url: res.url });
-      }
-      setUploaded((prev) => [...prev, ...rows]);
-      setLocalFiles([]); // clear the local queue
-    } catch (e: any) {
-      alert(e?.message || 'File upload failed');
-    } finally {
-      setUploading(false);
-    }
-  }
 
   async function handleSubmitProof() {
-    try {
-      setSubmitting(true);
-      setError('');
+    if (!bid) return;
 
-      if (!Number.isFinite(bidId)) throw new Error('Invalid bid ID');
-      if (!Number.isFinite(selectedOriginalIndex)) throw new Error('Select a milestone');
-      if (!proofDescription.trim() && uploaded.length === 0) {
-        throw new Error('Please provide a description or upload at least one file');
+    if (!proofDescription.trim() && proofFiles.length === 0) {
+      setError('Please provide either a description or upload files as proof');
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    setLastProof(null);
+    setUploadProgress({});
+
+    try {
+      // 1) Upload files to IPFS (if any)
+      const structuredFiles: { name: string; url: string }[] = [];
+      for (const file of proofFiles) {
+        setUploadProgress(prev => ({ ...prev, [file.name]: 1 }));
+        try {
+          const up = await uploadFileToIPFS(file);
+          structuredFiles.push({ name: file.name, url: up.url });
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        } catch (e) {
+          console.error('Upload failed for', file.name, e);
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        }
       }
 
-      // Payload EXACTLY as server expects
-      const payload = {
+      // 2) Submit proof (sends both new JSON and legacy "proof" internally)
+      const res = await submitProof({
         bidId,
-        milestoneIndex: selectedOriginalIndex, // ORIGINAL index in bid.milestones
-        title: '', // optional; keeping simple; you can add a Title input if you want
-        description: proofDescription.trim(),
-        files: uploaded, // [{ name, url }]
-        prompt: a2Prompt.trim() || undefined, // optional Agent 2 instructions
-      };
+        milestoneIndex: selectedOriginalIndex,
+        title: proofTitle,
+        description: proofDescription,
+        files: structuredFiles,
+        prompt: agentPrompt || undefined, // server will run Agent 2 if /proofs route is active
+      });
 
-      // helpful when debugging 400s
-      console.log('Submitting proof payload →', payload);
+      setLastProof(res);
 
-      await submitProof(payload);
-
-      alert('Proof submitted! Admin will review it alongside Agent 2’s analysis.');
-      router.push('/vendor/dashboard');
+      // 3) Success message
+      if (res?.proofId) {
+        // New route path: we have a stored proof with id (Agent2 may already be in aiAnalysis)
+        alert('Proof submitted successfully! You can review the Agent 2 analysis below.');
+      } else {
+        // Legacy fallback (no proofId) – analysis not available for this submission
+        alert('Proof submitted successfully! (Legacy mode). Admin will review and release payment.');
+      }
     } catch (e: any) {
+      console.error(e);
       setError(e?.message || 'Failed to submit proof. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function rerunAnalysis() {
+    if (!lastProof?.proofId) return;
+    try {
+      setRerunBusy(true);
+      const updated = await analyzeProof(lastProof.proofId, agentPrompt || undefined);
+      setLastProof(updated);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to run Agent 2');
+    } finally {
+      setRerunBusy(false);
     }
   }
 
@@ -137,7 +147,7 @@ export default function VendorProofPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Loading bid details...</p>
         </div>
       </div>
@@ -176,8 +186,6 @@ export default function VendorProofPage() {
     );
   }
 
-  const pendingMilestones = pending; // same visual name as before
-
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-sm p-6">
@@ -199,30 +207,45 @@ export default function VendorProofPage() {
           </p>
         </div>
 
-        {pendingMilestones.length === 0 ? (
+        {pending.length === 0 ? (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
             <p className="text-green-800 font-semibold">✅ All milestones completed!</p>
             <p className="text-green-600">All payments have been processed for this project.</p>
           </div>
         ) : (
           <>
+            {/* Milestone select (uses original indices under the hood) */}
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Select Milestone to Verify *
               </label>
               <select
-                value={selectedOriginalIndex}
-                onChange={(e) => setSelectedOriginalIndex(parseInt(e.target.value))}
+                value={selectedPendingIdx}
+                onChange={(e) => setSelectedPendingIdx(parseInt(e.target.value))}
                 className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                {pendingMilestones.map((m: any) => (
-                  <option key={m._idx} value={m._idx}>
+                {pending.map(({ m, originalIndex }, idx) => (
+                  <option key={originalIndex} value={idx}>
                     {m.name} - ${m.amount} (Due: {new Date(m.dueDate).toLocaleDateString()})
                   </option>
                 ))}
               </select>
             </div>
 
+            {/* Title (optional) */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Proof Title (optional)
+              </label>
+              <input
+                value={proofTitle}
+                onChange={(e) => setProofTitle(e.target.value)}
+                placeholder="e.g., Milestone 1: Installation completed"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* Description */}
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Proof Description
@@ -265,11 +288,10 @@ export default function VendorProofPage() {
                 </p>
               </div>
 
-              {/* local queue */}
-              {localFiles.length > 0 && (
+              {proofFiles.length > 0 && (
                 <div className="mt-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Selected files (not uploaded yet):</p>
-                  {localFiles.map((file, index) => (
+                  <p className="text-sm font-medium text-gray-700">Selected files:</p>
+                  {proofFiles.map((file, index) => (
                     <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
                       <div className="flex items-center space-x-2">
                         <span className="text-sm text-gray-600">{file.name}</span>
@@ -277,92 +299,163 @@ export default function VendorProofPage() {
                           ({(file.size / 1024 / 1024).toFixed(2)} MB)
                         </span>
                       </div>
-                      <button
-                        onClick={() => removeLocal(index)}
-                        className="text-red-600 hover:text-red-800 text-sm font-medium"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-
-                  <button
-                    onClick={uploadAll}
-                    disabled={uploading}
-                    className="mt-2 bg-slate-900 text-white px-4 py-2 rounded-lg disabled:opacity-60"
-                  >
-                    {uploading ? 'Uploading…' : 'Upload selected'}
-                  </button>
-                </div>
-              )}
-
-              {/* uploaded list */}
-              {uploaded.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Attached files:</p>
-                  {uploaded.map((row, index) => (
-                    <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-                      <a
-                        href={row.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline text-sm break-all"
-                      >
-                        {row.name}
-                      </a>
-                      <button
-                        onClick={() => removeUploaded(index)}
-                        className="text-red-600 hover:text-red-800 text-sm font-medium"
-                      >
-                        Remove
-                      </button>
+                      <div className="flex items-center space-x-2">
+                        {uploadProgress[file.name] > 0 && uploadProgress[file.name] < 100 && (
+                          <div className="w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-500 h-2 rounded-full"
+                              style={{ width: `${uploadProgress[file.name]}%` }}
+                            />
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Agent 2 prompt */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Agent 2 Prompt (optional)
-              </label>
+            {/* Agent 2 (optional) */}
+            <div className="mb-6 rounded-lg border border-slate-200 p-4 bg-slate-50">
+              <div className="font-semibold mb-2">Agent 2 — Optional prompt</div>
               <textarea
-                value={a2Prompt}
-                onChange={(e) => setA2Prompt(e.target.value)}
-                placeholder={`Extra instructions to Agent 2. Use {{CONTEXT}} to inject bid + proof.\nExample: "Ensure screenshots match acceptance criteria for this milestone. {{CONTEXT}}".`}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={agentPrompt}
+                onChange={(e) => setAgentPrompt(e.target.value)}
+                className="w-full p-3 rounded-lg border"
+                placeholder={`Optional. For example:\n"Summarize the attached work and highlight any risks. If a PDF is present, quote 1–2 short excerpts."`}
                 rows={3}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                If left blank, the default proof-analysis prompt will be used.
+              <p className="text-xs text-slate-500 mt-1">
+                If your API’s <code>/proofs</code> route is active, Agent 2 will analyze this proof automatically.
               </p>
             </div>
 
+            {/* Info & Submit */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
               <h3 className="font-semibold text-yellow-800 mb-2">Important Information</h3>
               <ul className="text-sm text-yellow-700 space-y-1">
-                <li>• Admin will review your proof and the Agent 2 analysis before releasing payment</li>
+                <li>• Admin will review your proof before releasing payment</li>
                 <li>• Include clear evidence of completed work</li>
                 <li>• Payment will be sent in {bid.preferredStablecoin}</li>
-                <li>• You&apos;ll receive ${milestones[selectedOriginalIndex]?.amount ?? 0} upon approval</li>
+                <li>• You&apos;ll receive ${bid.milestones[selectedOriginalIndex].amount} upon approval</li>
               </ul>
             </div>
 
             <button
               onClick={handleSubmitProof}
-              disabled={submitting}
+              disabled={submitting || proofFiles.length === 0}
               className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? 'Submitting Proof...' : 'Submit Proof for Review'}
             </button>
 
-            {error && (
-              <p className="text-red-600 text-sm mt-2 text-center">{error}</p>
+            {proofFiles.length === 0 && (
+              <p className="text-red-600 text-sm mt-2 text-center">
+                Please upload at least one file as proof of work
+              </p>
             )}
           </>
+        )}
+
+        {/* Agent 2 result (after submit) */}
+        {lastProof && (
+          <div className="mt-8 rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold">Agent 2 Result</h3>
+              {lastProof?.proofId ? (
+                <span className="text-xs rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 border border-emerald-200">
+                  Stored proof #{lastProof.proofId}
+                </span>
+              ) : (
+                <span className="text-xs rounded bg-amber-100 text-amber-800 px-2 py-0.5 border border-amber-200">
+                  Legacy submit: no proof id
+                </span>
+              )}
+            </div>
+
+            {lastProof.aiAnalysis ? (
+              <AnalysisView a={lastProof.aiAnalysis} />
+            ) : lastProof.proofId ? (
+              <div className="mt-2">
+                <p className="text-sm text-slate-600 mb-2">
+                  No analysis present yet. You can run Agent 2 now with an optional prompt:
+                </p>
+                <textarea
+                  value={agentPrompt}
+                  onChange={(e) => setAgentPrompt(e.target.value)}
+                  className="w-full p-3 border rounded-lg"
+                  rows={3}
+                  placeholder="Optional prompt for Agent 2…"
+                />
+                <div className="mt-2">
+                  <button
+                    onClick={rerunAnalysis}
+                    disabled={rerunBusy}
+                    className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+                  >
+                    {rerunBusy ? 'Analyzing…' : 'Run Agent 2'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-slate-600">
+                This submission used a legacy route, so Agent 2 analysis isn’t attached. Future submissions will include analysis when your server’s <code>/proofs</code> route is active.
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
   );
+}
+
+function AnalysisView({ a }: { a: any }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {'fit' in a && <span>Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b></span>}
+        {'confidence' in a && <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>}
+        {'pdfUsed' in a && <span className="text-slate-500">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>}
+      </div>
+
+      {a.summary && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Summary</div>
+          <p className="whitespace-pre-line text-sm leading-relaxed">{a.summary}</p>
+        </div>
+      )}
+
+      {Array.isArray(a.risks) && a.risks.length > 0 && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Risks</div>
+          <ul className="list-disc list-inside text-sm space-y-1">
+            {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Milestone Notes</div>
+          <ul className="list-disc list-inside text-sm space-y-1">
+            {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fitColor(fit?: string) {
+  const f = String(fit || '').toLowerCase();
+  if (f === 'high') return 'text-emerald-700';
+  if (f === 'medium') return 'text-amber-700';
+  if (f === 'low') return 'text-rose-700';
+  return 'text-slate-600';
 }

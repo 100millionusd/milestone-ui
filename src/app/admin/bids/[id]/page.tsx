@@ -3,40 +3,69 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import * as api from '@/lib/api';
-import Agent2PromptBox from '@/components/Agent2PromptBox';
 
-export default function AdminBidDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function AdminBidDetailPage({ params }: { params: { id: string } }) {
   const bidId = Number(params.id);
-  const [bid, setBid] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [bid, setBid] = useState<any>(null);
+  const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [promptById, setPromptById] = useState<Record<number, string>>({});
+  const [busyById, setBusyById] = useState<Record<number, boolean>>({});
 
-  async function load() {
-    setLoading(true);
-    setErr(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const [b, pf] = await Promise.all([
+          api.getBid(bidId),
+          api.getProofs(bidId) // admin-protected on server
+        ]);
+        setBid(b);
+        setProofs(pf);
+      } catch (e: any) {
+        setErr(e?.message || 'Failed to load bid');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [bidId]);
+
+  async function runProofAnalysis(id: number) {
     try {
-      const b = await api.getBid(bidId);
-      setBid(b);
+      setBusyById(prev => ({ ...prev, [id]: true }));
+      const prompt = promptById[id] || '';
+      const updated = await api.analyzeProof(id, prompt || undefined);
+      setProofs(prev => prev.map(p => (Number(p.proofId ?? p.id) === id ? updated : p)));
     } catch (e: any) {
-      setErr(String(e?.message ?? e));
+      alert(e?.message || 'Failed to run Agent 2 on proof');
     } finally {
-      setLoading(false);
+      setBusyById(prev => ({ ...prev, [id]: false }));
     }
   }
 
-  useEffect(() => {
-    if (Number.isFinite(bidId)) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bidId]);
-
-  if (!Number.isFinite(bidId)) {
+  if (loading) {
     return (
       <main className="max-w-5xl mx-auto p-6">
-        <div className="text-rose-700">Invalid bid id.</div>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
+          <Link href="/admin/bids" className="underline">← Back</Link>
+        </div>
+        <div className="py-20 text-center text-gray-500">Loading…</div>
+      </main>
+    );
+  }
+
+  if (err || !bid) {
+    return (
+      <main className="max-w-5xl mx-auto p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
+          <Link href="/admin/bids" className="underline">← Back</Link>
+        </div>
+        <div className="p-4 rounded border bg-rose-50 text-rose-700">
+          {err || 'Bid not found'}
+        </div>
       </main>
     );
   }
@@ -44,85 +73,158 @@ export default function AdminBidDetailPage({
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Admin · Bid #{bidId}</h1>
-        <Link href="/admin/proposals" className="underline">
-          ← Back to Admin
-        </Link>
+        <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
+        <Link href="/admin/bids" className="underline">← Back</Link>
       </div>
 
-      {loading && <div>Loading…</div>}
-      {err && <div className="text-rose-700">{err}</div>}
+      {/* Bid summary */}
+      <section className="rounded border p-4 bg-white">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Info label="Project" value={`#${bid.proposalId}`} />
+          <Info label="Vendor" value={bid.vendorName} />
+          <Info label="Price" value={`$${bid.priceUSD} ${bid.preferredStablecoin}`} />
+          <Info label="Timeline" value={`${bid.days} days`} />
+        </div>
+      </section>
 
-      {bid && (
-        <>
-          {/* Bid header */}
-          <section className="rounded border p-4 bg-white">
-            <div className="text-sm text-slate-500">Proposal #{bid.proposalId}</div>
-            <div className="mt-1 font-medium">{bid.vendorName}</div>
-            <div className="mt-2 text-sm">
-              <span className="font-medium">Price:</span>{' '}
-              ${Number(bid.priceUSD || 0).toLocaleString()} ·{' '}
-              <span className="font-medium">Days:</span> {bid.days} ·{' '}
-              <span className="font-medium">Status:</span> {bid.status}
-            </div>
-          </section>
+      {/* Proofs for this bid (with Agent 2) */}
+      <section className="rounded border p-4 bg-white">
+        <h2 className="font-semibold mb-3">Submitted Proofs</h2>
 
-          {/* Agent 2 analysis */}
-          <section className="rounded border p-4 bg-white">
-            <div className="font-semibold mb-1">Agent 2 Analysis</div>
+        {proofs.length === 0 && (
+          <div className="text-sm text-slate-500">No proofs submitted yet.</div>
+        )}
 
-            <div className="prose max-w-none whitespace-pre-wrap">
-              {bid.aiAnalysis?.summary || 'No analysis yet.'}
-            </div>
+        {proofs.map((p) => {
+          const id = Number(p.proofId ?? p.id);
+          const a = p.aiAnalysis ?? p.ai_analysis;
 
-            <div className="mt-2 text-sm text-slate-600">
-              Fit: {bid.aiAnalysis?.fit ?? '—'} · Confidence:{' '}
-              {Math.round(((bid.aiAnalysis?.confidence ?? 0) * 100))}%
-            </div>
+          return (
+            <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">
+                  {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
+                </div>
+                <span className={`text-xs rounded px-2 py-0.5 border ${
+                  p.status === 'approved'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                    : p.status === 'rejected'
+                    ? 'bg-rose-100 text-rose-800 border-rose-200'
+                    : 'bg-amber-100 text-amber-800 border-amber-200'
+                }`}>
+                  {p.status}
+                </span>
+              </div>
 
-            {!!(bid.aiAnalysis?.risks?.length) && (
-              <div className="mt-3">
-                <div className="font-medium">Risks</div>
-                <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.risks.map((r: string, i: number) => (
-                    <li key={i}>{r}</li>
+              {p.description && (
+                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
+              )}
+
+              {/* files */}
+              {Array.isArray(p.files) && p.files.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {p.files.map((f: any, i: number) => (
+                    <li key={i} className="text-sm">
+                      <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
+                        {f.name || f.url}
+                      </a>
+                    </li>
                   ))}
                 </ul>
-              </div>
-            )}
+              )}
 
-            {!!(bid.aiAnalysis?.milestoneNotes?.length) && (
-              <div className="mt-3">
-                <div className="font-medium">Milestone Notes</div>
-                <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.milestoneNotes.map((m: string, i: number) => (
-                    <li key={i}>{m}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              {/* Agent 2 analysis */}
+              <div className="mt-4 rounded-md bg-slate-50 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-semibold">Agent 2 Analysis</div>
+                </div>
 
-            <div className="mt-3 text-xs text-slate-500">
-              PDF parsed: {bid.aiAnalysis?.pdfUsed ? 'Yes' : 'No'}
-              {bid.aiAnalysis?.pdfDebug?.name ? <> · File: {bid.aiAnalysis.pdfDebug.name}</> : null}
-              {typeof bid.aiAnalysis?.pdfChars === 'number' ? <> · Chars: {bid.aiAnalysis.pdfChars}</> : null}
+                {a ? (
+                  <AnalysisView a={a} />
+                ) : (
+                  <div className="text-sm text-slate-600">
+                    No analysis yet for this proof.
+                  </div>
+                )}
+
+                {/* admin re-run */}
+                <div className="mt-3">
+                  <textarea
+                    value={promptById[id] || ''}
+                    onChange={(e) => setPromptById(prev => ({ ...prev, [id]: e.target.value }))}
+                    className="w-full p-2 rounded border"
+                    rows={3}
+                    placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
+                  />
+                  <div className="mt-2">
+                    <button
+                      onClick={() => runProofAnalysis(id)}
+                      disabled={!!busyById[id]}
+                      className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+                    >
+                      {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            {/* Optional: show stored prompt if your server returns it */}
-            {bid.aiAnalysis?.prompt && (
-              <div className="mt-4">
-                <div className="font-medium">Agent 2 Prompt (last run)</div>
-                <pre className="mt-2 text-xs whitespace-pre-wrap bg-slate-50 border rounded p-3">
-{bid.aiAnalysis.prompt}
-                </pre>
-              </div>
-            )}
-          </section>
-
-          {/* Interactive prompt box for admin refinement */}
-          <Agent2PromptBox bidId={bidId} onAfter={(updated: any) => setBid(updated)} />
-        </>
-      )}
+          );
+        })}
+      </section>
     </main>
   );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="font-medium">{value}</div>
+    </div>
+  );
+}
+
+function AnalysisView({ a }: { a: any }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {'fit' in a && <span>Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b></span>}
+        {'confidence' in a && <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>}
+        {'pdfUsed' in a && <span className="text-slate-500">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>}
+      </div>
+
+      {a.summary && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Summary</div>
+          <p className="whitespace-pre-line text-sm leading-relaxed">{a.summary}</p>
+        </div>
+      )}
+
+      {Array.isArray(a.risks) && a.risks.length > 0 && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Risks</div>
+          <ul className="list-disc list-inside text-sm space-y-1">
+            {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
+        <div>
+          <div className="text-sm font-semibold mb-1">Milestone Notes</div>
+          <ul className="list-disc list-inside text-sm space-y-1">
+            {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fitColor(fit?: string) {
+  const f = String(fit || '').toLowerCase();
+  if (f === 'high') return 'text-emerald-700';
+  if (f === 'medium') return 'text-amber-700';
+  if (f === 'low') return 'text-rose-700';
+  return 'text-slate-600';
 }
