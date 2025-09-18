@@ -137,7 +137,7 @@ export default function VendorBidDetailPage() {
           bidId={bidId}
           analysis={analysis}
           role={effectiveRole}
-          canRun={canRun}                 {/* <- key: allow owner/admin to run */}
+          canRun={canRun}              
           onAfter={onAfterAnalyze}
         />
 
