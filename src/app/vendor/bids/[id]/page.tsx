@@ -1,19 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import * as api from '@/lib/api';
 import Agent2PromptBox from '@/components/Agent2PromptBox';
 
-export default function AdminBidDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function VendorBidDetailPage({ params }: { params: { id: string } }) {
   const bidId = Number(params.id);
   const [bid, setBid] = useState<any>(null);
+  const [err, setErr] = useState<string|null>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -21,60 +16,42 @@ export default function AdminBidDetailPage({
     try {
       const b = await api.getBid(bidId);
       setBid(b);
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (Number.isFinite(bidId)) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bidId]);
+  useEffect(() => { if (Number.isFinite(bidId)) load(); }, [bidId]);
 
-  if (!Number.isFinite(bidId)) {
-    return (
-      <main className="max-w-5xl mx-auto p-6">
-        <div className="text-rose-700">Invalid bid id.</div>
-      </main>
-    );
-  }
+  if (!Number.isFinite(bidId)) return <div>Invalid bid id.</div>;
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Admin · Bid #{bidId}</h1>
-        <Link href="/admin/proposals" className="underline">
-          ← Back to Admin
-        </Link>
-      </div>
+    <div className="max-w-3xl mx-auto p-4 space-y-6">
+      <h1 className="text-xl font-semibold">Bid #{bidId}</h1>
 
       {loading && <div>Loading…</div>}
       {err && <div className="text-rose-700">{err}</div>}
 
       {bid && (
         <>
-          {/* Bid header */}
-          <section className="rounded border p-4 bg-white">
+          <div className="rounded-xl border p-4">
             <div className="text-sm text-slate-500">Proposal #{bid.proposalId}</div>
             <div className="mt-1 font-medium">{bid.vendorName}</div>
             <div className="mt-2 text-sm">
-              <span className="font-medium">Price:</span>{' '}
-              ${Number(bid.priceUSD || 0).toLocaleString()} ·{' '}
+              <span className="font-medium">Price:</span> ${bid.priceUSD.toLocaleString()} ·{' '}
               <span className="font-medium">Days:</span> {bid.days} ·{' '}
               <span className="font-medium">Status:</span> {bid.status}
             </div>
-          </section>
+          </div>
 
           {/* Agent 2 analysis */}
-          <section className="rounded border p-4 bg-white">
+          <div className="rounded-xl border p-4">
             <div className="font-semibold mb-1">Agent 2 Analysis</div>
-
             <div className="prose max-w-none whitespace-pre-wrap">
               {bid.aiAnalysis?.summary || 'No analysis yet.'}
             </div>
-
             <div className="mt-2 text-sm text-slate-600">
               Fit: {bid.aiAnalysis?.fit ?? '—'} · Confidence:{' '}
               {Math.round(((bid.aiAnalysis?.confidence ?? 0) * 100))}%
@@ -84,9 +61,7 @@ export default function AdminBidDetailPage({
               <div className="mt-3">
                 <div className="font-medium">Risks</div>
                 <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.risks.map((r: string, i: number) => (
-                    <li key={i}>{r}</li>
-                  ))}
+                  {bid.aiAnalysis.risks.map((r:string, i:number) => <li key={i}>{r}</li>)}
                 </ul>
               </div>
             )}
@@ -95,9 +70,7 @@ export default function AdminBidDetailPage({
               <div className="mt-3">
                 <div className="font-medium">Milestone Notes</div>
                 <ul className="list-disc ml-6">
-                  {bid.aiAnalysis.milestoneNotes.map((m: string, i: number) => (
-                    <li key={i}>{m}</li>
-                  ))}
+                  {bid.aiAnalysis.milestoneNotes.map((m:string, i:number) => <li key={i}>{m}</li>)}
                 </ul>
               </div>
             )}
@@ -105,24 +78,13 @@ export default function AdminBidDetailPage({
             <div className="mt-3 text-xs text-slate-500">
               PDF parsed: {bid.aiAnalysis?.pdfUsed ? 'Yes' : 'No'}
               {bid.aiAnalysis?.pdfDebug?.name ? <> · File: {bid.aiAnalysis.pdfDebug.name}</> : null}
-              {typeof bid.aiAnalysis?.pdfChars === 'number' ? <> · Chars: {bid.aiAnalysis.pdfChars}</> : null}
             </div>
+          </div>
 
-            {/* Optional: show stored prompt if your server returns it */}
-            {bid.aiAnalysis?.prompt && (
-              <div className="mt-4">
-                <div className="font-medium">Agent 2 Prompt (last run)</div>
-                <pre className="mt-2 text-xs whitespace-pre-wrap bg-slate-50 border rounded p-3">
-{bid.aiAnalysis.prompt}
-                </pre>
-              </div>
-            )}
-          </section>
-
-          {/* Interactive prompt box for admin refinement */}
-          <Agent2PromptBox bidId={bidId} onAfter={(updated: any) => setBid(updated)} />
+          {/* Interactive prompt box (vendor can clarify/re-run if allowed) */}
+          <Agent2PromptBox bidId={bidId} onAfter={(updated:any) => setBid(updated)} />
         </>
       )}
-    </main>
+    </div>
   );
 }
