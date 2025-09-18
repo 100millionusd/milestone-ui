@@ -54,7 +54,7 @@ export interface TransactionResult {
 }
 
 export interface Proof {
-  proofId?: number; // server may return proof_id / id
+  proofId?: number; // server might return proof_id / id
   bidId: number;
   milestoneIndex: number;
   vendorName: string;
@@ -70,18 +70,6 @@ export interface Proof {
 export interface AuthInfo {
   address?: string;
   role: "admin" | "vendor" | "guest";
-}
-
-export interface ProofFile {
-  name: string;
-  url: string;
-}
-
-export interface SubmitProofPayload {
-  title?: string;
-  description?: string;
-  files?: ProofFile[];
-  prompt?: string;
 }
 
 // ---- Env-safe API base resolution ----
@@ -110,30 +98,20 @@ const url = (path: string) => `${API_BASE}${path}`;
 function coerceJson(val: any) {
   if (!val) return null;
   if (typeof val === "string") {
-    try {
-      return JSON.parse(val);
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(val); } catch { return null; }
   }
   return val;
 }
 
 function toIso(d: any): string {
-  try {
-    return new Date(d).toISOString();
-  } catch {
-    return new Date().toISOString();
-  }
+  try { return new Date(d).toISOString(); }
+  catch { return new Date().toISOString(); }
 }
 
 function getJwt(): string | null {
   if (typeof window === "undefined") return null;
-  try {
-    return localStorage.getItem("lx_jwt");
-  } catch {
-    return null;
-  }
+  try { return localStorage.getItem("lx_jwt"); }
+  catch { return null; }
 }
 
 function isAuthError(e: any) {
@@ -191,10 +169,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
 // ---- POST helper ----
 export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
-  return apiFetch(path, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  return apiFetch(path, { method: "POST", body: JSON.stringify(data) });
 };
 
 // ---- Auth ----
@@ -240,11 +215,7 @@ function toProposal(p: any): Proposal {
 function coerceAnalysis(a: any) {
   if (!a) return null;
   if (typeof a === "string") {
-    try {
-      return JSON.parse(a);
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(a); } catch { return null; }
   }
   return a;
 }
@@ -254,11 +225,7 @@ function toMilestones(raw: any): Milestone[] {
   if (Array.isArray(raw)) {
     arr = raw;
   } else if (typeof raw === "string") {
-    try {
-      arr = JSON.parse(raw);
-    } catch {
-      arr = [];
-    }
+    try { arr = JSON.parse(raw); } catch { arr = []; }
   }
   return arr.map((m: any) => ({
     name: m?.name ?? "",
@@ -369,7 +336,6 @@ export async function getBids(proposalId?: number): Promise<Bid[]> {
     const rows = await apiFetch(`/bids${q}`);
     return (Array.isArray(rows) ? rows : []).map(toBid);
   } catch (e) {
-    // Soft-fail on unauth so public pages don't break
     if (isAuthError(e)) return [];
     throw e;
   }
@@ -478,7 +444,9 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
   }
 }
 
-// Create/submit a proof (text + optional files + optional Agent2 prompt)
+// Create/submit a proof (text + optional files) for a specific milestone.
+// Sends both the new shape and a legacy "proof" string to maximize server compatibility.
+// If /proofs 400s (older server), it falls back to /bids/:id/complete-milestone.
 export async function submitProof(input: {
   bidId: number;
   milestoneIndex: number;
@@ -489,34 +457,53 @@ export async function submitProof(input: {
 }): Promise<Proof> {
   const files = Array.isArray(input.files) ? input.files : [];
 
-  // Legacy-compatible "proof" string (old server expects this)
+  // Build a legacy-proof string in case the server only supports the old route
   let legacyProof = (input.description || "").trim();
   if (files.length) {
     legacyProof += "\n\nAttachments:\n" + files.map(f => `- ${f.name || "file"}: ${f.url}`).join("\n");
   }
 
   const payload = {
-    // required by both
     bidId: Number(input.bidId),
     milestoneIndex: Number(input.milestoneIndex),
-
-    // new shape (if your newer server is running, it will use these)
     title: input.title || "",
     description: input.description || "",
     files,
-
-    // optional Agent2 custom prompt for proof analysis
     ...(input.prompt ? { prompt: input.prompt } : {}),
-
-    // legacy field so older server won’t 400
+    // legacy safety-net
     proof: legacyProof,
   };
 
-  const p = await apiFetch("/proofs", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  return toProof(p);
+  try {
+    const p = await apiFetch("/proofs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return toProof(p);
+  } catch (e: any) {
+    // If the server doesn't support /proofs schema yet, fall back to legacy:
+    const msg = String(e?.message || "").toLowerCase();
+    const isSchema400 = msg.includes("invalid /proofs request") || msg.includes("http 400");
+    if (!isSchema400) throw e;
+
+    // Legacy fallback
+    await completeMilestone(payload.bidId, payload.milestoneIndex, legacyProof);
+
+    // Synthesize a minimal proof object so the UI can continue deterministically.
+    return {
+      proofId: undefined,
+      bidId: payload.bidId,
+      milestoneIndex: payload.milestoneIndex,
+      vendorName: "",
+      walletAddress: "",
+      title: payload.title || `Proof for Milestone ${payload.milestoneIndex + 1}`,
+      description: payload.description,
+      files,
+      status: "pending",
+      submittedAt: new Date().toISOString(),
+      aiAnalysis: undefined,
+    };
+  }
 }
 
 // Optional: re-run Agent2 on a proof (admin or owner)
