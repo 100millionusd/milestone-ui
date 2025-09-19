@@ -530,7 +530,7 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
   }
 }
 
-eexport async function submitProof(input: {
+export async function submitProof(input: {
   bidId: number;
   milestoneIndex: number;
   title?: string;
