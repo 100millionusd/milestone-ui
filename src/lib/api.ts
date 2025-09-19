@@ -54,7 +54,7 @@ export interface TransactionResult {
 }
 
 export interface Proof {
-  proofId?: number; // server might return proof_id / id
+  proofId?: number;
   bidId: number;
   milestoneIndex: number;
   vendorName: string;
@@ -64,7 +64,7 @@ export interface Proof {
   files: { name: string; url: string }[];
   status: "pending" | "approved" | "rejected";
   submittedAt: string;
-  aiAnalysis?: any; // Agent 2 output for proofs
+  aiAnalysis?: any;
 }
 
 export interface AuthInfo {
@@ -98,25 +98,48 @@ const url = (path: string) => `${API_BASE}${path}`;
 function coerceJson(val: any) {
   if (!val) return null;
   if (typeof val === "string") {
-    try { return JSON.parse(val); } catch { return null; }
+    try {
+      return JSON.parse(val);
+    } catch {
+      return null;
+    }
   }
   return val;
 }
 
 function toIso(d: any): string {
-  try { return new Date(d).toISOString(); }
-  catch { return new Date().toISOString(); }
+  try {
+    return new Date(d).toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
 }
 
 function getJwt(): string | null {
   if (typeof window === "undefined") return null;
-  try { return localStorage.getItem("lx_jwt"); }
-  catch { return null; }
+  try {
+    return localStorage.getItem("lx_jwt");
+  } catch {
+    return null;
+  }
+}
+
+function setJwt(token: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) localStorage.setItem("lx_jwt", token);
+    else localStorage.removeItem("lx_jwt");
+  } catch {}
 }
 
 function isAuthError(e: any) {
   const msg = String(e?.message || e || "").toLowerCase();
-  return msg.includes("unauthorized") || msg.includes("forbidden") || /\b401\b/.test(msg) || /\b403\b/.test(msg);
+  return (
+    msg.includes("unauthorized") ||
+    msg.includes("forbidden") ||
+    /\b401\b/.test(msg) ||
+    /\b403\b/.test(msg)
+  );
 }
 
 // ---- Fetch helper ----
@@ -132,20 +155,31 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const fullUrl = url(fullPath);
 
-  // Attach JWT if available (cookie is the primary auth)
+  // Attach JWT if available (cookie is primary)
   const token = getJwt();
+
+  // Avoid forcing JSON Content-Type when the caller passed FormData
+  const callerCT = (options.headers as any)?.["Content-Type"] || (options.headers as any)?.["content-type"];
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Pragma: "no-cache",
+    "Cache-Control": "no-cache",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers as any),
+  };
+
+  if (!callerCT && !isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
 
   const r = await fetch(fullUrl, {
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Pragma: "no-cache",
-      "Cache-Control": "no-cache",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
+    mode: "cors",
+    redirect: "follow",
     credentials: "include", // send auth cookie
+    headers,
     ...options,
   }).catch((e) => {
     throw new Error(e?.message || "Failed to fetch");
@@ -159,6 +193,10 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     } catch {}
     throw new Error(msg);
   }
+
+  // 204 or non-JSON
+  const ct = r.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) return null;
 
   try {
     return await r.json();
@@ -184,16 +222,38 @@ export async function getAuthRole(): Promise<AuthInfo> {
   }
 }
 
+/**
+ * Exchange a signed nonce for a JWT cookie (and token).
+ * Call flow:
+ *  1) GET/POST /auth/nonce to get `nonce` for your wallet address
+ *  2) Sign that `nonce` with the wallet
+ *  3) Call loginWithSignature(address, signature)
+ * Returns `{ role }` and stores `token` to localStorage (lx_jwt) for Bearer fallback.
+ */
+export async function loginWithSignature(address: string, signature: string) {
+  const res = await apiFetch("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ address, signature }),
+  });
+  // server returns { token, role }
+  if (res?.token) setJwt(res.token);
+  return { role: (res?.role as AuthInfo["role"]) || "vendor" };
+}
+
+/** Clears cookie on server and local JWT cache */
+export async function logout() {
+  try {
+    await apiFetch("/auth/logout", { method: "POST" });
+  } catch {}
+  setJwt(null);
+}
+
 // ---- Normalizers ----
 function toProposal(p: any): Proposal {
   const rawId = p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID;
 
   const parsedId =
-    typeof rawId === "number"
-      ? rawId
-      : rawId != null && rawId !== ""
-      ? Number(rawId)
-      : NaN;
+    typeof rawId === "number" ? rawId : rawId != null && rawId !== "" ? Number(rawId) : NaN;
 
   return {
     proposalId: Number.isFinite(parsedId) ? parsedId : NaN,
@@ -215,7 +275,11 @@ function toProposal(p: any): Proposal {
 function coerceAnalysis(a: any) {
   if (!a) return null;
   if (typeof a === "string") {
-    try { return JSON.parse(a); } catch { return null; }
+    try {
+      return JSON.parse(a);
+    } catch {
+      return null;
+    }
   }
   return a;
 }
@@ -225,7 +289,11 @@ function toMilestones(raw: any): Milestone[] {
   if (Array.isArray(raw)) {
     arr = raw;
   } else if (typeof raw === "string") {
-    try { arr = JSON.parse(raw); } catch { arr = []; }
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      arr = [];
+    }
   }
   return arr.map((m: any) => ({
     name: m?.name ?? "",
@@ -252,7 +320,8 @@ function toBid(b: any): Bid {
     days: Number(b?.days) || 0,
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
-    preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+    preferredStablecoin: (b?.preferredStablecoin ??
+      b?.preferred_stablecoin) as Bid["preferredStablecoin"],
     milestones: toMilestones(b?.milestones),
     doc: coerceJson(b?.doc),
     status: (b?.status as Bid["status"]) ?? "pending",
@@ -278,7 +347,10 @@ function toProof(p: any): Proof {
 }
 
 // ---- Proposals (open to all) ----
-export async function listProposals(params?: { status?: Proposal["status"] | string; includeArchived?: boolean; }): Promise<Proposal[]> {
+export async function listProposals(params?: {
+  status?: Proposal["status"] | string;
+  includeArchived?: boolean;
+}): Promise<Proposal[]> {
   const q = new URLSearchParams();
   if (params?.status) q.set("status", String(params.status));
   if (params?.includeArchived) q.set("includeArchived", "true");
@@ -307,19 +379,25 @@ export async function createProposal(
 
 export async function approveProposal(id: number): Promise<Proposal> {
   if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
-  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/approve`, { method: "POST" });
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/approve`, {
+    method: "POST",
+  });
   return toProposal(p);
 }
 
 export async function rejectProposal(id: number): Promise<Proposal> {
   if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
-  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/reject`, { method: "POST" });
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/reject`, {
+    method: "POST",
+  });
   return toProposal(p);
 }
 
 export async function archiveProposal(id: number): Promise<Proposal> {
   if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
-  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/archive`, { method: "POST" });
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}/archive`, {
+    method: "POST",
+  });
   return toProposal(p);
 }
 
@@ -363,26 +441,36 @@ export async function createBid(
 
 export async function approveBid(id: number): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/approve`, { method: "POST" });
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/approve`, {
+    method: "POST",
+  });
   return toBid(b);
 }
 
 export async function rejectBid(id: number): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/reject`, { method: "POST" });
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/reject`, {
+    method: "POST",
+  });
   return toBid(b);
 }
 
 export async function archiveBid(id: number): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/archive`, { method: "POST" });
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/archive`, {
+    method: "POST",
+  });
   return toBid(b);
 }
 
 export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const body = prompt ? { method: "POST", body: JSON.stringify({ prompt }) } : { method: "POST" };
-  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, body);
+  // ✅ Always send a JSON body so server JSON parser runs (and to avoid proxy issues)
+  const body = { prompt: (prompt ?? "").trim() || undefined };
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/analyze`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
   return toBid(b);
 }
 
@@ -432,8 +520,6 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
 }
 
 // ---- Proofs ----
-
-// Admin (legacy list)
 export async function getSubmittedProofs(): Promise<Proof[]> {
   try {
     const rows = await apiFetch("/proofs");
@@ -444,9 +530,6 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
   }
 }
 
-// Create/submit a proof (text + optional files) for a specific milestone.
-// Sends both the new shape and a legacy "proof" string to maximize server compatibility.
-// If /proofs 400s (older server), it falls back to /bids/:id/complete-milestone.
 export async function submitProof(input: {
   bidId: number;
   milestoneIndex: number;
@@ -454,13 +537,14 @@ export async function submitProof(input: {
   description: string;
   files?: { name: string; url: string }[];
   prompt?: string;
-}): Promise<Proof> {
+}: PromiseLike<any> extends never ? never : any) : Promise<Proof> {
   const files = Array.isArray(input.files) ? input.files : [];
 
   // Build a legacy-proof string in case the server only supports the old route
   let legacyProof = (input.description || "").trim();
   if (files.length) {
-    legacyProof += "\n\nAttachments:\n" + files.map(f => `- ${f.name || "file"}: ${f.url}`).join("\n");
+    legacyProof +=
+      "\n\nAttachments:\n" + files.map((f) => `- ${f.name || "file"}: ${f.url}`).join("\n");
   }
 
   const payload = {
@@ -506,7 +590,6 @@ export async function submitProof(input: {
   }
 }
 
-// Optional: re-run Agent2 on a proof (admin or owner)
 export async function analyzeProof(proofId: number, prompt?: string): Promise<Proof> {
   if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
   const p = await apiFetch(`/proofs/${encodeURIComponent(String(proofId))}/analyze`, {
@@ -516,7 +599,6 @@ export async function analyzeProof(proofId: number, prompt?: string): Promise<Pr
   return toProof(p);
 }
 
-// Optional: list proofs (scope by bid when provided)
 export async function getProofs(bidId?: number): Promise<Proof[]> {
   const q = Number.isFinite(bidId as number) ? `?bidId=${bidId}` : "";
   const rows = await apiFetch(`/proofs${q}`);
@@ -551,6 +633,8 @@ export async function uploadFileToIPFS(file: File) {
   const r = await fetch(`${API_BASE}/ipfs/upload-file`, {
     method: "POST",
     body: fd,
+    mode: "cors",
+    redirect: "follow",
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     credentials: "include",
   }).catch((e) => {
@@ -563,7 +647,8 @@ export async function uploadFileToIPFS(file: File) {
   const result = await r.json();
   if (result?.cid && !result?.url) {
     const gateway =
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
+      (typeof process !== "undefined" &&
+        (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
       "gateway.pinata.cloud";
     result.url = `https://${gateway}/ipfs/${result.cid}`;
   }
@@ -581,6 +666,8 @@ export function testConnection() {
 export default {
   // auth
   getAuthRole,
+  loginWithSignature,
+  logout,
 
   // proposals
   listProposals,
