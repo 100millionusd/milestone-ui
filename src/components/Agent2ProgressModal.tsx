@@ -230,6 +230,7 @@ export default function Agent2ProgressModal({
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold">Submitting Bid · Agent2 Checking</h3>
           <button
+            type="button"  // ← prevent form submit
             className={`text-slate-500 hover:text-slate-900 ${!canClose ? 'cursor-not-allowed opacity-50' : ''}`}
             onClick={handleClose}
             aria-label="Close"
@@ -269,7 +270,8 @@ export default function Agent2ProgressModal({
               <div className="mt-2 text-sm text-slate-500">⏳ Analysis pending…</div>
               {bidId && (
                 <button
-                  onClick={retryAnalysis}
+                  type="button"  // ← prevent form submit
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); retryAnalysis(); }} // ← block stray GETs
                   className="text-sm px-3 py-1.5 rounded-lg bg-slate-900 text-white disabled:opacity-50"
                   disabled={retrying}
                 >
@@ -284,6 +286,7 @@ export default function Agent2ProgressModal({
 
         <div className="mt-6 flex justify-end">
           <button
+            type="button"  // ← prevent form submit
             className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
             onClick={handleClose}
             disabled={!canClose}

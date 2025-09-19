@@ -1,6 +1,7 @@
+// src/components/Agent2Inline.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
 
 type Bid = api.Bid;
@@ -16,8 +17,10 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // start from whatever the server already has
-  const [analysis, setAnalysis] = useState<any | null>(coerce(bid.aiAnalysis));
+  // start from whatever the server already has (support both shapes)
+  const [analysis, setAnalysis] = useState<any | null>(
+    coerce((bid as any)?.aiAnalysis ?? (bid as any)?.ai_analysis)
+  );
 
   // helper to refresh the bid (polling)
   const poll = useCallback(async (bidId: number, ms = 120000, every = 1500) => {
@@ -25,7 +28,7 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
     while (Date.now() < stop) {
       try {
         const fresh = await api.getBid(bidId);
-        const a = coerce(fresh.aiAnalysis);
+        const a = coerce((fresh as any)?.aiAnalysis ?? (fresh as any)?.ai_analysis);
         if (a) return a;
       } catch {}
       await new Promise(r => setTimeout(r, every));
@@ -37,8 +40,9 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
     setError(null);
     setRunning(true);
     try {
-      // kick analysis with optional prompt
-      await api.analyzeBid(bid.bidId, prompt || undefined);
+      // kick analysis with optional prompt (empty => default server prompt)
+      const trimmed = prompt.trim();
+      await api.analyzeBid(bid.bidId, trimmed || undefined);
       const a = await poll(bid.bidId);
       if (a) setAnalysis(a);
       else setError('Analysis did not complete in time — try again.');
@@ -50,41 +54,56 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
   }, [bid.bidId, prompt, poll]);
 
   const a = useMemo(() => coerce(analysis), [analysis]);
-  const pdfBadge = a?.pdfUsed === true ? 'PDF ✓ used'
-                  : a?.pdfUsed === false ? 'PDF ✗ not used'
-                  : null;
+
+  const pdfBadge =
+    a?.pdfUsed === true ? 'PDF ✓ used'
+    : a?.pdfUsed === false ? 'PDF ✗ not used'
+    : null;
+
   const pdfReason = a?.pdfDebug?.reason || (a?.pdfUsed === false ? 'unknown' : null);
+  const promptOverrideBadge = a?.promptSource === 'override';
 
   // Render
   return (
     <div className="mt-3 rounded-xl border bg-slate-50 p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="font-semibold">Agent2</div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-slate-900 text-white grid place-items-center text-xs font-bold">A2</div>
+          <div className="font-semibold">Agent 2</div>
+          {promptOverrideBadge && (
+            <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              Using your custom prompt
+            </span>
+          )}
+        </div>
         {pdfBadge && (
-          <span className={`text-xs px-2 py-1 rounded-full ${
-            a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-          }`}>
+          <span
+            className={`text-xs px-2 py-1 rounded-full ${
+              a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+            }`}
+          >
             {pdfBadge}{pdfReason ? ` — ${pdfReason}` : ''}
           </span>
         )}
       </div>
 
       <div className="mt-3">
-        <label className="text-sm font-medium">Prompt (optional)</label>
+        <label className="text-sm font-medium">Custom Prompt (optional)</label>
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder="Tell Agent2 what to focus on (e.g., verify quantities vs. PDF, check timeline realism, flag missing deliverables)…"
+          placeholder={`Tell Agent 2 what to focus on.\nExamples:\n• Convert Bs 26,000 to USD at 6.90; show math.\n• Verify quantities vs. PDF and flag inconsistencies.\n• Rewrite the summary in Spanish. Keep concise.`}
           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
           rows={3}
         />
         <div className="mt-2 flex items-center gap-2">
           <button
-            onClick={run}
+            type="button"                                                     // ← prevents form submit
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); run(); }} // ← blocks stray GETs
             disabled={running}
             className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
           >
-            {running ? 'Analyzing…' : 'Run Agent2'}
+            {running ? 'Analyzing…' : 'Run Agent 2'}
           </button>
           {error && <div className="text-sm text-rose-700">{error}</div>}
         </div>
