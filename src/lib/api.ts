@@ -530,21 +530,20 @@ export async function getSubmittedProofs(): Promise<Proof[]> {
   }
 }
 
-export async function submitProof(input: {
+eexport async function submitProof(input: {
   bidId: number;
   milestoneIndex: number;
   title?: string;
   description: string;
   files?: { name: string; url: string }[];
   prompt?: string;
-}: PromiseLike<any> extends never ? never : any) : Promise<Proof> {
+}): Promise<Proof> {
   const files = Array.isArray(input.files) ? input.files : [];
 
   // Build a legacy-proof string in case the server only supports the old route
   let legacyProof = (input.description || "").trim();
   if (files.length) {
-    legacyProof +=
-      "\n\nAttachments:\n" + files.map((f) => `- ${f.name || "file"}: ${f.url}`).join("\n");
+    legacyProof += "\n\nAttachments:\n" + files.map(f => `- ${f.name || "file"}: ${f.url}`).join("\n");
   }
 
   const payload = {
