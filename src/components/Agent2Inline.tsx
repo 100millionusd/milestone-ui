@@ -9,11 +9,19 @@ type Bid = api.Bid;
 
 function coerce(a: any) {
   if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
   return a;
 }
 
-export default function Agent2Inline({ bid }: { bid: Bid }) {
+export default function Agent2Inline({
+  bid,
+  proposal, // optional; chat will still work without it
+}: {
+  bid: Bid;
+  proposal?: any;
+}) {
   const [prompt, setPrompt] = useState<string>('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +50,7 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
     setError(null);
     setRunning(true);
     try {
+      // kick analysis with optional prompt (empty => default server prompt)
       const trimmed = prompt.trim();
       await api.analyzeBid(bid.bidId, trimmed || undefined);
       const a = await poll(bid.bidId);
@@ -64,79 +73,86 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
   const pdfReason = a?.pdfDebug?.reason || (a?.pdfUsed === false ? 'unknown' : null);
   const promptOverrideBadge = a?.promptSource === 'override';
 
+  // Render
   return (
     <div className="mt-3 rounded-xl border bg-slate-50 p-4">
-      {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-slate-900 text-white grid place-items-center text-xs font-bold">A2</div>
-          <div className="font-semibold">Agent 2 Analysis</div>
+          <div className="font-semibold">Agent 2</div>
           {promptOverrideBadge && (
             <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
               Using your custom prompt
             </span>
           )}
-          <span className="ml-2 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-            ADMIN
+        </div>
+        {pdfBadge && (
+          <span
+            className={`text-xs px-2 py-1 rounded-full ${
+              a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+            }`}
+          >
+            {pdfBadge}{pdfReason ? ` — ${pdfReason}` : ''}
           </span>
+        )}
+      </div>
+
+      <div className="mt-3">
+        <label className="text-sm font-medium">Custom Prompt (optional)</label>
+        <textarea
+          value={prompt}
+          onChange={e => setPrompt(e.target.value)}
+          placeholder={`Tell Agent 2 what to focus on.\nExamples:\n• Convert Bs 26,000 to USD at 6.90; show math.\n• Verify quantities vs. PDF and flag inconsistencies.\n• Rewrite the summary in Spanish. Keep concise.`}
+          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+          rows={3}
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"                                                     // ← prevents form submit
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); run(); }} // ← blocks stray GETs
+            disabled={running}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          >
+            {running ? 'Analyzing…' : 'Run Agent 2'}
+          </button>
+          {error && <div className="text-sm text-rose-700">{error}</div>}
         </div>
 
-        <div className="flex items-center gap-2">
-          {pdfBadge && (
-            <span
-              className={`text-xs px-2 py-1 rounded-full ${
-                a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-              }`}
-            >
-              {pdfBadge}{pdfReason ? `: ${pdfReason}` : ''}
-            </span>
-          )}
+        {/* Always-visible chat entry point */}
+        <div className="mt-3">
           <button
             type="button"
             onClick={() => setChatOpen(true)}
             className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white"
             title="Open real-time chat with Agent 2 about this bid"
           >
-            Ask Agent 2
+            Ask Agent 2 (Chat)
           </button>
         </div>
       </div>
 
-      {/* Analysis body */}
       {a && (
         <div className="mt-4 rounded-lg border bg-white p-3 text-sm">
           {/* V2 format */}
           {('summary' in a || 'fit' in a) && (
             <>
-              <div className="text-sm">
-                <span className="font-medium">Fit:</span>{' '}
-                <span className="text-sky-700">{String(a.fit ?? '—')}</span>
+              <div className="font-medium">Summary</div>
+              <p className="mt-1 whitespace-pre-wrap">{a.summary || 'No summary provided.'}</p>
+              <div className="mt-2">
+                <span className="font-medium">Fit:</span> {String(a.fit ?? '—')}
                 <span className="mx-2">·</span>
                 <span className="font-medium">Confidence:</span>{' '}
                 {typeof a.confidence === 'number' ? `${Math.round(a.confidence * 100)}%` : '—'}
-                {typeof a.pdfUsed === 'boolean' && (
-                  <>
-                    <span className="mx-2">·</span>
-                    <span className="font-medium">PDF parsed:</span>{' '}
-                    {a.pdfUsed ? 'Yes' : 'No'}
-                  </>
-                )}
               </div>
-
-              <div className="mt-3">
-                <div className="font-semibold">Summary</div>
-                <p className="mt-1 whitespace-pre-wrap">{a.summary || 'No summary provided.'}</p>
-              </div>
-
               {Array.isArray(a.risks) && a.risks.length > 0 && (
-                <div className="mt-3">
-                  <div className="font-semibold">Risks</div>
+                <div className="mt-2">
+                  <div className="font-medium">Risks</div>
                   <ul className="list-disc pl-5">{a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
                 </div>
               )}
               {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
-                <div className="mt-3">
-                  <div className="font-semibold">Milestone Notes</div>
+                <div className="mt-2">
+                  <div className="font-medium">Milestone Notes</div>
                   <ul className="list-disc pl-5">{a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}</ul>
                 </div>
               )}
@@ -160,36 +176,13 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
         </div>
       )}
 
-      {/* Prompt box */}
-      <div className="mt-4">
-        <label className="text-sm font-medium">Custom Prompt</label>
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          placeholder={`Optional. Use {{CONTEXT}} to inject bid + proposal + PDF text.\nExample:\n"Rewrite the summary in Spanish. Keep it concise. {{CONTEXT}}"\n(Leave blank for the default prompt)`}
-          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-          rows={3}
-        />
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); run(); }}
-            disabled={running}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
-          >
-            {running ? 'Analyzing…' : 'Run Agent 2'}
-          </button>
-          {error && <div className="text-sm text-rose-700">{error}</div>}
-        </div>
-      </div>
-
       {/* Chat modal */}
       {chatOpen && (
         <BidChatAgent
           open={chatOpen}
           onClose={() => setChatOpen(false)}
           bidId={bid.bidId}
-          // proposal optional; backend uses bidId to hydrate context
+          proposal={proposal}
         />
       )}
     </div>
