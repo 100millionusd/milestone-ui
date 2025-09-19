@@ -1,6 +1,7 @@
+// src/components/ProposalAgent.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface ProposalAgentProps {
   proposal: {
@@ -26,31 +27,45 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Trigger automatic validation when chat opens
+  // Abort ongoing stream when closing the panel or remounting
+  const controllerRef = useRef<AbortController | null>(null);
+
+  // Auto-validate once when chat opens for the first time
   useEffect(() => {
     if (open && messages.length === 0) {
-      // Auto-validate when chat opens for the first time
       handleAutoValidate();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const handleAutoValidate = async () => {
+  // Clean up on unmount/close: abort any in-flight request
+  useEffect(() => {
+    if (!open && controllerRef.current) {
+      controllerRef.current.abort();
+      controllerRef.current = null;
+    }
+    return () => {
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
+    };
+  }, [open]);
+
+  const streamFromApi = async (body: any, baseMessages: ChatMessage[] = []) => {
     setIsLoading(true);
     setError(null);
 
-    // Debug log to check what data is being sent
-    console.log("Sending proposal data to API:", proposal);
+    // Abort any existing request before starting a new one
+    if (controllerRef.current) controllerRef.current.abort();
+    controllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('/api/validate-proposal/', {
+      const response = await fetch('/api/validate-proposal', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content: '' }], // Empty message triggers automatic validation
-          proposal // This should contain all the proposal data
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controllerRef.current.signal,
       });
 
       if (!response.ok) {
@@ -58,94 +73,71 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
       }
 
       const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body');
-      }
+      if (!reader) throw new Error('No response body');
 
-      let assistantMessage = '';
       const decoder = new TextDecoder();
+      let assistantMessage = '';
 
+      // Progressive streaming
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        assistantMessage += chunk;
-        
-        // Update the message in real-time
-        setMessages([
-          { role: 'assistant', content: assistantMessage }
+        assistantMessage += decoder.decode(value, { stream: true });
+
+        // Update messages incrementally without losing state
+        setMessages(() => [
+          ...baseMessages,
+          { role: 'assistant', content: assistantMessage },
         ]);
       }
-
-    } catch (err) {
-      console.error('Auto-validation error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred during validation');
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // silent cancel on close
+      } else {
+        console.error('Stream error:', err);
+        setError(err?.message || 'An error occurred');
+      }
     } finally {
       setIsLoading(false);
+      controllerRef.current = null;
     }
+  };
+
+  const handleAutoValidate = async () => {
+    // Log what we send (handy for debugging server expectations)
+    console.log('Sending proposal data to API:', proposal);
+
+    // Start with an empty assistant message that will fill as stream arrives
+    setMessages([{ role: 'assistant', content: '' }]);
+    await streamFromApi(
+      {
+        // Empty user prompt tells the server to just validate proposal
+        messages: [{ role: 'user', content: '' }],
+        proposal,
+      },
+      [] // base messages for auto-validate is just empty
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
-    const userMessage = input;
+    const userMessage: ChatMessage = { role: 'user', content: input.trim() };
     setInput('');
-    setIsLoading(true);
-    setError(null);
 
-    // Add user message to chat
-    const newMessages: ChatMessage[] = [
-      ...messages,
-      { role: 'user', content: userMessage }
-    ];
-    setMessages(newMessages);
+    const base = [...messages, userMessage];
+    // Show the user message immediately
+    setMessages(base);
 
-    try {
-      const response = await fetch('/api/validate-proposal/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: newMessages,
-          proposal
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body');
-      }
-
-      let assistantMessage = '';
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        assistantMessage += chunk;
-        
-        // Update the message in real-time
-        setMessages([
-          ...newMessages,
-          { role: 'assistant', content: assistantMessage }
-        ]);
-      }
-
-    } catch (err) {
-      console.error('Chat error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setIsLoading(false);
-    }
+    await streamFromApi(
+      {
+        messages: base,
+        proposal,
+      },
+      base // base includes all prior + the just-added user message
+    );
   };
 
   if (!open) {
@@ -179,7 +171,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
             Starting automatic validation...
           </div>
         )}
-        
+
         {messages.map((message, index) => (
           <div
             key={index}
@@ -192,7 +184,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
             {message.content}
           </div>
         ))}
-        
+
         {isLoading && messages.length === 0 && (
           <div className="text-xs text-slate-400 flex items-center">
             <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
@@ -206,7 +198,7 @@ export default function ProposalAgent({ proposal }: ProposalAgentProps) {
             AI is thinking...
           </div>
         )}
-        
+
         {error && (
           <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
             Error: {error}

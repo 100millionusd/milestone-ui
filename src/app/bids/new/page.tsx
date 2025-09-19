@@ -1,3 +1,4 @@
+// src/app/bids/new/page.tsx
 'use client';
 
 import { useState, useEffect, useRef, Suspense, useCallback } from 'react';
@@ -11,7 +12,7 @@ function NewBidPageContent() {
   const proposalId = searchParams.get('proposalId');
 
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);                 // ✅ NEW: lock form after finalize
+  const [submitted, setSubmitted] = useState(false);                 // ✅ lock form after finalize
   const [proposal, setProposal] = useState<any | null>(null);
 
   const [formData, setFormData] = useState({
@@ -74,6 +75,15 @@ function NewBidPageContent() {
     return clearPoll;
   }, [proposalId]);
 
+  // ✅ Guard: only allow submit when the clicked button opts in
+  const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
+    // @ts-ignore nativeEvent is fine here
+    const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
+    if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
+      e.preventDefault();
+    }
+  };
+
   // --- submit handler ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +132,7 @@ function NewBidPageContent() {
       setMessage('Agent2 is analyzing your bid…');
 
       // Trigger server analysis (safe if it already ran inline)
-      try { await analyzeBid(bidId, ''); } catch {}
+      try { await analyzeBid(bidId, undefined); } catch {}
 
       // Start polling until aiAnalysis appears
       pollUntilAnalysis(bidId);
@@ -165,7 +175,10 @@ function NewBidPageContent() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form
+        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
+        className="space-y-6"
+      >
         {/* ✅ Disable everything in one shot after finalize */}
         <fieldset disabled={disabled} className={disabled ? 'opacity-70 pointer-events-none' : ''}>
           {/* Vendor Information */}
@@ -357,6 +370,7 @@ function NewBidPageContent() {
         <div className="flex gap-4 pt-4">
           <button
             type="submit"
+            data-allow-submit="true"                {/* ✅ only this may submit */}
             disabled={loading || submitted}
             className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
           >
@@ -382,8 +396,8 @@ function NewBidPageContent() {
         analysis={analysis}
         bidId={createdBidId ?? undefined}
         onClose={() => { setModalOpen(false); clearPoll(); }}
-        onFinalized={() => {                     // <-- key bit
-          setSubmitted(true);                    // lock the form
+        onFinalized={() => {
+          setSubmitted(true);    // lock the form
           clearPoll();
           setModalOpen(false);
           // Optionally navigate: router.push(`/bids/${createdBidId}`);

@@ -9,6 +9,15 @@ interface SubmitBidFormProps {
   onSuccess: () => void;
 }
 
+// ✅ Guard: only allow submit when the clicked button opts in
+const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
+  // @ts-ignore nativeEvent is ok here
+  const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
+  if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
+    e.preventDefault();
+  }
+};
+
 const SubmitBidForm: React.FC<SubmitBidFormProps> = ({ proposalId, onSuccess }) => {
   const [formData, setFormData] = useState({
     vendorName: '',
@@ -39,20 +48,28 @@ const SubmitBidForm: React.FC<SubmitBidFormProps> = ({ proposalId, onSuccess }) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (!Number.isFinite(proposalId) || proposalId <= 0) {
+      alert('Missing or invalid proposalId.');
+      return;
+    }
 
+    setLoading(true);
     try {
+      const price = parseFloat(formData.priceUSD);
+      const days = parseInt(formData.days, 10);
+
       const bidData = {
         proposalId,
-        vendorName: formData.vendorName,
-        priceUSD: parseFloat(formData.priceUSD),
-        days: parseInt(formData.days),
+        vendorName: formData.vendorName.trim(),
+        priceUSD: Number.isFinite(price) ? price : 0,
+        days: Number.isFinite(days) ? days : 0,
         notes: formData.notes,
-        walletAddress: formData.walletAddress,
+        walletAddress: formData.walletAddress.trim(),
         preferredStablecoin: formData.preferredStablecoin,
         milestones: milestones.map(m => ({
           name: m.name,
-          amount: parseFloat(m.amount),
+          amount: Number.isFinite(parseFloat(m.amount)) ? parseFloat(m.amount) : 0,
+          // api.createBid() will coerce to ISO via toIso, but passing date string is fine
           dueDate: m.dueDate
         }))
       };
@@ -67,7 +84,10 @@ const SubmitBidForm: React.FC<SubmitBidFormProps> = ({ proposalId, onSuccess }) 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form
+      onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
+      className="space-y-6"
+    >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Company Name</label>
@@ -104,7 +124,10 @@ const SubmitBidForm: React.FC<SubmitBidFormProps> = ({ proposalId, onSuccess }) 
           <label className="block text-sm font-medium mb-1">Stablecoin</label>
           <select
             value={formData.preferredStablecoin}
-            onChange={(e) => setFormData({...formData, preferredStablecoin: e.target.value as 'USDT' | 'USDC'})}
+            onChange={(e) => setFormData({
+              ...formData,
+              preferredStablecoin: e.target.value as 'USDT' | 'USDC'
+            })}
             className="w-full p-2 border rounded"
           >
             <option value="USDT">USDT</option>
@@ -198,8 +221,10 @@ const SubmitBidForm: React.FC<SubmitBidFormProps> = ({ proposalId, onSuccess }) 
         </div>
       </div>
 
+      {/* ✅ Only this button may submit */}
       <button
         type="submit"
+        data-allow-submit="true"
         disabled={loading}
         className="bg-green-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
       >

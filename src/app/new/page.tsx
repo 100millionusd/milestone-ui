@@ -5,6 +5,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createProposal, uploadFileToIPFS } from "@/lib/api";
 
+// ✅ Guard: only allow submit when the clicked button opts in
+const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
+  // @ts-ignore nativeEvent is fine in Next/React DOM
+  const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
+  if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
+    e.preventDefault();
+  }
+};
+
 export default function NewProposalPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -26,7 +35,7 @@ export default function NewProposalPage() {
 
     try {
       // Upload files to IPFS if any
-      let docs = [];
+      const docs: Array<{ cid: string; url: string; name: string; size: number }> = [];
       for (const file of files) {
         const uploadResult = await uploadFileToIPFS(file);
         docs.push({
@@ -37,16 +46,20 @@ export default function NewProposalPage() {
         });
       }
 
+      const amount = parseFloat(formData.amountUSD);
       const body = {
         ...formData,
-        amountUSD: parseFloat(formData.amountUSD),
+        amountUSD: Number.isFinite(amount) ? amount : 0,
         docs
       };
 
       const res = await createProposal(body);
-      
-      if (res.proposalId) {
+
+      if (res?.proposalId) {
         router.push(`/admin/proposals/${res.proposalId}`);
+      } else {
+        // Fallback: stay and notify
+        alert('Proposal created, but no proposalId returned.');
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
@@ -65,8 +78,11 @@ export default function NewProposalPage() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Proposal</h1>
-      
-      <form onSubmit={handleSubmit} className="space-y-6">
+
+      <form
+        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
+        className="space-y-6"
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Organization Name *</label>
@@ -158,6 +174,7 @@ export default function NewProposalPage() {
           <input
             type="file"
             multiple
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
             onChange={handleFileChange}
             className="w-full p-2 border rounded"
           />
@@ -165,8 +182,10 @@ export default function NewProposalPage() {
         </div>
 
         <div className="flex gap-4">
+          {/* ✅ Only this button may submit */}
           <button
             type="submit"
+            data-allow-submit="true"
             disabled={loading}
             className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
           >

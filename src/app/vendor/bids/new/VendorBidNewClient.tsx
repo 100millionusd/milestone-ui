@@ -1,3 +1,4 @@
+// src/app/vendor/bids/new/VendorBidNewClient.tsx
 'use client';
 
 import React, { useCallback, useState } from 'react';
@@ -18,6 +19,15 @@ function coerce(a: any) {
   if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   return a;
 }
+
+// ✅ Guard: only allow submit when the clicked button opts in
+const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
+  // @ts-ignore nativeEvent is fine
+  const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
+  if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
+    e.preventDefault();
+  }
+};
 
 export default function VendorBidNewClient({ proposalId }: { proposalId: number }) {
   const router = useRouter();
@@ -104,12 +114,10 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
         setAnalysis(found);
         setStep('done');
         setMessage('Analysis complete.');
-        // 🔁 Make sure any server components that list bids re-fetch fresh data
         router.refresh();
       } else {
         setStep('done');
         setMessage('Analysis will appear shortly.');
-        // still refresh to pick up eventual async write
         router.refresh();
       }
     } catch (err: any) {
@@ -122,7 +130,10 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-xl font-semibold mb-4">Submit a Bid</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
+        className="space-y-4"
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input
             className="border rounded-lg px-3 py-2"
@@ -193,7 +204,12 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           ))}
         </div>
 
-        <button type="submit" className="px-4 py-2 rounded-lg bg-slate-900 text-white">
+        {/* ✅ Only this button may submit */}
+        <button
+          type="submit"
+          data-allow-submit="true"
+          className="px-4 py-2 rounded-lg bg-slate-900 text-white"
+        >
           Submit bid
         </button>
       </form>
