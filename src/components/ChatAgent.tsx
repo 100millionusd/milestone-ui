@@ -5,18 +5,20 @@ import { useState, useRef, useEffect } from "react";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-type ChatAgentProps = {
-  proposal: any;                 // whatever you pass in now
-  onComplete: () => void;        // called if AI says "✅ All good"
-  onClose: () => void;           // close the modal
-};
-
-export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentProps) {
+export default function ChatAgent({
+  proposal,
+  onComplete,
+  onClose,
+}: {
+  proposal: any;
+  onComplete: () => void;
+  onClose: () => void;
+}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Abort in-flight stream when user closes / component unmounts
+  // abort in-flight stream when user closes / re-sends
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -27,8 +29,8 @@ export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentPr
 
   const sendMessage = async (msg: string) => {
     const userMsg: Msg = { role: "user", content: msg };
-    const history = [...messages, userMsg];
-    setMessages(history);
+    const base = [...messages, userMsg];
+    setMessages(base);
     setInput("");
     setLoading(true);
 
@@ -37,43 +39,79 @@ export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentPr
     controllerRef.current = new AbortController();
 
     try {
-      // ✅ Use your existing API route that returns a plain text stream
-      const res = await fetch("/api/validate-proposal/", {
+      // ✅ use the existing Next.js route (same origin)
+      const res = await fetch("/api/validate-proposal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // matches your app's cookie auth behavior
-        body: JSON.stringify({ proposal, messages: history }),
+        body: JSON.stringify({ proposal, messages: base }),
         signal: controllerRef.current.signal,
       });
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        setLoading(false);
+        throw new Error(`API error: ${res.status}`);
+      }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      if (!reader) {
+        setLoading(false);
+        throw new Error("No response body");
+      }
 
-      // Create an assistant bubble and update it as tokens stream in
+      // push an empty assistant message; we’ll mutate it as tokens arrive
       let assistant: Msg = { role: "assistant", content: "" };
       setMessages((prev) => [...prev, assistant]);
 
       const decoder = new TextDecoder("utf-8");
+      let buffer = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        // Append streamed text directly (no SSE parsing)
-        assistant.content += decoder.decode(value, { stream: true });
-        setMessages((prev) => [...prev.slice(0, -1), { ...assistant }]);
+        buffer += decoder.decode(value, { stream: true });
 
-        // Trigger completion callback on your pass phrase
-        if (assistant.content.includes("✅ All good")) {
-          try { onComplete(); } catch {}
+        // Handle SSE-style "data: <token>\n\n"
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() || ""; // keep last partial
+
+        for (const chunk of chunks) {
+          const line = chunk.trim();
+          if (!line.startsWith("data:")) continue;
+
+          const token = line.slice(5).trim(); // after "data:"
+          if (token === "[DONE]") {
+            buffer = "";
+            break;
+          }
+
+          if (token.startsWith("ERROR")) {
+            assistant.content += `\n${token}`;
+            setMessages((prev) => [...prev.slice(0, -1), { ...assistant }]);
+            continue;
+          }
+
+          // append token and update the last assistant message only
+          assistant.content += token;
+          setMessages((prev) => [...prev.slice(0, -1), { ...assistant }]);
+
+          // optional pass signal
+          if (assistant.content.includes("✅ All good")) {
+            try {
+              onComplete();
+            } catch {
+              /* noop */
+            }
+          }
         }
       }
     } catch (err: any) {
       if (err?.name !== "AbortError") {
-        const msg = err?.message || "Streaming failed";
-        setMessages((prev) => [...prev, { role: "assistant", content: `ERROR: ${msg}` }]);
+        const errMsg = err?.message || "Streaming failed";
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `ERROR: ${errMsg}` },
+        ]);
       }
     } finally {
       setLoading(false);
@@ -92,8 +130,8 @@ export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentPr
               if (controllerRef.current) controllerRef.current.abort();
               onClose();
             }}
-            className="text-slate-600 hover:text-slate-900"
             aria-label="Close"
+            className="text-slate-600 hover:text-slate-800"
           >
             ✖
           </button>
@@ -113,15 +151,16 @@ export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentPr
               {m.content}
             </div>
           ))}
-          {loading && <div className="text-gray-400 text-xs">AI is typing...</div>}
+          {loading && (
+            <div className="text-gray-400 text-xs">AI is typing...</div>
+          )}
         </div>
 
         {/* Input */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            const trimmed = input.trim();
-            if (trimmed) sendMessage(trimmed);
+            if (input.trim()) sendMessage(input.trim());
           }}
           className="p-3 border-t flex gap-2"
         >
@@ -135,7 +174,7 @@ export default function ChatAgent({ proposal, onComplete, onClose }: ChatAgentPr
           <button
             type="submit"
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:bg-slate-400"
           >
             Send
           </button>
