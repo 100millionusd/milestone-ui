@@ -11,12 +11,14 @@ type Props = {
   step: Step;
   message?: string | null;
   onClose: () => void;
-  /** ✅ NEW: called when user closes after analysis is ready (or on error) */
+  /** Called when user closes after analysis is ready (or on error) */
   onFinalized?: (payload: { bidId?: number; analysis: any | null }) => void;
-  /** may be object or JSON string */
+  /** May be object or JSON string */
   analysis?: any | null;
-  /** when provided, modal will poll /bids/:id until analysis exists */
+  /** When provided, modal will poll /bids/:id until analysis exists */
   bidId?: number;
+  /** Optional: custom prompt to use when starting or retrying analysis */
+  prompt?: string;
 };
 
 function coerce(a: any) {
@@ -32,7 +34,8 @@ export default function Agent2ProgressModal({
   onClose,
   onFinalized,
   analysis,
-  bidId
+  bidId,
+  prompt,
 }: Props) {
   const [fetched, setFetched] = useState<any | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -60,11 +63,19 @@ export default function Agent2ProgressModal({
   useEffect(() => {
     if (!open) { clearTimer(); return; }
     if (!ready && bidId && !timerRef.current) {
-      fetchOnce(); // immediate
+      // Kick off an immediate fetch
+      fetchOnce();
+
+      // If we opened in "analyzing" step, trigger analysis once (with optional prompt)
+      if (step === 'analyzing') {
+        api.analyzeBid(bidId, (prompt ?? '').trim() || undefined).catch(() => {});
+      }
+
+      // Start polling for the result
       timerRef.current = setInterval(fetchOnce, 1500);
     }
     return () => { clearTimer(); };
-  }, [open, ready, bidId, fetchOnce]);
+  }, [open, ready, bidId, fetchOnce, step, prompt]);
 
   useEffect(() => { if (ready) clearTimer(); }, [ready]);
 
@@ -72,7 +83,7 @@ export default function Agent2ProgressModal({
     if (!bidId) return;
     try {
       setRetrying(true);
-      await api.analyzeBid(bidId); // fire-and-forget; modal keeps polling
+      await api.analyzeBid(bidId, (prompt ?? '').trim() || undefined); // use custom prompt if provided
       await fetchOnce();
       if (!ready && !timerRef.current) timerRef.current = setInterval(fetchOnce, 1500);
     } catch (e: any) {
@@ -80,9 +91,9 @@ export default function Agent2ProgressModal({
     } finally {
       setRetrying(false);
     }
-  }, [bidId, fetchOnce, ready]);
+  }, [bidId, fetchOnce, ready, prompt]);
 
-  // ✅ Only allow closing when ready or error; and notify parent once.
+  // Only allow closing when ready or error; and notify parent once.
   const canClose = ready || step === 'error';
   const handleClose = () => {
     if (!canClose) return;
@@ -99,10 +110,14 @@ export default function Agent2ProgressModal({
 
   const stepBadge = (active: boolean, label: string) => (
     <div className="flex items-center gap-2">
-      <span className={[
-        "inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
-        active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700",
-      ].join(' ')}>{active ? '✓' : '•'}</span>
+      <span
+        className={[
+          "inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
+          active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700",
+        ].join(' ')}
+      >
+        {active ? '✓' : '•'}
+      </span>
       <span className="text-sm">{label}</span>
     </div>
   );
@@ -114,27 +129,42 @@ export default function Agent2ProgressModal({
 
     return (
       <div className="mt-4 border rounded-xl p-4 bg-slate-50 text-sm">
-        <div className="font-medium">Agent2 — Summary</div>
+        <div className="font-medium flex items-center gap-2">
+          <span>Agent2 — Summary</span>
+          {a?.promptSource === 'override' && (
+            <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              Using your custom prompt
+            </span>
+          )}
+        </div>
 
         {isV2 && (
           <>
-            {a.summary ? <p className="mt-1 whitespace-pre-wrap">{a.summary}</p>
-                        : <p className="mt-1 text-slate-500">No summary provided.</p>}
+            {a.summary ? (
+              <p className="mt-1 whitespace-pre-wrap">{a.summary}</p>
+            ) : (
+              <p className="mt-1 text-slate-500">No summary provided.</p>
+            )}
             <div className="mt-2">
               <span className="font-medium">Fit:</span> {String(a.fit ?? '—')}
               <span className="mx-2">·</span>
-              <span className="font-medium">Confidence:</span>{typeof a.confidence === 'number' ? `${Math.round(a.confidence * 100)}%` : '—'}
+              <span className="font-medium">Confidence:</span>{' '}
+              {typeof a.confidence === 'number' ? `${Math.round(a.confidence * 100)}%` : '—'}
             </div>
             {Array.isArray(a.risks) && a.risks.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Risks</div>
-                <ul className="list-disc pl-5">{a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
+                <ul className="list-disc pl-5">
+                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
               </div>
             )}
             {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Milestone Notes</div>
-                <ul className="list-disc pl-5">{a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}</ul>
+                <ul className="list-disc pl-5">
+                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
               </div>
             )}
           </>
@@ -148,7 +178,9 @@ export default function Agent2ProgressModal({
             {Array.isArray(a.suggestions) && a.suggestions.length > 0 && (
               <div className="mt-2">
                 <div className="font-medium">Suggestions</div>
-                <ul className="list-disc pl-5">{a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+                <ul className="list-disc pl-5">
+                  {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                </ul>
               </div>
             )}
           </div>
@@ -156,7 +188,7 @@ export default function Agent2ProgressModal({
 
         {!isV1 && !isV2 && <p className="mt-1 text-slate-500">Analysis format not recognized.</p>}
 
-        {/* ✅ PDF Debug Info */}
+        {/* PDF Debug Info */}
         {a?.pdfUsed !== undefined && (
           <div className="mt-3 text-xs text-slate-600 border-t pt-2">
             <div>
@@ -166,27 +198,22 @@ export default function Agent2ProgressModal({
               <ul className="mt-1 space-y-1 list-disc pl-5">
                 {a.pdfDebug.url && (
                   <li>
-                    <span className="font-medium">URL:</span>{" "}
-                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                    <span className="font-medium">URL:</span>{' '}
+                    <a
+                      href={a.pdfDebug.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
                       {a.pdfDebug.url}
                     </a>
                   </li>
                 )}
-                {a.pdfDebug.name && (
-                  <li><span className="font-medium">File:</span> {a.pdfDebug.name}</li>
-                )}
-                {a.pdfDebug.bytes !== undefined && (
-                  <li><span className="font-medium">Size:</span> {a.pdfDebug.bytes} bytes</li>
-                )}
-                {a.pdfDebug.first5 && (
-                  <li><span className="font-medium">Header:</span> “{a.pdfDebug.first5}”</li>
-                )}
-                {a.pdfDebug.reason && (
-                  <li><span className="font-medium">Reason:</span> {a.pdfDebug.reason}</li>
-                )}
-                {a.pdfDebug.error && (
-                  <li><span className="font-medium">Error:</span> {a.pdfDebug.error}</li>
-                )}
+                {a.pdfDebug.name && <li><span className="font-medium">File:</span> {a.pdfDebug.name}</li>}
+                {a.pdfDebug.bytes !== undefined && <li><span className="font-medium">Size:</span> {a.pdfDebug.bytes} bytes</li>}
+                {a.pdfDebug.first5 && <li><span className="font-medium">Header:</span> “{a.pdfDebug.first5}”</li>}
+                {a.pdfDebug.reason && <li><span className="font-medium">Reason:</span> {a.pdfDebug.reason}</li>}
+                {a.pdfDebug.error && <li><span className="font-medium">Error:</span> {a.pdfDebug.error}</li>}
               </ul>
             )}
           </div>
@@ -221,10 +248,12 @@ export default function Agent2ProgressModal({
           </div>
 
           <div className={`mt-2 text-sm ${statusColor}`}>
-            {message || (step === 'submitting' ? 'Sending your bid…'
-                    : step === 'analyzing' ? 'Agent2 is checking your bid…'
-                    : step === 'done' ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
-                    : 'Something went wrong.')}
+            {message || (
+              step === 'submitting' ? 'Sending your bid…'
+              : step === 'analyzing' ? 'Agent2 is checking your bid…'
+              : step === 'done' ? (ready ? 'Analysis complete.' : 'Finalizing analysis…')
+              : 'Something went wrong.'
+            )}
           </div>
 
           {showProgressBar && (
