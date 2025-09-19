@@ -1,10 +1,12 @@
 // src/components/Agent2Inline.tsx
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
+import BidChatAgent from '@/components/BidChatAgent';
 
 type Bid = api.Bid;
+type Proposal = api.Proposal;
 
 function coerce(a: any) {
   if (!a) return null;
@@ -21,6 +23,24 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
   const [analysis, setAnalysis] = useState<any | null>(
     coerce((bid as any)?.aiAnalysis ?? (bid as any)?.ai_analysis)
   );
+
+  // ---- Chat modal state ----
+  const [chatOpen, setChatOpen] = useState(false);
+  const [proposalForChat, setProposalForChat] = useState<Proposal | null>(null);
+
+  // Fetch proposal context once (needed for chat system prompt)
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const p = await api.getProposal(bid.proposalId);
+        if (!stop) setProposalForChat(p);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => { stop = true; };
+  }, [bid.proposalId]);
 
   // helper to refresh the bid (polling)
   const poll = useCallback(async (bidId: number, ms = 120000, every = 1500) => {
@@ -76,15 +96,25 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
             </span>
           )}
         </div>
-        {pdfBadge && (
-          <span
-            className={`text-xs px-2 py-1 rounded-full ${
-              a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-            }`}
+
+        <div className="flex items-center gap-2">
+          {pdfBadge && (
+            <span
+              className={`text-xs px-2 py-1 rounded-full ${
+                a?.pdfUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              {pdfBadge}{pdfReason ? ` — ${pdfReason}` : ''}
+            </span>
+          )}
+          <button
+            type="button"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white"
+            onClick={() => setChatOpen(true)}
           >
-            {pdfBadge}{pdfReason ? ` — ${pdfReason}` : ''}
-          </span>
-        )}
+            Ask Agent 2
+          </button>
+        </div>
       </div>
 
       <div className="mt-3">
@@ -152,6 +182,16 @@ export default function Agent2Inline({ bid }: { bid: Bid }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Chat modal */}
+      {chatOpen && (
+        <BidChatAgent
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          bidId={bid.bidId}
+          proposal={proposalForChat || undefined}
+        />
       )}
     </div>
   );
