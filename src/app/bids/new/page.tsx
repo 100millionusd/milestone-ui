@@ -368,12 +368,13 @@ function NewBidPageContent() {
 
         {/* Submit / Cancel */}
         <div className="flex gap-4 pt-4">
-          <button
-            type="submit"
-            data-allow-submit="true"                {/* ✅ only this may submit */}
-            disabled={loading || submitted}
-            className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
-          >
+         {/* ✅ only this may submit */}
+<button
+  type="submit"
+  data-allow-submit="true"
+  disabled={loading || submitted}
+  className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
+>
             {submitted ? 'Bid submitted' : (loading ? 'Submitting Bid...' : 'Submit Bid')}
           </button>
 
