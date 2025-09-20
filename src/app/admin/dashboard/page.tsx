@@ -117,15 +117,22 @@ function Forbidden() {
 
 /* ---------------- Vendors Tab (with expandable bids per project) --------------- */
 
-type SortKey = 'bidsCount' | 'totalAwardedUSD' | 'lastBidAt' | 'vendorName';
+type SortKey =
+  | 'bidsCount'
+  | 'totalAwardedUSD'
+  | 'lastBidAt'
+  | 'vendorName'
+  | 'walletAddress';
 
 function VendorsTab() {
   // list state
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | AdminVendor['status']>('all');
   const [kyc, setKyc] = useState<'all' | NonNullable<AdminVendor['kycStatus']>>('all');
-  const [sortKey, setSortKey] = useState<SortKey>('lastBidAt');
-  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+
+  // Default to wallet sort so changes in vendor name don't affect ordering
+  const [sortKey, setSortKey] = useState<SortKey>('walletAddress');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('asc');
 
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
@@ -188,19 +195,32 @@ function VendorsTab() {
       const av = a?.[sortKey];
       const bv = b?.[sortKey];
 
-      if (sortKey === 'vendorName') {
+      // String sorts (case-insensitive). Wallet address added here.
+      if (sortKey === 'vendorName' || sortKey === 'walletAddress') {
         const aa = String(av || '').toLowerCase();
         const bb = String(bv || '').toLowerCase();
-        if (aa === bb) return 0;
+        if (aa === bb) {
+          // tiebreaker: vendor name asc, then wallet asc
+          const an = String(a.vendorName || '').toLowerCase();
+          const bn = String(b.vendorName || '').toLowerCase();
+          if (an === bn) {
+            const aw = String(a.walletAddress || '').toLowerCase();
+            const bw = String(b.walletAddress || '').toLowerCase();
+            return aw > bw ? 1 : aw < bw ? -1 : 0;
+          }
+          return an > bn ? 1 : -1;
+        }
         return aa > bb ? dir : -dir;
       }
 
+      // Date sort
       if (sortKey === 'lastBidAt') {
         const ta = av ? Date.parse(String(av)) : 0;
         const tb = bv ? Date.parse(String(bv)) : 0;
         return ta === tb ? 0 : (ta > tb ? dir : -dir);
       }
 
+      // Numeric sorts
       const na = Number(av || 0);
       const nb = Number(bv || 0);
       if (na === nb) return 0;
@@ -247,13 +267,13 @@ function VendorsTab() {
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={q}
-          onChange={(e) => { setPage(1); setQ(e.target.value); }}
+          onChange={(e) => { setQ(e.target.value); setPage(1); }}
           placeholder="Search vendor or wallet…"
           className="border rounded px-3 py-1.5 text-sm"
         />
         <select
           value={status}
-          onChange={(e) => { setPage(1); setStatus(e.target.value as any); }}
+          onChange={(e) => { setStatus(e.target.value as any); setPage(1); }}
           className="border rounded px-2 py-1.5 text-sm"
           title="Status"
         >
@@ -265,7 +285,7 @@ function VendorsTab() {
         </select>
         <select
           value={kyc}
-          onChange={(e) => { setPage(1); setKyc(e.target.value as any); }}
+          onChange={(e) => { setKyc(e.target.value as any); setPage(1); }}
           className="border rounded px-2 py-1.5 text-sm"
           title="KYC"
         >
@@ -284,6 +304,7 @@ function VendorsTab() {
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="border rounded px-2 py-1.5 text-sm"
           >
+            <option value="walletAddress">Wallet address</option>
             <option value="lastBidAt">Last bid (recent)</option>
             <option value="bidsCount">Bids count</option>
             <option value="totalAwardedUSD">Total awarded</option>
