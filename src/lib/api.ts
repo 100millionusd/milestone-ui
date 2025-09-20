@@ -545,6 +545,11 @@ export async function getAdminVendors(): Promise<VendorSummary[]> {
   }
 }
 
+/** ✅ Alias to keep older UI calls working */
+export async function getVendors(): Promise<VendorSummary[]> {
+  return getAdminVendors();
+}
+
 // ---- Proofs ----
 export async function getSubmittedProofs(): Promise<Proof[]> {
   try {
@@ -719,7 +724,10 @@ export default {
   getVendorPayments,
   adminCompleteMilestone,
   payMilestone,
-  getAdminVendors, // ✅ NEW
+
+  // admin vendors
+  getAdminVendors,
+  getVendors, // alias
 
   // proofs
   getSubmittedProofs,
