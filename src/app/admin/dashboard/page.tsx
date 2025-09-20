@@ -7,6 +7,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import AdminTabs from '@/components/AdminTabs';
 import { API_BASE, getAuthRole } from '@/lib/api';
 
+type Role = 'admin' | 'vendor' | 'guest';
+
 type AdminVendor = {
   vendorName: string;
   walletAddress: string;
@@ -19,30 +21,52 @@ export default function AdminDashboardPage() {
   const sp = useSearchParams();
   const router = useRouter();
 
-  const [role, setRole] = useState<'admin'|'vendor'|'guest' | null>(null);
-  const isAdmin = role === 'admin';
+  const [role, setRole] = useState<Role | null>(null);
+  const [loadingRole, setLoadingRole] = useState(true);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const info = await getAuthRole();
-      setRole(info.role);
+      try {
+        const info = await getAuthRole(); // expects { role: 'admin' | 'vendor' | 'guest' }
+        if (!alive) return;
+        const r = (info?.role ?? 'guest') as Role;
+        setRole(r);
+      } catch {
+        if (!alive) return;
+        setRole('guest');
+      } finally {
+        if (alive) setLoadingRole(false);
+      }
     })();
+    return () => { alive = false; };
   }, []);
 
-  const tab = (sp.get('tab') || (isAdmin ? 'vendors' : 'proposals')).toLowerCase();
+  const isAdmin = role === 'admin';
 
-  // If not admin and user forced ?tab=vendors, bounce them to proposals
+  // Prefer query ?tab, else default: vendors for admin, proposals for others.
+  // While role is loading and no ?tab is present, optimistically default to "vendors"
+  // so an admin won't see a flash of "proposals".
+  const tab: string = useMemo(() => {
+    const q = (sp.get('tab') || '').toLowerCase();
+    if (q) return q;
+    if (loadingRole) return 'vendors';
+    return isAdmin ? 'vendors' : 'proposals';
+  }, [sp, isAdmin, loadingRole]);
+
+  // If NOT admin and user forced ?tab=vendors, bounce to proposals — but only AFTER role is known.
   useEffect(() => {
-    if (role && role !== 'admin' && tab === 'vendors') {
+    if (!loadingRole && role !== null && role !== 'admin' && tab === 'vendors') {
       router.replace('/admin/dashboard?tab=proposals');
     }
-  }, [role, tab, router]);
+  }, [loadingRole, role, tab, router]);
 
-  if (!role) {
+  // Loading state while we determine role
+  if (loadingRole) {
     return (
       <main className="max-w-6xl mx-auto p-6">
         <h1 className="text-2xl font-semibold mb-4">Admin Dashboard</h1>
-        <div className="text-slate-500">Loading…</div>
+        <div className="text-slate-500">Checking your permissions…</div>
       </main>
     );
   }
@@ -108,7 +132,7 @@ function VendorsTab() {
     const needle = q.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter(r =>
-      r.vendorName.toLowerCase().includes(needle) ||
+      (r.vendorName || '').toLowerCase().includes(needle) ||
       (r.walletAddress || '').toLowerCase().includes(needle)
     );
   }, [rows, q]);
@@ -148,7 +172,7 @@ function VendorsTab() {
               {filtered.map((v, i) => (
                 <tr key={`${v.walletAddress}-${i}`} className="border-b last:border-0">
                   <td className="py-2 pr-3 font-medium">{v.vendorName || '—'}</td>
-                  <td className="py-2 pr-3 font-mono text-xs">{v.walletAddress || '—'}</td>
+                  <td className="py-2 pr-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
                   <td className="py-2 pr-3">{v.bidsCount}</td>
                   <td className="py-2 pr-3">
                     ${Number(v.totalAwardedUSD || 0).toLocaleString()}
