@@ -1,96 +1,359 @@
+// src/app/admin/vendors/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getAdminVendors, type VendorSummary } from '@/lib/api';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { API_BASE, getAuthRole } from '@/lib/api';
+
+type Role = 'admin' | 'vendor' | 'guest';
+
+type VendorLite = {
+  id: string;
+  vendorName: string;
+  walletAddress: string;
+  status?: 'pending' | 'approved' | 'suspended' | 'banned';
+  kycStatus?: 'none' | 'pending' | 'verified' | 'rejected';
+  totalAwardedUSD?: number;
+  bidsCount?: number;
+  lastBidAt?: string | null;
+};
+
+type VendorBid = {
+  bidId: string;
+  projectId: string;
+  projectTitle: string;
+  amountUSD?: number | null;
+  status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn';
+  createdAt: string;
+};
+
+type Paged<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
 
 export default function AdminVendorsPage() {
-  const [loading, setLoading] = useState(true);
-  const [vendors, setVendors] = useState<VendorSummary[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const [q, setQ] = useState('');
+  const sp = useSearchParams();
+  const router = useRouter();
+
+  // auth gate (keeps UX smooth)
+  const [role, setRole] = useState<Role | null>(null);
+  const isAdmin = role === 'admin';
 
   useEffect(() => {
+    let alive = true;
     (async () => {
       try {
-        setLoading(true);
-        setErr(null);
-        const rows = await getAdminVendors();
-        setVendors(rows);
-      } catch (e: any) {
-        setErr(e?.message || 'Failed to load vendors');
-      } finally {
-        setLoading(false);
+        const info = await getAuthRole();
+        if (!alive) return;
+        setRole((info?.role ?? 'guest') as Role);
+      } catch {
+        if (!alive) return;
+        setRole('guest');
       }
     })();
+    return () => { alive = false; };
   }, []);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return vendors;
-    return vendors.filter(v =>
-      v.vendorName.toLowerCase().includes(s) ||
-      v.walletAddress.toLowerCase().includes(s)
+  // list state
+  const [q, setQ] = useState(sp.get('q') || '');
+  const [status, setStatus] = useState(sp.get('status') || 'all');
+  const [kyc, setKyc] = useState(sp.get('kyc') || 'all');
+  const [page, setPage] = useState(Number(sp.get('page') || '1'));
+  const [pageSize, setPageSize] = useState(25);
+
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [data, setData] = useState<Paged<VendorLite>>({ items: [], page: 1, pageSize: 25, total: 0 });
+
+  // expanded rows: per-vendor bids cache
+  const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
+  const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
+
+  // sync URL (nice DX)
+  useEffect(() => {
+    const query = new URLSearchParams();
+    if (q) query.set('q', q);
+    if (status !== 'all') query.set('status', status);
+    if (kyc !== 'all') query.set('kyc', kyc);
+    if (page !== 1) query.set('page', String(page));
+    const qs = query.toString();
+    router.replace(`/admin/vendors${qs ? `?${qs}` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, status, kyc, page]);
+
+  const fetchList = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const url = new URL(`${API_BASE}/admin/vendors`);
+      if (q) url.searchParams.set('search', q);
+      if (status !== 'all') url.searchParams.set('status', status);
+      if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('limit', String(pageSize));
+      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
+      const total = typeof json?.total === 'number' ? json.total : items.length;
+      const pg = typeof json?.page === 'number' ? json.page : page;
+      const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+      setData({ items, total, page: pg, pageSize: ps });
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load vendors');
+      setData({ items: [], page: 1, pageSize, total: 0 });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, [q, status, kyc, page, pageSize]);
+
+  const toggleOpen = async (vendorId: string, walletAddress?: string) => {
+    setRowsOpen(prev => ({ ...prev, [vendorId]: !prev[vendorId] }));
+    // lazy load bids if opening and not cached
+    const already = bidsByVendor[vendorId];
+    const opening = !rowsOpen[vendorId];
+    if (opening && (!already || (!already.loading && already.bids.length === 0 && !already.error))) {
+      setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: true, error: null, bids: [] } }));
+      try {
+        // Try a focused endpoint first; fallback to generic if needed
+        const url = `${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}/bids`;
+        const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const arr = await res.json();
+        const bids: VendorBid[] = Array.isArray(arr) ? arr.map((b: any) => ({
+          bidId: String(b?.id ?? b?.bidId ?? ''),
+          projectId: String(b?.projectId ?? b?.project_id ?? ''),
+          projectTitle: String(b?.projectTitle ?? b?.project_title ?? 'Untitled Project'),
+          amountUSD: typeof b?.amountUSD === 'number' ? b.amountUSD : (typeof b?.amount_usd === 'number' ? b.amount_usd : null),
+          status: (b?.status ?? 'submitted') as VendorBid['status'],
+          createdAt: String(b?.createdAt ?? b?.created_at ?? b?.created_at_utc ?? new Date().toISOString()),
+        })) : [];
+        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: null, bids } }));
+      } catch (e: any) {
+        // fallback: if you don’t have /vendors/:id/bids, try a generic search
+        const msg = e?.message || 'Failed to load bids';
+        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: msg, bids: [] } }));
+      }
+    }
+  };
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
+
+  if (role === null) {
+    return (
+      <main className="max-w-7xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-4">Vendors</h1>
+        <div className="text-slate-500">Checking your permissions…</div>
+      </main>
     );
-  }, [q, vendors]);
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="max-w-7xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-4">Vendors</h1>
+        <div className="rounded border p-6 bg-white text-rose-700">403 — Admins only.</div>
+      </main>
+    );
+  }
 
   return (
-    <main className="max-w-6xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <main className="max-w-7xl mx-auto p-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold">Vendors</h1>
-        <Link href="/admin" className="underline">← Admin</Link>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <input
-          className="w-80 border rounded-lg px-3 py-2 text-sm"
-          placeholder="Search by name or wallet…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <div className="text-sm text-slate-500">
-          {filtered.length} / {vendors.length} vendors
+        <div className="flex items-center gap-2">
+          <input
+            value={q}
+            onChange={(e) => { setPage(1); setQ(e.target.value); }}
+            placeholder="Search vendor or wallet…"
+            className="border rounded px-3 py-1.5 text-sm"
+          />
+          <select
+            value={status}
+            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
+            className="border rounded px-2 py-1.5 text-sm"
+            title="Status"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="suspended">Suspended</option>
+            <option value="banned">Banned</option>
+          </select>
+          <select
+            value={kyc}
+            onChange={(e) => { setPage(1); setKyc(e.target.value); }}
+            className="border rounded px-2 py-1.5 text-sm"
+            title="KYC"
+          >
+            <option value="all">All KYC</option>
+            <option value="none">None</option>
+            <option value="pending">Pending</option>
+            <option value="verified">Verified</option>
+            <option value="rejected">Rejected</option>
+          </select>
         </div>
       </div>
 
-      {loading && <div className="py-10 text-center text-slate-500">Loading…</div>}
-      {err && <div className="p-3 rounded border bg-rose-50 text-rose-700">{err}</div>}
-
-      {!loading && !err && (
-        <div className="overflow-x-auto rounded border">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr className="[&>th]:py-2 [&>th]:px-3 text-left">
-                <th>Vendor</th>
-                <th>Wallet</th>
-                <th className="text-right">Bids</th>
-                <th className="text-right">Total Awarded (USD)</th>
-                <th className="text-right">Last Bid</th>
+      {/* List */}
+      <section className="rounded border bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b bg-slate-50">
+                <th className="py-2 px-3">Vendor</th>
+                <th className="py-2 px-3">Wallet</th>
+                <th className="py-2 px-3">Status</th>
+                <th className="py-2 px-3">KYC</th>
+                <th className="py-2 px-3">Bids</th>
+                <th className="py-2 px-3">Total Awarded</th>
+                <th className="py-2 px-3">Last Bid</th>
+                <th className="py-2 px-3 w-24">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((v, i) => (
-                <tr key={`${v.vendorName}-${v.walletAddress}-${i}`} className="border-t">
-                  <td className="py-2 px-3">{v.vendorName || '—'}</td>
-                  <td className="py-2 px-3 font-mono text-xs">{v.walletAddress || '—'}</td>
-                  <td className="py-2 px-3 text-right">{v.bidsCount.toLocaleString()}</td>
-                  <td className="py-2 px-3 text-right">
-                    ${v.totalAwardedUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  </td>
-                  <td className="py-2 px-3 text-right">
-                    {v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-500">No vendors match your search.</td>
-                </tr>
+              {loading && (
+                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">Loading vendors…</td></tr>
               )}
+              {err && !loading && (
+                <tr><td colSpan={8} className="py-6 px-3 text-rose-700">{err}</td></tr>
+              )}
+              {!loading && !err && data.items.length === 0 && (
+                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
+              )}
+              {!loading && !err && data.items.map((v) => {
+                const open = !!rowsOpen[v.id];
+                const bidsState = bidsByVendor[v.id];
+                return (
+                  <>
+                    <tr key={v.id} className="border-b hover:bg-slate-50">
+                      <td className="py-2 px-3 font-medium">{v.vendorName || '—'}</td>
+                      <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
+                      <td className="py-2 px-3">
+                        <StatusChip value={v.status} />
+                      </td>
+                      <td className="py-2 px-3">
+                        <KycChip value={v.kycStatus} />
+                      </td>
+                      <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
+                      <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+                      <td className="py-2 px-3">
+                        <button
+                          onClick={() => toggleOpen(v.id, v.walletAddress)}
+                          className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                        >
+                          {open ? 'Hide bids' : 'View bids'}
+                        </button>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr className="bg-slate-50 border-b">
+                        <td colSpan={8} className="px-3 py-3">
+                          <VendorBidsPanel state={bidsState} />
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      )}
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
+          <div className="text-xs text-slate-500">
+            Page {data.page} of {totalPages} — {data.total} total
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </section>
     </main>
+  );
+}
+
+function StatusChip({ value }: { value?: VendorLite['status'] }) {
+  const map: Record<string, string> = {
+    pending: 'bg-amber-100 text-amber-800',
+    approved: 'bg-emerald-100 text-emerald-800',
+    suspended: 'bg-rose-100 text-rose-800',
+    banned: 'bg-zinc-200 text-zinc-700',
+  };
+  const cls = value ? (map[value] || 'bg-zinc-100 text-zinc-700') : 'bg-zinc-100 text-zinc-700';
+  return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
+}
+
+function KycChip({ value }: { value?: VendorLite['kycStatus'] }) {
+  const map: Record<string, string> = {
+    none: 'bg-zinc-100 text-zinc-700',
+    pending: 'bg-amber-100 text-amber-800',
+    verified: 'bg-emerald-100 text-emerald-800',
+    rejected: 'bg-rose-100 text-rose-800',
+  };
+  const cls = value ? (map[value] || 'bg-zinc-100 text-zinc-700') : 'bg-zinc-100 text-zinc-700';
+  return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
+}
+
+function VendorBidsPanel({ state }: { state?: { loading: boolean; error: string | null; bids: VendorBid[] } }) {
+  if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
+  if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
+  if (state.error) return <div className="text-rose-700 text-sm">{state.error}</div>;
+  if (state.bids.length === 0) return <div className="text-slate-500 text-sm">No bids for this vendor.</div>;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left border-b">
+            <th className="py-2 pr-3">Project</th>
+            <th className="py-2 pr-3">Amount (USD)</th>
+            <th className="py-2 pr-3">Status</th>
+            <th className="py-2 pr-3">Date</th>
+            <th className="py-2 pr-3">Open</th>
+          </tr>
+        </thead>
+        <tbody>
+          {state.bids.map((b) => (
+            <tr key={b.bidId} className="border-b last:border-0">
+              <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
+              <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
+              <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
+              <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
+              <td className="py-2 pr-3">
+                {/* Update this link to whatever your project route is */}
+                <Link
+                  href={`/projects/${encodeURIComponent(b.projectId)}`}
+                  className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                >
+                  Open project
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
