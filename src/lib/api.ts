@@ -72,6 +72,15 @@ export interface AuthInfo {
   role: "admin" | "vendor" | "guest";
 }
 
+/** ✅ NEW: Admin vendor directory row */
+export interface VendorSummary {
+  vendorName: string;
+  walletAddress: string;
+  bidsCount: number;
+  lastBidAt?: string | null;
+  totalAwardedUSD: number;
+}
+
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -519,6 +528,23 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
+/** ✅ NEW: Admin — list all vendors (server must expose GET /admin/vendors) */
+export async function getAdminVendors(): Promise<VendorSummary[]> {
+  try {
+    const rows = await apiFetch("/admin/vendors");
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      vendorName: r.vendorName ?? r.vendor_name ?? "",
+      walletAddress: r.walletAddress ?? r.wallet_address ?? "",
+      bidsCount: Number(r.bidsCount ?? r.bids_count ?? 0),
+      lastBidAt: r.lastBidAt ?? r.last_bid_at ?? null,
+      totalAwardedUSD: Number(r.totalAwardedUSD ?? r.total_awarded_usd ?? 0),
+    }));
+  } catch (e) {
+    if (isAuthError(e)) return [];
+    throw e;
+  }
+}
+
 // ---- Proofs ----
 export async function getSubmittedProofs(): Promise<Proof[]> {
   try {
@@ -693,6 +719,7 @@ export default {
   getVendorPayments,
   adminCompleteMilestone,
   payMilestone,
+  getAdminVendors, // ✅ NEW
 
   // proofs
   getSubmittedProofs,
