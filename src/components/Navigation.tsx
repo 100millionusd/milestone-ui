@@ -48,7 +48,10 @@ export default function Navigation() {
           headers: { Accept: 'application/json' },
         });
         const d = r.ok ? await r.json() : null;
-        if (alive) setServerRole(((d?.role ?? '') as string).toLowerCase() as Role || 'guest');
+        if (alive) {
+          const sr = String(d?.role ?? '').toLowerCase() as Role;
+          setServerRole(sr || 'guest');
+        }
       } catch {
         if (alive) setServerRole('guest');
       }
@@ -61,8 +64,7 @@ export default function Navigation() {
   if (!mounted) return null;
 
   const web3RoleStr = (web3Role ?? '').toString().toLowerCase();
-  const effectiveRole: Role =
-    (serverRole ?? web3RoleStr || 'guest') as Role;
+  const effectiveRole: Role = (((serverRole ?? web3RoleStr) || 'guest') as Role);
   const isAdmin = effectiveRole === 'admin';
   const roleLoading = serverRole === null;
 
@@ -101,13 +103,12 @@ export default function Navigation() {
   const showItem = (item: NavItem) => {
     if (isAdmin) return true; // admin sees everything
 
-    // Make sure Admin is visible while server role loads, or when already on /admin/*
+    // Ensure Admin is visible while server role loads or when already on /admin/*
     const isAdminDropdown = 'children' in item && item.label === 'Admin';
     if (isAdminDropdown) {
       if (onAdminRoute) return true;
       if (roleLoading && !!addressStr) return true;
-      // If neither, show only to actual admins
-      return false;
+      return false; // non-admins
     }
 
     if ('roles' in item && item.roles)
@@ -283,7 +284,7 @@ export default function Navigation() {
 
         {/* Mobile Navigation */}
         {isMobileMenuOpen && (
-          <div className="md:hidden border-t border-gray-700">
+          <div className="md-hidden border-t border-gray-700 md:border-t-0">
             <div className="px-2 pt-2 pb-3 space-y-1">
               {navItems.filter(showItem).map((item) =>
                 'children' in item ? (
