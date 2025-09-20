@@ -19,20 +19,24 @@ export default function Navigation() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
 
-  const pathname = usePathname() || '/';
+  const pathnameRaw = usePathname() || '/';
+  const pathname = pathnameRaw.split('?')[0]; // robust against querystrings
   const router = useRouter();
   const { address, role, logout } = useWeb3Auth();
 
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  const roleStr = (role ?? '').toString().toLowerCase();     // <-- normalize
-  const roleLoading = role === undefined || role === null;    // <-- loading flag
+  // --- role handling
+  const roleStr = (role ?? '').toString().toLowerCase();
+  const roleLoading = role === undefined || role === null;
   const isAdmin = roleStr === 'admin';
   const onAdminRoute = pathname.startsWith('/admin');
 
-  const isActive = (path: string) =>
-    pathname === path || pathname.startsWith(path + '/');
+  const isActive = (path: string) => {
+    const target = (path || '/').split('?')[0];
+    return pathname === target || pathname.startsWith(target + '/');
+  };
 
   // Admin must see ALL areas. Admin section is explicitly admin-only.
   const navItems: NavItem[] = [
@@ -60,9 +64,9 @@ export default function Navigation() {
 
     const isAdminDropdown = 'children' in item && item.label === 'Admin';
     if (isAdminDropdown) {
-      if (onAdminRoute) return true;               // already in admin
-      if (roleLoading && !!address) return true;   // optimistic while loading
-      return false;                                 // not admin
+      if (onAdminRoute) return true;             // already in admin
+      if (roleLoading && !!address) return true; // optimistic while loading
+      return false;                               // not admin
     }
 
     if ('roles' in item && item.roles)
