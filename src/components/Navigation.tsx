@@ -5,56 +5,41 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
-type NavItem =
-  | { href: string; label: string; roles?: Array<'admin' | 'vendor' | 'guest'> }
-  | {
-      label: string;
-      roles?: Array<'admin' | 'vendor' | 'guest'>;
-      children: { href: string; label: string }[];
-    };
-
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
+
   const pathname = usePathname();
   const router = useRouter();
   const { address, role, logout } = useWeb3Auth();
 
   useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
-  // ✅ Route Vendors link by role:
-  const vendorsHref = role === 'admin' ? '/admin/dashboard?tab=vendors' : '/vendor/dashboard';
+  // If user is admin, or already inside /admin, force-show the Admin dropdown
+  const isAdmin = role === 'admin';
+  const showAdminMenu = isAdmin || pathname.startsWith('/admin');
 
-  // Admin must see ALL areas. Admin section is explicitly admin-only.
-  const navItems: NavItem[] = [
-    { href: '/', label: 'Dashboard' },                 // all
-    { href: '/projects', label: 'Projects' },          // all
-    { href: '/new', label: 'Submit Proposal' },        // all (guest/new + vendor + admin)
-    {
-      label: 'Admin',
-      roles: ['admin'], // admin-only dropdown
-      children: [
-        { href: '/admin/proposals', label: 'Proposals' },
-        { href: '/admin/bids', label: 'Bids' },
-        { href: '/admin/proofs', label: 'Proofs' },
-        // ✅ quick access to the Vendors directory tab:
-        { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
-      ],
-    },
-    // ✅ Vendors link now dynamic:
-    { href: vendorsHref, label: 'Vendors' },           // all (guest/new + vendor + admin)
+  // Top-level links everyone can see
+  const mainLinks = [
+    { href: '/', label: 'Dashboard' },
+    { href: '/projects', label: 'Projects' },
+    { href: '/new', label: 'Submit Proposal' },
+    // Keep vendor area, but rename to avoid confusion with Admin Vendors
+    { href: '/vendor/dashboard', label: 'Vendor Portal' },
   ];
 
-  const showItem = (item: NavItem) => {
-    if (role === 'admin') return true; // admin sees everything
-    if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
-    return true; // default visible to all
-  };
-
-  if (!mounted) return null;
+  // Admin dropdown (only visible if showAdminMenu)
+  const adminLinks = [
+    { href: '/admin/proposals', label: 'Proposals' },
+    { href: '/admin/bids', label: 'Bids' },
+    { href: '/admin/proofs', label: 'Proofs' },
+    { href: '/admin/dashboard?tab=vendors', label: 'Vendors (Admin)' }, // <-- exact admin vendors tab
+  ];
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
@@ -70,62 +55,64 @@ export default function Navigation() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
-            {navItems.filter(showItem).map((item) =>
-              'children' in item ? (
-                <div key={item.label} className="relative">
-                  <button
-                    onClick={() => setIsAdminOpen((o) => !o)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      pathname.startsWith('/admin')
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {item.label}
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {isAdminOpen && (
-                    <div className="absolute mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                      {item.children.map((sub) => (
-                        <Link
-                          key={sub.href}
-                          href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href.split('?')[0]) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                          }`}
-                        >
-                          {sub.label}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href.split('?')[0])
+            {mainLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isActive(item.href)
+                    ? 'text-cyan-400 bg-gray-700'
+                    : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+
+            {/* Admin dropdown */}
+            {showAdminMenu && (
+              <div className="relative">
+                <button
+                  onClick={() => setIsAdminOpen((o) => !o)}
+                  className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
+                    pathname.startsWith('/admin')
                       ? 'text-cyan-400 bg-gray-700'
                       : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                 >
-                  {item.label}
-                </Link>
-              )
+                  Admin
+                  <svg
+                    className={`w-4 h-4 transform transition-transform ${
+                      isAdminOpen ? 'rotate-180' : ''
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isAdminOpen && (
+                  <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                    {adminLinks.map((sub) => (
+                      <Link
+                        key={sub.href}
+                        href={sub.href}
+                        className={`block px-4 py-2 text-sm ${
+                          isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                        }`}
+                      >
+                        {sub.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </nav>
 
           {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
-            {/* Profile */}
             <div className="relative">
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
@@ -185,35 +172,39 @@ export default function Navigation() {
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.filter(showItem).map((item) =>
-                'children' in item ? (
-                  <div key={item.label}>
-                    <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
-                    {item.children.map((sub) => (
-                      <Link
-                        key={sub.href}
-                        href={sub.href}
-                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                          isActive(sub.href.split('?')[0]) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                        }`}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                      >
-                        {sub.label}
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href.split('?')[0]) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    {item.label}
-                  </Link>
-                )
+              {mainLinks.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                    isActive(item.href)
+                      ? 'text-cyan-400 bg-gray-700'
+                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+
+              {showAdminMenu && (
+                <div>
+                  <p className="px-3 py-2 text-gray-400 text-xs uppercase">Admin</p>
+                  {adminLinks.map((sub) => (
+                    <Link
+                      key={sub.href}
+                      href={sub.href}
+                      className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                        isActive(sub.href)
+                          ? 'text-cyan-600 bg-gray-100'
+                          : 'text-gray-800 hover:bg-gray-100'
+                      }`}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      {sub.label}
+                    </Link>
+                  ))}
+                </div>
               )}
             </div>
           </div>
