@@ -18,18 +18,27 @@ export default function Navigation() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
-  const pathname = usePathname();
+
+  const pathname = usePathname() || '/';
   const router = useRouter();
   const { address, role, logout } = useWeb3Auth();
 
   useEffect(() => setMounted(true), []);
-  const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
+  if (!mounted) return null;
+
+  const roleStr = (role ?? '').toString().toLowerCase();     // <-- normalize
+  const roleLoading = role === undefined || role === null;    // <-- loading flag
+  const isAdmin = roleStr === 'admin';
+  const onAdminRoute = pathname.startsWith('/admin');
+
+  const isActive = (path: string) =>
+    pathname === path || pathname.startsWith(path + '/');
 
   // Admin must see ALL areas. Admin section is explicitly admin-only.
   const navItems: NavItem[] = [
     { href: '/', label: 'Dashboard' },                 // all
     { href: '/projects', label: 'Projects' },          // all
-    { href: '/new', label: 'Submit Proposal' },        // all (guest/new + vendor + admin)
+    { href: '/new', label: 'Submit Proposal' },        // all
     {
       label: 'Admin',
       roles: ['admin'], // admin-only dropdown
@@ -39,16 +48,31 @@ export default function Navigation() {
         { href: '/admin/proofs', label: 'Proofs' },
       ],
     },
-    { href: '/vendor/dashboard', label: 'Vendors' },   // all (guest/new + vendor + admin)
+    { href: '/vendor/dashboard', label: 'Vendors' },   // all
   ];
 
+  // SHOW RULES:
+  // - Real admin ⇒ everything
+  // - While role is loading but user is logged in ⇒ show Admin (prevents flicker)
+  // - If already on /admin/* ⇒ show Admin (so user can navigate within)
   const showItem = (item: NavItem) => {
-    if (role === 'admin') return true; // admin sees everything
-    if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
+    if (isAdmin) return true; // admin sees everything
+
+    const isAdminDropdown = 'children' in item && item.label === 'Admin';
+    if (isAdminDropdown) {
+      if (onAdminRoute) return true;               // already in admin
+      if (roleLoading && !!address) return true;   // optimistic while loading
+      return false;                                 // not admin
+    }
+
+    if ('roles' in item && item.roles)
+      return item.roles.includes((roleStr || 'guest') as any);
+
     return true; // default visible to all
   };
 
-  if (!mounted) return null;
+  // Auto-open the Admin dropdown when on an /admin route
+  useEffect(() => { if (onAdminRoute) setIsAdminOpen(true); }, [onAdminRoute]);
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
@@ -70,7 +94,7 @@ export default function Navigation() {
                   <button
                     onClick={() => setIsAdminOpen((o) => !o)}
                     className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      pathname.startsWith('/admin')
+                      onAdminRoute
                         ? 'text-cyan-400 bg-gray-700'
                         : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
