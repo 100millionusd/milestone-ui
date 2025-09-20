@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as api from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
+import BidChatAgent from '@/components/BidChatAgent';
 
 export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const routeParams = useParams();
@@ -17,8 +18,12 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  // per-proof prompt + busy state
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
+
+  // chat modal state (bid-level; opened from header or any proof)
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -28,12 +33,10 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         const b = await api.getBid(bidId);
         setBid(b);
 
-        // fetch proposal context for Agent 2 chat
         const p = await api.getProposal(b.proposalId);
         setProposal(p);
 
-        // admin-only list
-        const pf = await api.getProofs(bidId);
+        const pf = await api.getProofs(bidId); // admin-only
         setProofs(pf);
       } catch (e: any) {
         setErr(e?.message || 'Failed to load bid');
@@ -88,7 +91,18 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-        <Link href="/admin/bids" className="underline">← Back</Link>
+        <div className="flex items-center gap-2">
+          {/* Global bid-level chat button */}
+          <button
+            type="button"
+            onClick={() => setChatOpen(true)}
+            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white"
+            title="Ask Agent 2 about this bid"
+          >
+            Ask Agent 2 (Chat)
+          </button>
+          <Link href="/admin/bids" className="underline">← Back</Link>
+        </div>
       </div>
 
       {/* Bid summary */}
@@ -123,14 +137,15 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         )}
       </section>
 
-      {/* ✅ Agent 2 — inline analysis + Run + Ask Agent 2 (Chat) */}
+      {/* Agent 2 — inline analysis + run + (Agent2Inline may also render its own chat button) */}
       {proposal && (
         <section className="rounded border p-4 bg-white">
-          <Agent2Inline bid={bid} proposal={proposal} />
+          {/* If your Agent2Inline accepts { proposal }, pass it; else remove the prop */}
+          <Agent2Inline bid={bid} proposal={proposal as any} />
         </section>
       )}
 
-      {/* Proofs for this bid (with Agent 2 per-proof) */}
+      {/* Proofs for this bid (with Agent 2 per-proof + chat button on each) */}
       <section className="rounded border p-4 bg-white">
         <h2 className="font-semibold mb-3">Submitted Proofs</h2>
 
@@ -180,6 +195,15 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
               <div className="mt-4 rounded-md bg-slate-50 p-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-semibold">Agent 2 Analysis</div>
+                  {/* Per-proof chat opens the same bid-level chat modal */}
+                  <button
+                    type="button"
+                    onClick={() => setChatOpen(true)}
+                    className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
+                    title="Ask Agent 2 about this bid/proof"
+                  >
+                    Ask Agent 2 (Chat)
+                  </button>
                 </div>
 
                 {a ? <AnalysisView a={a} /> : <div className="text-sm text-slate-600">No analysis yet for this proof.</div>}
@@ -192,13 +216,21 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
                     rows={3}
                     placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
                   />
-                  <div className="mt-2">
+                  <div className="mt-2 flex gap-2">
                     <button
                       onClick={() => runProofAnalysis(id)}
                       disabled={!!busyById[id]}
                       className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
                     >
                       {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
+                    </button>
+                    {/* Secondary chat entry point beside the rerun button */}
+                    <button
+                      type="button"
+                      onClick={() => setChatOpen(true)}
+                      className="px-3 py-2 rounded-lg bg-blue-600 text-white"
+                    >
+                      Ask Agent 2 (Chat)
                     </button>
                   </div>
                 </div>
@@ -207,6 +239,14 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           );
         })}
       </section>
+
+      {/* One chat modal for the whole page */}
+      <BidChatAgent
+        bidId={bidId}
+        proposal={proposal}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
     </main>
   );
 }
