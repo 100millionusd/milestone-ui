@@ -1,13 +1,19 @@
+// src/components/Navigation.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useWeb3Auth } from '@/providers/Web3AuthProvider';
+import { getAuthRole } from '@/lib/api';
+
+type Role = 'admin' | 'vendor' | 'guest';
 
 type NavItem =
-  | { href: string; label: string }
+  | { href: string; label: string; roles?: Array<Role> }
   | {
       label: string;
+      roles?: Array<Role>;
       children: { href: string; label: string }[];
     };
 
@@ -17,36 +23,66 @@ export default function Navigation() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
 
-  const pathnameRaw = usePathname() || '/';
-  const pathname = pathnameRaw.split('?')[0];
+  const pathname = usePathname();
   const router = useRouter();
 
+  const { address, role: web3Role, logout } = useWeb3Auth();
+  const [serverRole, setServerRole] = useState<Role | null>(null);
+
+  // SSR guard
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
 
-  const isActive = (path: string) =>
-    pathname === path || pathname.startsWith(path + '/');
-
-  // Minimal, crash-proof nav; Admin menu ALWAYS visible so you can access admin pages
-  const navItems: NavItem[] = [
-    { href: '/', label: 'Dashboard' },
-    { href: '/projects', label: 'Projects' },
-    { href: '/new', label: 'Submit Proposal' },
-    {
-      label: 'Admin',
-      children: [
-        { href: '/admin/proposals', label: 'Proposals' },
-        { href: '/admin/bids', label: 'Bids' },
-        { href: '/admin/proofs', label: 'Proofs' },
-      ],
-    },
-    { href: '/vendor/dashboard', label: 'Vendors' },
-  ];
-
-  // Auto-open Admin when on an /admin route
+  // Also ask the server who we are (cookie/JWT truth)
   useEffect(() => {
-    if (pathname.startsWith('/admin')) setIsAdminOpen(true);
-  }, [pathname]);
+    let alive = true;
+    (async () => {
+      try {
+        const info = await getAuthRole();
+        if (alive) setServerRole(info.role);
+      } catch {
+        if (alive) setServerRole('guest');
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Effective role: server wins, then wallet, then guest
+  const role: Role = (serverRole || web3Role || 'guest') as Role;
+  const isAdmin = role === 'admin';
+
+  const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
+
+  // Admin must see ALL; Admin dropdown is admin-only.
+  const navItems: NavItem[] = useMemo(
+    () => [
+      { href: '/', label: 'Dashboard' }, // all
+      { href: '/projects', label: 'Projects' }, // all
+      { href: '/new', label: 'Submit Proposal' }, // all
+      {
+        label: 'Admin',
+        roles: ['admin'],
+        children: [
+          { href: '/admin/proposals', label: 'Proposals' },
+          { href: '/admin/bids', label: 'Bids' },
+          { href: '/admin/proofs', label: 'Proofs' },
+          { href: '/admin/dashboard?tab=vendors', label: 'Vendors' }, // ✅ added
+        ],
+      },
+      // Top-level "Vendors" should go to admin vendors for admins, vendor dashboard otherwise
+      { href: isAdmin ? '/admin/dashboard?tab=vendors' : '/vendor/dashboard', label: 'Vendors' },
+    ],
+    [isAdmin]
+  );
+
+  const showItem = (item: NavItem) => {
+    if (role === 'admin') return true; // admin sees everything
+    if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
+    return true; // default visible to all
+  };
+
+  if (!mounted) return null;
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
@@ -62,7 +98,7 @@ export default function Navigation() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
-            {navItems.map((item) =>
+            {navItems.filter(showItem).map((item) =>
               'children' in item ? (
                 <div key={item.label} className="relative">
                   <button
@@ -84,7 +120,7 @@ export default function Navigation() {
                     </svg>
                   </button>
                   {isAdminOpen && (
-                    <div className="absolute mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                    <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                       {item.children.map((sub) => (
                         <Link
                           key={sub.href}
@@ -113,17 +149,20 @@ export default function Navigation() {
             )}
           </nav>
 
-          {/* User Actions (no auth deps; crash-proof) */}
+          {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
+            {/* Profile */}
             <div className="relative">
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
                 onClick={() => setIsProfileOpen((o) => !o)}
               >
                 <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                  U
+                  {address ? address.slice(2, 4).toUpperCase() : 'G'}
                 </div>
-                <span className="text-sm text-gray-300">User</span>
+                <span className="text-sm text-gray-300">
+                  {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Guest'}
+                </span>
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -131,12 +170,24 @@ export default function Navigation() {
 
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                  <button
-                    onClick={() => router.push('/vendor/login')}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                  >
-                    Login
-                  </button>
+                  {address ? (
+                    <button
+                      onClick={async () => {
+                        await logout();
+                        router.push('/vendor/login');
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Logout
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => router.push('/vendor/login')}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Login
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -160,7 +211,7 @@ export default function Navigation() {
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.map((item) =>
+              {navItems.filter(showItem).map((item) =>
                 'children' in item ? (
                   <div key={item.label}>
                     <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
