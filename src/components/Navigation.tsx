@@ -3,13 +3,11 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 type NavItem =
-  | { href: string; label: string; roles?: Array<'admin' | 'vendor' | 'guest'> }
+  | { href: string; label: string }
   | {
       label: string;
-      roles?: Array<'admin' | 'vendor' | 'guest'>;
       children: { href: string; label: string }[];
     };
 
@@ -19,75 +17,36 @@ export default function Navigation() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
 
-  const pathnameRaw = usePathname();
+  const pathnameRaw = usePathname() || '/';
+  const pathname = pathnameRaw.split('?')[0];
   const router = useRouter();
-  const { address, role, logout } = useWeb3Auth();
 
-  // Only render on client after mount to avoid hydration issues
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  // ---- Safe derived values (never crash on undefined/null) ----
-  const pathname = (pathnameRaw || '/').split('?')[0];
-  const addressStr = typeof address === 'string' ? address : '';
-  const roleStr =
-    typeof role === 'string' ? role.toLowerCase() : (role ? String(role).toLowerCase() : '');
-  const roleLoading = role === undefined || role === null || roleStr === '';
-  const isAdmin = roleStr === 'admin';
-  const onAdminRoute = pathname.startsWith('/admin');
+  const isActive = (path: string) =>
+    pathname === path || pathname.startsWith(path + '/');
 
-  const isActive = (path: string) => {
-    const target = (path || '/').split('?')[0];
-    return pathname === target || pathname.startsWith(target + '/');
-  };
-
-  // Admin must see ALL areas. Admin section is explicitly admin-only.
+  // Minimal, crash-proof nav; Admin menu ALWAYS visible so you can access admin pages
   const navItems: NavItem[] = [
-    { href: '/', label: 'Dashboard' },                 // all
-    { href: '/projects', label: 'Projects' },          // all
-    { href: '/new', label: 'Submit Proposal' },        // all
+    { href: '/', label: 'Dashboard' },
+    { href: '/projects', label: 'Projects' },
+    { href: '/new', label: 'Submit Proposal' },
     {
       label: 'Admin',
-      roles: ['admin'], // admin-only dropdown
       children: [
         { href: '/admin/proposals', label: 'Proposals' },
         { href: '/admin/bids', label: 'Bids' },
         { href: '/admin/proofs', label: 'Proofs' },
       ],
     },
-    { href: '/vendor/dashboard', label: 'Vendors' },   // all
+    { href: '/vendor/dashboard', label: 'Vendors' },
   ];
 
-  // SHOW RULES:
-  // - Real admin ⇒ everything
-  // - While role is loading but a wallet is connected ⇒ show Admin (prevents flicker)
-  // - If already on /admin/* ⇒ show Admin (so user can navigate within)
-  const showItem = (item: NavItem) => {
-    try {
-      if (isAdmin) return true;
-
-      const isAdminDropdown = 'children' in item && item.label === 'Admin';
-      if (isAdminDropdown) {
-        if (onAdminRoute) return true;
-        if (roleLoading && !!addressStr) return true; // optimistic while loading
-        return false;
-      }
-
-      if ('roles' in item && item.roles) {
-        return item.roles.includes((roleStr || 'guest') as 'admin' | 'vendor' | 'guest');
-      }
-
-      return true;
-    } catch {
-      // absolutely never crash the app due to nav logic
-      return true;
-    }
-  };
-
-  // Auto-open the Admin dropdown when on an /admin route
+  // Auto-open Admin when on an /admin route
   useEffect(() => {
-    if (onAdminRoute) setIsAdminOpen(true);
-  }, [onAdminRoute]);
+    if (pathname.startsWith('/admin')) setIsAdminOpen(true);
+  }, [pathname]);
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
@@ -103,13 +62,13 @@ export default function Navigation() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
-            {navItems.filter(showItem).map((item) =>
+            {navItems.map((item) =>
               'children' in item ? (
                 <div key={item.label} className="relative">
                   <button
                     onClick={() => setIsAdminOpen((o) => !o)}
                     className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      onAdminRoute
+                      pathname.startsWith('/admin')
                         ? 'text-cyan-400 bg-gray-700'
                         : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
@@ -154,20 +113,17 @@ export default function Navigation() {
             )}
           </nav>
 
-          {/* User Actions */}
+          {/* User Actions (no auth deps; crash-proof) */}
           <div className="hidden md:flex items-center space-x-4 relative">
-            {/* Profile */}
             <div className="relative">
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
                 onClick={() => setIsProfileOpen((o) => !o)}
               >
                 <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                  {addressStr ? addressStr.slice(2, 4).toUpperCase() : 'G'}
+                  U
                 </div>
-                <span className="text-sm text-gray-300">
-                  {addressStr ? `${addressStr.slice(0, 6)}...${addressStr.slice(-4)}` : 'Guest'}
-                </span>
+                <span className="text-sm text-gray-300">User</span>
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -175,24 +131,12 @@ export default function Navigation() {
 
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                  {addressStr ? (
-                    <button
-                      onClick={async () => {
-                        try { await (logout?.()); } catch {}
-                        router.push('/vendor/login');
-                      }}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Logout
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => router.push('/vendor/login')}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Login
-                    </button>
-                  )}
+                  <button
+                    onClick={() => router.push('/vendor/login')}
+                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                  >
+                    Login
+                  </button>
                 </div>
               )}
             </div>
@@ -216,7 +160,7 @@ export default function Navigation() {
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.filter(showItem).map((item) =>
+              {navItems.map((item) =>
                 'children' in item ? (
                   <div key={item.label}>
                     <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
