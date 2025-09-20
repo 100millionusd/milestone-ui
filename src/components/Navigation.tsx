@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
@@ -11,34 +11,47 @@ export default function Navigation() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
 
-  const pathname = usePathname();
+  const pathnameRaw = usePathname() || '/';
   const router = useRouter();
   const { address, role, logout } = useWeb3Auth();
 
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
+  // --- NEW: normalize pathname to ignore querystrings when checking actives
+  const pathname = useMemo(() => pathnameRaw.split('?')[0], [pathnameRaw]);
+
+  // --- NEW: robust isActive (ignores querystring in href too)
+  const isActive = (href: string) => {
+    const target = href.split('?')[0];
+    return pathname === target || pathname.startsWith(target + '/');
+  };
 
   // If user is admin, or already inside /admin, force-show the Admin dropdown
+  const roleLoading = role === undefined || role === null;            // <-- NEW
   const isAdmin = role === 'admin';
-  const showAdminMenu = isAdmin || pathname.startsWith('/admin');
+  const onAdminRoute = pathname.startsWith('/admin');
+  const showAdminMenu =
+    isAdmin || onAdminRoute || (roleLoading && !!address);            // <-- NEW (optimistic while loading)
+
+  // Auto-open dropdown when on /admin
+  useEffect(() => {
+    if (onAdminRoute) setIsAdminOpen(true);                           // <-- NEW
+  }, [onAdminRoute]);
 
   // Top-level links everyone can see
   const mainLinks = [
     { href: '/', label: 'Dashboard' },
     { href: '/projects', label: 'Projects' },
     { href: '/new', label: 'Submit Proposal' },
-    // Keep vendor area, but rename to avoid confusion with Admin Vendors
     { href: '/vendor/dashboard', label: 'Vendor Portal' },
   ];
 
-  // Admin dropdown (only visible if showAdminMenu)
   const adminLinks = [
     { href: '/admin/proposals', label: 'Proposals' },
     { href: '/admin/bids', label: 'Bids' },
     { href: '/admin/proofs', label: 'Proofs' },
-    { href: '/admin/dashboard?tab=vendors', label: 'Vendors (Admin)' }, // <-- exact admin vendors tab
+    { href: '/admin/dashboard?tab=vendors', label: 'Vendors (Admin)' },
   ];
 
   return (
@@ -75,16 +88,12 @@ export default function Navigation() {
                 <button
                   onClick={() => setIsAdminOpen((o) => !o)}
                   className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                    pathname.startsWith('/admin')
-                      ? 'text-cyan-400 bg-gray-700'
-                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    onAdminRoute ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                 >
                   Admin
                   <svg
-                    className={`w-4 h-4 transform transition-transform ${
-                      isAdminOpen ? 'rotate-180' : ''
-                    }`}
+                    className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -93,13 +102,13 @@ export default function Navigation() {
                   </svg>
                 </button>
                 {isAdminOpen && (
-                  <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                  <div className="absolute mt-2 w-56 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                     {adminLinks.map((sub) => (
                       <Link
                         key={sub.href}
                         href={sub.href}
                         className={`block px-4 py-2 text-sm ${
-                          isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                          isActive(sub.href.split('?')[0]) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
                         }`}
                       >
                         {sub.label}
