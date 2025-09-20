@@ -1,5 +1,6 @@
 // src/components/BidChatAgent.tsx
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
 
@@ -7,7 +8,7 @@ type Msg = { role: "user" | "assistant"; content: string };
 
 export default function BidChatAgent({
   bidId,
-  proposal,         // pass the proposal object if you want extra context on server
+  proposal,
   open,
   onClose,
 }: {
@@ -20,10 +21,16 @@ export default function BidChatAgent({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
+  // auto-scroll on new messages
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages]);
+
+  // cleanup when closed
   useEffect(() => {
     if (!open) {
-      // cleanup stream if modal closes
       abortRef.current?.abort();
       abortRef.current = null;
       setMessages([]);
@@ -40,6 +47,7 @@ export default function BidChatAgent({
     setInput("");
     setLoading(true);
 
+    // cancel any previous stream
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -48,16 +56,14 @@ export default function BidChatAgent({
       const res = await fetch(`${API_BASE}/bids/${bidId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // sends auth cookie/JWT
+        credentials: "include",
         body: JSON.stringify({ messages: next, proposal }),
         signal: ctrl.signal,
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
-      // create empty assistant bubble to stream into
+      // assistant bubble we’ll stream into
       let assistant: Msg = { role: "assistant", content: "" };
       setMessages((prev) => [...prev, assistant]);
 
@@ -68,22 +74,31 @@ export default function BidChatAgent({
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+
         buf += dec.decode(value, { stream: true });
 
+        // SSE frames are separated by a blank line
         const chunks = buf.split("\n\n");
-        buf = chunks.pop() || "";
+        buf = chunks.pop() || ""; // keep partial
 
         for (const chunk of chunks) {
-          const line = chunk.trim();
+          // IMPORTANT: keep trailing whitespace/newlines from tokens
+          const line = chunk.trimStart(); // only trim the start (keeps token spaces)
           if (!line.startsWith("data:")) continue;
-          const token = line.slice(5).trim();
+
+          // remove the "data:" prefix only; DO NOT .trim() the token
+          const token = line.replace(/^data:\s?/, "");
 
           if (token === "[DONE]") {
             buf = "";
             break;
           }
 
-          assistant.content += token;
+          if (token.startsWith("ERROR")) {
+            assistant.content += `\n${token}\n`;
+          } else {
+            assistant.content += token; // preserve spaces/newlines
+          }
           setMessages((prev) => [...prev.slice(0, -1), { ...assistant }]);
         }
       }
@@ -102,7 +117,8 @@ export default function BidChatAgent({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl flex flex-col">
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl flex flex-col">
+        {/* Header */}
         <div className="p-4 border-b flex items-center justify-between">
           <h3 className="font-semibold">Agent 2 — Bid Chat (#{bidId})</h3>
           <button
@@ -111,12 +127,17 @@ export default function BidChatAgent({
               abortRef.current?.abort();
               onClose();
             }}
+            aria-label="Close"
           >
             ✖
           </button>
         </div>
 
-        <div className="p-4 space-y-3 overflow-y-auto max-h-[60vh] text-sm">
+        {/* Messages */}
+        <div
+          ref={listRef}
+          className="p-4 space-y-3 overflow-y-auto max-h-[60vh] text-sm"
+        >
           {messages.map((m, i) => (
             <div
               key={i}
@@ -124,14 +145,17 @@ export default function BidChatAgent({
                 m.role === "user"
                   ? "ml-auto bg-blue-100 text-blue-900"
                   : "bg-gray-100 text-gray-800"
-              }`}
+              } whitespace-pre-wrap break-words`} // preserve spaces & line breaks
             >
               {m.content}
             </div>
           ))}
-          {loading && <div className="text-xs text-gray-400">Agent 2 is typing…</div>}
+          {loading && (
+            <div className="text-xs text-gray-400">Agent 2 is typing…</div>
+          )}
         </div>
 
+        {/* Input */}
         <form
           className="p-3 border-t flex gap-2"
           onSubmit={(e) => {
