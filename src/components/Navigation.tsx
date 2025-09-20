@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useWeb3Auth } from '@/providers/Web3AuthProvider';
+import { useWeb3Auth as _useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 type NavItem =
   | { href: string; label: string; roles?: Array<'admin' | 'vendor' | 'guest'> }
@@ -13,6 +13,15 @@ type NavItem =
       children: { href: string; label: string }[];
     };
 
+// Guard the provider so it can't crash the client if the context isn't ready yet
+function useSafeWeb3Auth() {
+  try {
+    return _useWeb3Auth();
+  } catch {
+    return { address: null, role: null, logout: async () => {} } as any;
+  }
+}
+
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -20,16 +29,19 @@ export default function Navigation() {
   const [mounted, setMounted] = useState(false); // avoid SSR flicker
 
   const pathnameRaw = usePathname() || '/';
-  const pathname = pathnameRaw.split('?')[0]; // robust against querystrings
+  const pathname = pathnameRaw.split('?')[0];
   const router = useRouter();
-  const { address, role, logout } = useWeb3Auth();
+
+  // SAFE auth hook (won't throw if provider not mounted)
+  const { address, role, logout } = useSafeWeb3Auth();
+  const addressStr = typeof address === 'string' ? address : ''; // no .slice on non-string
 
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  // --- role handling
-  const roleStr = (role ?? '').toString().toLowerCase();
-  const roleLoading = role === undefined || role === null;
+  // Normalize / compute role + flags
+  const roleStr = String(role ?? '').toLowerCase();
+  const roleLoading = role === undefined || role === null || roleStr === '';
   const isAdmin = roleStr === 'admin';
   const onAdminRoute = pathname.startsWith('/admin');
 
@@ -57,22 +69,22 @@ export default function Navigation() {
 
   // SHOW RULES:
   // - Real admin ⇒ everything
-  // - While role is loading but user is logged in ⇒ show Admin (prevents flicker)
+  // - While role is loading but a wallet is connected ⇒ show Admin (prevents flicker)
   // - If already on /admin/* ⇒ show Admin (so user can navigate within)
   const showItem = (item: NavItem) => {
-    if (isAdmin) return true; // admin sees everything
+    if (isAdmin) return true;
 
     const isAdminDropdown = 'children' in item && item.label === 'Admin';
     if (isAdminDropdown) {
-      if (onAdminRoute) return true;             // already in admin
-      if (roleLoading && !!address) return true; // optimistic while loading
-      return false;                               // not admin
+      if (onAdminRoute) return true;
+      if (roleLoading && !!addressStr) return true;
+      return false;
     }
 
     if ('roles' in item && item.roles)
       return item.roles.includes((roleStr || 'guest') as any);
 
-    return true; // default visible to all
+    return true;
   };
 
   // Auto-open the Admin dropdown when on an /admin route
@@ -152,10 +164,10 @@ export default function Navigation() {
                 onClick={() => setIsProfileOpen((o) => !o)}
               >
                 <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                  {address ? address.slice(2, 4).toUpperCase() : 'G'}
+                  {addressStr ? addressStr.slice(2, 4).toUpperCase() : 'G'}
                 </div>
                 <span className="text-sm text-gray-300">
-                  {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Guest'}
+                  {addressStr ? `${addressStr.slice(0, 6)}...${addressStr.slice(-4)}` : 'Guest'}
                 </span>
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -164,10 +176,10 @@ export default function Navigation() {
 
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                  {address ? (
+                  {addressStr ? (
                     <button
                       onClick={async () => {
-                        await logout();
+                        try { await (logout?.()); } catch {}
                         router.push('/vendor/login');
                       }}
                       className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
