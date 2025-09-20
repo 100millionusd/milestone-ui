@@ -26,40 +26,42 @@ export default function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
 
+  // From wallet context
   const { address, role: web3Role, logout } = useWeb3Auth();
+
+  // From server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
 
-  // SSR guard
   useEffect(() => setMounted(true), []);
 
-  // Also ask the server who we are (cookie/JWT truth)
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRole();          // calls /auth/role (uses cookie)
         if (alive) setServerRole(info.role);
       } catch {
         if (alive) setServerRole('guest');
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Effective role: server wins, then wallet, then guest
-  const role: Role = (serverRole || web3Role || 'guest') as Role;
-  const isAdmin = role === 'admin';
+  // Effective role: if server says admin, trust it; else fall back to wallet; else guest
+  const role: Role = useMemo(() => {
+    if (serverRole === 'admin') return 'admin';
+    return (web3Role as Role) || serverRole || 'guest';
+  }, [serverRole, web3Role]);
 
+  const isAdmin = role === 'admin';
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
-  // Admin must see ALL; Admin dropdown is admin-only.
+  // Keep your existing items; Admin dropdown is admin-only.
   const navItems: NavItem[] = useMemo(
     () => [
-      { href: '/', label: 'Dashboard' }, // all
-      { href: '/projects', label: 'Projects' }, // all
-      { href: '/new', label: 'Submit Proposal' }, // all
+      { href: '/', label: 'Dashboard' },
+      { href: '/projects', label: 'Projects' },
+      { href: '/new', label: 'Submit Proposal' },
       {
         label: 'Admin',
         roles: ['admin'],
@@ -67,19 +69,20 @@ export default function Navigation() {
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
-          { href: '/admin/dashboard?tab=vendors', label: 'Vendors' }, // ✅ added
+          // optional: quick link to vendors tab inside admin dashboard
+          { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
         ],
       },
-      // Top-level "Vendors" should go to admin vendors for admins, vendor dashboard otherwise
-      { href: isAdmin ? '/admin/dashboard?tab=vendors' : '/vendor/dashboard', label: 'Vendors' },
+      // keep your existing top-level Vendors link
+      { href: '/vendor/dashboard', label: 'Vendors' },
     ],
-    [isAdmin]
+    []
   );
 
   const showItem = (item: NavItem) => {
     if (role === 'admin') return true; // admin sees everything
     if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
-    return true; // default visible to all
+    return true;
   };
 
   if (!mounted) return null;
@@ -151,7 +154,6 @@ export default function Navigation() {
 
           {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
-            {/* Profile */}
             <div className="relative">
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
