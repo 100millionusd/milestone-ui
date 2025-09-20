@@ -3,46 +3,39 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useWeb3Auth as _useWeb3Auth } from '@/providers/Web3AuthProvider';
+import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
 type NavItem =
   | { href: string; label: string; roles?: Array<'admin' | 'vendor' | 'guest'> }
-  | {
-      label: string;
-      roles?: Array<'admin' | 'vendor' | 'guest'>;
-      children: { href: string; label: string }[];
-    };
-
-// Guard the provider so it can't crash the client if the context isn't ready yet
-function useSafeWeb3Auth() {
-  try {
-    return _useWeb3Auth();
-  } catch {
-    return { address: null, role: null, logout: async () => {} } as any;
-  }
-}
+  | { label: string; roles?: Array<'admin' | 'vendor' | 'guest'>; children: { href: string; label: string }[] };
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [mounted, setMounted] = useState(false); // avoid SSR flicker
+  const [mounted, setMounted] = useState(false);
+  const [serverRole, setServerRole] = useState<string | undefined>(undefined); // <— NEW
 
   const pathnameRaw = usePathname() || '/';
   const pathname = pathnameRaw.split('?')[0];
   const router = useRouter();
-
-  // SAFE auth hook (won't throw if provider not mounted)
-  const { address, role, logout } = useSafeWeb3Auth();
-  const addressStr = typeof address === 'string' ? address : ''; // no .slice on non-string
+  const { address, role, logout } = useWeb3Auth();
 
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  // Normalize / compute role + flags
-  const roleStr = String(role ?? '').toLowerCase();
-  const roleLoading = role === undefined || role === null || roleStr === '';
-  const isAdmin = roleStr === 'admin';
+  // Fetch role from server cookie (source of truth)
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://milestone-api-production.up.railway.app';
+    fetch(`${base}/auth/role`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setServerRole((d?.role ?? '').toString().toLowerCase()))
+      .catch(() => {});
+  }, []);
+
+  const roleStr = (role ?? '').toString().toLowerCase();
+  const isAdmin = roleStr === 'admin' || serverRole === 'admin';        // <— use server role
+  const roleLoading = (!roleStr && serverRole === undefined);           // <— loading until server replies
   const onAdminRoute = pathname.startsWith('/admin');
 
   const isActive = (path: string) => {
@@ -50,51 +43,41 @@ export default function Navigation() {
     return pathname === target || pathname.startsWith(target + '/');
   };
 
-  // Admin must see ALL areas. Admin section is explicitly admin-only.
   const navItems: NavItem[] = [
-    { href: '/', label: 'Dashboard' },                 // all
-    { href: '/projects', label: 'Projects' },          // all
-    { href: '/new', label: 'Submit Proposal' },        // all
+    { href: '/', label: 'Dashboard' },
+    { href: '/projects', label: 'Projects' },
+    { href: '/new', label: 'Submit Proposal' },
     {
       label: 'Admin',
-      roles: ['admin'], // admin-only dropdown
+      roles: ['admin'],
       children: [
         { href: '/admin/proposals', label: 'Proposals' },
         { href: '/admin/bids', label: 'Bids' },
         { href: '/admin/proofs', label: 'Proofs' },
       ],
     },
-    { href: '/vendor/dashboard', label: 'Vendors' },   // all
+    { href: '/vendor/dashboard', label: 'Vendors' },
   ];
 
-  // SHOW RULES:
-  // - Real admin ⇒ everything
-  // - While role is loading but a wallet is connected ⇒ show Admin (prevents flicker)
-  // - If already on /admin/* ⇒ show Admin (so user can navigate within)
+  // Show Admin while loading (if wallet present) or when already on /admin
   const showItem = (item: NavItem) => {
     if (isAdmin) return true;
-
     const isAdminDropdown = 'children' in item && item.label === 'Admin';
     if (isAdminDropdown) {
       if (onAdminRoute) return true;
-      if (roleLoading && !!addressStr) return true;
+      if (roleLoading && !!address) return true;
       return false;
     }
-
-    if ('roles' in item && item.roles)
-      return item.roles.includes((roleStr || 'guest') as any);
-
+    if ('roles' in item && item.roles) return item.roles.includes((roleStr || 'guest') as any);
     return true;
   };
 
-  // Auto-open the Admin dropdown when on an /admin route
   useEffect(() => { if (onAdminRoute) setIsAdminOpen(true); }, [onAdminRoute]);
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
@@ -102,26 +85,18 @@ export default function Navigation() {
             <h1 className="text-xl font-semibold">LithiumX</h1>
           </Link>
 
-          {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
             {navItems.filter(showItem).map((item) =>
               'children' in item ? (
                 <div key={item.label} className="relative">
                   <button
-                    onClick={() => setIsAdminOpen((o) => !o)}
+                    onClick={() => setIsAdminOpen(o => !o)}
                     className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      onAdminRoute
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      onAdminRoute ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
                   >
                     {item.label}
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
@@ -131,9 +106,7 @@ export default function Navigation() {
                         <Link
                           key={sub.href}
                           href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                          }`}
+                          className={`block px-4 py-2 text-sm ${isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'}`}
                         >
                           {sub.label}
                         </Link>
@@ -155,19 +128,14 @@ export default function Navigation() {
             )}
           </nav>
 
-          {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
-            {/* Profile */}
             <div className="relative">
-              <div
-                className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
-                onClick={() => setIsProfileOpen((o) => !o)}
-              >
+              <div className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700" onClick={() => setIsProfileOpen(o => !o)}>
                 <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                  {addressStr ? addressStr.slice(2, 4).toUpperCase() : 'G'}
+                  {typeof address === 'string' && address ? address.slice(2, 4).toUpperCase() : 'G'}
                 </div>
                 <span className="text-sm text-gray-300">
-                  {addressStr ? `${addressStr.slice(0, 6)}...${addressStr.slice(-4)}` : 'Guest'}
+                  {typeof address === 'string' && address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Guest'}
                 </span>
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -176,21 +144,15 @@ export default function Navigation() {
 
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                  {addressStr ? (
+                  {typeof address === 'string' && address ? (
                     <button
-                      onClick={async () => {
-                        try { await (logout?.()); } catch {}
-                        router.push('/vendor/login');
-                      }}
+                      onClick={async () => { try { await logout?.(); } catch {} router.push('/vendor/login'); }}
                       className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
                     >
                       Logout
                     </button>
                   ) : (
-                    <button
-                      onClick={() => router.push('/vendor/login')}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
+                    <button onClick={() => router.push('/vendor/login')} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">
                       Login
                     </button>
                   )}
@@ -199,11 +161,7 @@ export default function Navigation() {
             </div>
           </div>
 
-          {/* Mobile menu button */}
-          <button
-            onClick={() => setIsMobileMenuOpen((o) => !o)}
-            className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none"
-          >
+          <button onClick={() => setIsMobileMenuOpen(o => !o)} className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none">
             <span className="sr-only">Open main menu</span>
             <div className="w-6 h-6 space-y-1">
               <span className={`block w-6 h-0.5 bg-current transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`} />
@@ -213,7 +171,6 @@ export default function Navigation() {
           </button>
         </div>
 
-        {/* Mobile Navigation */}
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
