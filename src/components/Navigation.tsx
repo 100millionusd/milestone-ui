@@ -3,20 +3,18 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-// NOTE: some builds throw if provider not ready; we guard it.
 import { useWeb3Auth as _useWeb3Auth } from '@/providers/Web3AuthProvider';
 
+// Guard the provider so a missing/mis-timed context won't crash the nav
 function useSafeWeb3Auth() {
   try {
     return _useWeb3Auth();
   } catch {
-    // Provider not mounted yet — return safe stubs to prevent crashes
     return { address: null, role: null, logout: async () => {} } as any;
   }
 }
 
-function NavInner() {
+function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -24,7 +22,6 @@ function NavInner() {
 
   const pathnameRaw = usePathname() || '/';
   const router = useRouter();
-
   const { address, role, logout } = useSafeWeb3Auth();
 
   useEffect(() => setMounted(true), []);
@@ -33,7 +30,6 @@ function NavInner() {
   const pathname = useMemo(() => (pathnameRaw || '/').split('?')[0], [pathnameRaw]);
 
   const isActive = (href: string) => {
-    if (typeof href !== 'string') return false;
     const target = href.split('?')[0];
     return pathname === target || pathname.startsWith(target + '/');
   };
@@ -63,6 +59,7 @@ function NavInner() {
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
+          {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
@@ -70,6 +67,7 @@ function NavInner() {
             <h1 className="text-xl font-semibold">LithiumX</h1>
           </Link>
 
+          {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
             {mainLinks.map((item) => (
               <Link
@@ -83,6 +81,7 @@ function NavInner() {
               </Link>
             ))}
 
+            {/* Admin dropdown */}
             {showAdminMenu && (
               <div className="relative">
                 <button
@@ -115,6 +114,7 @@ function NavInner() {
             )}
           </nav>
 
+          {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
             <div className="relative">
               <div
@@ -157,6 +157,7 @@ function NavInner() {
             </div>
           </div>
 
+          {/* Mobile menu button */}
           <button
             onClick={() => setIsMobileMenuOpen((o) => !o)}
             className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none"
@@ -170,6 +171,7 @@ function NavInner() {
           </button>
         </div>
 
+        {/* Mobile Navigation */}
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-gray-700">
             <div className="px-2 pt-2 pb-3 space-y-1">
@@ -178,7 +180,9 @@ function NavInner() {
                   key={item.href}
                   href={item.href}
                   className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    isActive(item.href)
+                      ? 'text-cyan-400 bg-gray-700'
+                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
@@ -194,7 +198,9 @@ function NavInner() {
                       key={sub.href}
                       href={sub.href}
                       className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                        isActive(sub.href) ? 'text-cyan-600 bg-gray-100' : 'text-gray-800 hover:bg-gray-100'
+                        isActive(sub.href)
+                          ? 'text-cyan-600 bg-gray-100'
+                          : 'text-gray-800 hover:bg-gray-100'
                       }`}
                       onClick={() => setIsMobileMenuOpen(false)}
                     >
@@ -211,10 +217,4 @@ function NavInner() {
   );
 }
 
-export default function Navigation() {
-  return (
-    <ErrorBoundary fallback={<div className="p-2 text-sm bg-amber-50 text-amber-800">Navigation failed to load.</div>}>
-      <NavInner />
-    </ErrorBoundary>
-  );
-}
+export default Navigation;
