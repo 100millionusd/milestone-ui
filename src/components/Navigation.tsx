@@ -25,6 +25,9 @@ export default function Navigation() {
   useEffect(() => setMounted(true), []);
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
+  // ✅ Route Vendors link by role:
+  const vendorsHref = role === 'admin' ? '/admin/dashboard?tab=vendors' : '/vendor/dashboard';
+
   // Admin must see ALL areas. Admin section is explicitly admin-only.
   const navItems: NavItem[] = [
     { href: '/', label: 'Dashboard' },                 // all
@@ -37,9 +40,12 @@ export default function Navigation() {
         { href: '/admin/proposals', label: 'Proposals' },
         { href: '/admin/bids', label: 'Bids' },
         { href: '/admin/proofs', label: 'Proofs' },
+        // ✅ quick access to the Vendors directory tab:
+        { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
       ],
     },
-    { href: '/vendor/dashboard', label: 'Vendors' },   // all (guest/new + vendor + admin)
+    // ✅ Vendors link now dynamic:
+    { href: vendorsHref, label: 'Vendors' },           // all (guest/new + vendor + admin)
   ];
 
   const showItem = (item: NavItem) => {
@@ -92,7 +98,7 @@ export default function Navigation() {
                           key={sub.href}
                           href={sub.href}
                           className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                            isActive(sub.href.split('?')[0]) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
                           }`}
                         >
                           {sub.label}
@@ -106,7 +112,9 @@ export default function Navigation() {
                   key={item.href}
                   href={item.href}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    isActive(item.href.split('?')[0])
+                      ? 'text-cyan-400 bg-gray-700'
+                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                 >
                   {item.label}
@@ -186,7 +194,7 @@ export default function Navigation() {
                         key={sub.href}
                         href={sub.href}
                         className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                          isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                          isActive(sub.href.split('?')[0]) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                         }`}
                         onClick={() => setIsMobileMenuOpen(false)}
                       >
@@ -199,7 +207,7 @@ export default function Navigation() {
                     key={item.href}
                     href={item.href}
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      isActive(item.href.split('?')[0]) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
                     onClick={() => setIsMobileMenuOpen(false)}
                   >
