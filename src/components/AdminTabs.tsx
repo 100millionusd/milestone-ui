@@ -1,37 +1,46 @@
 'use client';
+
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
-type Tab = { key: string; label: string; href: string };
+type Props = {
+  /** If false, the Vendors tab is hidden */
+  isAdmin: boolean;
+};
 
-export default function AdminTabs({ isAdmin }: { isAdmin: boolean }) {
+function cx(...cls: (string | false | null | undefined)[]) {
+  return cls.filter(Boolean).join(' ');
+}
+
+export default function AdminTabs({ isAdmin }: Props) {
   const sp = useSearchParams();
-  const active = (sp.get('tab') || (isAdmin ? 'vendors' : 'proposals')).toLowerCase();
+  const active = (sp.get('tab') || 'proposals').toLowerCase();
 
-  const base: Tab[] = [
+  const items = [
     { key: 'proposals', label: 'Proposals', href: '/admin/dashboard?tab=proposals' },
     { key: 'bids',      label: 'Bids',      href: '/admin/dashboard?tab=bids' },
+    // Vendors tab only for admins
+    ...(isAdmin ? [{ key: 'vendors', label: 'Vendors', href: '/admin/dashboard?tab=vendors' }] : []),
   ];
-  const tabs = isAdmin
-    ? [...base, { key: 'vendors', label: 'Vendors', href: '/admin/dashboard?tab=vendors' }]
-    : base;
 
   return (
-    <div className="border-b mb-4">
-      <nav className="flex gap-4">
-        {tabs.map(t => {
-          const isActive = active === t.key;
+    <div className="mb-4 border-b">
+      <nav className="-mb-px flex gap-4">
+        {items.map(item => {
+          const isActive = active === item.key;
           return (
             <Link
-              key={t.key}
-              href={t.href}
-              className={`px-3 py-2 -mb-px border-b-2 text-sm ${
+              key={item.key}
+              href={item.href}
+              aria-current={isActive ? 'page' : undefined}
+              className={cx(
+                'px-3 py-2 text-sm font-medium border-b-2',
                 isActive
-                  ? 'border-slate-900 text-slate-900 font-semibold'
-                  : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
-              }`}
+                  ? 'border-slate-900 text-slate-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+              )}
             >
-              {t.label}
+              {item.label}
             </Link>
           );
         })}
