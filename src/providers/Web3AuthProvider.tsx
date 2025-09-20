@@ -138,6 +138,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const norm = normalizeRole(data?.role);
       setRole(norm);
       localStorage.setItem('lx_role', norm);
+      // Optional: if server echoes address, keep it in sync
+      if (data?.address && typeof data.address === 'string') {
+        localStorage.setItem('lx_addr', data.address);
+        setAddress(data.address);
+      }
     } catch (e) {
       console.warn('refreshRole failed:', e);
     }
@@ -178,7 +183,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const { nonce } = await nonceRes.json();
 
       // 3) Sign the nonce
-      const signature = await signer.signMessage(nonce);
+      const signature = await (new ethers.BrowserProvider(web3authProvider as any))
+        .getSigner()
+        .then(s => s.signMessage(nonce));
 
       // 4) Verify (COOKIE MODE: sets httpOnly auth_token)
       const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
@@ -199,7 +206,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setRole(normRole);
       localStorage.setItem('lx_role', normRole);
 
-      // Extra: confirm from cookie
+      // Confirm from cookie
       await refreshRole();
     } catch (e) {
       console.error('Login error:', e);
@@ -221,6 +228,46 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
   };
+
+  // 🔒 Re-auth on account change to avoid stale JWTs
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const eth = (window as any).ethereum;
+    if (!eth?.on) return;
+
+    const onAccountsChanged = async (_accounts: string[]) => {
+      try {
+        // clear server cookie if route exists; ignore errors
+        await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+      } finally {
+        // clear local state/storage
+        setProvider(null);
+        setAddress(null);
+        setToken(null);
+        setRole('guest');
+        localStorage.removeItem('lx_addr');
+        localStorage.removeItem('lx_jwt');
+        localStorage.removeItem('lx_role');
+        // redirect to login to issue a fresh JWT for the new account
+        window.location.href = '/vendor/login';
+      }
+    };
+
+    const onChainChanged = () => {
+      // simplest & safest: reload to reset providers/networks
+      window.location.reload();
+    };
+
+    eth.on('accountsChanged', onAccountsChanged);
+    eth.on('chainChanged', onChainChanged);
+
+    return () => {
+      try {
+        eth.removeListener?.('accountsChanged', onAccountsChanged);
+        eth.removeListener?.('chainChanged', onChainChanged);
+      } catch {}
+    };
+  }, []);
 
   if (!mounted) return null;
 
