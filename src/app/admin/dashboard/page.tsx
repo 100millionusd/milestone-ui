@@ -11,7 +11,7 @@ type Role = 'admin' | 'vendor' | 'guest';
 
 type AdminVendorRaw = any;
 type AdminVendor = {
-  id: string;                    // ← guaranteed after mapping
+  id: string;
   vendorName: string;
   walletAddress: string;
   status?: 'pending' | 'approved' | 'suspended' | 'banned';
@@ -63,7 +63,6 @@ export default function AdminDashboardPage() {
 
   const isAdmin = role === 'admin';
 
-  // Prefer query ?tab, else default: vendors for admin, proposals for others.
   const tab: string = useMemo(() => {
     const q = (sp.get('tab') || '').toLowerCase();
     if (q) return q;
@@ -71,7 +70,6 @@ export default function AdminDashboardPage() {
     return isAdmin ? 'vendors' : 'proposals';
   }, [sp, isAdmin, loadingRole]);
 
-  // Only enforce redirects after role known
   useEffect(() => {
     if (!loadingRole && role !== 'admin' && tab === 'vendors') {
       router.replace('/admin/dashboard?tab=proposals');
@@ -116,7 +114,7 @@ function Forbidden() {
   );
 }
 
-/* ---------------- Vendors Tab (with expandable bids per project) --------------- */
+/* ---------------- Vendors Tab (expandable bids per vendor) --------------- */
 
 type SortKey =
   | 'bidsCount'
@@ -126,26 +124,23 @@ type SortKey =
   | 'walletAddress';
 
 function mapVendor(raw: AdminVendorRaw): AdminVendor {
-  // Normalize fields coming from various backends
-  const id =
-    String(
-      raw?.id ??
-      raw?._id ??
-      raw?.vendorId ??
-      raw?.vendor_id ??
-      raw?.walletAddress ??
-      raw?.wallet_address ??
-      raw?.address ??
-      ''
-    );
+  const id = String(
+    raw?.id ??
+    raw?._id ??
+    raw?.vendorId ??
+    raw?.vendor_id ??
+    raw?.walletAddress ??
+    raw?.wallet_address ??
+    raw?.address ??
+    ''
+  );
 
-  const wallet =
-    String(
-      raw?.walletAddress ??
-      raw?.wallet_address ??
-      raw?.address ??
-      ''
-    );
+  const wallet = String(
+    raw?.walletAddress ??
+    raw?.wallet_address ??
+    raw?.address ??
+    ''
+  );
 
   return {
     id,
@@ -162,13 +157,26 @@ function mapVendor(raw: AdminVendorRaw): AdminVendor {
   };
 }
 
+function normalizeBidsPayload(raw: any): VendorBid[] {
+  const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
+  return arr.map((b: any) => ({
+    bidId: String(b?.id ?? b?.bidId ?? ''),
+    projectId: String(b?.projectId ?? b?.project_id ?? ''),
+    projectTitle: String(b?.projectTitle ?? b?.project_title ?? 'Untitled Project'),
+    amountUSD:
+      typeof b?.amountUSD === 'number'
+        ? b.amountUSD
+        : (typeof b?.amount_usd === 'number' ? b.amount_usd : null),
+    status: (b?.status ?? 'submitted') as VendorBid['status'],
+    createdAt: String(b?.createdAt ?? b?.created_at ?? b?.created_at_utc ?? new Date().toISOString()),
+  }));
+}
+
 function VendorsTab() {
-  // list state
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | AdminVendor['status']>('all');
   const [kyc, setKyc] = useState<'all' | NonNullable<AdminVendor['kycStatus']>>('all');
 
-  // Default to wallet sort so changes in vendor name don't affect ordering
   const [sortKey, setSortKey] = useState<SortKey>('walletAddress');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('asc');
 
@@ -179,11 +187,9 @@ function VendorsTab() {
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<Paged<AdminVendor>>({ items: [], page: 1, pageSize: 25, total: 0 });
 
-  // expanded rows cache: vendorId -> bids
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
 
-  // Fetch vendors list (server filters + pagination if your API supports; else we filter client-side)
   const fetchList = async () => {
     setLoading(true);
     setErr(null);
@@ -236,12 +242,10 @@ function VendorsTab() {
       const av = (a as any)[sortKey];
       const bv = (b as any)[sortKey];
 
-      // String sorts (case-insensitive). Wallet address added here.
       if (sortKey === 'vendorName' || sortKey === 'walletAddress') {
         const aa = String(av || '').toLowerCase();
         const bb = String(bv || '').toLowerCase();
         if (aa === bb) {
-          // tiebreaker: vendor name asc, then wallet asc
           const an = String(a.vendorName || '').toLowerCase();
           const bn = String(b.vendorName || '').toLowerCase();
           if (an === bn) {
@@ -254,14 +258,12 @@ function VendorsTab() {
         return aa > bb ? dir : -dir;
       }
 
-      // Date sort
       if (sortKey === 'lastBidAt') {
         const ta = av ? Date.parse(String(av)) : 0;
         const tb = bv ? Date.parse(String(bv)) : 0;
         return ta === tb ? 0 : (ta > tb ? dir : -dir);
       }
 
-      // Numeric sorts
       const na = Number(av || 0);
       const nb = Number(bv || 0);
       if (na === nb) return 0;
@@ -273,20 +275,34 @@ function VendorsTab() {
 
   const totalPages = Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize));
 
-  const toggleOpen = async (vendorId: string, walletAddress?: string) => {
-    setRowsOpen(prev => ({ ...prev, [vendorId]: !prev[vendorId] }));
-    const opening = !rowsOpen[vendorId];
+  const toggleOpen = async (vendorKey: string, walletAddress?: string) => {
+    setRowsOpen(prev => ({ ...prev, [vendorKey]: !prev[vendorKey] }));
+    const opening = !rowsOpen[vendorKey];
     if (!opening) return;
 
-    if (!bidsByVendor[vendorId]) {
-      setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: true, error: null, bids: [] } }));
+    if (!bidsByVendor[vendorKey]) {
+      setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: true, error: null, bids: [] } }));
 
-      // Try a few common backend routes: by id first, then by wallet
+      const wallet = (walletAddress || '').toLowerCase();
+
+      // Try many likely endpoints; stop on first success (2xx)
       const candidates = [
-        `${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}/bids`,
-        walletAddress ? `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(walletAddress)}/bids` : null,
-        walletAddress ? `${API_BASE}/admin/bids?vendorWallet=${encodeURIComponent(walletAddress)}` : null,
-        walletAddress ? `${API_BASE}/admin/bids?vendor_address=${encodeURIComponent(walletAddress)}` : null,
+        // by internal id
+        `${API_BASE}/admin/vendors/${encodeURIComponent(vendorKey)}/bids`,
+        // wallet-based routes (various shapes)
+        wallet ? `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(wallet)}/bids` : null,
+        wallet ? `${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/bids` : null,
+        wallet ? `${API_BASE}/admin/vendor/${encodeURIComponent(wallet)}/bids` : null,
+        wallet ? `${API_BASE}/admin/vendor-bids?wallet=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/vendor-bids?vendorWallet=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/vendor-bids?vendor_address=${encodeURIComponent(wallet)}` : null,
+        // generic bids query with filters
+        wallet ? `${API_BASE}/admin/bids?wallet=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/bids?vendorWallet=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/bids?vendor_wallet=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/bids?vendorAddress=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/bids?vendor_address=${encodeURIComponent(wallet)}` : null,
+        wallet ? `${API_BASE}/admin/bids?address=${encodeURIComponent(wallet)}` : null,
       ].filter(Boolean) as string[];
 
       let loaded: VendorBid[] | null = null;
@@ -295,36 +311,19 @@ function VendorsTab() {
       for (const url of candidates) {
         try {
           const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
-          if (!res.ok) {
-            lastErr = `HTTP ${res.status}`;
-            // 404 often means wrong route shape; try next candidate
-            continue;
-          }
-          const arr = await res.json();
-          loaded = Array.isArray(arr)
-            ? arr.map((b: any) => ({
-                bidId: String(b?.id ?? b?.bidId ?? ''),
-                projectId: String(b?.projectId ?? b?.project_id ?? ''),
-                projectTitle: String(b?.projectTitle ?? b?.project_title ?? 'Untitled Project'),
-                amountUSD:
-                  typeof b?.amountUSD === 'number'
-                    ? b.amountUSD
-                    : (typeof b?.amount_usd === 'number' ? b.amount_usd : null),
-                status: (b?.status ?? 'submitted') as VendorBid['status'],
-                createdAt: String(b?.createdAt ?? b?.created_at ?? b?.created_at_utc ?? new Date().toISOString()),
-              }))
-            : [];
-          break; // success
+          if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }
+          const json = await res.json();
+          loaded = normalizeBidsPayload(json);
+          break;
         } catch (e: any) {
           lastErr = e?.message || 'Failed to load bids';
         }
       }
 
       if (loaded) {
-        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: null, bids: loaded! } }));
+        setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: null, bids: loaded! } }));
       } else {
-        console.warn('Vendor bids fetch failed for', vendorId, 'last error:', lastErr);
-        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: lastErr || 'Failed to load bids', bids: [] } }));
+        setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: lastErr || 'Failed to load bids', bids: [] } }));
       }
     }
   };
@@ -415,7 +414,7 @@ function VendorsTab() {
                 <tr><td colSpan={8} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
               )}
               {!loading && !err && filteredSorted.map((v) => {
-                const rowId = v.id || v.walletAddress; // ← safe fallback
+                const rowId = v.id || v.walletAddress;
                 const open = !!rowsOpen[rowId];
                 const bidsState = bidsByVendor[rowId];
                 return (
@@ -451,7 +450,6 @@ function VendorsTab() {
           </table>
         </div>
 
-        {/* Pagination */}
         <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
           <div className="text-xs text-slate-500">
             Page {data.page} of {totalPages} — {data.total || filteredSorted.length} total
