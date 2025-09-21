@@ -1,7 +1,7 @@
 // src/app/admin/dashboard/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState, Fragment } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AdminTabs from '@/components/AdminTabs';
@@ -19,6 +19,14 @@ type AdminVendor = {
   bidsCount?: number;
   totalAwardedUSD?: number;
   lastBidAt?: string | null;
+
+  // NEW: contact/profile fields (optional)
+  contactEmail?: string | null;
+  phone?: string | null;
+  addressLine?: string | null;
+  city?: string | null;
+  country?: string | null;
+  website?: string | null;
 };
 
 type VendorBid = {
@@ -157,6 +165,14 @@ function mapVendor(raw: AdminVendorRaw): AdminVendor {
         ? raw.totalAwardedUSD
         : (typeof raw?.total_awarded_usd === 'number' ? raw.total_awarded_usd : undefined),
     lastBidAt: raw?.lastBidAt ?? raw?.last_bid_at ?? null,
+
+    // NEW: map profile/contact fields (both camelCase & snake_case)
+    contactEmail: raw?.contactEmail ?? raw?.contact_email ?? null,
+    phone: raw?.phone ?? null,
+    addressLine: raw?.addressLine ?? raw?.address_line ?? null,
+    city: raw?.city ?? null,
+    country: raw?.country ?? null,
+    website: raw?.website ?? null,
   };
 }
 
@@ -226,7 +242,7 @@ function VendorsTab() {
     setErr(null);
     try {
       const url = new URL(`${API_BASE}/admin/vendors`);
-      // These params are ignored by current backend, but harmless if added later:
+      // Harmless if backend ignores them; future-proof if you add filters later:
       if (q) url.searchParams.set('search', q);
       if (status !== 'all') url.searchParams.set('status', status as string);
       if (kyc !== 'all') url.searchParams.set('kyc', kyc as string);
@@ -263,7 +279,10 @@ function VendorsTab() {
       const matchesQ =
         !needle ||
         (v.vendorName || '').toLowerCase().includes(needle) ||
-        (v.walletAddress || '').toLowerCase().includes(needle);
+        (v.walletAddress || '').toLowerCase().includes(needle) ||
+        (v.contactEmail || '').toLowerCase().includes(needle) ||
+        (v.city || '').toLowerCase().includes(needle) ||
+        (v.country || '').toLowerCase().includes(needle);
       const matchesStatus = status === 'all' || v.status === status;
       const matchesKyc = kyc === 'all' || v.kycStatus === kyc;
       return matchesQ && matchesStatus && matchesKyc;
@@ -338,7 +357,7 @@ function VendorsTab() {
         <input
           value={q}
           onChange={(e) => { setQ(e.target.value); setPage(1); }}
-          placeholder="Search vendor or wallet…"
+          placeholder="Search vendor, wallet, city, country…"
           className="border rounded px-3 py-1.5 text-sm"
         />
         <select
@@ -421,8 +440,8 @@ function VendorsTab() {
                 const open = !!rowsOpen[rowId];
                 const bidsState = bidsByVendor[rowId];
                 return (
-                  <Fragment key={rowId}>
-                    <tr className="border-b hover:bg-slate-50">
+                  <>
+                    <tr key={rowId} className="border-b hover:bg-slate-50">
                       <td className="py-2 px-3 font-medium">{v.vendorName || '—'}</td>
                       <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
                       <td className="py-2 px-3"><StatusChip value={v.status} /></td>
@@ -442,11 +461,34 @@ function VendorsTab() {
                     {open && (
                       <tr className="bg-slate-50 border-b">
                         <td colSpan={8} className="px-3 py-3">
+                          {/* NEW: Vendor details block */}
+                          <div className="mb-3 text-xs text-slate-700 grid md:grid-cols-2 gap-y-1 gap-x-6">
+                            <div><b>Email:</b> {v.contactEmail || '—'}</div>
+                            <div><b>Phone:</b> {v.phone || '—'}</div>
+                            <div className="md:col-span-2">
+                              <b>Address:</b>{' '}
+                              {v.addressLine || v.city || v.country
+                                ? [
+                                    v.addressLine || null,
+                                    v.city || null,
+                                    v.country || null,
+                                  ].filter(Boolean).join(', ')
+                                : '—'}
+                            </div>
+                            <div className="md:col-span-2">
+                              <b>Website:</b>{' '}
+                              {v.website
+                                ? <a className="underline" href={v.website} target="_blank" rel="noreferrer">{v.website}</a>
+                                : '—'}
+                            </div>
+                          </div>
+
+                          {/* Existing bids panel */}
                           <VendorBidsPanel state={bidsState} wallet={v.walletAddress} />
                         </td>
                       </tr>
                     )}
-                  </Fragment>
+                  </>
                 );
               })}
             </tbody>
