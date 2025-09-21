@@ -28,6 +28,7 @@ type VendorBid = {
   amountUSD?: number | null;
   status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn';
   createdAt: string;
+  vendorWallet?: string;
 };
 
 type Paged<T> = {
@@ -169,7 +170,93 @@ function normalizeBidsPayload(raw: any): VendorBid[] {
         : (typeof b?.amount_usd === 'number' ? b.amount_usd : null),
     status: (b?.status ?? 'submitted') as VendorBid['status'],
     createdAt: String(b?.createdAt ?? b?.created_at ?? b?.created_at_utc ?? new Date().toISOString()),
+    vendorWallet: String(
+      b?.vendorWallet ??
+      b?.vendor_wallet ??
+      b?.vendorAddress ??
+      b?.vendor_address ??
+      b?.wallet ??
+      b?.vendor?.wallet ??
+      ''
+    ).toLowerCase(),
   }));
+}
+
+async function fetchBidsForVendor(vendorKey: string, wallet?: string) {
+  const w = (wallet || '').toLowerCase();
+
+  // 1) Specific endpoints we already tried (admin + wallet/id variants)
+  const candidates = [
+    `${API_BASE}/admin/vendors/${encodeURIComponent(vendorKey)}/bids`,
+    w ? `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(w)}/bids` : null,
+    w ? `${API_BASE}/admin/vendors/${encodeURIComponent(w)}/bids` : null,
+    w ? `${API_BASE}/admin/vendor/${encodeURIComponent(w)}/bids` : null,
+    w ? `${API_BASE}/admin/vendor-bids?wallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/vendor-bids?vendorWallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/vendor-bids?vendor_address=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?wallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?vendorWallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?vendor_wallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?vendorAddress=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?vendor_address=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/admin/bids?address=${encodeURIComponent(w)}` : null,
+
+    // 2) Non-admin mirrors (in case your API uses public routes with admin cookie)
+    w ? `${API_BASE}/bids?wallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/bids?vendorWallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/bids?vendor_wallet=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/bids?vendorAddress=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/bids?vendor_address=${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/bids?address=${encodeURIComponent(w)}` : null,
+
+    // 3) Vendor detail that may contain embedded bids
+    `${API_BASE}/admin/vendors/${encodeURIComponent(vendorKey)}`,
+    w ? `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(w)}` : null,
+    w ? `${API_BASE}/vendors/${encodeURIComponent(w)}` : null,
+  ].filter(Boolean) as string[];
+
+  // Try all candidates; on 2xx parse usable payload
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!res.ok) continue;
+      const json = await res.json();
+
+      // If this was a detail endpoint with embedded bids
+      const embedded = json?.bids || json?.data?.bids;
+      if (embedded && (Array.isArray(embedded) || Array.isArray(embedded?.items))) {
+        return normalizeBidsPayload(embedded);
+      }
+
+      // Otherwise treat as list payload
+      const normalized = normalizeBidsPayload(json);
+      if (normalized.length) {
+        // If vendorWallet present, optionally filter to wallet
+        if (w) return normalized.filter(b => (b.vendorWallet || '').toLowerCase() === w);
+        return normalized;
+      }
+    } catch {
+      // ignore, try next
+    }
+  }
+
+  // 4) Last resort: fetch all bids and filter client-side
+  for (const listUrl of [`${API_BASE}/admin/bids`, `${API_BASE}/bids`]) {
+    try {
+      const res = await fetch(listUrl, { credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const all = normalizeBidsPayload(json);
+      if (all.length) {
+        return w ? all.filter(b => (b.vendorWallet || '').toLowerCase() === w) : all;
+      }
+    } catch {
+      // keep trying
+    }
+  }
+
+  // Nothing worked
+  return null;
 }
 
 function VendorsTab() {
@@ -283,47 +370,19 @@ function VendorsTab() {
     if (!bidsByVendor[vendorKey]) {
       setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: true, error: null, bids: [] } }));
 
-      const wallet = (walletAddress || '').toLowerCase();
-
-      // Try many likely endpoints; stop on first success (2xx)
-      const candidates = [
-        // by internal id
-        `${API_BASE}/admin/vendors/${encodeURIComponent(vendorKey)}/bids`,
-        // wallet-based routes (various shapes)
-        wallet ? `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(wallet)}/bids` : null,
-        wallet ? `${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/bids` : null,
-        wallet ? `${API_BASE}/admin/vendor/${encodeURIComponent(wallet)}/bids` : null,
-        wallet ? `${API_BASE}/admin/vendor-bids?wallet=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/vendor-bids?vendorWallet=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/vendor-bids?vendor_address=${encodeURIComponent(wallet)}` : null,
-        // generic bids query with filters
-        wallet ? `${API_BASE}/admin/bids?wallet=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/bids?vendorWallet=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/bids?vendor_wallet=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/bids?vendorAddress=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/bids?vendor_address=${encodeURIComponent(wallet)}` : null,
-        wallet ? `${API_BASE}/admin/bids?address=${encodeURIComponent(wallet)}` : null,
-      ].filter(Boolean) as string[];
-
-      let loaded: VendorBid[] | null = null;
-      let lastErr: string | null = null;
-
-      for (const url of candidates) {
-        try {
-          const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
-          if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }
-          const json = await res.json();
-          loaded = normalizeBidsPayload(json);
-          break;
-        } catch (e: any) {
-          lastErr = e?.message || 'Failed to load bids';
-        }
-      }
-
+      const loaded = await fetchBidsForVendor(vendorKey, walletAddress);
       if (loaded) {
-        setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: null, bids: loaded! } }));
+        setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: null, bids: loaded } }));
       } else {
-        setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: lastErr || 'Failed to load bids', bids: [] } }));
+        setBidsByVendor(prev => ({
+          ...prev,
+          [vendorKey]: {
+            loading: false,
+            error:
+              'No vendor-bids endpoint found (all probes 404). Implement e.g. GET /admin/bids?vendorWallet=:wallet or /admin/vendors/:id/bids.',
+            bids: [],
+          },
+        }));
       }
     }
   };
@@ -439,7 +498,7 @@ function VendorsTab() {
                     {open && (
                       <tr className="bg-slate-50 border-b">
                         <td colSpan={8} className="px-3 py-3">
-                          <VendorBidsPanel state={bidsState} />
+                          <VendorBidsPanel state={bidsState} wallet={v.walletAddress} />
                         </td>
                       </tr>
                     )}
@@ -498,43 +557,76 @@ function KycChip({ value }: { value?: AdminVendor['kycStatus'] }) {
   return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
 }
 
-function VendorBidsPanel({ state }: { state?: { loading: boolean; error: string | null; bids: VendorBid[] } }) {
+function VendorBidsPanel({
+  state,
+  wallet,
+}: { state?: { loading: boolean; error: string | null; bids: VendorBid[] }, wallet?: string }) {
   if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
-  if (state.error) return <div className="text-rose-700 text-sm">{state.error}</div>;
-  if (state.bids.length === 0) return <div className="text-slate-500 text-sm">No bids for this vendor.</div>;
+  const showEmptyHelp = !state.error && state.bids.length === 0;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left border-b">
-            <th className="py-2 pr-3">Project</th>
-            <th className="py-2 pr-3">Amount (USD)</th>
-            <th className="py-2 pr-3">Status</th>
-            <th className="py-2 pr-3">Date</th>
-            <th className="py-2 pr-3">Open</th>
-          </tr>
-        </thead>
-        <tbody>
-          {state.bids.map((b) => (
-            <tr key={b.bidId} className="border-b last:border-0">
-              <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
-              <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
-              <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
-              <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
-              <td className="py-2 pr-3">
-                <Link
-                  href={`/projects/${encodeURIComponent(b.projectId)}`}
-                  className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                >
-                  Open project
-                </Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {state.error && (
+        <div className="text-rose-700 text-sm">
+          {state.error}
+        </div>
+      )}
+
+      {showEmptyHelp && (
+        <div className="text-slate-600 text-sm">
+          No bids found for this vendor. If your API lacks a vendor filter, add one like:
+          <code className="ml-1 px-1 py-0.5 bg-slate-200 rounded">GET /admin/bids?vendorWallet=0x…</code>
+          , or expose <code className="px-1 py-0.5 bg-slate-200 rounded">/admin/vendors/:id/bids</code>.
+        </div>
+      )}
+
+      {state.bids.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-3">Project</th>
+                <th className="py-2 pr-3">Amount (USD)</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Date</th>
+                <th className="py-2 pr-3">Open</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.bids.map((b) => (
+                <tr key={b.bidId} className="border-b last:border-0">
+                  <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
+                  <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
+                  <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
+                  <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
+                  <td className="py-2 pr-3">
+                    <Link
+                      href={`/projects/${encodeURIComponent(b.projectId)}`}
+                      className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                    >
+                      Open project
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Convenience link to Bids page with client-side filter param */}
+      {wallet && (
+        <div className="text-xs text-slate-500">
+          Tip: check the Bids page filtered by this wallet:&nbsp;
+          <Link
+            href={`/admin/bids?vendorWallet=${encodeURIComponent(wallet)}`}
+            className="underline"
+          >
+            /admin/bids?vendorWallet={wallet}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
