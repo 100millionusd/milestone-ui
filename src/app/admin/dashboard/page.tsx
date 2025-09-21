@@ -1,7 +1,7 @@
 // src/app/admin/dashboard/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AdminTabs from '@/components/AdminTabs';
@@ -421,8 +421,8 @@ function VendorsTab() {
                 const open = !!rowsOpen[rowId];
                 const bidsState = bidsByVendor[rowId];
                 return (
-                  <>
-                    <tr key={rowId} className="border-b hover:bg-slate-50">
+                  <Fragment key={rowId}>
+                    <tr className="border-b hover:bg-slate-50">
                       <td className="py-2 px-3 font-medium">{v.vendorName || '—'}</td>
                       <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
                       <td className="py-2 px-3"><StatusChip value={v.status} /></td>
@@ -446,7 +446,7 @@ function VendorsTab() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -455,7 +455,7 @@ function VendorsTab() {
 
         <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
           <div className="text-xs text-slate-500">
-            Page {data.page} of {Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize))} — {data.total || filteredSorted.length} total
+            Page {data.page} of {totalPages} — {data.total || filteredSorted.length} total
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -466,8 +466,8 @@ function VendorsTab() {
               Prev
             </button>
             <button
-              disabled={page >= Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize))}
-              onClick={() => setPage(p => Math.min(Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize)), p + 1))}
+              disabled={page >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               className="px-2 py-1 text-xs rounded border disabled:opacity-50"
             >
               Next
