@@ -4,21 +4,21 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
-type Profile = {
+type ProfileForm = {
   walletAddress: string;
   vendorName: string;
   email: string;
   phone: string;
   website: string;
-  address: { line1: string; city: string; country: string; postalCode: string; };
+  address: { line1: string; city: string; country: string; postalCode: string };
 };
 
 export default function VendorProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string|null>(null);
-  const [p, setP] = useState<Profile>({
+  const [err, setErr] = useState<string | null>(null);
+  const [p, setP] = useState<ProfileForm>({
     walletAddress: '',
     vendorName: '',
     email: '',
@@ -34,6 +34,13 @@ export default function VendorProfilePage() {
         const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
+
+        // Server returns `address` as a single string. Keep it in line1 for editing.
+        const addrString =
+          typeof j?.address === 'string'
+            ? j.address
+            : j?.address?.line1 || '';
+
         if (!alive) return;
         setP({
           walletAddress: j.walletAddress || '',
@@ -42,35 +49,70 @@ export default function VendorProfilePage() {
           phone: j.phone || '',
           website: j.website || '',
           address: {
-            line1: j.address?.line1 || '',
+            line1: addrString,
             city: j.address?.city || '',
             country: j.address?.country || '',
             postalCode: j.address?.postalCode || '',
           },
         });
-      } catch (e:any) {
+      } catch (e: any) {
         setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
+
+  function normalizeWebsite(v: string) {
+    const s = (v || '').trim();
+    if (!s) return '';
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true); setErr(null);
+    setSaving(true);
+    setErr(null);
+
     try {
+      // API expects a flat string `address`. Use line1 primarily (you can join other parts if you want).
+      const addressOut = [p.address.line1, p.address.city, p.address.postalCode, p.address.country]
+        .map((x) => (x || '').trim())
+        .filter(Boolean)
+        .join(', ');
+
+      const payload = {
+        vendorName: (p.vendorName || '').trim(), // REQUIRED by server (min 2)
+        email: (p.email || '').trim(),           // '' allowed
+        phone: (p.phone || '').trim(),           // '' allowed
+        address: addressOut,                     // string (not object)
+        website: normalizeWebsite(p.website || ''),
+      };
+
+      if (payload.vendorName.length < 2) {
+        setErr('Please enter your Vendor / Company Name (min 2 characters).');
+        setSaving(false);
+        return;
+      }
+
       const r = await fetch(`${API_BASE}/vendor/profile`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(p),
+        body: JSON.stringify(payload),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+
       await r.json();
       router.push('/'); // or router.back();
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
       setSaving(false);
@@ -88,40 +130,49 @@ export default function VendorProfilePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Company / Vendor Name</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.vendorName}
-              onChange={(e)=>setP({...p, vendorName: e.target.value})}
+              onChange={(e) => setP({ ...p, vendorName: e.target.value })}
               required
             />
           </label>
           <label className="block">
             <div className="text-sm text-slate-600">Wallet</div>
-            <input className="border rounded px-3 py-2 w-full font-mono text-xs" value={p.walletAddress} readOnly />
+            <input
+              className="border rounded px-3 py-2 w-full font-mono text-xs"
+              value={p.walletAddress}
+              readOnly
+            />
           </label>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Email</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.email}
-              onChange={(e)=>setP({...p, email: e.target.value})}
+              onChange={(e) => setP({ ...p, email: e.target.value })}
               type="email"
-              required
+              // server allows empty, but keeping required is fine if you want to enforce
             />
           </label>
           <label className="block">
             <div className="text-sm text-slate-600">Phone</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.phone}
-              onChange={(e)=>setP({...p, phone: e.target.value})}
+              onChange={(e) => setP({ ...p, phone: e.target.value })}
             />
           </label>
           <label className="block">
             <div className="text-sm text-slate-600">Website</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.website}
-              onChange={(e)=>setP({...p, website: e.target.value})}
+              onChange={(e) => setP({ ...p, website: e.target.value })}
+              placeholder="https://yourdomain.com"
             />
           </label>
         </div>
@@ -129,23 +180,36 @@ export default function VendorProfilePage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <label className="block md:col-span-2">
             <div className="text-sm text-slate-600">Address</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.address.line1}
-              onChange={(e)=>setP({...p, address: {...p.address, line1: e.target.value}})}
+              onChange={(e) =>
+                setP({ ...p, address: { ...p.address, line1: e.target.value } })
+              }
+              placeholder="Street address"
             />
           </label>
           <label className="block">
             <div className="text-sm text-slate-600">City</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.address.city}
-              onChange={(e)=>setP({...p, address: {...p.address, city: e.target.value}})}
+              onChange={(e) =>
+                setP({ ...p, address: { ...p.address, city: e.target.value } })
+              }
             />
           </label>
           <label className="block">
             <div className="text-sm text-slate-600">Postal code</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.address.postalCode}
-              onChange={(e)=>setP({...p, address: {...p.address, postalCode: e.target.value}})}
+              onChange={(e) =>
+                setP({
+                  ...p,
+                  address: { ...p.address, postalCode: e.target.value },
+                })
+              }
             />
           </label>
         </div>
@@ -153,9 +217,12 @@ export default function VendorProfilePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Country</div>
-            <input className="border rounded px-3 py-2 w-full"
+            <input
+              className="border rounded px-3 py-2 w-full"
               value={p.address.country}
-              onChange={(e)=>setP({...p, address: {...p.address, country: e.target.value}})}
+              onChange={(e) =>
+                setP({ ...p, address: { ...p.address, country: e.target.value } })
+              }
             />
           </label>
         </div>
@@ -164,7 +231,11 @@ export default function VendorProfilePage() {
           <button disabled={saving} className="px-4 py-2 rounded bg-slate-900 text-white">
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button type="button" onClick={()=>router.back()} className="px-4 py-2 rounded border">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="px-4 py-2 rounded border"
+          >
             Cancel
           </button>
         </div>
