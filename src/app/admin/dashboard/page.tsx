@@ -26,7 +26,7 @@ type VendorBid = {
   projectId: string;
   projectTitle: string;
   amountUSD?: number | null;
-  status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn';
+  status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn' | 'approved' | 'rejected' | 'pending';
   createdAt: string;
   vendorWallet?: string;
 };
@@ -37,31 +37,6 @@ type Paged<T> = {
   pageSize: number;
   total: number;
 };
-
-/** ------------------------- Config via ENV -------------------------
- * NEXT_PUBLIC_BIDS_FETCH_MODE:
- *   - 'LIST_FILTER' (default): GET /admin/bids (or /bids) and filter by wallet
- *   - 'VENDOR_ID':            GET /admin/vendors/:id/bids
- *   - 'VENDOR_WALLET_SEG':    GET /admin/vendors/wallet/:wallet/bids
- *   - 'BIDS_QUERY_PARAM':     GET /admin/bids?{param}=:wallet
- *   - 'PUBLIC_BIDS_QUERY_PARAM': GET /bids?{param}=:wallet
- *
- * NEXT_PUBLIC_BIDS_VENDOR_PARAM:
- *   - name of the query param (default 'vendorWallet')
- *
- * NEXT_PUBLIC_BIDS_PREFER_PUBLIC:
- *   - '1' to try /bids before /admin/bids in LIST_FILTER mode
- */
-const BIDS_MODE =
-  (process.env.NEXT_PUBLIC_BIDS_FETCH_MODE || 'LIST_FILTER') as
-    | 'LIST_FILTER'
-    | 'VENDOR_ID'
-    | 'VENDOR_WALLET_SEG'
-    | 'BIDS_QUERY_PARAM'
-    | 'PUBLIC_BIDS_QUERY_PARAM';
-
-const BIDS_VENDOR_PARAM = process.env.NEXT_PUBLIC_BIDS_VENDOR_PARAM || 'vendorWallet';
-const BIDS_PREFER_PUBLIC = process.env.NEXT_PUBLIC_BIDS_PREFER_PUBLIC === '1';
 
 /* =============================== Page =============================== */
 
@@ -210,98 +185,20 @@ function normalizeBids(raw: any): VendorBid[] {
   }));
 }
 
-/** Build the URL we’ll try first, based on env mode. */
-function buildPrimaryBidsUrl(vendorId: string, walletLower: string) {
-  switch (BIDS_MODE) {
-    case 'VENDOR_ID':
-      return `${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}/bids`;
-    case 'VENDOR_WALLET_SEG':
-      return `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(walletLower)}/bids`;
-    case 'BIDS_QUERY_PARAM':
-      return `${API_BASE}/admin/bids?${encodeURIComponent(BIDS_VENDOR_PARAM)}=${encodeURIComponent(walletLower)}`;
-    case 'PUBLIC_BIDS_QUERY_PARAM':
-      return `${API_BASE}/bids?${encodeURIComponent(BIDS_VENDOR_PARAM)}=${encodeURIComponent(walletLower)}`;
-    case 'LIST_FILTER':
-    default:
-      return ''; // list mode, handled separately
-  }
-}
-
 async function fetchJson(url: string) {
   const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-/** Try a deterministic strategy first, then robust fallbacks, then list-filter. */
-async function fetchBidsForVendor(vendorId: string, wallet?: string) {
+/** Single deterministic call: GET /admin/bids?vendorWallet=<wallet> */
+async function fetchBidsForWallet(wallet?: string) {
   const walletLower = (wallet || '').toLowerCase();
-
-  // 1) Deterministic mode via env
-  const primary = buildPrimaryBidsUrl(vendorId, walletLower);
-  if (primary) {
-    try {
-      // eslint-disable-next-line no-console
-      console.info('[VendorsTab] primary bids URL:', primary);
-      const json = await fetchJson(primary);
-      const embedded = json?.bids || json?.data?.bids;
-      const normalized = normalizeBids(embedded ?? json);
-      return walletLower ? normalized.filter(b => (b.vendorWallet || '').toLowerCase() === walletLower) : normalized;
-    } catch (e) {
-      // continue to fallback
-    }
-  }
-
-  // 2) Robust fallback probes (id + wallet variants)
-  const probes: string[] = [];
-  if (walletLower) {
-    probes.push(
-      `${API_BASE}/admin/vendors/wallet/${encodeURIComponent(walletLower)}/bids`,
-      `${API_BASE}/admin/vendors/${encodeURIComponent(walletLower)}/bids`,
-      `${API_BASE}/admin/vendor/${encodeURIComponent(walletLower)}/bids`,
-      `${API_BASE}/admin/vendor-bids?wallet=${encodeURIComponent(walletLower)}`,
-      `${API_BASE}/admin/vendor-bids?${encodeURIComponent(BIDS_VENDOR_PARAM)}=${encodeURIComponent(walletLower)}`,
-      `${API_BASE}/admin/bids?wallet=${encodeURIComponent(walletLower)}`,
-      `${API_BASE}/admin/bids?${encodeURIComponent(BIDS_VENDOR_PARAM)}=${encodeURIComponent(walletLower)}`
-    );
-  }
-  probes.push(`${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}`, `${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}/bids`);
-
-  for (const url of probes) {
-    try {
-      // eslint-disable-next-line no-console
-      console.info('[VendorsTab] probe URL:', url);
-      const json = await fetchJson(url);
-      const embedded = json?.bids || json?.data?.bids;
-      const normalized = normalizeBids(embedded ?? json);
-      if (normalized.length) {
-        return walletLower ? normalized.filter(b => (b.vendorWallet || '').toLowerCase() === walletLower) : normalized;
-      }
-    } catch {
-      // keep trying
-    }
-  }
-
-  // 3) LIST_FILTER mode (fetch all bids and filter by wallet)
-  const listOrder = BIDS_PREFER_PUBLIC
-    ? [`${API_BASE}/bids`, `${API_BASE}/admin/bids`]
-    : [`${API_BASE}/admin/bids`, `${API_BASE}/bids`];
-
-  for (const listUrl of listOrder) {
-    try {
-      // eslint-disable-next-line no-console
-      console.info('[VendorsTab] list URL:', listUrl);
-      const json = await fetchJson(listUrl);
-      const all = normalizeBids(json);
-      if (all.length) {
-        return walletLower ? all.filter(b => (b.vendorWallet || '').toLowerCase() === walletLower) : all;
-      }
-    } catch {
-      // try next
-    }
-  }
-
-  return null;
+  if (!walletLower) return [];
+  const url = new URL(`${API_BASE}/admin/bids`);
+  url.searchParams.set('vendorWallet', walletLower);
+  const json = await fetchJson(url.toString());
+  return normalizeBids(json);
 }
 
 function VendorsTab() {
@@ -329,6 +226,7 @@ function VendorsTab() {
     setErr(null);
     try {
       const url = new URL(`${API_BASE}/admin/vendors`);
+      // These params are ignored by current backend, but harmless if added later:
       if (q) url.searchParams.set('search', q);
       if (status !== 'all') url.searchParams.set('status', status as string);
       if (kyc !== 'all') url.searchParams.set('kyc', kyc as string);
@@ -417,16 +315,15 @@ function VendorsTab() {
     if (!bidsByVendor[vendorKey]) {
       setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: true, error: null, bids: [] } }));
 
-      const loaded = await fetchBidsForVendor(vendorKey, walletAddress);
-      if (loaded) {
+      try {
+        const loaded = await fetchBidsForWallet(walletAddress);
         setBidsByVendor(prev => ({ ...prev, [vendorKey]: { loading: false, error: null, bids: loaded } }));
-      } else {
+      } catch (e: any) {
         setBidsByVendor(prev => ({
           ...prev,
           [vendorKey]: {
             loading: false,
-            error:
-              'No vendor-bids endpoint found. Set env NEXT_PUBLIC_BIDS_FETCH_MODE to LIST_FILTER (default) or to a mode matching your API (VENDOR_ID / VENDOR_WALLET_SEG / BIDS_QUERY_PARAM / PUBLIC_BIDS_QUERY_PARAM).',
+            error: e?.message || 'Failed to load bids for this vendor.',
             bids: [],
           },
         }));
@@ -558,7 +455,7 @@ function VendorsTab() {
 
         <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
           <div className="text-xs text-slate-500">
-            Page {data.page} of {totalPages} — {data.total || filteredSorted.length} total
+            Page {data.page} of {Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize))} — {data.total || filteredSorted.length} total
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -569,8 +466,8 @@ function VendorsTab() {
               Prev
             </button>
             <button
-              disabled={page >= totalPages}
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize))}
+              onClick={() => setPage(p => Math.min(Math.max(1, Math.ceil((data.total || filteredSorted.length || 0) / pageSize)), p + 1))}
               className="px-2 py-1 text-xs rounded border disabled:opacity-50"
             >
               Next
@@ -608,6 +505,8 @@ function VendorBidsPanel({
   state,
   wallet,
 }: { state?: { loading: boolean; error: string | null; bids: VendorBid[] }, wallet?: string }) {
+  const VENDOR_PARAM = 'vendorWallet';
+
   if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   const showEmptyHelp = !state.error && state.bids.length === 0;
@@ -615,16 +514,12 @@ function VendorBidsPanel({
   return (
     <div className="space-y-3">
       {state.error && (
-        <div className="text-rose-700 text-sm">
-          {state.error}
-        </div>
+        <div className="text-rose-700 text-sm">{state.error}</div>
       )}
 
       {showEmptyHelp && (
         <div className="text-slate-600 text-sm">
-          No bids found for this vendor. If your API lacks a vendor filter, add one like:
-          <code className="ml-1 px-1 py-0.5 bg-slate-200 rounded">GET /admin/bids?{BIDS_VENDOR_PARAM}=0x…</code>
-          , or expose <code className="px-1 py-0.5 bg-slate-200 rounded">/admin/vendors/:id/bids</code>.
+          No bids found for this vendor.
         </div>
       )}
 
@@ -666,10 +561,10 @@ function VendorBidsPanel({
         <div className="text-xs text-slate-500">
           Tip: Bids page filtered by this wallet:&nbsp;
           <Link
-            href={`/admin/bids?${encodeURIComponent(BIDS_VENDOR_PARAM)}=${encodeURIComponent(wallet)}`}
+            href={`/admin/bids?${encodeURIComponent(VENDOR_PARAM)}=${encodeURIComponent(wallet)}`}
             className="underline"
           >
-            /admin/bids?{BIDS_VENDOR_PARAM}={wallet}
+            /admin/bids?{VENDOR_PARAM}={wallet}
           </Link>
         </div>
       )}
