@@ -62,7 +62,7 @@ export default function VendorProfilePage() {
     setSaving(true); setErr(null);
     try {
       const r = await fetch(`${API_BASE}/vendor/profile`, {
-        method: 'PUT',
+        method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(p),
