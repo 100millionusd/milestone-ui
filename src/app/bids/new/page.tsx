@@ -1,10 +1,11 @@
 // src/app/bids/new/page.tsx
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useRef, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { createBid, uploadFileToIPFS, getProposal, analyzeBid, getBid } from '@/lib/api';
+import { API_BASE, createBid, uploadFileToIPFS, getProposal, analyzeBid, getBid } from '@/lib/api';
 
 function NewBidPageContent() {
   const router = useRouter();
@@ -14,6 +15,18 @@ function NewBidPageContent() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);                 // ✅ lock form after finalize
   const [proposal, setProposal] = useState<any | null>(null);
+
+  // ✅ Vendor profile (prefill + gate)
+  type VendorProfile = {
+    vendorName: string;
+    walletAddress: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    website?: string;
+  };
+  const [profile, setProfile] = useState<VendorProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const [formData, setFormData] = useState({
     proposalId: proposalId ? parseInt(proposalId) : '',
@@ -75,6 +88,36 @@ function NewBidPageContent() {
     return clearPoll;
   }, [proposalId]);
 
+  // ✅ Load vendor profile and prefill vendorName + walletAddress
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/vendor/profile`, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (res.ok) {
+          const data: VendorProfile = await res.json();
+          if (!alive) return;
+          setProfile(data);
+          setFormData((prev) => ({
+            ...prev,
+            vendorName: prev.vendorName || data.vendorName || '',
+            walletAddress: prev.walletAddress || data.walletAddress || '',
+          }));
+        } else {
+          setProfile(null);
+        }
+      } catch {
+        setProfile(null);
+      } finally {
+        if (alive) setProfileLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   // ✅ Guard: only allow submit when the clicked button opts in
   const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
     // @ts-ignore nativeEvent is fine here
@@ -84,12 +127,30 @@ function NewBidPageContent() {
     }
   };
 
+  // ✅ Require profile fields once (adjust which fields are required)
+  const missingRequiredProfile =
+    !profileLoading &&
+    (
+      !profile ||
+      !profile.vendorName ||
+      !profile.walletAddress ||
+      !profile.email ||
+      !profile.address
+    );
+
+  const qs = searchParams?.toString();
+  const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
+
   // --- submit handler ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitted) return; // ✅ already finalized; block repeat
+    if (submitted) return; // already finalized
     if (!proposalId) {
       alert('No project selected. Open this page with ?proposalId=<id>.');
+      return;
+    }
+    if (missingRequiredProfile) {
+      alert('Please complete your vendor profile first.');
       return;
     }
 
@@ -155,15 +216,28 @@ function NewBidPageContent() {
     );
   }
 
-  const disabled = loading || submitted; // ✅ all inputs/buttons respect this
+  const disabled = loading || submitted; // ✅ lock inputs after finalization
 
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Submit Bid</h1>
 
-      {submitted && (
-        <div className="mb-6 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-emerald-800">
-          ✅ Your bid has been submitted{createdBidId ? ` (ID: ${createdBidId})` : ''}. You can safely leave this page.
+      {/* ✅ Profile gate */}
+      {profileLoading && (
+        <div className="mb-4 text-slate-500">Loading your profile…</div>
+      )}
+      {!profileLoading && missingRequiredProfile && (
+        <div className="mb-6 rounded border bg-amber-50 text-amber-900 p-4">
+          <div className="font-medium mb-1">Complete your vendor profile first</div>
+          <p className="text-sm">
+            We need your company details (email, address, etc.) once. After that, your bids are prefilled automatically.
+          </p>
+          <Link
+            className="inline-block mt-3 px-3 py-1.5 rounded bg-slate-900 text-white text-sm"
+            href={`/vendor/profile?returnTo=${encodeURIComponent(returnTo)}`}
+          >
+            Go to Profile
+          </Link>
         </div>
       )}
 
@@ -192,7 +266,13 @@ function NewBidPageContent() {
                 onChange={(e) => setFormData({ ...formData, vendorName: e.target.value })}
                 className="w-full p-2 border rounded"
                 placeholder="Your company name"
+                readOnly={!!profile?.vendorName} // keep source of truth in Profile
               />
+              {profile?.vendorName && (
+                <div className="text-xs text-slate-500 mt-1">
+                  Prefilled from your <Link className="underline" href={`/vendor/profile?returnTo=${encodeURIComponent(returnTo)}`}>profile</Link>.
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Wallet Address *</label>
@@ -203,7 +283,13 @@ function NewBidPageContent() {
                 onChange={(e) => setFormData({ ...formData, walletAddress: e.target.value })}
                 className="w-full p-2 border rounded"
                 placeholder="0x..."
+                readOnly={!!profile?.walletAddress}
               />
+              {profile?.walletAddress && (
+                <div className="text-xs text-slate-500 mt-1">
+                  Prefilled from your <Link className="underline" href={`/vendor/profile?returnTo=${encodeURIComponent(returnTo)}`}>profile</Link>.
+                </div>
+              )}
             </div>
           </div>
 
@@ -368,13 +454,13 @@ function NewBidPageContent() {
 
         {/* Submit / Cancel */}
         <div className="flex gap-4 pt-4">
-         {/* ✅ only this may submit */}
-<button
-  type="submit"
-  data-allow-submit="true"
-  disabled={loading || submitted}
-  className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
->
+          {/* ✅ only this may submit */}
+          <button
+            type="submit"
+            data-allow-submit="true"
+            disabled={loading || submitted || missingRequiredProfile}
+            className="bg-blue-600 text-white px-8 py-3 rounded-lg disabled:bg-gray-400 font-medium"
+          >
             {submitted ? 'Bid submitted' : (loading ? 'Submitting Bid...' : 'Submit Bid')}
           </button>
 

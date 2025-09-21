@@ -8,6 +8,7 @@ import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
 import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
+import { useRouter, usePathname } from 'next/navigation';
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -58,6 +59,9 @@ const API_BASE =
   'https://milestone-api-production.up.railway.app';
 
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [web3auth, setWeb3auth] = useState<Web3Auth | null>(null);
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
@@ -148,6 +152,37 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Profile completeness helper
+  const isProfileIncomplete = (p: any) => {
+    // Tweak required fields here:
+    const hasName = !!(p?.vendorName || p?.companyName);
+    const hasEmail = !!p?.email;
+    return !(hasName && hasEmail);
+  };
+
+  // After login, check profile and redirect
+  const postLoginProfileRedirect = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
+      const p = r.ok ? await r.json() : null;
+
+      // Prefer ?next=… from the current URL if present
+      const url = new URL(window.location.href);
+      const nextParam = url.searchParams.get('next');
+      const fallback = pathname || '/';
+
+      if (!p || isProfileIncomplete(p)) {
+        const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
+        router.replace(dest);
+      } else {
+        router.replace(nextParam || '/');
+      }
+    } catch {
+      // If anything fails, just land on home
+      router.replace('/');
+    }
+  };
+
   // Sync role from cookie on mount
   useEffect(() => {
     if (mounted) {
@@ -199,15 +234,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const { role: srvRole } = await verifyRes.json();
       const normRole = normalizeRole(srvRole);
 
-      // Cookie mode → we don't need to keep a JWT in localStorage
+      // Cookie mode → no need to keep a JWT in localStorage
       setToken(null);
       localStorage.removeItem('lx_jwt');
 
       setRole(normRole);
       localStorage.setItem('lx_role', normRole);
 
-      // Confirm from cookie
+      // Confirm from cookie & then enforce profile completion
       await refreshRole();
+      await postLoginProfileRedirect();
     } catch (e) {
       console.error('Login error:', e);
     }
@@ -227,6 +263,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
+    // Optional: send them home after logout
+    try { router.replace('/'); } catch {}
   };
 
   // 🔒 Re-auth on account change to avoid stale JWTs
@@ -248,7 +286,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem('lx_addr');
         localStorage.removeItem('lx_jwt');
         localStorage.removeItem('lx_role');
-        // redirect to login to issue a fresh JWT for the new account
+        // redirect to profile/login flow to issue a fresh JWT for the new account
         window.location.href = '/vendor/login';
       }
     };
