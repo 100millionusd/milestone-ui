@@ -25,10 +25,10 @@ type AdminVendor = {
   phone?: string | null;
 
   // Address fields (now complete)
-  street?: string | null;          // <-- street + house number (from API: street or address1)
+  street?: string | null;          // street + house number (from API: street or address1)
   addressLine?: string | null;     // backward-compat alias if UI elsewhere relies on it
   city?: string | null;
-  postalCode?: string | null;      // <-- add postalCode
+  postalCode?: string | null;      // postalCode
   country?: string | null;
 
   website?: string | null;
@@ -175,7 +175,7 @@ function mapVendor(raw: AdminVendorRaw): AdminVendor {
     contactEmail: raw?.contactEmail ?? raw?.contact_email ?? raw?.email ?? null,
     phone: raw?.phone ?? null,
 
-    // Address (from your /admin/vendors API: street, address1, city, postalCode, country)
+    // Address (from /admin/vendors API: street, address1, city, postalCode, country)
     street: raw?.street ?? raw?.address1 ?? raw?.addressLine ?? raw?.address_line ?? null,
     addressLine: raw?.addressLine ?? raw?.address_line ?? raw?.address1 ?? raw?.street ?? null,
     city: raw?.city ?? raw?.profile?.city ?? null,
@@ -245,6 +245,7 @@ function VendorsTab() {
 
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
+  const [mutating, setMutating] = useState<string | null>(null); // wallet currently being archived/deleted
 
   // Load vendors list
   const fetchList = async () => {
@@ -360,6 +361,45 @@ function VendorsTab() {
     }
   };
 
+  // --- Admin actions: archive / delete vendor profile ---
+  const archiveVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    if (!confirm('Archive this vendor?')) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/archive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to archive vendor');
+    } finally {
+      setMutating(null);
+    }
+  };
+
+  const deleteVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    if (!confirm('PERMANENTLY delete this vendor profile? Bids remain.')) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to delete vendor');
+    } finally {
+      setMutating(null);
+    }
+  };
+
   return (
     <section className="space-y-4">
       {/* Controls */}
@@ -432,7 +472,7 @@ function VendorsTab() {
                 <th className="py-2 px-3">Bids</th>
                 <th className="py-2 px-3">Total Awarded</th>
                 <th className="py-2 px-3">Last Bid</th>
-                <th className="py-2 px-3 w-24">Actions</th>
+                <th className="py-2 px-3 w-64">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -449,6 +489,7 @@ function VendorsTab() {
                 const rowId = v.id || v.walletAddress;
                 const open = !!rowsOpen[rowId];
                 const bidsState = bidsByVendor[rowId];
+                const isBusy = mutating === v.walletAddress;
                 return (
                   <>
                     <tr key={rowId} className="border-b hover:bg-slate-50">
@@ -460,32 +501,50 @@ function VendorsTab() {
                       <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
                       <td className="py-2 px-3">
-                        <button
-                          onClick={() => toggleOpen(rowId, v.walletAddress)}
-                          className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                        >
-                          {open ? 'Hide bids' : 'View bids'}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => toggleOpen(rowId, v.walletAddress)}
+                            className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                          >
+                            {open ? 'Hide' : 'Bids'}
+                          </button>
+                          <button
+                            onClick={() => archiveVendor(v.walletAddress)}
+                            disabled={!v.walletAddress || isBusy}
+                            className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                            title="Archive vendor (soft hide)"
+                          >
+                            {isBusy ? 'Archiving…' : 'Archive'}
+                          </button>
+                          <button
+                            onClick={() => deleteVendor(v.walletAddress)}
+                            disabled={!v.walletAddress || isBusy}
+                            className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
+                            title="Delete vendor profile (bids remain)"
+                          >
+                            {isBusy ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {open && (
                       <tr className="bg-slate-50 border-b">
                         <td colSpan={8} className="px-3 py-3">
-                          {/* NEW: Vendor details block */}
+                          {/* Vendor details block */}
                           <div className="mb-3 text-xs text-slate-700 grid md:grid-cols-2 gap-y-1 gap-x-6">
                             <div><b>Email:</b> {v.contactEmail || '—'}</div>
                             <div><b>Phone:</b> {v.phone || '—'}</div>
                             <div className="md:col-span-2">
-  <b>Address:</b>{' '}
-  {(v.street || v.addressLine || v.city || v.postalCode || v.country)
-    ? [
-        (v.street || v.addressLine) || null, // street + house no
-        v.city || null,
-        v.postalCode || null,
-        v.country || null,
-      ].filter(Boolean).join(', ')
-    : '—'}
-</div>
+                              <b>Address:</b>{' '}
+                              {(v.street || v.addressLine || v.city || v.postalCode || v.country)
+                                ? [
+                                    (v.street || v.addressLine) || null, // street + house no
+                                    v.city || null,
+                                    v.postalCode || null,
+                                    v.country || null,
+                                  ].filter(Boolean).join(', ')
+                                : '—'}
+                            </div>
                             <div className="md:col-span-2">
                               <b>Website:</b>{' '}
                               {v.website
