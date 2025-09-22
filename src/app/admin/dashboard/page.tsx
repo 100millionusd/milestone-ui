@@ -20,12 +20,17 @@ type AdminVendor = {
   totalAwardedUSD?: number;
   lastBidAt?: string | null;
 
-  // NEW: contact/profile fields (optional)
+  // Contact / profile fields
   contactEmail?: string | null;
   phone?: string | null;
-  addressLine?: string | null;
+
+  // Address fields (now complete)
+  street?: string | null;          // <-- street + house number (from API: street or address1)
+  addressLine?: string | null;     // backward-compat alias if UI elsewhere relies on it
   city?: string | null;
+  postalCode?: string | null;      // <-- add postalCode
   country?: string | null;
+
   website?: string | null;
 };
 
@@ -166,12 +171,17 @@ function mapVendor(raw: AdminVendorRaw): AdminVendor {
         : (typeof raw?.total_awarded_usd === 'number' ? raw.total_awarded_usd : undefined),
     lastBidAt: raw?.lastBidAt ?? raw?.last_bid_at ?? null,
 
-    // NEW: map profile/contact fields (both camelCase & snake_case)
-    contactEmail: raw?.contactEmail ?? raw?.contact_email ?? null,
+    // Contact
+    contactEmail: raw?.contactEmail ?? raw?.contact_email ?? raw?.email ?? null,
     phone: raw?.phone ?? null,
-    addressLine: raw?.addressLine ?? raw?.address_line ?? null,
-    city: raw?.city ?? null,
-    country: raw?.country ?? null,
+
+    // Address (from your /admin/vendors API: street, address1, city, postalCode, country)
+    street: raw?.street ?? raw?.address1 ?? raw?.addressLine ?? raw?.address_line ?? null,
+    addressLine: raw?.addressLine ?? raw?.address_line ?? raw?.address1 ?? raw?.street ?? null,
+    city: raw?.city ?? raw?.profile?.city ?? null,
+    postalCode: raw?.postalCode ?? raw?.postal_code ?? raw?.profile?.postalCode ?? raw?.profile?.postal_code ?? null,
+    country: raw?.country ?? raw?.profile?.country ?? null,
+
     website: raw?.website ?? null,
   };
 }
@@ -465,16 +475,17 @@ function VendorsTab() {
                           <div className="mb-3 text-xs text-slate-700 grid md:grid-cols-2 gap-y-1 gap-x-6">
                             <div><b>Email:</b> {v.contactEmail || '—'}</div>
                             <div><b>Phone:</b> {v.phone || '—'}</div>
-                            <div className="md:col-span-2">
-                              <b>Address:</b>{' '}
-                              {v.addressLine || v.city || v.country
-                                ? [
-                                    v.addressLine || null,
-                                    v.city || null,
-                                    v.country || null,
-                                  ].filter(Boolean).join(', ')
-                                : '—'}
-                            </div>
+                            <<div className="md:col-span-2">
+  <b>Address:</b>{' '}
+  {(v.street || v.addressLine || v.city || v.postalCode || v.country)
+    ? [
+        (v.street || v.addressLine) || null,   // street + house no
+        v.city || null,                        // city
+        v.postalCode || null,                  // postal code
+        v.country || null,                     // country
+      ].filter(Boolean).join(', ')
+    : '—'}
+</div>
                             <div className="md:col-span-2">
                               <b>Website:</b>{' '}
                               {v.website
