@@ -1,8 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/api';
 import { useRouter } from 'next/navigation';
+import { API_BASE } from '@/lib/api';
+
+type Address = {
+  line1: string;
+  city: string;
+  postalCode: string;
+  country: string;
+};
 
 type ProfileForm = {
   walletAddress: string;
@@ -10,7 +17,7 @@ type ProfileForm = {
   email: string;
   phone: string;
   website: string;
-  address: { line1: string; city: string; country: string; postalCode: string };
+  address: Address;
 };
 
 export default function VendorProfilePage() {
@@ -24,7 +31,7 @@ export default function VendorProfilePage() {
     email: '',
     phone: '',
     website: '',
-    address: { line1: '', city: '', country: '', postalCode: '' },
+    address: { line1: '', city: '', postalCode: '', country: '' },
   });
 
   useEffect(() => {
@@ -35,25 +42,26 @@ export default function VendorProfilePage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
 
-        // Server returns `address` as a single string. Keep it in line1 for editing.
-        const addrString =
-          typeof j?.address === 'string'
-            ? j.address
-            : j?.address?.line1 || '';
+        // Server may return address as string or object — normalize to object.
+        const a = j?.address ?? {};
+        const address: Address =
+          typeof a === 'string'
+            ? { line1: a, city: '', postalCode: '', country: '' }
+            : {
+                line1: a?.line1 || '',
+                city: a?.city || '',
+                postalCode: a?.postalCode || '',
+                country: a?.country || '',
+              };
 
         if (!alive) return;
         setP({
-          walletAddress: j.walletAddress || '',
-          vendorName: j.vendorName || '',
-          email: j.email || '',
-          phone: j.phone || '',
-          website: j.website || '',
-          address: {
-            line1: addrString,
-            city: j.address?.city || '',
-            country: j.address?.country || '',
-            postalCode: j.address?.postalCode || '',
-          },
+          walletAddress: j?.walletAddress || '',
+          vendorName: j?.vendorName || '',
+          email: j?.email || '',
+          phone: j?.phone || '',
+          website: j?.website || '',
+          address,
         });
       } catch (e: any) {
         setErr(e?.message || 'Failed to load profile');
@@ -78,18 +86,17 @@ export default function VendorProfilePage() {
     setErr(null);
 
     try {
-      // API expects a flat string `address`. Use line1 primarily (you can join other parts if you want).
-      const addressOut = [p.address.line1, p.address.city, p.address.postalCode, p.address.country]
-        .map((x) => (x || '').trim())
-        .filter(Boolean)
-        .join(', ');
-
       const payload = {
-        vendorName: (p.vendorName || '').trim(), // REQUIRED by server (min 2)
-        email: (p.email || '').trim(),           // '' allowed
-        phone: (p.phone || '').trim(),           // '' allowed
-        address: addressOut,                     // string (not object)
+        vendorName: (p.vendorName || '').trim(),   // required (>= 2 chars)
+        email: (p.email || '').trim(),
+        phone: (p.phone || '').trim(),
         website: normalizeWebsite(p.website || ''),
+        address: {
+          line1: (p.address.line1 || '').trim(),
+          city: (p.address.city || '').trim(),
+          postalCode: (p.address.postalCode || '').trim(),
+          country: (p.address.country || '').trim(),
+        },
       };
 
       if (payload.vendorName.length < 2) {
@@ -100,8 +107,8 @@ export default function VendorProfilePage() {
 
       const r = await fetch(`${API_BASE}/vendor/profile`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(payload),
       });
 
@@ -155,7 +162,6 @@ export default function VendorProfilePage() {
               value={p.email}
               onChange={(e) => setP({ ...p, email: e.target.value })}
               type="email"
-              // server allows empty, but keeping required is fine if you want to enforce
             />
           </label>
           <label className="block">
@@ -205,10 +211,7 @@ export default function VendorProfilePage() {
               className="border rounded px-3 py-2 w-full"
               value={p.address.postalCode}
               onChange={(e) =>
-                setP({
-                  ...p,
-                  address: { ...p.address, postalCode: e.target.value },
-                })
+                setP({ ...p, address: { ...p.address, postalCode: e.target.value } })
               }
             />
           </label>
