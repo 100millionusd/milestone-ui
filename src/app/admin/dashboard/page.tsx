@@ -475,14 +475,14 @@ function VendorsTab() {
                           <div className="mb-3 text-xs text-slate-700 grid md:grid-cols-2 gap-y-1 gap-x-6">
                             <div><b>Email:</b> {v.contactEmail || '—'}</div>
                             <div><b>Phone:</b> {v.phone || '—'}</div>
-                            <<div className="md:col-span-2">
+                            <div className="md:col-span-2">
   <b>Address:</b>{' '}
   {(v.street || v.addressLine || v.city || v.postalCode || v.country)
     ? [
-        (v.street || v.addressLine) || null,   // street + house no
-        v.city || null,                        // city
-        v.postalCode || null,                  // postal code
-        v.country || null,                     // country
+        (v.street || v.addressLine) || null, // street + house no
+        v.city || null,
+        v.postalCode || null,
+        v.country || null,
       ].filter(Boolean).join(', ')
     : '—'}
 </div>
