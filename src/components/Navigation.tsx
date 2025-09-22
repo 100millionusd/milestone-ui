@@ -21,15 +21,15 @@ export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [mounted, setMounted] = useState(false); // avoid SSR flicker
+  const [mounted, setMounted] = useState(false);
 
   const pathname = usePathname();
   const router = useRouter();
 
-  // From wallet context
+  // Wallet context
   const { address, role: web3Role, logout } = useWeb3Auth();
 
-  // From server cookie/JWT
+  // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
 
   useEffect(() => setMounted(true), []);
@@ -38,7 +38,7 @@ export default function Navigation() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole();          // calls /auth/role (uses cookie)
+        const info = await getAuthRole(); // calls /auth/role (uses cookie)
         if (alive) setServerRole(info.role);
       } catch {
         if (alive) setServerRole('guest');
@@ -47,16 +47,14 @@ export default function Navigation() {
     return () => { alive = false; };
   }, []);
 
-  // Effective role: if server says admin, trust it; else fall back to wallet; else guest
+  // Effective role
   const role: Role = useMemo(() => {
     if (serverRole === 'admin') return 'admin';
     return (web3Role as Role) || serverRole || 'guest';
   }, [serverRole, web3Role]);
 
-  const isAdmin = role === 'admin';
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
-  // Keep your existing items; Admin dropdown is admin-only.
   const navItems: NavItem[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard' },
@@ -69,18 +67,16 @@ export default function Navigation() {
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
-          // optional: quick link to vendors tab inside admin dashboard
           { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
         ],
       },
-      // keep your existing top-level Vendors link
       { href: '/vendor/dashboard', label: 'Vendors' },
     ],
     []
   );
 
   const showItem = (item: NavItem) => {
-    if (role === 'admin') return true; // admin sees everything
+    if (role === 'admin') return true;
     if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
     return true;
   };
@@ -171,17 +167,26 @@ export default function Navigation() {
               </div>
 
               {isProfileOpen && (
-                <div className="absolute right-0 mt-2 w-40 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
-                    <button
-                      onClick={async () => {
-                        await logout();
-                        router.push('/vendor/login');
-                      }}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Logout
-                    </button>
+                    <>
+                      {/* ✅ NEW: Vendor can edit their data here */}
+                      <Link
+                        href="/vendor/profile"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Vendor Profile
+                      </Link>
+                      <button
+                        onClick={async () => {
+                          await logout();
+                          router.push('/vendor/login');
+                        }}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Logout
+                      </button>
+                    </>
                   ) : (
                     <button
                       onClick={() => router.push('/vendor/login')}
@@ -243,6 +248,17 @@ export default function Navigation() {
                   </Link>
                 )
               )}
+
+              {/* ✅ NEW (mobile): quick access to profile when connected */}
+              {address && (
+                <Link
+                  href="/vendor/profile"
+                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  Vendor Profile
+                </Link>
+              )}
             </div>
           </div>
         )}
@@ -250,4 +266,3 @@ export default function Navigation() {
     </header>
   );
 }
-
