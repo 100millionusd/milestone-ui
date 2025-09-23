@@ -15,6 +15,9 @@ export interface Proposal {
   cid: string | null;
   status: "pending" | "approved" | "rejected" | "completed" | "archived";
   createdAt: string;
+  ownerWallet?: string | null;
+  ownerEmail?: string | null;
+  updatedAt?: string;
 }
 
 export interface Milestone {
@@ -284,6 +287,9 @@ function toProposal(p: any): Proposal {
     cid: p?.cid ?? null,
     status: (p?.status as Proposal["status"]) ?? "pending",
     createdAt: p?.createdAt ?? p?.created_at ?? new Date().toISOString(),
+    ownerWallet: p?.ownerWallet ?? p?.owner_wallet ?? null,
+    ownerEmail:  p?.ownerEmail  ?? p?.owner_email  ?? null,
+    updatedAt:   p?.updatedAt   ?? p?.updated_at   ?? undefined,
   };
 }
 
@@ -420,6 +426,22 @@ export async function deleteProposal(id: number): Promise<boolean> {
   if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
   await apiFetch(`/proposals/${encodeURIComponent(String(id))}`, { method: "DELETE" });
   return true;
+}
+
+// Update a proposal (admin or owner)
+export async function updateProposal(id: number, changes: Partial<Proposal>): Promise<Proposal> {
+  if (!Number.isFinite(id)) throw new Error("Invalid proposal ID");
+  const p = await apiFetch(`/proposals/${encodeURIComponent(String(id))}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+  return toProposal(p);
+}
+
+// List proposals owned by the logged-in user
+export async function getMyProposals(): Promise<Proposal[]> {
+  const rows = await apiFetch(`/proposals/mine`);
+  return (Array.isArray(rows) ? rows : []).map(toProposal);
 }
 
 // ---- Bids ----
@@ -794,6 +816,8 @@ export default {
   rejectProposal,
   archiveProposal,
   deleteProposal,
+  updateProposal,
+  getMyProposals,
 
   // bids
   getBids,
