@@ -3,17 +3,19 @@ import Agent2Inline from "@/components/Agent2Inline";
 import { getProposal, getBids } from "@/lib/api";
 import Link from "next/link";
 
-interface PageProps {
-  params: Promise<{ id: string }>;
-}
+type PageProps = { params: { id: string } };
 
 export default async function ProposalDetailPage({ params }: PageProps) {
-  const { id } = await params;
-  const proposalId = Number(id);
+  const proposalId = Number(params.id);
+  if (!Number.isFinite(proposalId)) {
+    return <div className="p-6">Invalid proposal id.</div>;
+  }
 
   try {
-    const proposal = await getProposal(proposalId);
-    const bids = await getBids(proposalId);
+    const [proposal, bids] = await Promise.all([
+      getProposal(proposalId),
+      getBids(proposalId),
+    ]);
 
     const fmtUSD = (n: number) =>
       new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
@@ -22,14 +24,14 @@ export default async function ProposalDetailPage({ params }: PageProps) {
       <div className="p-6 space-y-6">
         <header>
           <div className="flex items-center justify-between mb-4">
-  <h1 className="text-2xl font-bold">{proposal.title}</h1>
-  <Link
-    href={`/proposals/${proposalId}/edit`}
-    className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
-  >
-    Edit
-  </Link>
-</div>
+            <h1 className="text-2xl font-bold">{proposal.title}</h1>
+            <Link
+              href={`/proposals/${proposalId}/edit`}
+              className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
+            >
+              Edit
+            </Link>
+          </div>
         </header>
 
         <section className="bg-white p-4 rounded shadow space-y-2">
