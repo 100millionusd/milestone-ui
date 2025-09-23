@@ -235,9 +235,12 @@ b?.user?.wallet ??
 }
 
 async function fetchJson(url: string) {
-const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
-if (!res.ok) throw new Error(HTTP ${res.status});
-return res.json();
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 /** Single deterministic call: GET /admin/bids?vendorWallet=<wallet> */
