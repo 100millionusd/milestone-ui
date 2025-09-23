@@ -73,6 +73,9 @@ export default function AdminVendorsPage() {
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
 
+  // track which wallet we’re mutating (for Archive/Delete)
+  const [mutating, setMutating] = useState<string | null>(null);
+
   // sync URL (nice DX)
   useEffect(() => {
     const query = new URLSearchParams();
@@ -136,10 +139,48 @@ export default function AdminVendorsPage() {
         })) : [];
         setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: null, bids } }));
       } catch (e: any) {
-        // fallback: if you don’t have /vendors/:id/bids, try a generic search
         const msg = e?.message || 'Failed to load bids';
         setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: msg, bids: [] } }));
       }
+    }
+  };
+
+  // ---- Admin actions for vendor profile ----
+  const archiveVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    if (!confirm('Archive this vendor?')) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/archive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to archive vendor');
+    } finally {
+      setMutating(null);
+    }
+  };
+
+  const deleteVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    if (!confirm('PERMANENTLY delete this vendor profile? Bids remain.')) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to delete vendor');
+    } finally {
+      setMutating(null);
     }
   };
 
@@ -214,7 +255,7 @@ export default function AdminVendorsPage() {
                 <th className="py-2 px-3">Bids</th>
                 <th className="py-2 px-3">Total Awarded</th>
                 <th className="py-2 px-3">Last Bid</th>
-                <th className="py-2 px-3 w-24">Actions</th>
+                <th className="py-2 px-3 w-64">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -230,6 +271,7 @@ export default function AdminVendorsPage() {
               {!loading && !err && data.items.map((v) => {
                 const open = !!rowsOpen[v.id];
                 const bidsState = bidsByVendor[v.id];
+                const busy = mutating === v.walletAddress;
                 return (
                   <>
                     <tr key={v.id} className="border-b hover:bg-slate-50">
@@ -245,12 +287,30 @@ export default function AdminVendorsPage() {
                       <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
                       <td className="py-2 px-3">
-                        <button
-                          onClick={() => toggleOpen(v.id, v.walletAddress)}
-                          className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                        >
-                          {open ? 'Hide bids' : 'View bids'}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => toggleOpen(v.id, v.walletAddress)}
+                            className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                          >
+                            {open ? 'Hide' : 'Bids'}
+                          </button>
+                          <button
+                            onClick={() => archiveVendor(v.walletAddress)}
+                            disabled={!v.walletAddress || busy}
+                            className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                            title="Archive vendor (soft hide)"
+                          >
+                            {busy ? 'Archiving…' : 'Archive'}
+                          </button>
+                          <button
+                            onClick={() => deleteVendor(v.walletAddress)}
+                            disabled={!v.walletAddress || busy}
+                            className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
+                            title="Delete vendor profile (bids remain)"
+                          >
+                            {busy ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {open && (
@@ -342,7 +402,6 @@ function VendorBidsPanel({ state }: { state?: { loading: boolean; error: string 
               <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
               <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
               <td className="py-2 pr-3">
-                {/* Update this link to whatever your project route is */}
                 <Link
                   href={`/projects/${encodeURIComponent(b.projectId)}`}
                   className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
