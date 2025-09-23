@@ -150,7 +150,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         <div className="flex items-center justify-between mb-3">
   <h2 className="font-semibold">Submitted Proofs</h2>
   <Link
-    href={`/proposals/${b.proposalId}/edit`}
+    href={`/proposals/${bid.proposalId}/edit`}
     className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
   >
     Edit Proposal
