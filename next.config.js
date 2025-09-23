@@ -1,22 +1,15 @@
-// next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   trailingSlash: true,
-  images: {
-    unoptimized: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  images: { unoptimized: true },
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
 
-  // 🔎 Show real filenames/line numbers in production errors
+  // Keep this if you want readable prod stack traces (slightly larger build)
   productionBrowserSourceMaps: true,
 
-  // 🧪 TEMP: disable minify so variable names aren’t mangled (helps find "b is not defined")
-  swcMinify: false,
+  // Re-enable minification for production performance/bundle size
+  swcMinify: true,
 };
 
 module.exports = nextConfig;
