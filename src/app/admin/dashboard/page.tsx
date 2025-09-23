@@ -1,3 +1,6 @@
+Here’s the completed file with archived vendor support (show/hide archived, Unarchive button), plus the bid Archive/Delete actions you already added:
+
+```tsx
 // src/app/admin/dashboard/page.tsx
 'use client';
 
@@ -32,6 +35,9 @@ type AdminVendor = {
   country?: string | null;
 
   website?: string | null;
+
+  // Admin flags
+  archived?: boolean;              // <-- NEW
 };
 
 type VendorBid = {
@@ -183,6 +189,9 @@ function mapVendor(raw: AdminVendorRaw): AdminVendor {
     country: raw?.country ?? raw?.profile?.country ?? null,
 
     website: raw?.website ?? null,
+
+    // NEW
+    archived: !!raw?.archived,
   };
 }
 
@@ -239,13 +248,15 @@ function VendorsTab() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
 
+  const [includeArchived, setIncludeArchived] = useState(false); // <-- NEW
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<Paged<AdminVendor>>({ items: [], page: 1, pageSize: 25, total: 0 });
 
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
-  const [mutating, setMutating] = useState<string | null>(null); // wallet currently being archived/deleted
+  const [mutating, setMutating] = useState<string | null>(null); // wallet currently being archived/deleted/unarchived
 
   // Load vendors list
   const fetchList = async () => {
@@ -257,6 +268,7 @@ function VendorsTab() {
       if (q) url.searchParams.set('search', q);
       if (status !== 'all') url.searchParams.set('status', status as string);
       if (kyc !== 'all') url.searchParams.set('kyc', kyc as string);
+      if (includeArchived) url.searchParams.set('includeArchived', 'true'); // <-- NEW
       url.searchParams.set('page', String(page));
       url.searchParams.set('limit', String(pageSize));
 
@@ -282,7 +294,7 @@ function VendorsTab() {
   useEffect(() => {
     fetchList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, kyc, page, pageSize]);
+  }, [q, status, kyc, includeArchived, page, pageSize]); // includeArchived in deps
 
   const filteredSorted = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -361,7 +373,7 @@ function VendorsTab() {
     }
   };
 
-  // --- Admin actions: archive / delete vendor profile ---
+  // --- Admin actions: archive / unarchive / delete vendor profile ---
   const archiveVendor = async (wallet?: string) => {
     if (!wallet) return;
     if (!confirm('Archive this vendor?')) return;
@@ -376,6 +388,25 @@ function VendorsTab() {
       await fetchList();
     } catch (e: any) {
       alert(e?.message || 'Failed to archive vendor');
+    } finally {
+      setMutating(null);
+    }
+  };
+
+  const unarchiveVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    if (!confirm('Unarchive this vendor?')) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to unarchive vendor');
     } finally {
       setMutating(null);
     }
@@ -435,6 +466,16 @@ function VendorsTab() {
           <option value="rejected">Rejected</option>
         </select>
 
+        {/* NEW: include archived */}
+        <label className="ml-2 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }}
+          />
+          Show archived
+        </label>
+
         {/* Sort */}
         <div className="ml-auto flex items-center gap-2">
           <label className="text-sm text-slate-600">Sort by</label>
@@ -492,7 +533,7 @@ function VendorsTab() {
                 const isBusy = mutating === v.walletAddress;
                 return (
                   <>
-                    <tr key={rowId} className="border-b hover:bg-slate-50">
+                    <tr key={rowId} className={`border-b hover:bg-slate-50 ${v.archived ? 'opacity-60' : ''}`}>
                       <td className="py-2 px-3 font-medium">{v.vendorName || '—'}</td>
                       <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
                       <td className="py-2 px-3"><StatusChip value={v.status} /></td>
@@ -508,14 +549,27 @@ function VendorsTab() {
                           >
                             {open ? 'Hide' : 'Bids'}
                           </button>
-                          <button
-                            onClick={() => archiveVendor(v.walletAddress)}
-                            disabled={!v.walletAddress || isBusy}
-                            className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
-                            title="Archive vendor (soft hide)"
-                          >
-                            {isBusy ? 'Archiving…' : 'Archive'}
-                          </button>
+
+                          {!v.archived ? (
+                            <button
+                              onClick={() => archiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || isBusy}
+                              className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                              title="Archive vendor (soft hide)"
+                            >
+                              {isBusy ? 'Archiving…' : 'Archive'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => unarchiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || isBusy}
+                              className="px-2 py-1 rounded bg-emerald-600 text-white text-xs disabled:opacity-50"
+                              title="Unarchive vendor"
+                            >
+                              {isBusy ? 'Unarchiving…' : 'Unarchive'}
+                            </button>
+                          )}
+
                           <button
                             onClick={() => deleteVendor(v.walletAddress)}
                             disabled={!v.walletAddress || isBusy}
@@ -785,3 +839,4 @@ function ProposalsShortcut() {
     </section>
   );
 }
+```
