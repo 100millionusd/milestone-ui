@@ -553,7 +553,7 @@ function VendorsTab() {
                             </div>
                           </div>
 
-                          {/* Existing bids panel */}
+                          {/* Existing bids panel (now with Archive/Delete) */}
                           <VendorBidsPanel state={bidsState} wallet={v.walletAddress} />
                         </td>
                       </tr>
@@ -619,9 +619,61 @@ function VendorBidsPanel({
 }: { state?: { loading: boolean; error: string | null; bids: VendorBid[] }, wallet?: string }) {
   const VENDOR_PARAM = 'vendorWallet';
 
+  // Local copy to allow optimistic updates after archive/delete
+  const [rows, setRows] = useState<VendorBid[]>(state?.bids || []);
+  const [busy, setBusy] = useState<Record<string, boolean>>({}); // bidId -> busy
+
+  useEffect(() => {
+    setRows(state?.bids || []);
+  }, [state]);
+
+  const setBusyFor = (bidId: string, v: boolean) =>
+    setBusy(prev => ({ ...prev, [bidId]: v }));
+
+  const archiveBid = async (bidId: string) => {
+    if (!bidId) return;
+    try {
+      setBusyFor(bidId, true);
+      const res = await fetch(`${API_BASE}/bids/${encodeURIComponent(bidId)}/archive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Remove from current list after archiving
+      setRows(prev => prev.filter(b => b.bidId !== bidId));
+    } catch (e) {
+      alert(`Failed to archive bid: ${(e as any)?.message || 'unknown error'}`);
+    } finally {
+      setBusyFor(bidId, false);
+    }
+  };
+
+  const deleteBid = async (bidId: string) => {
+    if (!bidId) return;
+    if (!confirm('Delete this bid permanently? This cannot be undone.')) return;
+    try {
+      setBusyFor(bidId, true);
+      const res = await fetch(`${API_BASE}/bids/${encodeURIComponent(bidId)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      setRows(prev => prev.filter(b => b.bidId !== bidId));
+    } catch (e) {
+      alert(`Failed to delete bid: ${(e as any)?.message || 'unknown error'}`);
+    } finally {
+      setBusyFor(bidId, false);
+    }
+  };
+
   if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
-  const showEmptyHelp = !state.error && state.bids.length === 0;
+  const showEmptyHelp = !state.error && rows.length === 0;
 
   return (
     <div className="space-y-3">
@@ -635,7 +687,7 @@ function VendorBidsPanel({
         </div>
       )}
 
-      {state.bids.length > 0 && (
+      {rows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -645,25 +697,49 @@ function VendorBidsPanel({
                 <th className="py-2 pr-3">Status</th>
                 <th className="py-2 pr-3">Date</th>
                 <th className="py-2 pr-3">Open</th>
+                <th className="py-2 pr-3">Manage</th>
               </tr>
             </thead>
             <tbody>
-              {state.bids.map((b) => (
-                <tr key={b.bidId} className="border-b last:border-0">
-                  <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
-                  <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
-                  <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
-                  <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
-                  <td className="py-2 pr-3">
-                    <Link
-                      href={`/projects/${encodeURIComponent(b.projectId)}`}
-                      className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                    >
-                      Open project
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((b) => {
+                const isBusy = !!busy[b.bidId];
+                return (
+                  <tr key={b.bidId} className="border-b last:border-0">
+                    <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
+                    <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
+                    <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
+                    <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
+                    <td className="py-2 pr-3">
+                      <Link
+                        href={`/projects/${encodeURIComponent(b.projectId)}`}
+                        className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                      >
+                        Open project
+                      </Link>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={isBusy}
+                          onClick={() => archiveBid(b.bidId)}
+                          className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                          title="Archive bid"
+                        >
+                          Archive
+                        </button>
+                        <button
+                          disabled={isBusy}
+                          onClick={() => deleteBid(b.bidId)}
+                          className="px-2 py-1 rounded bg-rose-700 text-white text-xs disabled:opacity-50"
+                          title="Delete bid"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
