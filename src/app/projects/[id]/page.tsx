@@ -26,7 +26,7 @@ type AnalysisV1 = {
   status?: 'ready' | 'error' | string;
 };
 
-function coerceAnalysis(a: any): AnalysisV2 & AnalysisV1 | null {
+function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
   if (typeof a === 'string') {
     try { return JSON.parse(a); } catch { return null; }
@@ -39,12 +39,11 @@ export default function ProjectDetailPage() {
   const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
 
   const [project, setProject] = useState<any>(null);
-  const [bids, setBids] = useState<any[]>([]);
+  const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const clearPoll = () => {
     if (pollTimer.current) {
       clearTimeout(pollTimer.current);
@@ -64,7 +63,7 @@ export default function ProjectDetailPage() {
         ]);
         if (!active) return;
         setProject(projectData);
-        setBids(bidsData);
+        setRows(bidsData);
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -80,18 +79,17 @@ export default function ProjectDetailPage() {
     let stopped = false;
     const start = Date.now();
 
-    const needsMore = (rows: any[]) => {
-      return rows.some((b) => {
-        const a = coerceAnalysis(b?.aiAnalysis ?? b?.ai_analysis);
+    const needsMore = (list: any[]) =>
+      list.some((row) => {
+        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
         return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
       });
-    };
 
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
         if (stopped) return;
-        setBids(next);
+        setRows(next);
         if (Date.now() - start < 90_000 && needsMore(next)) {
           pollTimer.current = setTimeout(tick, 1500);
         } else {
@@ -106,13 +104,13 @@ export default function ProjectDetailPage() {
       }
     };
 
-    if (needsMore(bids)) {
+    if (needsMore(rows)) {
       clearPoll();
       pollTimer.current = setTimeout(tick, 1500);
     }
 
     const onFocus = () => {
-      if (needsMore(bids)) {
+      if (needsMore(rows)) {
         clearPoll();
         pollTimer.current = setTimeout(tick, 0);
       }
@@ -126,20 +124,20 @@ export default function ProjectDetailPage() {
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
-  }, [projectIdNum, bids]);
+  }, [projectIdNum, rows]);
 
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
-  const isProjectCompleted = (project: any, bids: any[]) => {
-    if (project.status === 'completed') return true;
-    const acceptedBid = bids.find((b: any) => b.status === 'approved');
-    if (!acceptedBid) return false;
-    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
-    return acceptedBid.milestones.every((m: any) => m.completed === true);
+  const isProjectCompleted = (proj: any, list: any[]) => {
+    if (proj.status === 'completed') return true;
+    const accepted = list.find((row: any) => row.status === 'approved');
+    if (!accepted) return false;
+    if (!accepted.milestones || accepted.milestones.length === 0) return false;
+    return accepted.milestones.every((m: any) => m.completed === true);
   };
 
-  const completed = isProjectCompleted(project, bids);
+  const completed = isProjectCompleted(project, rows);
 
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
@@ -183,7 +181,10 @@ export default function ProjectDetailPage() {
             <div className="text-sm">
               {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
               {typeof analysis.confidence === 'number' && (
-                <><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%</>
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                </>
               )}
             </div>
             {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
@@ -239,6 +240,8 @@ export default function ProjectDetailPage() {
     );
   };
 
+  const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-start mb-6">
@@ -260,7 +263,7 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">Budget: ${project.amountUSD}</p>
+          <p className="text-green-600 font-medium text-lg">Budget: {currency.format(project.amountUSD || 0)}</p>
         </div>
         {!completed && (
           <Link
@@ -292,36 +295,44 @@ export default function ProjectDetailPage() {
 
       {/* ✅ Bids */}
       <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
-        {bids.length > 0 ? (
+        <h2 className="text-xl font-semibold mb-3">Bids ({rows.length})</h2>
+        {rows.length > 0 ? (
           <div className="space-y-3">
-            {bids.map((bid) => {
-              const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
-              const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
+            {rows.map((row) => {
+              const docs = (row.docs || (row.doc ? [row.doc] : [])).filter(Boolean);
+              const analysisRaw = row.aiAnalysis ?? row.ai_analysis ?? null;
 
               return (
-                <div key={bid.bidId} className="border p-4 rounded">
+                <div key={row.bidId} className="border p-4 rounded">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="font-medium">{bid.vendorName}</h3>
-                      <p className="text-gray-600">${bid.priceUSD} • {bid.days} days</p>
-                      <p className="text-sm text-gray-500">{bid.notes}</p>
+                      <h3 className="font-medium">{row.vendorName}</h3>
+                      <p className="text-gray-600">
+                        {currency.format(row.priceUSD || 0)} • {row.days} days
+                      </p>
+                      <p className="text-sm text-gray-500">{row.notes}</p>
 
                       {docs.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">{docs.map((d: any, i: number) => renderAttachment(d, i))}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {docs.map((d: any, i: number) => renderAttachment(d, i))}
+                        </div>
                       ) : (
                         <p className="text-xs text-gray-400 mt-2">No attachments</p>
                       )}
 
                       {renderAnalysis(analysisRaw)}
                     </div>
-                    <span className={`px-2 py-1 rounded text-xs ${
-                      bid.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : bid.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}>{bid.status}</span>
+                    <span
+                      className={`px-2 py-1 rounded text-xs ${
+                        row.status === 'approved'
+                          ? 'bg-green-100 text-green-800'
+                          : row.status === 'rejected'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}
+                    >
+                      {row.status}
+                    </span>
                   </div>
                 </div>
               );
@@ -335,10 +346,23 @@ export default function ProjectDetailPage() {
       <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
 
       {lightbox && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="attachment preview" className="max-h-full max-w-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
-          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>✕</button>
+          <img
+            src={lightbox}
+            alt="attachment preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
