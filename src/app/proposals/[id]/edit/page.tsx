@@ -13,11 +13,12 @@ export default function EditProposalPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // form state (add any fields you want editable)
+  // form state
   const [orgName, setOrgName] = useState('');
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [contact, setContact] = useState('');
+  const [ownerEmail, setOwnerEmail] = useState(''); // optional owner email
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
@@ -28,12 +29,14 @@ export default function EditProposalPage() {
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const p: Proposal = await getProposal(pid);
         if (!alive) return;
         setOrgName(p.orgName || '');
         setTitle(p.title || '');
         setSummary(p.summary || '');
         setContact(p.contact || '');
+        setOwnerEmail((p as any).ownerEmail || ''); // in case your Proposal type includes ownerEmail
         setAddress(p.address || '');
         setCity(p.city || '');
         setCountry(p.country || '');
@@ -51,10 +54,19 @@ export default function EditProposalPage() {
   async function onSave() {
     try {
       setSaving(true);
+      setError(null);
       await updateProposal(pid, {
-        orgName, title, summary, contact, address, city, country, amountUSD,
+        orgName,
+        title,
+        summary,
+        contact,
+        ownerEmail: ownerEmail || undefined, // send only if filled
+        address,
+        city,
+        country,
+        amountUSD,
       });
-      router.push(`/proposals/${pid}`); // or back to list
+      router.push(`/proposals/${pid}`);
     } catch (e: any) {
       setError(e?.message || 'Failed to save');
     } finally {
@@ -66,60 +78,124 @@ export default function EditProposalPage() {
   if (loading) return <div className="p-6">Loading…</div>;
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-bold">Edit Proposal #{pid}</h1>
-      {error && <div className="text-red-600 text-sm">{error}</div>}
+    <div className="max-w-3xl mx-auto p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Edit Proposal #{pid}</h1>
+        <button
+          onClick={() => router.push(`/proposals/${pid}`)}
+          className="px-3 py-2 rounded border text-sm"
+        >
+          Cancel
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded border border-red-200 bg-red-50 text-red-700 text-sm p-3">
+          {error}
+        </div>
+      )}
 
       <label className="block">
         <span className="text-sm font-medium">Organization</span>
-        <input className="mt-1 w-full border rounded p-2" value={orgName} onChange={e=>setOrgName(e.target.value)} />
+        <input
+          className="mt-1 w-full border rounded p-2"
+          value={orgName}
+          onChange={(e) => setOrgName(e.target.value)}
+        />
       </label>
 
       <label className="block">
         <span className="text-sm font-medium">Title</span>
-        <input className="mt-1 w-full border rounded p-2" value={title} onChange={e=>setTitle(e.target.value)} />
+        <input
+          className="mt-1 w-full border rounded p-2"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
       </label>
 
       <label className="block">
         <span className="text-sm font-medium">Summary</span>
-        <textarea className="mt-1 w-full border rounded p-2" rows={5} value={summary} onChange={e=>setSummary(e.target.value)} />
+        <textarea
+          className="mt-1 w-full border rounded p-2"
+          rows={5}
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+        />
       </label>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="block">
-          <span className="text-sm font-medium">Contact (email)</span>
-          <input className="mt-1 w-full border rounded p-2" value={contact} onChange={e=>setContact(e.target.value)} />
+          <span className="text-sm font-medium">Contact (proposal email)</span>
+          <input
+            className="mt-1 w-full border rounded p-2"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            placeholder="contact@example.org"
+          />
         </label>
         <label className="block">
-          <span className="text-sm font-medium">Amount (USD)</span>
-          <input type="number" className="mt-1 w-full border rounded p-2"
-                 value={amountUSD} onChange={e=>setAmountUSD(Number(e.target.value)||0)} />
+          <span className="text-sm font-medium">Owner Email (login/account)</span>
+          <input
+            className="mt-1 w-full border rounded p-2"
+            value={ownerEmail}
+            onChange={(e) => setOwnerEmail(e.target.value)}
+            placeholder="optional"
+          />
         </label>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <label className="block">
           <span className="text-sm font-medium">Address</span>
-          <input className="mt-1 w-full border rounded p-2" value={address} onChange={e=>setAddress(e.target.value)} />
+          <input
+            className="mt-1 w-full border rounded p-2"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+          />
         </label>
         <label className="block">
           <span className="text-sm font-medium">City</span>
-          <input className="mt-1 w-full border rounded p-2" value={city} onChange={e=>setCity(e.target.value)} />
+          <input
+            className="mt-1 w-full border rounded p-2"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+          />
         </label>
         <label className="block">
           <span className="text-sm font-medium">Country</span>
-          <input className="mt-1 w-full border rounded p-2" value={country} onChange={e=>setCountry(e.target.value)} />
+          <input
+            className="mt-1 w-full border rounded p-2"
+            value={country}
+            onChange={(e) => setCountry(e.target.value)}
+          />
         </label>
       </div>
 
-      <button
-        onClick={onSave}
-        disabled={saving}
-        className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
-      >
-        {saving ? 'Saving…' : 'Save'}
-      </button>
+      <label className="block">
+        <span className="text-sm font-medium">Amount (USD)</span>
+        <input
+          type="number"
+          className="mt-1 w-full border rounded p-2"
+          value={amountUSD}
+          onChange={(e) => setAmountUSD(Number(e.target.value) || 0)}
+          min={0}
+          step="0.01"
+        />
+      </label>
+
+      <div className="pt-2">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      <p className="text-xs text-gray-500">
+        You can edit only if you are the proposal owner or an admin. Otherwise, saving will be blocked by the server.
+      </p>
     </div>
   );
 }
-
