@@ -1,6 +1,7 @@
 // src/app/admin/proposals/[id]/page.tsx
 import Agent2Inline from "@/components/Agent2Inline";
 import { getProposal, getBids } from "@/lib/api";
+import Link from "next/link";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -20,7 +21,15 @@ export default async function ProposalDetailPage({ params }: PageProps) {
     return (
       <div className="p-6 space-y-6">
         <header>
-          <h1 className="text-2xl font-bold">{proposal.title}</h1>
+          <div className="flex items-center justify-between mb-4">
+  <h1 className="text-2xl font-bold">{proposal.title}</h1>
+  <Link
+    href={`/proposals/${proposalId}/edit`}
+    className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
+  >
+    Edit
+  </Link>
+</div>
         </header>
 
         <section className="bg-white p-4 rounded shadow space-y-2">
