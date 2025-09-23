@@ -9,7 +9,7 @@ import { API_BASE, getAuthRole } from '@/lib/api';
 type Role = 'admin' | 'vendor' | 'guest';
 
 type VendorLite = {
-  id: string;
+  id?: string;
   vendorName: string;
   walletAddress: string;
   status?: 'pending' | 'approved' | 'suspended' | 'banned';
@@ -17,6 +17,7 @@ type VendorLite = {
   totalAwardedUSD?: number;
   bidsCount?: number;
   lastBidAt?: string | null;
+  archived?: boolean; // NEW
 };
 
 type VendorBid = {
@@ -24,7 +25,7 @@ type VendorBid = {
   projectId: string;
   projectTitle: string;
   amountUSD?: number | null;
-  status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn';
+  status?: 'submitted' | 'shortlisted' | 'won' | 'lost' | 'withdrawn' | 'approved' | 'rejected' | 'pending';
   createdAt: string;
 };
 
@@ -39,7 +40,7 @@ export default function AdminVendorsPage() {
   const sp = useSearchParams();
   const router = useRouter();
 
-  // auth gate (keeps UX smooth)
+  // auth gate
   const [role, setRole] = useState<Role | null>(null);
   const isAdmin = role === 'admin';
 
@@ -63,7 +64,8 @@ export default function AdminVendorsPage() {
   const [status, setStatus] = useState(sp.get('status') || 'all');
   const [kyc, setKyc] = useState(sp.get('kyc') || 'all');
   const [page, setPage] = useState(Number(sp.get('page') || '1'));
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize] = useState(25);
+  const [includeArchived, setIncludeArchived] = useState(sp.get('includeArchived') === 'true'); // NEW
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -72,21 +74,20 @@ export default function AdminVendorsPage() {
   // expanded rows: per-vendor bids cache
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
+  const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
 
-  // track which wallet we’re mutating (for Archive/Delete)
-  const [mutating, setMutating] = useState<string | null>(null);
-
-  // sync URL (nice DX)
+  // sync URL
   useEffect(() => {
     const query = new URLSearchParams();
     if (q) query.set('q', q);
     if (status !== 'all') query.set('status', status);
     if (kyc !== 'all') query.set('kyc', kyc);
     if (page !== 1) query.set('page', String(page));
+    if (includeArchived) query.set('includeArchived', 'true');
     const qs = query.toString();
     router.replace(`/admin/vendors${qs ? `?${qs}` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, kyc, page]);
+  }, [q, status, kyc, page, includeArchived]);
 
   const fetchList = async () => {
     setLoading(true);
@@ -96,6 +97,7 @@ export default function AdminVendorsPage() {
       if (q) url.searchParams.set('search', q);
       if (status !== 'all') url.searchParams.set('status', status);
       if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+      if (includeArchived) url.searchParams.set('includeArchived', 'true'); // NEW
       url.searchParams.set('page', String(page));
       url.searchParams.set('limit', String(pageSize));
       const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json' } });
@@ -114,38 +116,11 @@ export default function AdminVendorsPage() {
     }
   };
 
-  useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, [q, status, kyc, page, pageSize]);
+  useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, [q, status, kyc, page, pageSize, includeArchived]);
 
-  const toggleOpen = async (vendorId: string, walletAddress?: string) => {
-    setRowsOpen(prev => ({ ...prev, [vendorId]: !prev[vendorId] }));
-    // lazy load bids if opening and not cached
-    const already = bidsByVendor[vendorId];
-    const opening = !rowsOpen[vendorId];
-    if (opening && (!already || (!already.loading && already.bids.length === 0 && !already.error))) {
-      setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: true, error: null, bids: [] } }));
-      try {
-        // Try a focused endpoint first; fallback to generic if needed
-        const url = `${API_BASE}/admin/vendors/${encodeURIComponent(vendorId)}/bids`;
-        const res = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const arr = await res.json();
-        const bids: VendorBid[] = Array.isArray(arr) ? arr.map((b: any) => ({
-          bidId: String(b?.id ?? b?.bidId ?? ''),
-          projectId: String(b?.projectId ?? b?.project_id ?? ''),
-          projectTitle: String(b?.projectTitle ?? b?.project_title ?? 'Untitled Project'),
-          amountUSD: typeof b?.amountUSD === 'number' ? b.amountUSD : (typeof b?.amount_usd === 'number' ? b.amount_usd : null),
-          status: (b?.status ?? 'submitted') as VendorBid['status'],
-          createdAt: String(b?.createdAt ?? b?.created_at ?? b?.created_at_utc ?? new Date().toISOString()),
-        })) : [];
-        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: null, bids } }));
-      } catch (e: any) {
-        const msg = e?.message || 'Failed to load bids';
-        setBidsByVendor(prev => ({ ...prev, [vendorId]: { loading: false, error: msg, bids: [] } }));
-      }
-    }
-  };
+  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
 
-  // ---- Admin actions for vendor profile ----
+  // --- Admin actions ---
   const archiveVendor = async (wallet?: string) => {
     if (!wallet) return;
     if (!confirm('Archive this vendor?')) return;
@@ -160,6 +135,24 @@ export default function AdminVendorsPage() {
       await fetchList();
     } catch (e: any) {
       alert(e?.message || 'Failed to archive vendor');
+    } finally {
+      setMutating(null);
+    }
+  };
+
+  const unarchiveVendor = async (wallet?: string) => {
+    if (!wallet) return;
+    try {
+      setMutating(wallet);
+      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to unarchive vendor');
     } finally {
       setMutating(null);
     }
@@ -184,7 +177,41 @@ export default function AdminVendorsPage() {
     }
   };
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
+  // --- Bids loader per vendor (uses /admin/bids?vendorWallet=...) ---
+  async function loadBidsForWallet(wallet?: string): Promise<VendorBid[]> {
+    const w = (wallet || '').toLowerCase();
+    if (!w) return [];
+    const url = new URL(`${API_BASE}/admin/bids`);
+    url.searchParams.set('vendorWallet', w);
+    const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const arr = Array.isArray(json?.items) ? json.items : [];
+    return arr.map((b: any) => ({
+      bidId: String(b.id ?? b.bidId ?? ''),
+      projectId: String(b.projectId ?? ''),
+      projectTitle: String(b.projectTitle ?? 'Untitled Project'),
+      amountUSD: typeof b.amountUSD === 'number' ? b.amountUSD : null,
+      status: (b.status ?? 'submitted') as VendorBid['status'],
+      createdAt: String(b.createdAt ?? new Date().toISOString()),
+    }));
+  }
+
+  const toggleOpen = async (rowKey: string, walletAddress?: string) => {
+    setRowsOpen(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
+    const opening = !rowsOpen[rowKey];
+    if (!opening) return;
+
+    if (!bidsByVendor[rowKey]) {
+      setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: true, error: null, bids: [] } }));
+      try {
+        const bids = await loadBidsForWallet(walletAddress);
+        setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: null, bids } }));
+      } catch (e: any) {
+        setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] } }));
+      }
+    }
+  };
 
   if (role === null) {
     return (
@@ -208,7 +235,15 @@ export default function AdminVendorsPage() {
     <main className="max-w-7xl mx-auto p-6">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold">Vendors</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => { setPage(1); setIncludeArchived(e.target.checked); }}
+            />
+            Show archived
+          </label>
           <input
             value={q}
             onChange={(e) => { setPage(1); setQ(e.target.value); }}
@@ -269,39 +304,56 @@ export default function AdminVendorsPage() {
                 <tr><td colSpan={8} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
               )}
               {!loading && !err && data.items.map((v) => {
-                const open = !!rowsOpen[v.id];
-                const bidsState = bidsByVendor[v.id];
+                const rowKey = v.id || v.walletAddress; // safe key
+                const open = !!rowsOpen[rowKey];
+                const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
                 return (
                   <>
-                    <tr key={v.id} className="border-b hover:bg-slate-50">
-                      <td className="py-2 px-3 font-medium">{v.vendorName || '—'}</td>
+                    <tr key={rowKey} className="border-b hover:bg-slate-50">
+                      <td className="py-2 px-3 font-medium">
+                        {v.vendorName || '—'}
+                        {v.archived && (
+                          <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
+                            Archived
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
-                      <td className="py-2 px-3">
-                        <StatusChip value={v.status} />
-                      </td>
-                      <td className="py-2 px-3">
-                        <KycChip value={v.kycStatus} />
-                      </td>
+                      <td className="py-2 px-3"><StatusChip value={v.status} /></td>
+                      <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
                       <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
                       <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
                       <td className="py-2 px-3">
                         <div className="flex flex-wrap gap-2">
                           <button
-                            onClick={() => toggleOpen(v.id, v.walletAddress)}
+                            onClick={() => toggleOpen(rowKey, v.walletAddress)}
                             className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
                           >
                             {open ? 'Hide' : 'Bids'}
                           </button>
-                          <button
-                            onClick={() => archiveVendor(v.walletAddress)}
-                            disabled={!v.walletAddress || busy}
-                            className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
-                            title="Archive vendor (soft hide)"
-                          >
-                            {busy ? 'Archiving…' : 'Archive'}
-                          </button>
+
+                          {!v.archived ? (
+                            <button
+                              onClick={() => archiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || busy}
+                              className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                              title="Archive vendor (soft hide)"
+                            >
+                              {busy ? 'Archiving…' : 'Archive'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => unarchiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || busy}
+                              className="px-2 py-1 rounded bg-emerald-600 text-white text-xs disabled:opacity-50"
+                              title="Unarchive vendor"
+                            >
+                              {busy ? 'Working…' : 'Unarchive'}
+                            </button>
+                          )}
+
                           <button
                             onClick={() => deleteVendor(v.walletAddress)}
                             disabled={!v.walletAddress || busy}
