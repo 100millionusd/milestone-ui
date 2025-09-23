@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids } from '@/lib/api';
+import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
 const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -43,6 +43,7 @@ export default function ProjectDetailPage() {
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => {
@@ -73,6 +74,11 @@ export default function ProjectDetailPage() {
     })();
     return () => { active = false; };
   }, [projectIdNum]);
+
+  // Fetch current user role/address (for Edit gating)
+  useEffect(() => {
+    getAuthRole().then(setMe).catch(() => {});
+  }, []);
 
   // Poll bids until all analyses are terminal (ready/error) or 90s passes
   useEffect(() => {
@@ -139,6 +145,12 @@ export default function ProjectDetailPage() {
   };
 
   const completed = isProjectCompleted(project, bids);
+
+  const canEdit =
+    me?.role === 'admin' ||
+    (!!project?.ownerWallet &&
+     !!me?.address &&
+     String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
@@ -251,12 +263,14 @@ export default function ProjectDetailPage() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{project.title}</h1>
-            <Link
-              href={`/proposals/${projectIdNum}/edit`}
-              className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
-            >
-              Edit
-            </Link>
+            {canEdit && (
+              <Link
+                href={`/proposals/${projectIdNum}/edit`}
+                className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
+              >
+                Edit
+              </Link>
+            )}
             <span
               className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                 completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
