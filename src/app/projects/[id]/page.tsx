@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { getProposal, getBids } from '@/lib/api';
 
 const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
@@ -39,17 +40,12 @@ export default function ProjectDetailPage() {
   const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
 
   const [project, setProject] = useState<any>(null);
-  const [rows, setRows] = useState<any[]>([]);
+  const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearPoll = () => {
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-      pollTimer.current = null;
-    }
-  };
+  const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
   // Initial fetch
   useEffect(() => {
@@ -57,13 +53,10 @@ export default function ProjectDetailPage() {
     if (!Number.isFinite(projectIdNum)) return;
     (async () => {
       try {
-        const [projectData, bidsData] = await Promise.all([
-          getProposal(projectIdNum),
-          getBids(projectIdNum),
-        ]);
+        const [p, b] = await Promise.all([getProposal(projectIdNum), getBids(projectIdNum)]);
         if (!active) return;
-        setProject(projectData);
-        setRows(bidsData);
+        setProject(p);
+        setBids(b);
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -79,9 +72,9 @@ export default function ProjectDetailPage() {
     let stopped = false;
     const start = Date.now();
 
-    const needsMore = (list: any[]) =>
-      list.some((row) => {
-        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
+    const needsMore = (rows: any[]) =>
+      rows.some((bid) => {
+        const a = coerceAnalysis(bid?.aiAnalysis ?? bid?.ai_analysis);
         return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
       });
 
@@ -89,7 +82,7 @@ export default function ProjectDetailPage() {
       try {
         const next = await getBids(projectIdNum);
         if (stopped) return;
-        setRows(next);
+        setBids(next);
         if (Date.now() - start < 90_000 && needsMore(next)) {
           pollTimer.current = setTimeout(tick, 1500);
         } else {
@@ -104,13 +97,13 @@ export default function ProjectDetailPage() {
       }
     };
 
-    if (needsMore(rows)) {
+    if (needsMore(bids)) {
       clearPoll();
       pollTimer.current = setTimeout(tick, 1500);
     }
 
     const onFocus = () => {
-      if (needsMore(rows)) {
+      if (needsMore(bids)) {
         clearPoll();
         pollTimer.current = setTimeout(tick, 0);
       }
@@ -124,20 +117,20 @@ export default function ProjectDetailPage() {
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
-  }, [projectIdNum, rows]);
+  }, [projectIdNum, bids]);
 
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
-  const isProjectCompleted = (proj: any, list: any[]) => {
-    if (proj.status === 'completed') return true;
-    const accepted = list.find((row: any) => row.status === 'approved');
+  const isProjectCompleted = (p: any, bs: any[]) => {
+    if (p.status === 'completed') return true;
+    const accepted = bs.find((x: any) => x.status === 'approved');
     if (!accepted) return false;
     if (!accepted.milestones || accepted.milestones.length === 0) return false;
     return accepted.milestones.every((m: any) => m.completed === true);
   };
 
-  const completed = isProjectCompleted(project, rows);
+  const completed = isProjectCompleted(project, bids);
 
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
@@ -181,10 +174,7 @@ export default function ProjectDetailPage() {
             <div className="text-sm">
               {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
               {typeof analysis.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
-                </>
+                <><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%</>
               )}
             </div>
             {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
@@ -240,8 +230,6 @@ export default function ProjectDetailPage() {
     );
   };
 
-  const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-start mb-6">
@@ -263,7 +251,9 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">Budget: {currency.format(project.amountUSD || 0)}</p>
+          <p className="text-green-600 font-medium text-lg">
+            Budget: {currency.format(project.amountUSD || 0)}
+          </p>
         </div>
         {!completed && (
           <Link
@@ -275,13 +265,13 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* ✅ Project Description */}
+      {/* Project Description */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-3">Project Description</h2>
         <p className="text-gray-700">{project.summary}</p>
       </div>
 
-      {/* ✅ Project Attachments */}
+      {/* Project Attachments */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-3">Project Attachments</h2>
         {project.docs?.length > 0 ? (
@@ -293,24 +283,24 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* ✅ Bids */}
+      {/* Bids */}
       <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Bids ({rows.length})</h2>
-        {rows.length > 0 ? (
+        <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
+        {bids.length > 0 ? (
           <div className="space-y-3">
-            {rows.map((row) => {
-              const docs = (row.docs || (row.doc ? [row.doc] : [])).filter(Boolean);
-              const analysisRaw = row.aiAnalysis ?? row.ai_analysis ?? null;
+            {bids.map((bid) => {
+              const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
+              const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
 
               return (
-                <div key={row.bidId} className="border p-4 rounded">
+                <div key={bid.bidId} className="border p-4 rounded">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="font-medium">{row.vendorName}</h3>
+                      <h3 className="font-medium">{bid.vendorName}</h3>
                       <p className="text-gray-600">
-                        {currency.format(row.priceUSD || 0)} • {row.days} days
+                        {currency.format(bid.priceUSD || 0)} • {bid.days} days
                       </p>
-                      <p className="text-sm text-gray-500">{row.notes}</p>
+                      <p className="text-sm text-gray-500">{bid.notes}</p>
 
                       {docs.length > 0 ? (
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -324,14 +314,14 @@ export default function ProjectDetailPage() {
                     </div>
                     <span
                       className={`px-2 py-1 rounded text-xs ${
-                        row.status === 'approved'
+                        bid.status === 'approved'
                           ? 'bg-green-100 text-green-800'
-                          : row.status === 'rejected'
+                          : bid.status === 'rejected'
                           ? 'bg-red-100 text-red-800'
                           : 'bg-yellow-100 text-yellow-800'
                       }`}
                     >
-                      {row.status}
+                      {bid.status}
                     </span>
                   </div>
                 </div>
