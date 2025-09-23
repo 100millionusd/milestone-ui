@@ -81,6 +81,9 @@ export interface VendorSummary {
   totalAwardedUSD: number;
 }
 
+/** ✅ NEW: Chat message type for SSE chat */
+export type ChatMsg = { role: "user" | "assistant"; content: string };
+
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -168,8 +171,11 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   const token = getJwt();
 
   // Avoid forcing JSON Content-Type when the caller passed FormData
-  const callerCT = (options.headers as any)?.["Content-Type"] || (options.headers as any)?.["content-type"];
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const callerCT =
+    (options.headers as any)?.["Content-Type"] ||
+    (options.headers as any)?.["content-type"];
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -574,7 +580,9 @@ export async function submitProof(input: {
   // Build a legacy-proof string in case the server only supports the old route
   let legacyProof = (input.description || "").trim();
   if (files.length) {
-    legacyProof += "\n\nAttachments:\n" + files.map(f => `- ${f.name || "file"}: ${f.url}`).join("\n");
+    legacyProof +=
+      "\n\nAttachments:\n" +
+      files.map((f) => `- ${f.name || "file"}: ${f.url}`).join("\n");
   }
 
   const payload = {
@@ -597,7 +605,8 @@ export async function submitProof(input: {
   } catch (e: any) {
     // If the server doesn't support /proofs schema yet, fall back to legacy:
     const msg = String(e?.message || "").toLowerCase();
-    const isSchema400 = msg.includes("invalid /proofs request") || msg.includes("http 400");
+    const isSchema400 =
+      msg.includes("invalid /proofs request") || msg.includes("http 400");
     if (!isSchema400) throw e;
 
     // Legacy fallback
@@ -610,7 +619,9 @@ export async function submitProof(input: {
       milestoneIndex: payload.milestoneIndex,
       vendorName: "",
       walletAddress: "",
-      title: payload.title || `Proof for Milestone ${payload.milestoneIndex + 1}`,
+      title:
+        payload.title ||
+        `Proof for Milestone ${payload.milestoneIndex + 1}`,
       description: payload.description,
       files,
       status: "pending",
@@ -638,7 +649,9 @@ export async function getProofs(bidId?: number): Promise<Proof[]> {
 export function approveProof(bidId: number, milestoneIndex: number) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
   return apiFetch(
-    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/approve`,
+    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
+      String(milestoneIndex)
+    )}/approve`,
     { method: "POST" }
   );
 }
@@ -646,9 +659,82 @@ export function approveProof(bidId: number, milestoneIndex: number) {
 export function rejectProof(bidId: number, milestoneIndex: number) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
   return apiFetch(
-    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/reject`,
+    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
+      String(milestoneIndex)
+    )}/reject`,
     { method: "POST" }
   );
+}
+
+/* ==========================
+   Agent2 Proof Chat (SSE)
+   - Streams tokens from POST /proofs/:id/chat
+   - Must be called from a Client Component (browser)
+   ========================== */
+
+/** Internal SSE reader used by chatProof/chatProofOnce */
+async function streamSSE(res: Response, onToken: (t: string) => void) {
+  if (!res.ok || !res.body) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += dec.decode(value, { stream: true });
+
+    // split on blank line between SSE frames
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+
+    for (const frame of frames) {
+      // server writes "data: <content>"
+      const line = frame.startsWith("data: ") ? frame.slice(6) : frame;
+      const data = line.trim();
+      if (!data) continue;
+      if (data === "[DONE]") return;
+      onToken(data);
+    }
+  }
+}
+
+/** Chat about a PROOF (Agent2 uses proof description + file links like PDFs/images) */
+export async function chatProof(
+  proofId: number,
+  messages: ChatMsg[],
+  onToken: (t: string) => void
+) {
+  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
+  const token = getJwt();
+  const res = await fetch(
+    `${API_BASE}/proofs/${encodeURIComponent(String(proofId))}/chat`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "Content-Type": "application/json",
+        // ask server for an SSE stream
+        Accept: "text/event-stream",
+        Pragma: "no-cache",
+        "Cache-Control": "no-cache",
+      },
+      body: JSON.stringify({ messages }),
+    }
+  );
+  await streamSSE(res, onToken);
+}
+
+/** Convenience helper: send a single question and get the full streamed answer */
+export async function chatProofOnce(proofId: number, question: string): Promise<string> {
+  let text = "";
+  await chatProof(proofId, [{ role: "user", content: question }], (t) => {
+    text += t;
+  });
+  return text;
 }
 
 // ---- IPFS ----
@@ -736,6 +822,10 @@ export default {
   submitProof,
   analyzeProof,
   getProofs,
+
+  // chat
+  chatProof,
+  chatProofOnce,
 
   // ipfs & misc
   uploadJsonToIPFS,
