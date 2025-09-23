@@ -1,6 +1,5 @@
 // src/app/admin/bids/[id]/page.tsx
 'use client';
-import Link from "next/link";
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
