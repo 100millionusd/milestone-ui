@@ -247,7 +247,7 @@ async function fetchJson(url: string) {
 async function fetchBidsForWallet(wallet?: string) {
 const walletLower = (wallet || '').toLowerCase();
 if (!walletLower) return [];
-const url = new URL(${API_BASE}/admin/bids);
+const url = new URL(`${API_BASE}/admin/bids`);
 url.searchParams.set('vendorWallet', walletLower);
 const json = await fetchJson(url.toString());
 return normalizeBids(json);
