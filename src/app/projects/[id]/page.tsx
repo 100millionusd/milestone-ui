@@ -45,7 +45,12 @@ export default function ProjectDetailPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
+  const clearPoll = () => {
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current);
+      pollTimer.current = null;
+    }
+  };
 
   // Initial fetch
   useEffect(() => {
@@ -53,10 +58,13 @@ export default function ProjectDetailPage() {
     if (!Number.isFinite(projectIdNum)) return;
     (async () => {
       try {
-        const [p, b] = await Promise.all([getProposal(projectIdNum), getBids(projectIdNum)]);
+        const [projectData, bidsData] = await Promise.all([
+          getProposal(projectIdNum),
+          getBids(projectIdNum),
+        ]);
         if (!active) return;
-        setProject(p);
-        setBids(b);
+        setProject(projectData);
+        setBids(bidsData);
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -73,8 +81,8 @@ export default function ProjectDetailPage() {
     const start = Date.now();
 
     const needsMore = (rows: any[]) =>
-      rows.some((bid) => {
-        const a = coerceAnalysis(bid?.aiAnalysis ?? bid?.ai_analysis);
+      rows.some((row) => {
+        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
         return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
       });
 
@@ -122,12 +130,12 @@ export default function ProjectDetailPage() {
   if (loading) return <div>Loading project...</div>;
   if (!project) return <div>Project not found</div>;
 
-  const isProjectCompleted = (p: any, bs: any[]) => {
-    if (p.status === 'completed') return true;
-    const accepted = bs.find((x: any) => x.status === 'approved');
-    if (!accepted) return false;
-    if (!accepted.milestones || accepted.milestones.length === 0) return false;
-    return accepted.milestones.every((m: any) => m.completed === true);
+  const isProjectCompleted = (proj: any, rows: any[]) => {
+    if (proj.status === 'completed') return true;
+    const acceptedBid = rows.find((r: any) => r.status === 'approved');
+    if (!acceptedBid) return false;
+    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
+    return acceptedBid.milestones.every((m: any) => m.completed === true);
   };
 
   const completed = isProjectCompleted(project, bids);
@@ -139,7 +147,11 @@ export default function ProjectDetailPage() {
 
     if (isImage) {
       return (
-        <button key={idx} onClick={() => setLightbox(href)} className="group relative overflow-hidden rounded border">
+        <button
+          key={idx}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={href} alt={doc.name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
         </button>
@@ -174,7 +186,10 @@ export default function ProjectDetailPage() {
             <div className="text-sm">
               {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
               {typeof analysis.confidence === 'number' && (
-                <><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%</>
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                </>
               )}
             </div>
             {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
@@ -251,9 +266,7 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">
-            Budget: {currency.format(project.amountUSD || 0)}
-          </p>
+          <p className="text-green-600 font-medium text-lg">Budget: {currency.format(project.amountUSD || 0)}</p>
         </div>
         {!completed && (
           <Link
@@ -291,14 +304,13 @@ export default function ProjectDetailPage() {
             {bids.map((bid) => {
               const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
               const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
-
               return (
                 <div key={bid.bidId} className="border p-4 rounded">
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-medium">{bid.vendorName}</h3>
                       <p className="text-gray-600">
-                        {currency.format(bid.priceUSD || 0)} • {bid.days} days
+                        {currency.format(Number(bid.priceUSD || 0))} • {bid.days} days
                       </p>
                       <p className="text-sm text-gray-500">{bid.notes}</p>
 
