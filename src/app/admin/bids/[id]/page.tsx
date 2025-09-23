@@ -1,5 +1,6 @@
 // src/app/admin/bids/[id]/page.tsx
 'use client';
+import Link from "next/link";
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -147,7 +148,15 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
 
       {/* Proofs for this bid (with Agent 2 per-proof + chat button on each) */}
       <section className="rounded border p-4 bg-white">
-        <h2 className="font-semibold mb-3">Submitted Proofs</h2>
+        <div className="flex items-center justify-between mb-3">
+  <h2 className="font-semibold">Submitted Proofs</h2>
+  <Link
+    href={`/proposals/${b.proposalId}/edit`}
+    className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
+  >
+    Edit Proposal
+  </Link>
+</div>
 
         {proofs.length === 0 && (
           <div className="text-sm text-slate-500">No proofs submitted yet.</div>
