@@ -1,6 +1,8 @@
+// src/components/AdminProposersClient.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { listProposers, listProposals, type Proposal } from '@/lib/api';
 
 export type ProposerAgg = {
@@ -196,24 +198,117 @@ export default function AdminProposersClient({ initial = [] }: Props) {
             <tbody className="divide-y divide-slate-100">
               {filtered.map((r, i) => (
                 <tr key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`} className="hover:bg-slate-50/60">
+                  {/* Entity / Org + City/Country links */}
                   <Td>
-                    <div className="font-medium text-slate-900">{r.entity || '—'}</div>
+                    <div className="font-medium text-slate-900">
+                      {r.entity ? (
+                        <Link
+                          href={`/admin/proposals?org=${encodeURIComponent(r.entity)}`}
+                          className="hover:underline hover:text-cyan-700"
+                          title="View proposals for this entity"
+                        >
+                          {r.entity}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </div>
                     {(r.city || r.country) && (
-                      <div className="text-xs text-slate-500">
-                        {[r.city, r.country].filter(Boolean).join(', ')}
+                      <div className="text-xs text-slate-500 space-x-2">
+                        {r.city && (
+                          <Link
+                            href={`/admin/proposals?city=${encodeURIComponent(r.city)}`}
+                            className="hover:underline hover:text-ccyan-700"
+                            title="Filter by city"
+                          >
+                            {r.city}
+                          </Link>
+                        )}
+                        {r.country && (
+                          <Link
+                            href={`/admin/proposals?country=${encodeURIComponent(r.country)}`}
+                            className="hover:underline hover:text-cyan-700"
+                            title="Filter by country"
+                          >
+                            {r.country}
+                          </Link>
+                        )}
                       </div>
                     )}
                   </Td>
-                  <Td className="text-slate-700">{r.address || '—'}</Td>
+
+                  {/* Address (clickable) */}
+                  <Td className="text-slate-700">
+                    {r.address ? (
+                      <Link
+                        href={`/admin/proposals?address=${encodeURIComponent(r.address)}`}
+                        className="hover:underline hover:text-cyan-700"
+                        title="Filter by address"
+                      >
+                        {r.address}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
+                  </Td>
+
+                  {/* Contact (contactEmail and/or ownerEmail) */}
                   <Td>
-                    <div className="text-slate-700">
-                      {r.contactEmail || r.ownerEmail || '—'}
+                    <div className="text-slate-700 space-y-0.5">
+                      {r.contactEmail ? (
+                        <Link
+                          href={`/admin/proposals?contactEmail=${encodeURIComponent(r.contactEmail)}`}
+                          className="hover:underline hover:text-cyan-700"
+                          title="Filter by primary contact"
+                        >
+                          {r.contactEmail}
+                        </Link>
+                      ) : null}
+                      {r.ownerEmail && r.ownerEmail !== r.contactEmail ? (
+                        <div>
+                          <Link
+                            href={`/admin/proposals?ownerEmail=${encodeURIComponent(r.ownerEmail)}`}
+                            className="hover:underline hover:text-cyan-700"
+                            title="Filter by owner email"
+                          >
+                            {r.ownerEmail}
+                          </Link>
+                        </div>
+                      ) : null}
+                      {!r.contactEmail && !r.ownerEmail ? '—' : null}
                     </div>
                   </Td>
+
+                  {/* Wallet (clickable, truncated) */}
                   <Td className="font-mono text-xs text-slate-700">
-                    {r.wallet ? `${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}` : '—'}
+                    {r.wallet ? (
+                      <Link
+                        href={`/admin/proposals?wallet=${encodeURIComponent(r.wallet)}`}
+                        className="hover:underline hover:text-cyan-700"
+                        title={r.wallet}
+                      >
+                        {`${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}`}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
                   </Td>
-                  <Td className="text-right">{r.proposalsCount ?? 0}</Td>
+
+                  {/* Proposals count (clickable to org) */}
+                  <Td className="text-right">
+                    {r.entity ? (
+                      <Link
+                        href={`/admin/proposals?org=${encodeURIComponent(r.entity)}`}
+                        className="hover:underline hover:text-cyan-700"
+                        title="View proposals for this entity"
+                      >
+                        {r.proposalsCount ?? 0}
+                      </Link>
+                    ) : (
+                      r.proposalsCount ?? 0
+                    )}
+                  </Td>
+
                   <Td className="text-right">{r.approvedCount ?? 0}</Td>
                   <Td className="text-right">{r.pendingCount ?? 0}</Td>
                   <Td className="text-right">{r.rejectedCount ?? 0}</Td>
