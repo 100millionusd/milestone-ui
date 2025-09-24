@@ -1,22 +1,7 @@
 // src/app/admin/entities/page.tsx
-import dynamic from 'next/dynamic';
-import { listProposals } from '@/lib/api';
+import AdminProposersClient from '@/components/AdminProposersClient'; // or AdminEntitiesClient if that's your filename
 
-// Load client component dynamically (no SSR required)
-const AdminProposalsClient = dynamic(
-  () => import('@/components/AdminProposalsClient'),
-  { ssr: false }
-);
-
-export default async function AdminEntitiesPage() {
-  // We can pass empty initial proposals; the client will start in 'entities' mode and
-  // won’t fetch proposals unless user switches to the Proposals tab.
-  const initialProposals = [] as any[];
-
-  return (
-    <AdminProposalsClient
-      initialProposals={initialProposals}
-      defaultMode="entities"
-    />
-  );
+export default function AdminEntitiesPage() {
+  // This page is a Server Component that simply renders the Client Component.
+  return <AdminProposersClient />;
 }

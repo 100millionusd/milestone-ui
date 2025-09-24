@@ -7,9 +7,6 @@ const nextConfig = {
 
   // Keep this if you want readable prod stack traces (slightly larger build)
   productionBrowserSourceMaps: true,
-
-  // Re-enable minification for production performance/bundle size
-  swcMinify: true,
 };
 
 module.exports = nextConfig;
