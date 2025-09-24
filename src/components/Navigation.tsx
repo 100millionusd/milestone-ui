@@ -67,6 +67,7 @@ export default function Navigation() {
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
+          { href: '/admin/entities', label: 'Entities' }, // ✅ restored
           { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
         ],
       },
@@ -83,7 +84,7 @@ export default function Navigation() {
 
   if (!mounted) return null;
 
-  // Helper to resolve Submit Proposal destination for guests
+  // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
@@ -252,7 +253,6 @@ export default function Navigation() {
                 )
               )}
 
-              {/* quick access to profile when connected */}
               {address && (
                 <Link
                   href="/vendor/profile"
