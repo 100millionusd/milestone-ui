@@ -68,8 +68,6 @@ export default function Navigation() {
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
-          // ✅ NEW
-          { href: '/admin/entities', label: 'Entities' },
         ],
       },
       { href: '/vendor/dashboard', label: 'Vendors' },
@@ -84,6 +82,10 @@ export default function Navigation() {
   };
 
   if (!mounted) return null;
+
+  // Helper to resolve Submit Proposal destination for guests
+  const resolveHref = (href: string) =>
+    href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
@@ -139,7 +141,7 @@ export default function Navigation() {
               ) : (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={resolveHref(item.href)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
@@ -172,7 +174,6 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
                     <>
-                      {/* ✅ NEW: Vendor can edit their data here */}
                       <Link
                         href="/vendor/profile"
                         className="block px-4 py-2 text-sm hover:bg-gray-100"
@@ -240,7 +241,7 @@ export default function Navigation() {
                 ) : (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={resolveHref(item.href)}
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                       isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
@@ -251,7 +252,7 @@ export default function Navigation() {
                 )
               )}
 
-              {/* ✅ NEW (mobile): quick access to profile when connected */}
+              {/* quick access to profile when connected */}
               {address && (
                 <Link
                   href="/vendor/profile"
