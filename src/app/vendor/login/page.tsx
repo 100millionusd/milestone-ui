@@ -27,9 +27,9 @@ export default function VendorLogin() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-md text-center">
-        <h1 className="text-2xl font-bold mb-6">Vendor Portal</h1>
+        <h1 className="text-2xl font-bold mb-6">Welcome to the Revolution</h1>
         <p className="text-gray-600 mb-6">
-          Sign in to submit proof of work and manage your bids
+          Sign in to submit a proposal, provide proof of work, or manage your bids
         </p>
 
         <button
@@ -40,7 +40,7 @@ export default function VendorLogin() {
         </button>
 
         <p className="text-sm text-gray-500 mt-6">
-          You'll need to use the same wallet address you provided in your bids
+          Powered by USDT/USDC
         </p>
       </div>
     </div>
