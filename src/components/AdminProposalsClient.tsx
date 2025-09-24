@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Proposal } from '@/lib/api';
 import {
-  listProposals,           // 👈 fetch with includeArchived so "Archived" tab works
+  listProposals,           // fetch with includeArchived so "Archived" tab works
   getProposals,            // (kept to not break other imports/usages)
   approveProposal,
   rejectProposal,
@@ -12,6 +12,40 @@ import {
   deleteProposal,
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
+
+/** =======================
+ * Entities (proposers) types
+ * ======================= */
+type ProposerRow = {
+  id: string;                    // entity_key (wallet/email/org)
+  orgName: string;
+  address: string | null;
+  walletAddress: string | null;
+  contactEmail: string | null;
+  ownerEmail: string | null;
+  proposalsCount: number;
+  totalBudgetUSD: number;
+  lastProposalAt: string | null;
+  statusCounts: { approved: number; pending: number; rejected: number; archived: number };
+};
+type ProposersResponse = {
+  items: ProposerRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+const fmtUSD = (n: number) =>
+  Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+const fmtDateTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+async function loadProposers(params: { q?: string; includeArchived?: boolean; page?: number; limit?: number } = {}) {
+  const { q = '', includeArchived = false, page = 1, limit = 50 } = params;
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (q) qs.set('q', q);
+  if (includeArchived) qs.set('includeArchived', 'true');
+  const res = await fetch(`/admin/proposers?${qs.toString()}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to load entities');
+  return (await res.json()) as ProposersResponse;
+}
 
 type TabKey = 'all' | 'pending' | 'approved' | 'rejected' | 'completed' | 'archived';
 
@@ -29,14 +63,20 @@ interface AdminProposalsClientProps {
 }
 
 export default function AdminProposalsClient({ initialProposals = [] }: AdminProposalsClientProps) {
+  // ====== top-level mode: proposals vs entities ======
+  const [mode, setMode] = useState<'proposals' | 'entities'>('proposals');
+
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  // Tabs + search
+  // Tabs + search (for proposals)
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
+
+  // Entities filters
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   useEffect(() => {
     if (initialProposals.length === 0) fetchProposals();
@@ -47,7 +87,6 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     try {
       setLoading(true);
       setError(null);
-      // 👇 include archived so the "Archived" tab has data
       const data = await listProposals({ includeArchived: true });
       setProposals(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -99,6 +138,35 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
     }
   };
 
+  // ===== Entities state & loader =====
+  const [entities, setEntities] = useState<ProposersResponse>({
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 50,
+  });
+  const [entitiesLoading, setEntitiesLoading] = useState(false);
+  const [entitiesError, setEntitiesError] = useState<string | null>(null);
+  const [entitiesPage, setEntitiesPage] = useState(1);
+
+  useEffect(() => {
+    if (mode !== 'entities') return;
+    let alive = true;
+    (async () => {
+      try {
+        setEntitiesLoading(true);
+        setEntitiesError(null);
+        const data = await loadProposers({ q: query, includeArchived, page: entitiesPage, limit: 50 });
+        if (alive) setEntities(data);
+      } catch (e: any) {
+        if (alive) setEntitiesError(e?.message || 'Failed to load');
+      } finally {
+        if (alive) setEntitiesLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [mode, query, includeArchived, entitiesPage]);
+
   const counts = useMemo(() => {
     const c: Record<TabKey, number> = {
       all: proposals.length,
@@ -138,129 +206,244 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
       <div className="max-w-5xl mx-auto px-4 py-10">
-        <h1 className="text-2xl font-bold mb-6">Admin — Proposals Management</h1>
+        <h1 className="text-2xl font-bold mb-6">Admin — Proposals & Entities</h1>
 
-        {/* Tabs + search */}
-        <div className="mb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
-            {TABS.map(t => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={[
-                  'px-3 py-1.5 rounded-full text-sm font-medium border',
-                  tab === t.key
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
-                ].join(' ')}
-              >
-                {t.label}
-                <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                  {t.key === 'all' ? counts.all : counts[t.key] || 0}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="w-full md:w-80">
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search proposals…"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-            />
-          </div>
+        {/* Top-level tabs: Proposals | Entities */}
+        <div className="mb-4 flex gap-2">
+          <button
+            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${mode === 'proposals' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+            onClick={() => setMode('proposals')}
+          >
+            Proposals
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${mode === 'entities' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+            onClick={() => setMode('entities')}
+          >
+            Entities
+          </button>
         </div>
 
-        <div className="grid gap-5">
-          {filtered.map((p) => (
-            <div
-              key={p.proposalId}
-              className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6"
-            >
-              {/* Header */}
-              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{p.title}</h3>
-                  <div className="mt-1 text-sm text-slate-600">
-                    <span className="font-medium">{p.orgName}</span>
-                    {(p.city || p.country) && (
-                      <span> · {[p.city, p.country].filter(Boolean).join(', ')}</span>
-                    )}
-                  </div>
-                  <p className="mt-3 text-sm text-slate-700">{p.summary}</p>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-slate-500">#{p.proposalId}</div>
-                  <div className="mt-2 text-sm">
-                    <span className="text-slate-500">Requested: </span>
-                    <span className="font-semibold">
-                      ${Number(p.amountUSD).toLocaleString()}
+        {/* ===========================
+            PROPOSALS MODE (existing UI)
+           =========================== */}
+        {mode === 'proposals' && (
+          <>
+            {/* Tabs + search (status filter for proposals) */}
+            <div className="mb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                {TABS.map(t => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
+                    className={[
+                      'px-3 py-1.5 rounded-full text-sm font-medium border',
+                      tab === t.key
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+                    ].join(' ')}
+                  >
+                    {t.label}
+                    <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                      {t.key === 'all' ? counts.all : counts[t.key] || 0}
                     </span>
+                  </button>
+                ))}
+              </div>
+              <div className="w-full md:w-80">
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search proposals…"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5">
+              {filtered.map((p) => (
+                <div
+                  key={p.proposalId}
+                  className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6"
+                >
+                  {/* Header */}
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900">{p.title}</h3>
+                      <div className="mt-1 text-sm text-slate-600">
+                        <span className="font-medium">{p.orgName}</span>
+                        {(p.city || p.country) && (
+                          <span> · {[p.city, p.country].filter(Boolean).join(', ')}</span>
+                        )}
+                      </div>
+                      <p className="mt-3 text-sm text-slate-700">{p.summary}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">#{p.proposalId}</div>
+                      <div className="mt-2 text-sm">
+                        <span className="text-slate-500">Requested: </span>
+                        <span className="font-semibold">
+                          ${Number(p.amountUSD).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <StatusPill status={p.status} />
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-2">
-                    <StatusPill status={p.status} />
+
+                  {/* Contact & meta */}
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+                    <p className="text-slate-700">
+                      <span className="font-semibold text-slate-900">Contact:</span> {p.contact}
+                    </p>
+                    {(p.address || p.city || p.country) && (
+                      <p className="mt-1 text-slate-700">
+                        <span className="font-semibold text-slate-900">Address:</span>{' '}
+                        {[p.address, p.city, p.country].filter(Boolean).join(', ')}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-slate-500">
+                      Submitted: {new Date(p.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+
+                  {/* ✅ Keep AI Chat Agent */}
+                  <ProposalAgent proposal={p} />
+
+                  {/* Actions */}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleApprove(p.proposalId)}
+                      disabled={p.status === 'approved'}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-emerald-700 transition-colors"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleReject(p.proposalId)}
+                      disabled={p.status === 'rejected'}
+                      className="px-4 py-2 bg-rose-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-rose-700 transition-colors"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => handleArchive(p.proposalId)}
+                      disabled={p.status === 'archived'}
+                      className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
+                    >
+                      Archive
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p.proposalId)}
+                      className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-              </div>
+              ))}
 
-              {/* Contact & meta */}
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                <p className="text-slate-700">
-                  <span className="font-semibold text-slate-900">Contact:</span> {p.contact}
-                </p>
-                {(p.address || p.city || p.country) && (
-                  <p className="mt-1 text-slate-700">
-                    <span className="font-semibold text-slate-900">Address:</span>{' '}
-                    {[p.address, p.city, p.country].filter(Boolean).join(', ')}
-                  </p>
-                )}
-                <p className="mt-1 text-xs text-slate-500">
-                  Submitted: {new Date(p.createdAt).toLocaleString()}
-                </p>
-              </div>
-
-              {/* ✅ Keep AI Chat Agent */}
-              <ProposalAgent proposal={p} />
-
-              {/* Actions */}
-              <div className="mt-5 flex flex-wrap gap-2">
-                <button
-                  onClick={() => handleApprove(p.proposalId)}
-                  disabled={p.status === 'approved'}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-emerald-700 transition-colors"
-                >
-                  Approve
-                </button>
-                <button
-                  onClick={() => handleReject(p.proposalId)}
-                  disabled={p.status === 'rejected'}
-                  className="px-4 py-2 bg-rose-600 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-rose-700 transition-colors"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={() => handleArchive(p.proposalId)}
-                  disabled={p.status === 'archived'}
-                  className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
-                >
-                  Archive
-                </button>
-                <button
-                  onClick={() => handleDelete(p.proposalId)}
-                  className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
+              {filtered.length === 0 && (
+                <div className="text-center py-10 text-slate-500 bg-white border border-slate-200 rounded-2xl">
+                  No proposals match this view.
+                </div>
+              )}
             </div>
-          ))}
+          </>
+        )}
 
-          {filtered.length === 0 && (
-            <div className="text-center py-10 text-slate-500 bg-white border border-slate-200 rounded-2xl">
-              No proposals match this view.
+        {/* ===========================
+            ENTITIES MODE (new table)
+           =========================== */}
+        {mode === 'entities' && (
+          <div className="space-y-4">
+            {/* Filters for entities */}
+            <div className="flex items-center gap-3">
+              <input
+                value={query}
+                onChange={(e) => { setEntitiesPage(1); setQuery(e.target.value); }}
+                placeholder="Search org/contact/wallet"
+                className="w-72 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={includeArchived}
+                  onChange={(e) => { setEntitiesPage(1); setIncludeArchived(e.target.checked); }}
+                />
+                Include archived
+              </label>
             </div>
-          )}
-        </div>
+
+            <div className="overflow-auto border border-slate-200 rounded-2xl bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="text-left px-3 py-2">Entity / Org</th>
+                    <th className="text-left px-3 py-2">Address</th>
+                    <th className="text-left px-3 py-2">Primary contact</th>
+                    <th className="text-left px-3 py-2">Wallet</th>
+                    <th className="text-right px-3 py-2">Proposals (#)</th>
+                    <th className="text-left px-3 py-2">Approved / Pending / Rejected</th>
+                    <th className="text-right px-3 py-2">Total Budget (USD)</th>
+                    <th className="text-left px-3 py-2">Last Activity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entitiesLoading && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">Loading…</td>
+                    </tr>
+                  )}
+                  {entitiesError && !entitiesLoading && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-6 text-center text-red-600">{entitiesError}</td>
+                    </tr>
+                  )}
+                  {!entitiesLoading && !entitiesError && entities.items.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">No results</td>
+                    </tr>
+                  )}
+                  {!entitiesLoading && !entitiesError && entities.items.map((r) => (
+                    <tr key={r.id} className="border-t">
+                      <td className="px-3 py-2">{r.orgName || '—'}</td>
+                      <td className="px-3 py-2">{r.address || '—'}</td>
+                      <td className="px-3 py-2">{r.contactEmail || r.ownerEmail || '—'}</td>
+                      <td className="px-3 py-2">{r.walletAddress || '—'}</td>
+                      <td className="px-3 py-2 text-right">{r.proposalsCount}</td>
+                      <td className="px-3 py-2">
+                        {r.statusCounts.approved} / {r.statusCounts.pending} / {r.statusCounts.rejected}
+                      </td>
+                      <td className="px-3 py-2 text-right">{fmtUSD(r.totalBudgetUSD)}</td>
+                      <td className="px-3 py-2">{fmtDateTime(r.lastProposalAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pager */}
+            <div className="flex items-center gap-2">
+              <button
+                className="border rounded px-3 py-1"
+                disabled={entitiesPage <= 1}
+                onClick={() => setEntitiesPage((p) => Math.max(1, p - 1))}
+              >
+                Prev
+              </button>
+              <div className="text-sm">Page {entitiesPage}</div>
+              <button
+                className="border rounded px-3 py-1"
+                onClick={() => setEntitiesPage((p) => p + 1)}
+              >
+                Next
+              </button>
+              <div className="text-sm text-slate-500">Total entities: {entities.total}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Lightbox (kept) */}
