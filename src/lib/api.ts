@@ -500,6 +500,25 @@ export async function archiveBid(id: number): Promise<Bid> {
   return toBid(b);
 }
 
+export async function updateBidMilestones(id: number, milestones: Milestone[]): Promise<Bid> {
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  const body = { milestones: milestones.map(m => ({
+    name: m.name,
+    amount: Number(m.amount),
+    dueDate: m.dueDate,
+    completed: !!m.completed,
+    completionDate: m.completionDate ?? null,
+    proof: m.proof ?? "",
+    paymentTxHash: m.paymentTxHash ?? null,
+    paymentDate: m.paymentDate ?? null,
+  })) };
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/milestones`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return toBid(b);
+}
+
 export async function updateBid(
   id: number,
   patch: Partial<Pick<Bid, "preferredStablecoin" | "priceUSD" | "days" | "notes" | "status">>
@@ -818,6 +837,7 @@ export default {
   getAuthRole,
   loginWithSignature,
   logout,
+  updateBidMilestones,
 
   // proposals
   listProposals,
