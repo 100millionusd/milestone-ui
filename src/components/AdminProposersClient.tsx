@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { listProposers } from '@/lib/api';
+import { listProposers, listProposals, type Proposal } from '@/lib/api';
 
 export type ProposerAgg = {
   entity: string | null;
@@ -21,6 +21,87 @@ export type ProposerAgg = {
 
 type Props = { initial?: ProposerAgg[] };
 
+/* ---------------- helpers ---------------- */
+
+function normalizeRow(r: any): ProposerAgg {
+  return {
+    entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
+    address: r.address ?? null,
+    city: r.city ?? null,
+    country: r.country ?? null,
+    contactEmail:
+      r.primaryEmail ??
+      r.primary_email ??
+      r.contactEmail ??
+      r.contact_email ??
+      r.ownerEmail ??
+      r.owner_email ??
+      null,
+    ownerEmail: r.ownerEmail ?? r.owner_email ?? null,
+    wallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet ?? null,
+    proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
+    approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
+    pendingCount: Number(r.pendingCount ?? r.pending_count ?? 0),
+    rejectedCount: Number(r.rejectedCount ?? r.rejected_count ?? 0),
+    totalBudgetUSD: Number(
+      r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
+    ),
+    lastActivity:
+      r.lastActivityAt ??
+      r.last_activity_at ??
+      r.updatedAt ??
+      r.updated_at ??
+      r.createdAt ??
+      r.created_at ??
+      null,
+  };
+}
+
+function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
+  const byKey = new Map<string, ProposerAgg>();
+
+  for (const p of props) {
+    const org = (p.orgName || 'Unknown Org').trim();
+    const key = `${org}|${p.contact || ''}|${p.ownerWallet || ''}`;
+
+    const existing = byKey.get(key);
+    const row: ProposerAgg =
+      existing || {
+        entity: org || null,
+        address: p.address || null,
+        city: p.city || null,
+        country: p.country || null,
+        contactEmail: p.contact || p.ownerEmail || null,
+        ownerEmail: p.ownerEmail || null,
+        wallet: p.ownerWallet || null,
+        proposalsCount: 0,
+        approvedCount: 0,
+        pendingCount: 0,
+        rejectedCount: 0,
+        totalBudgetUSD: 0,
+        lastActivity: null,
+      };
+
+    row.proposalsCount += 1;
+    row.totalBudgetUSD += Number(p.amountUSD) || 0;
+
+    const st = p.status || 'pending';
+    if (st === 'approved') row.approvedCount += 1;
+    else if (st === 'rejected') row.rejectedCount += 1;
+    else row.pendingCount += 1;
+
+    const prev = row.lastActivity ? new Date(row.lastActivity).getTime() : 0;
+    const cand = new Date(p.updatedAt || p.createdAt).getTime();
+    if (cand > prev) row.lastActivity = p.updatedAt || p.createdAt;
+
+    byKey.set(key, row);
+  }
+
+  return Array.from(byKey.values());
+}
+
+/* ---------------- component ---------------- */
+
 export default function AdminProposersClient({ initial = [] }: Props) {
   const [rows, setRows] = useState<ProposerAgg[]>(initial);
   const [loading, setLoading] = useState(initial.length === 0);
@@ -30,33 +111,56 @@ export default function AdminProposersClient({ initial = [] }: Props) {
   useEffect(() => {
     if (initial.length) return;
     let alive = true;
+
     (async () => {
       try {
         setLoading(true);
-        const data = await listProposers();
-        if (alive) setRows(Array.isArray(data) ? data : []);
+
+        // 1) Try server rollup
+        const server = await listProposers().catch(() => []);
+        let data: ProposerAgg[] = (Array.isArray(server) ? server : []).map(normalizeRow);
+
+        // 2) Fallback: aggregate from proposals if server returns nothing
+        if (!data.length) {
+          const proposals = await listProposals({ includeArchived: true });
+          data = aggregateFromProposals(proposals);
+        }
+
+        if (alive) setRows(data);
       } catch (e: any) {
         if (alive) setError(e?.message || 'Failed to load entities');
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+
+    return () => {
+      alive = false;
+    };
   }, [initial.length]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
     if (!n) return rows;
-    return rows.filter(r => {
+    return rows.filter((r) => {
       const hay = [
-        r.entity, r.address, r.city, r.country, r.contactEmail, r.ownerEmail, r.wallet
-      ].filter(Boolean).join(' ').toLowerCase();
+        r.entity,
+        r.address,
+        r.city,
+        r.country,
+        r.contactEmail,
+        r.ownerEmail,
+        r.wallet,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return hay.includes(n);
     });
   }, [rows, q]);
 
   if (loading) return <div className="p-6">Loading entities…</div>;
-  if (error)   return <div className="p-6 text-red-600">Error: {error}</div>;
+  if (error) return <div className="p-6 text-red-600">Error: {error}</div>;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
