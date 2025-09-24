@@ -56,18 +56,16 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* CTA Section (no buttons) */}
       <section className="bg-gray-50 py-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl font-bold text-gray-900 mb-6">
             Join the Revolution
           </h2>
-          <p className="text-lg text-gray-600 mb-8">
+          <p className="text-lg text-gray-600 mb-0">
             For Bolivia, from Bolivia
-                      </p>
-
-          {/* Reuse the same auth-aware CTAs */}
-          <HeroCtas className="flex flex-col sm:flex-row gap-4 justify-center" />
+          </p>
+          {/* Buttons removed per request */}
         </div>
       </section>
     </div>
