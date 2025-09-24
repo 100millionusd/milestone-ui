@@ -340,19 +340,32 @@ function fitColor(fit?: string) {
 
 /** Admin inline editor for stablecoin, price, days, notes */
 function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void }) {
-  const [coin, setCoin] = useState<'USDC'|'USDT'>(bid.preferredStablecoin || 'USDC');
+  const [coin, setCoin]   = useState<'USDC'|'USDT'>(bid.preferredStablecoin || 'USDC');
   const [price, setPrice] = useState<string>(String(bid.priceUSD ?? ''));
   const [days, setDays]   = useState<string>(String(bid.days ?? ''));
   const [notes, setNotes] = useState<string>(bid.notes || '');
 
+  // NEW: editable milestones (as JSON)
+  const pretty = (v:any) => {
+    try { return JSON.stringify(v ?? [], null, 2); } catch { return '[]'; }
+  };
+  const [milestonesJson, setMilestonesJson] = useState<string>(pretty(bid.milestones));
+  const [jsonErr, setJsonErr] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
 
-  // Detect if anything changed
+  // Keep textarea in sync if parent bid changes
+  useEffect(() => {
+    setMilestonesJson(pretty(bid.milestones));
+  }, [bid?.milestones]);
+
+  // Detect if anything changed (including milestones)
   const dirty =
     coin !== (bid.preferredStablecoin || 'USDC') ||
     Number(price) !== Number(bid.priceUSD) ||
     Number(days) !== Number(bid.days) ||
-    String(notes || '') !== String(bid.notes || '');
+    String(notes || '') !== String(bid.notes || '') ||
+    milestonesJson.trim() !== pretty(bid.milestones).trim();
 
   async function save() {
     const parsedPrice = Number(price);
@@ -364,6 +377,18 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
       alert('Days must be a non-negative number'); return;
     }
 
+    // Validate milestones JSON (optional field — only included if valid)
+    let milestonesPatch: any[] | undefined = undefined;
+    setJsonErr(null);
+    try {
+      const val = JSON.parse(milestonesJson);
+      if (!Array.isArray(val)) throw new Error('Milestones must be an array');
+      milestonesPatch = val;
+    } catch (e:any) {
+      setJsonErr(e?.message || 'Invalid JSON');
+      // Still allow saving the other fields; skip milestones if invalid
+    }
+
     setSaving(true);
     try {
       const patch: any = {
@@ -371,15 +396,17 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         priceUSD: parsedPrice,
         days: parsedDays,
         notes,
+        ...(Array.isArray(milestonesPatch) ? { milestones: milestonesPatch } : {}),
       };
+
       const updated = await api.updateBid(bid.bidId, patch);
-      onUpdated((prev:any) => ({
-        ...prev,
-        preferredStablecoin: updated.preferredStablecoin,
-        priceUSD: updated.priceUSD,
-        days: updated.days,
-        notes: updated.notes,
-      }));
+
+      // IMPORTANT: replace full bid so UI (including milestones list) refreshes
+      onUpdated(updated);
+
+      // Re-pretty-print from server (normalizes any auto-fixes)
+      setMilestonesJson(pretty(updated.milestones));
+      setJsonErr(null);
     } catch (e:any) {
       alert(e?.message || 'Failed to update bid');
     } finally {
@@ -435,6 +462,24 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         />
       </div>
 
+      {/* NEW: Milestones JSON editor */}
+      <div className="sm:col-span-2">
+        <label className="block text-sm text-gray-600 mb-1">Milestones (JSON)</label>
+        <textarea
+          className="w-full border rounded px-2 py-1 text-sm font-mono"
+          rows={10}
+          value={milestonesJson}
+          onChange={(e) => setMilestonesJson(e.target.value)}
+          placeholder='[{"name":"M1","amount":1000,"dueDate":"2025-10-01"}]'
+        />
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-500 mt-1">
+            Tip: amounts are USD; <code>dueDate</code> can be <code>YYYY-MM-DD</code> or ISO datetime.
+          </p>
+          {jsonErr && <p className="text-xs text-rose-600 mt-1">JSON error: {jsonErr}</p>}
+        </div>
+      </div>
+
       <div className="sm:col-span-2 flex gap-2">
         <button
           className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
@@ -450,6 +495,8 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
             setPrice(String(bid.priceUSD ?? ''));
             setDays(String(bid.days ?? ''));
             setNotes(bid.notes || '');
+            setMilestonesJson(pretty(bid.milestones));
+            setJsonErr(null);
           }}
           disabled={saving}
         >
