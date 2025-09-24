@@ -18,6 +18,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  // who am I (gate admin-only edit controls)
+  const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
+
   // per-proof prompt + busy state
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
@@ -30,6 +33,10 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       try {
         setLoading(true);
         setErr(null);
+
+        // load role early to gate UI
+        api.getAuthRole().then(setMe).catch(() => {});
+
         const b = await api.getBid(bidId);
         setBid(b);
 
@@ -58,6 +65,15 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       alert(e?.message || 'Failed to run Agent 2 on proof');
     } finally {
       setBusyById((prev) => ({ ...prev, [proofId]: false }));
+    }
+  }
+
+  async function handleStablecoinChange(next: 'USDC' | 'USDT') {
+    try {
+      const updated = await api.updateBid(bidId, { preferredStablecoin: next });
+      setBid((prev: any) => ({ ...prev, preferredStablecoin: updated.preferredStablecoin }));
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update stablecoin');
     }
   }
 
@@ -110,13 +126,34 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         <div className="grid sm:grid-cols-2 gap-4">
           <Info label="Project" value={`#${bid.proposalId}`} />
           <Info label="Vendor" value={bid.vendorName} />
-          <Info label="Price" value={`$${Number(bid.priceUSD).toLocaleString()} ${bid.preferredStablecoin}`} />
+          <Info
+            label="Price"
+            value={`$${Number(bid.priceUSD).toLocaleString()} ${bid.preferredStablecoin}`}
+          />
           <Info label="Timeline" value={`${bid.days} days`} />
           <div className="sm:col-span-2">
             <div className="text-sm text-gray-500">Notes</div>
             <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
           </div>
         </div>
+
+        {/* Admin-only quick edits */}
+        {me.role === 'admin' && (
+          <div className="mt-4 p-3 rounded-lg bg-slate-50 border">
+            <div className="text-sm font-semibold mb-2">Admin: Quick Edit</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm text-gray-600">Stablecoin</label>
+              <select
+                className="border rounded px-2 py-1 text-sm"
+                value={bid.preferredStablecoin || 'USDC'}
+                onChange={(e) => handleStablecoinChange(e.target.value as 'USDC' | 'USDT')}
+              >
+                <option value="USDC">USDC</option>
+                <option value="USDT">USDT</option>
+              </select>
+            </div>
+          </div>
+        )}
 
         {/* Milestones quick view */}
         {ms.length > 0 && (
@@ -137,25 +174,24 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         )}
       </section>
 
-      {/* Agent 2 — inline analysis + run + (Agent2Inline may also render its own chat button) */}
+      {/* Agent 2 — inline analysis + run */}
       {proposal && (
         <section className="rounded border p-4 bg-white">
-          {/* If your Agent2Inline accepts { proposal }, pass it; else remove the prop */}
           <Agent2Inline bid={bid} proposal={proposal as any} />
         </section>
       )}
 
-      {/* Proofs for this bid (with Agent 2 per-proof + chat button on each) */}
+      {/* Proofs for this bid */}
       <section className="rounded border p-4 bg-white">
         <div className="flex items-center justify-between mb-3">
-  <h2 className="font-semibold">Submitted Proofs</h2>
-  <Link
-    href={`/proposals/${bid.proposalId}/edit`}
-    className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
-  >
-    Edit Proposal
-  </Link>
-</div>
+          <h2 className="font-semibold">Submitted Proofs</h2>
+          <Link
+            href={`/proposals/${bid.proposalId}/edit`}
+            className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
+          >
+            Edit Proposal
+          </Link>
+        </div>
 
         {proofs.length === 0 && (
           <div className="text-sm text-slate-500">No proofs submitted yet.</div>

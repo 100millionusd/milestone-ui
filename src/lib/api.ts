@@ -500,6 +500,18 @@ export async function archiveBid(id: number): Promise<Bid> {
   return toBid(b);
 }
 
+export async function updateBid(
+  id: number,
+  patch: Partial<Pick<Bid, "preferredStablecoin" | "priceUSD" | "days" | "notes" | "status">>
+): Promise<Bid> {
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return toBid(b);
+}
+
 export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
   // ✅ Always send a JSON body so server JSON parser runs (and to avoid proxy issues)
@@ -827,6 +839,7 @@ export default {
   rejectBid,
   analyzeBid,
   archiveBid,
+  updateBid,
 
   // vendor/admin
   getVendorBids,
