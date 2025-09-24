@@ -32,7 +32,7 @@ export default function AdminBidsPage() {
   const [actionLoading, setActionLoading] = useState<Record<string, string | null>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  // NEW: tabs + search
+  // tabs + search
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
@@ -99,7 +99,7 @@ export default function AdminBidsPage() {
       default:
         return withSearch;
     }
-  }, [bids, proposals, tab, query]); // proposals used via getProposalTitle in search
+  }, [bids, proposals, tab, query]);
 
   const handleApprove = async (bidId: number) => {
     setActionLoading((prev) => ({ ...prev, [bidId]: 'approving' }));
@@ -177,9 +177,9 @@ export default function AdminBidsPage() {
     return (
       <div
         key={idx}
-        className="p-2 rounded border bg-gray-50 text-xs text-gray-700"
+        className="p-2 rounded border bg-gray-50 text-xs text-gray-700 max-w-[240px]"
       >
-        <p className="truncate">{doc.name}</p>
+        <p className="truncate" title={doc.name}>{doc.name}</p>
         <a
           href={href}
           target="_blank"
@@ -241,150 +241,175 @@ export default function AdminBidsPage() {
         </div>
       </div>
 
+      {/* TABLE (fixed layout; no horizontal scroll) */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Project
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Vendor
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Price
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Timeline
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Attachments
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredBids.map((bid) => (
-                <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      {getProposalTitle(bid.proposalId)}
+        <table className="min-w-full table-fixed divide-y divide-gray-200">
+          {/* Column widths */}
+          <colgroup>
+            <col className="w-[28%]" /> {/* Project */}
+            <col className="w-[22%]" /> {/* Vendor */}
+            <col className="w-[10%]" /> {/* Price */}
+            <col className="w-[12%]" /> {/* Timeline */}
+            <col className="w-[18%]" /> {/* Attachments */}
+            <col className="w-[10%]" /> {/* Status */}
+            <col className="w-[12%] hidden xl:table-column" /> {/* Actions (hidden < xl) */}
+          </colgroup>
+
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Project
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Vendor
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Price
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Timeline
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Attachments
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
+                Actions
+              </th>
+            </tr>
+          </thead>
+
+          <tbody className="bg-white divide-y divide-gray-200">
+            {filteredBids.map((bid) => (
+              <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
+                {/* Project */}
+                <td className="px-6 py-4">
+                  <div
+                    className="text-sm font-medium text-gray-900 truncate max-w-[420px]"
+                    title={getProposalTitle(bid.proposalId)}
+                  >
+                    {getProposalTitle(bid.proposalId)}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Project #{bid.proposalId}
+                  </div>
+                </td>
+
+                {/* Vendor */}
+                <td className="px-6 py-4">
+                  <div
+                    className="text-sm font-medium text-gray-900 truncate max-w-[340px]"
+                    title={bid.vendorName}
+                  >
+                    {bid.vendorName}
+                  </div>
+                  <div className="text-xs font-mono text-gray-500">
+                    {bid.walletAddress
+                      ? `${bid.walletAddress.slice(0, 8)}…${bid.walletAddress.slice(-6)}`
+                      : '—'}
+                  </div>
+                </td>
+
+                {/* Price */}
+                <td className="px-6 py-4">
+                  <div className="text-sm font-medium text-gray-900">
+                    ${Number(bid.priceUSD).toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {bid.preferredStablecoin}
+                  </div>
+                </td>
+
+                {/* Timeline */}
+                <td className="px-6 py-4">
+                  <div className="text-sm text-gray-900">
+                    {bid.days} days
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {bid.milestones?.length || 0} milestones
+                  </div>
+                </td>
+
+                {/* Attachments */}
+                <td className="px-6 py-4">
+                  {bid.doc ? (
+                    <div className="flex flex-wrap gap-2 max-w-[260px]">
+                      {renderAttachment(bid.doc, 0)}
                     </div>
-                    <div className="text-sm text-gray-500">
-                      Project #{bid.proposalId}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      {bid.vendorName}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {bid.walletAddress?.slice(0, 8)}...
-                      {bid.walletAddress?.slice(-6)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      ${bid.priceUSD}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {bid.preferredStablecoin}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {bid.days} days
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {bid.milestones?.length || 0} milestones
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {bid.doc ? (
-                      <div className="flex flex-wrap gap-2">
-                        {renderAttachment(bid.doc, 0)}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">
-                        No files
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
-                        bid.status
-                      )}`}
-                    >
-                      {bid.status}
+                  ) : (
+                    <span className="text-xs text-gray-400">
+                      No files
                     </span>
-                  </td>
+                  )}
+                </td>
 
-                  {/* UPDATED ACTIONS CELL: includes "View" link to /admin/bids/[id] */}
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex flex-wrap gap-2">
-                      {/* Always show the detail page link */}
-                      <Link
-                        href={`/admin/bids/${bid.bidId}`}
-                        className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
-                      >
-                        View
-                      </Link>
+                {/* Status */}
+                <td className="px-6 py-4">
+                  <span
+                    className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
+                      bid.status
+                    )}`}
+                  >
+                    {bid.status}
+                  </span>
+                </td>
 
-                      {bid.status === 'pending' && (
-                        <>
-                          <button
-                            onClick={() => handleApprove(bid.bidId)}
-                            disabled={!!actionLoading[bid.bidId]}
-                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
-                          >
-                            {actionLoading[bid.bidId] === 'approving'
-                              ? 'Approving...'
-                              : 'Approve'}
-                          </button>
-                          <button
-                            onClick={() => handleReject(bid.bidId)}
-                            disabled={!!actionLoading[bid.bidId]}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
-                          >
-                            {actionLoading[bid.bidId] === 'rejecting'
-                              ? 'Rejecting...'
-                              : 'Reject'}
-                          </button>
-                        </>
-                      )}
+                {/* Actions (hidden on small/medium screens) */}
+                <td className="px-6 py-4 text-sm font-medium hidden xl:table-cell">
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/admin/bids/${bid.bidId}`}
+                      className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
+                    >
+                      View
+                    </Link>
 
-                      {bid.status === 'approved' && (
-                        <Link
-                          href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                    {bid.status === 'pending' && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(bid.bidId)}
+                          disabled={!!actionLoading[bid.bidId]}
+                          className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
                         >
-                          Manage
-                        </Link>
-                      )}
+                          {actionLoading[bid.bidId] === 'approving'
+                            ? 'Approving...'
+                            : 'Approve'}
+                        </button>
+                        <button
+                          onClick={() => handleReject(bid.bidId)}
+                          disabled={!!actionLoading[bid.bidId]}
+                          className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
+                        >
+                          {actionLoading[bid.bidId] === 'rejecting'
+                            ? 'Rejecting...'
+                            : 'Reject'}
+                        </button>
+                      </>
+                    )}
 
-                      {bid.status === 'rejected' && (
-                        <span className="text-gray-500 text-sm">
-                          Bid rejected
-                        </span>
-                      )}
-                      {bid.status === 'archived' && (
-                        <span className="text-slate-500 text-sm">Archived</span>
-                      )}
-                    </div>
-                  </td>
-                  {/* END actions cell */}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    {bid.status === 'approved' && (
+                      <Link
+                        href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                      >
+                        Manage
+                      </Link>
+                    )}
+
+                    {bid.status === 'rejected' && (
+                      <span className="text-gray-500 text-sm">Bid rejected</span>
+                    )}
+                    {bid.status === 'archived' && (
+                      <span className="text-slate-500 text-sm">Archived</span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
         {filteredBids.length === 0 && (
           <div className="text-center py-12">
