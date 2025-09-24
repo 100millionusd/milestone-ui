@@ -84,6 +84,31 @@ export interface VendorSummary {
   totalAwardedUSD: number;
 }
 
+/** ✅ NEW: Admin proposer/entity rollup row */
+export interface ProposerSummary {
+  orgName: string;
+
+  // location
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+
+  // contacts
+  primaryEmail?: string | null;   // e.g. contactEmail
+  ownerEmail?: string | null;
+  ownerWallet?: string | null;
+
+  // counts
+  proposalsCount: number;
+  approvedCount: number;
+  pendingCount: number;
+  rejectedCount: number;
+
+  // money + recency
+  totalBudgetUSD: number;
+  lastActivityAt?: string | null;
+}
+
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
@@ -604,6 +629,38 @@ export async function getAdminVendors(): Promise<VendorSummary[]> {
   }
 }
 
+/** ✅ NEW: Admin — list all proposers/entities (server should expose GET /admin/proposers) */
+export async function listProposers(): Promise<ProposerSummary[]> {
+  try {
+    const rows = await apiFetch("/admin/proposers");
+
+    // Defensive mapping for snake_case / alt keys
+    return (Array.isArray(rows) ? rows : []).map((r: any): ProposerSummary => ({
+      orgName: r.orgName ?? r.org_name ?? r.organization ?? "",
+
+      address: r.address ?? null,
+      city: r.city ?? null,
+      country: r.country ?? null,
+
+      primaryEmail: r.primaryEmail ?? r.primary_email ?? r.contactEmail ?? r.contact_email ?? null,
+      ownerEmail:   r.ownerEmail   ?? r.owner_email   ?? null,
+      ownerWallet:  r.ownerWallet  ?? r.owner_wallet  ?? null,
+
+      proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
+      approvedCount:  Number(r.approvedCount  ?? r.approved_count  ?? 0),
+      pendingCount:   Number(r.pendingCount   ?? r.pending_count   ?? 0),
+      rejectedCount:  Number(r.rejectedCount  ?? r.rejected_count  ?? 0),
+
+      totalBudgetUSD: Number(r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0),
+
+      lastActivityAt: r.lastActivityAt ?? r.last_activity_at ?? r.updatedAt ?? r.updated_at ?? null,
+    }));
+  } catch (e) {
+    if (isAuthError(e)) return [];
+    throw e;
+  }
+}
+
 /** ✅ Alias to keep older UI calls working */
 export async function getVendors(): Promise<VendorSummary[]> {
   return getAdminVendors();
@@ -871,6 +928,7 @@ export default {
   // admin vendors
   getAdminVendors,
   getVendors, // alias
+  listProposers,
 
   // proofs
   getSubmittedProofs,
