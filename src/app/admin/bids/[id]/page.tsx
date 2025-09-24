@@ -68,15 +68,6 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
   }
 
-  async function handleStablecoinChange(next: 'USDC' | 'USDT') {
-    try {
-      const updated = await api.updateBid(bidId, { preferredStablecoin: next });
-      setBid((prev: any) => ({ ...prev, preferredStablecoin: updated.preferredStablecoin }));
-    } catch (e: any) {
-      alert(e?.message || 'Failed to update stablecoin');
-    }
-  }
-
   if (loading) {
     return (
       <main className="max-w-5xl mx-auto p-6">
@@ -140,18 +131,8 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         {/* Admin-only quick edits */}
         {me.role === 'admin' && (
           <div className="mt-4 p-3 rounded-lg bg-slate-50 border">
-            <div className="text-sm font-semibold mb-2">Admin: Quick Edit</div>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-gray-600">Stablecoin</label>
-              <select
-                className="border rounded px-2 py-1 text-sm"
-                value={bid.preferredStablecoin || 'USDC'}
-                onChange={(e) => handleStablecoinChange(e.target.value as 'USDC' | 'USDT')}
-              >
-                <option value="USDC">USDC</option>
-                <option value="USDT">USDT</option>
-              </select>
-            </div>
+            <div className="text-sm font-semibold mb-3">Admin: Quick Edit</div>
+            <AdminBidEditor bid={bid} onUpdated={setBid} />
           </div>
         )}
 
@@ -355,4 +336,126 @@ function fitColor(fit?: string) {
   if (f === 'medium') return 'text-amber-700';
   if (f === 'low') return 'text-rose-700';
   return 'text-slate-600';
+}
+
+/** Admin inline editor for stablecoin, price, days, notes */
+function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void }) {
+  const [coin, setCoin] = useState<'USDC'|'USDT'>(bid.preferredStablecoin || 'USDC');
+  const [price, setPrice] = useState<string>(String(bid.priceUSD ?? ''));
+  const [days, setDays]   = useState<string>(String(bid.days ?? ''));
+  const [notes, setNotes] = useState<string>(bid.notes || '');
+
+  const [saving, setSaving] = useState(false);
+
+  // Detect if anything changed
+  const dirty =
+    coin !== (bid.preferredStablecoin || 'USDC') ||
+    Number(price) !== Number(bid.priceUSD) ||
+    Number(days) !== Number(bid.days) ||
+    String(notes || '') !== String(bid.notes || '');
+
+  async function save() {
+    const parsedPrice = Number(price);
+    const parsedDays  = Number(days);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      alert('Price must be a non-negative number'); return;
+    }
+    if (!Number.isFinite(parsedDays) || parsedDays < 0) {
+      alert('Days must be a non-negative number'); return;
+    }
+
+    setSaving(true);
+    try {
+      const patch: any = {
+        preferredStablecoin: coin,
+        priceUSD: parsedPrice,
+        days: parsedDays,
+        notes,
+      };
+      const updated = await api.updateBid(bid.bidId, patch);
+      onUpdated((prev:any) => ({
+        ...prev,
+        preferredStablecoin: updated.preferredStablecoin,
+        priceUSD: updated.priceUSD,
+        days: updated.days,
+        notes: updated.notes,
+      }));
+    } catch (e:any) {
+      alert(e?.message || 'Failed to update bid');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Stablecoin</label>
+        <select
+          className="border rounded px-2 py-1 text-sm"
+          value={coin}
+          onChange={(e) => setCoin(e.target.value as 'USDC'|'USDT')}
+        >
+          <option value="USDC">USDC</option>
+          <option value="USDT">USDT</option>
+        </select>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Price (USD)</label>
+        <input
+          type="number"
+          className="border rounded px-2 py-1 text-sm w-40"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          min={0}
+          step="0.01"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Days</label>
+        <input
+          type="number"
+          className="border rounded px-2 py-1 text-sm w-32"
+          value={days}
+          onChange={(e) => setDays(e.target.value)}
+          min={0}
+          step="1"
+        />
+      </div>
+
+      <div className="sm:col-span-2">
+        <label className="block text-sm text-gray-600 mb-1">Notes</label>
+        <textarea
+          className="w-full border rounded px-2 py-1 text-sm"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </div>
+
+      <div className="sm:col-span-2 flex gap-2">
+        <button
+          className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
+          onClick={save}
+          disabled={!dirty || saving}
+        >
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+        <button
+          className="px-3 py-1.5 rounded bg-slate-200"
+          onClick={() => {
+            setCoin(bid.preferredStablecoin || 'USDC');
+            setPrice(String(bid.priceUSD ?? ''));
+            setDays(String(bid.days ?? ''));
+            setNotes(bid.notes || '');
+          }}
+          disabled={saving}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  );
 }
