@@ -68,6 +68,17 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
   }
 
+  // SAVE milestones to API and refresh local state
+  async function saveMilestones(next: any[]) {
+    try {
+      const updated = await api.updateBid(bidId, { milestones: next });
+      setBid(updated); // replace entire bid from server to stay in sync
+    } catch (e: any) {
+      alert(e?.message || 'Failed to save milestones');
+      try { const fresh = await api.getBid(bidId); setBid(fresh); } catch {}
+    }
+  }
+
   if (loading) {
     return (
       <main className="max-w-5xl mx-auto p-6">
@@ -136,23 +147,41 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </div>
         )}
 
-        {/* Milestones quick view */}
-        {ms.length > 0 && (
-          <div className="mt-4">
-            <div className="text-sm text-gray-500 mb-1">Milestones</div>
-            <ul className="space-y-2">
-              {ms.map((m: any, i: number) => (
-                <li key={i} className="rounded border p-3">
-                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-                  <div className="text-sm text-gray-600">
-                    Amount: ${m.amount} · Due: {new Date(m.dueDate).toLocaleDateString()}
-                    {m.completed ? ' · Completed' : ''}
-                  </div>
-                </li>
-              ))}
-            </ul>
+        {/* Milestones (click to edit) */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-sm text-gray-500">Milestones</div>
+            {me.role === 'admin' && (
+              <button
+                className="text-xs px-2 py-1 rounded bg-slate-200"
+                onClick={() => {
+                  const next = [
+                    ...ms,
+                    { name: `Milestone ${ms.length + 1}`, amount: 0, dueDate: '', completed: false, proof: '' },
+                  ];
+                  saveMilestones(next);
+                }}
+              >
+                + Add
+              </button>
+            )}
           </div>
-        )}
+
+          <ul className="space-y-2">
+            {ms.length === 0 && <li className="text-sm text-slate-500">No milestones.</li>}
+
+            {ms.map((m: any, i: number) => (
+              <MilestoneController
+                key={i}
+                m={m}
+                index={i}
+                canEdit={me.role === 'admin'}
+                all={ms}
+                saveMilestones={saveMilestones}
+              />
+            ))}
+          </ul>
+        </div>
       </section>
 
       {/* Agent 2 — inline analysis + run */}
@@ -345,27 +374,13 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
   const [days, setDays]   = useState<string>(String(bid.days ?? ''));
   const [notes, setNotes] = useState<string>(bid.notes || '');
 
-  // NEW: editable milestones (as JSON)
-  const pretty = (v:any) => {
-    try { return JSON.stringify(v ?? [], null, 2); } catch { return '[]'; }
-  };
-  const [milestonesJson, setMilestonesJson] = useState<string>(pretty(bid.milestones));
-  const [jsonErr, setJsonErr] = useState<string | null>(null);
-
   const [saving, setSaving] = useState(false);
 
-  // Keep textarea in sync if parent bid changes
-  useEffect(() => {
-    setMilestonesJson(pretty(bid.milestones));
-  }, [bid?.milestones]);
-
-  // Detect if anything changed (including milestones)
   const dirty =
     coin !== (bid.preferredStablecoin || 'USDC') ||
     Number(price) !== Number(bid.priceUSD) ||
     Number(days) !== Number(bid.days) ||
-    String(notes || '') !== String(bid.notes || '') ||
-    milestonesJson.trim() !== pretty(bid.milestones).trim();
+    String(notes || '') !== String(bid.notes || '');
 
   async function save() {
     const parsedPrice = Number(price);
@@ -377,18 +392,6 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
       alert('Days must be a non-negative number'); return;
     }
 
-    // Validate milestones JSON (optional field — only included if valid)
-    let milestonesPatch: any[] | undefined = undefined;
-    setJsonErr(null);
-    try {
-      const val = JSON.parse(milestonesJson);
-      if (!Array.isArray(val)) throw new Error('Milestones must be an array');
-      milestonesPatch = val;
-    } catch (e:any) {
-      setJsonErr(e?.message || 'Invalid JSON');
-      // Still allow saving the other fields; skip milestones if invalid
-    }
-
     setSaving(true);
     try {
       const patch: any = {
@@ -396,17 +399,9 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         priceUSD: parsedPrice,
         days: parsedDays,
         notes,
-        ...(Array.isArray(milestonesPatch) ? { milestones: milestonesPatch } : {}),
       };
-
       const updated = await api.updateBid(bid.bidId, patch);
-
-      // IMPORTANT: replace full bid so UI (including milestones list) refreshes
       onUpdated(updated);
-
-      // Re-pretty-print from server (normalizes any auto-fixes)
-      setMilestonesJson(pretty(updated.milestones));
-      setJsonErr(null);
     } catch (e:any) {
       alert(e?.message || 'Failed to update bid');
     } finally {
@@ -462,24 +457,6 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         />
       </div>
 
-      {/* NEW: Milestones JSON editor */}
-      <div className="sm:col-span-2">
-        <label className="block text-sm text-gray-600 mb-1">Milestones (JSON)</label>
-        <textarea
-          className="w-full border rounded px-2 py-1 text-sm font-mono"
-          rows={10}
-          value={milestonesJson}
-          onChange={(e) => setMilestonesJson(e.target.value)}
-          placeholder='[{"name":"M1","amount":1000,"dueDate":"2025-10-01"}]'
-        />
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-gray-500 mt-1">
-            Tip: amounts are USD; <code>dueDate</code> can be <code>YYYY-MM-DD</code> or ISO datetime.
-          </p>
-          {jsonErr && <p className="text-xs text-rose-600 mt-1">JSON error: {jsonErr}</p>}
-        </div>
-      </div>
-
       <div className="sm:col-span-2 flex gap-2">
         <button
           className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
@@ -495,8 +472,6 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
             setPrice(String(bid.priceUSD ?? ''));
             setDays(String(bid.days ?? ''));
             setNotes(bid.notes || '');
-            setMilestonesJson(pretty(bid.milestones));
-            setJsonErr(null);
           }}
           disabled={saving}
         >
@@ -504,5 +479,171 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         </button>
       </div>
     </div>
+  );
+}
+
+/** A single milestone row that toggles into edit mode when clicked */
+function MilestoneRow({
+  m,
+  i,
+  canEdit,
+  onChange,
+  onSave,
+  onCancel,
+  isEditing,
+  setEditing,
+}: {
+  m: any;
+  i: number;
+  canEdit: boolean;
+  isEditing: boolean;
+  setEditing: (v: boolean) => void;
+  onChange: (next: any) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const [local, setLocal] = useState<any>(m);
+
+  // keep local in sync if prop changes while not editing
+  useEffect(() => { if (!isEditing) setLocal(m); }, [m, isEditing]);
+
+  if (!canEdit || !isEditing) {
+    return (
+      <li
+        className={`rounded border p-3 ${canEdit ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+        onClick={() => canEdit && setEditing(true)}
+        title={canEdit ? 'Click to edit' : ''}
+      >
+        <div className="flex items-center justify-between">
+          <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+          <span className="text-xs text-gray-500">#{i + 1}</span>
+        </div>
+        <div className="text-sm text-gray-600">
+          Amount: ${m.amount} · Due: {m.dueDate ? new Date(m.dueDate).toLocaleDateString() : '—'}
+          {m.completed ? ' · Completed' : ''}
+        </div>
+        {m.proof && <div className="mt-1 text-xs text-gray-500 line-clamp-2">Proof: {m.proof}</div>}
+      </li>
+    );
+  }
+
+  // edit mode
+  return (
+    <li className="rounded border p-3 bg-slate-50">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex items-center gap-2">
+          <label className="min-w-24 text-sm text-gray-600">Name</label>
+          <input
+            className="border rounded px-2 py-1 text-sm w-full"
+            value={local.name || ''}
+            onChange={(e) => setLocal((p: any) => ({ ...p, name: e.target.value }))}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="min-w-24 text-sm text-gray-600">Amount (USD)</label>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            className="border rounded px-2 py-1 text-sm w-40"
+            value={local.amount ?? ''}
+            onChange={(e) => setLocal((p: any) => ({ ...p, amount: e.target.value === '' ? '' : Number(e.target.value) }))}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="min-w-24 text-sm text-gray-600">Due date</label>
+          <input
+            type="date"
+            className="border rounded px-2 py-1 text-sm"
+            value={local.dueDate ? toDateInput(local.dueDate) : ''}
+            onChange={(e) => setLocal((p: any) => ({ ...p, dueDate: e.target.value ? `${e.target.value}T00:00:00.000Z` : '' }))}
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={!!local.completed}
+            onChange={(e) => setLocal((p: any) => ({ ...p, completed: e.target.checked }))}
+          />
+          Completed
+        </label>
+
+        <div className="sm:col-span-2">
+          <label className="block text-sm text-gray-600 mb-1">Proof (optional)</label>
+          <textarea
+            rows={2}
+            className="w-full border rounded px-2 py-1 text-sm"
+            value={local.proof || ''}
+            onChange={(e) => setLocal((p: any) => ({ ...p, proof: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <button
+          className="px-3 py-1.5 rounded bg-slate-900 text-white"
+          onClick={() => { onChange(local); onSave(); }}
+        >
+          Save
+        </button>
+        <button className="px-3 py-1.5 rounded bg-slate-200" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function toDateInput(val: string | Date) {
+  try {
+    const d = new Date(val);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  } catch { return ''; }
+}
+
+function MilestoneController({
+  m, index, canEdit, all, saveMilestones,
+}: {
+  m: any;
+  index: number;
+  canEdit: boolean;
+  all: any[];
+  saveMilestones: (next: any[]) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<any>(m);
+
+  useEffect(() => { if (!editing) setDraft(m); }, [m, editing]);
+
+  const onChange = (nextOne: any) => setDraft(nextOne);
+
+  const onSave = async () => {
+    const amt = Number(draft.amount);
+    if (!Number.isFinite(amt) || amt < 0) { alert('Amount must be a non-negative number'); return; }
+
+    const copy = all.map((x, idx) => (idx === index ? { ...draft, amount: amt } : x));
+    await saveMilestones(copy);
+    setEditing(false);
+  };
+
+  const onCancel = () => { setDraft(m); setEditing(false); };
+
+  return (
+    <MilestoneRow
+      m={m}
+      i={index}
+      canEdit={canEdit}
+      isEditing={editing}
+      setEditing={setEditing}
+      onChange={onChange}
+      onSave={onSave}
+      onCancel={onCancel}
+    />
   );
 }
