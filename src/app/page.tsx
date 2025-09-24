@@ -1,5 +1,5 @@
 // src/app/page.tsx
-import Link from 'next/link';
+import HeroCtas from '@/components/HeroCtas';
 
 export default function Home() {
   return (
@@ -18,20 +18,9 @@ export default function Home() {
               infrastructure, and every cornerstone of society — secured with
               USDT/USDC transactions.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/projects"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-3 rounded-lg font-semibold text-lg transition-colors"
-              >
-                Browse Projects
-              </Link>
-              <Link
-                href="/new"
-                className="border-2 border-white text-white hover:bg-white hover:text-gray-900 px-8 py-3 rounded-lg font-semibold text-lg transition-colors"
-              >
-                Submit Proposal
-              </Link>
-            </div>
+
+            {/* Auth-aware CTAs (login if not authed) */}
+            <HeroCtas className="flex flex-col sm:flex-row gap-4 justify-center" />
           </div>
         </div>
       </section>
@@ -76,20 +65,9 @@ export default function Home() {
           <p className="text-lg text-gray-600 mb-8">
             Join professionals who trust our platform for transparent project management and secure payments
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="/projects"
-              className="bg-cyan-600 hover:bg-cyan-700 text-white px-8 py-3 rounded-lg font-semibold transition-colors"
-            >
-              Explore Projects
-            </Link>
-            <Link
-              href="/new"
-              className="border border-gray-300 text-gray-700 hover:bg-gray-100 px-8 py-3 rounded-lg font-semibold transition-colors"
-            >
-              Create Project
-            </Link>
-          </div>
+
+          {/* Reuse the same auth-aware CTAs */}
+          <HeroCtas className="flex flex-col sm:flex-row gap-4 justify-center" />
         </div>
       </section>
     </div>
