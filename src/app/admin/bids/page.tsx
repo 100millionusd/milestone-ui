@@ -32,7 +32,7 @@ export default function AdminBidsPage() {
   const [actionLoading, setActionLoading] = useState<Record<string, string | null>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  // NEW: tabs + search
+  // tabs + search
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
@@ -99,7 +99,7 @@ export default function AdminBidsPage() {
       default:
         return withSearch;
     }
-  }, [bids, proposals, tab, query]); // proposals used via getProposalTitle in search
+  }, [bids, proposals, tab, query]);
 
   const handleApprove = async (bidId: number) => {
     setActionLoading((prev) => ({ ...prev, [bidId]: 'approving' }));
@@ -168,7 +168,7 @@ export default function AdminBidsPage() {
           <img
             src={href}
             alt={doc.name}
-            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+            className="h-20 w-20 object-cover group-hover:scale-105 transition"
           />
         </button>
       );
@@ -177,9 +177,9 @@ export default function AdminBidsPage() {
     return (
       <div
         key={idx}
-        className="p-2 rounded border bg-gray-50 text-xs text-gray-700"
+        className="p-2 rounded border bg-gray-50 text-xs text-gray-700 max-w-[200px]"
       >
-        <p className="truncate">{doc.name}</p>
+        <p className="truncate" title={doc.name}>{doc.name}</p>
         <a
           href={href}
           target="_blank"
@@ -241,9 +241,21 @@ export default function AdminBidsPage() {
         </div>
       </div>
 
+      {/* TABLE with sticky right Actions */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
+          <table className="min-w-full table-fixed divide-y divide-gray-200">
+            {/* Column widths */}
+            <colgroup>
+              <col className="w-[30%]" /> {/* Project */}
+              <col className="w-[22%]" /> {/* Vendor */}
+              <col className="w-[10%]" /> {/* Price */}
+              <col className="w-[12%]" /> {/* Timeline */}
+              <col className="w-[16%]" /> {/* Attachments */}
+              <col className="w-[10%]" /> {/* Status */}
+              <col className="w-[180px]" /> {/* Actions (sticky) */}
+            </colgroup>
+
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -264,40 +276,56 @@ export default function AdminBidsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                {/* Sticky header cell for actions */}
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50 z-10 border-l">
                   Actions
                 </th>
               </tr>
             </thead>
+
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredBids.map((bid) => (
                 <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
+                  {/* Project */}
+                  <td className="px-6 py-4">
+                    <div
+                      className="text-sm font-medium text-gray-900 truncate max-w-[420px]"
+                      title={getProposalTitle(bid.proposalId)}
+                    >
                       {getProposalTitle(bid.proposalId)}
                     </div>
                     <div className="text-sm text-gray-500">
                       Project #{bid.proposalId}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
+
+                  {/* Vendor */}
+                  <td className="px-6 py-4">
+                    <div
+                      className="text-sm font-medium text-gray-900 truncate max-w-[320px]"
+                      title={bid.vendorName}
+                    >
                       {bid.vendorName}
                     </div>
-                    <div className="text-sm text-gray-500">
-                      {bid.walletAddress?.slice(0, 8)}...
-                      {bid.walletAddress?.slice(-6)}
+                    <div className="text-xs font-mono text-gray-500">
+                      {bid.walletAddress
+                        ? `${bid.walletAddress.slice(0, 8)}…${bid.walletAddress.slice(-6)}`
+                        : '—'}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+
+                  {/* Price */}
+                  <td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-900">
-                      ${bid.priceUSD}
+                      ${Number(bid.priceUSD).toLocaleString()}
                     </div>
                     <div className="text-sm text-gray-500">
                       {bid.preferredStablecoin}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+
+                  {/* Timeline */}
+                  <td className="px-6 py-4">
                     <div className="text-sm text-gray-900">
                       {bid.days} days
                     </div>
@@ -305,9 +333,11 @@ export default function AdminBidsPage() {
                       {bid.milestones?.length || 0} milestones
                     </div>
                   </td>
+
+                  {/* Attachments */}
                   <td className="px-6 py-4">
                     {bid.doc ? (
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2 max-w-[240px]">
                         {renderAttachment(bid.doc, 0)}
                       </div>
                     ) : (
@@ -316,7 +346,9 @@ export default function AdminBidsPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+
+                  {/* Status */}
+                  <td className="px-6 py-4">
                     <span
                       className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
                         bid.status
@@ -326,13 +358,12 @@ export default function AdminBidsPage() {
                     </span>
                   </td>
 
-                  {/* UPDATED ACTIONS CELL: includes "View" link to /admin/bids/[id] */}
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex flex-wrap gap-2">
-                      {/* Always show the detail page link */}
+                  {/* Sticky Actions */}
+                  <td className="px-4 py-4 sticky right-0 bg-white z-10 border-l">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <Link
                         href={`/admin/bids/${bid.bidId}`}
-                        className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
+                        className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50 text-center"
                       >
                         View
                       </Link>
@@ -345,7 +376,7 @@ export default function AdminBidsPage() {
                             className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
                           >
                             {actionLoading[bid.bidId] === 'approving'
-                              ? 'Approving...'
+                              ? 'Approving…'
                               : 'Approve'}
                           </button>
                           <button
@@ -354,7 +385,7 @@ export default function AdminBidsPage() {
                             className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:bg-gray-400"
                           >
                             {actionLoading[bid.bidId] === 'rejecting'
-                              ? 'Rejecting...'
+                              ? 'Rejecting…'
                               : 'Reject'}
                           </button>
                         </>
@@ -363,23 +394,20 @@ export default function AdminBidsPage() {
                       {bid.status === 'approved' && (
                         <Link
                           href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 text-center"
                         >
                           Manage
                         </Link>
                       )}
 
                       {bid.status === 'rejected' && (
-                        <span className="text-gray-500 text-sm">
-                          Bid rejected
-                        </span>
+                        <span className="text-gray-500 text-sm">Rejected</span>
                       )}
                       {bid.status === 'archived' && (
                         <span className="text-slate-500 text-sm">Archived</span>
                       )}
                     </div>
                   </td>
-                  {/* END actions cell */}
                 </tr>
               ))}
             </tbody>
@@ -420,4 +448,3 @@ export default function AdminBidsPage() {
     </div>
   );
 }
-
