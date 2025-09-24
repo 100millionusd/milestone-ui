@@ -1,7 +1,7 @@
 // src/app/admin/bids/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as api from '@/lib/api';
@@ -68,17 +68,6 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
   }
 
-  // SAVE milestones to API and refresh local state
-  async function saveMilestones(next: any[]) {
-    try {
-      const updated = await api.updateBid(bidId, { milestones: next });
-      setBid(updated); // replace entire bid from server to stay in sync
-    } catch (e: any) {
-      alert(e?.message || 'Failed to save milestones');
-      try { const fresh = await api.getBid(bidId); setBid(fresh); } catch {}
-    }
-  }
-
   if (loading) {
     return (
       <main className="max-w-5xl mx-auto p-6">
@@ -139,7 +128,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </div>
         </div>
 
-        {/* Admin-only quick edits */}
+        {/* Admin-only quick edits (non-milestone fields) */}
         {me.role === 'admin' && (
           <div className="mt-4 p-3 rounded-lg bg-slate-50 border">
             <div className="text-sm font-semibold mb-3">Admin: Quick Edit</div>
@@ -147,41 +136,12 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </div>
         )}
 
-        {/* Milestones (click to edit) */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-sm text-gray-500">Milestones</div>
-            {me.role === 'admin' && (
-              <button
-                className="text-xs px-2 py-1 rounded bg-slate-200"
-                onClick={() => {
-                  const next = [
-                    ...ms,
-                    { name: `Milestone ${ms.length + 1}`, amount: 0, dueDate: '', completed: false, proof: '' },
-                  ];
-                  saveMilestones(next);
-                }}
-              >
-                + Add
-              </button>
-            )}
-          </div>
-
-          <ul className="space-y-2">
-            {ms.length === 0 && <li className="text-sm text-slate-500">No milestones.</li>}
-
-            {ms.map((m: any, i: number) => (
-              <MilestoneController
-                key={i}
-                m={m}
-                index={i}
-                canEdit={me.role === 'admin'}
-                all={ms}
-                saveMilestones={saveMilestones}
-              />
-            ))}
-          </ul>
-        </div>
+        {/* Milestones */}
+        <MilestonesSection
+          bid={bid}
+          canEdit={me.role === 'admin'}
+          onUpdated={(updatedBid) => setBid(updatedBid)}
+        />
       </section>
 
       {/* Agent 2 — inline analysis + run */}
@@ -367,13 +327,12 @@ function fitColor(fit?: string) {
   return 'text-slate-600';
 }
 
-/** Admin inline editor for stablecoin, price, days, notes */
+/** Admin inline editor for stablecoin, price, days, notes (NOT milestones) */
 function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void }) {
   const [coin, setCoin]   = useState<'USDC'|'USDT'>(bid.preferredStablecoin || 'USDC');
   const [price, setPrice] = useState<string>(String(bid.priceUSD ?? ''));
   const [days, setDays]   = useState<string>(String(bid.days ?? ''));
   const [notes, setNotes] = useState<string>(bid.notes || '');
-
   const [saving, setSaving] = useState(false);
 
   const dirty =
@@ -401,7 +360,13 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
         notes,
       };
       const updated = await api.updateBid(bid.bidId, patch);
-      onUpdated(updated);
+      onUpdated((prev:any) => ({
+        ...prev,
+        preferredStablecoin: updated.preferredStablecoin,
+        priceUSD: updated.priceUSD,
+        days: updated.days,
+        notes: updated.notes,
+      }));
     } catch (e:any) {
       alert(e?.message || 'Failed to update bid');
     } finally {
@@ -482,168 +447,218 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
   );
 }
 
-/** A single milestone row that toggles into edit mode when clicked */
-function MilestoneRow({
-  m,
-  i,
+/** Milestones section with click-to-edit rows */
+function MilestonesSection({
+  bid,
   canEdit,
-  onChange,
-  onSave,
-  onCancel,
-  isEditing,
-  setEditing,
+  onUpdated,
 }: {
-  m: any;
-  i: number;
+  bid: any;
   canEdit: boolean;
-  isEditing: boolean;
-  setEditing: (v: boolean) => void;
-  onChange: (next: any) => void;
-  onSave: () => void;
-  onCancel: () => void;
+  onUpdated: (b:any)=>void;
 }) {
-  const [local, setLocal] = useState<any>(m);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const milestones = useMemo(() => (Array.isArray(bid.milestones) ? bid.milestones : []), [bid?.milestones]);
 
-  // keep local in sync if prop changes while not editing
-  useEffect(() => { if (!isEditing) setLocal(m); }, [m, isEditing]);
-
-  if (!canEdit || !isEditing) {
-    return (
-      <li
-        className={`rounded border p-3 ${canEdit ? 'cursor-pointer hover:bg-slate-50' : ''}`}
-        onClick={() => canEdit && setEditing(true)}
-        title={canEdit ? 'Click to edit' : ''}
-      >
-        <div className="flex items-center justify-between">
-          <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-          <span className="text-xs text-gray-500">#{i + 1}</span>
-        </div>
-        <div className="text-sm text-gray-600">
-          Amount: ${m.amount} · Due: {m.dueDate ? new Date(m.dueDate).toLocaleDateString() : '—'}
-          {m.completed ? ' · Completed' : ''}
-        </div>
-        {m.proof && <div className="mt-1 text-xs text-gray-500 line-clamp-2">Proof: {m.proof}</div>}
-      </li>
-    );
-  }
-
-  // edit mode
   return (
-    <li className="rounded border p-3 bg-slate-50">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex items-center gap-2">
-          <label className="min-w-24 text-sm text-gray-600">Name</label>
-          <input
-            className="border rounded px-2 py-1 text-sm w-full"
-            value={local.name || ''}
-            onChange={(e) => setLocal((p: any) => ({ ...p, name: e.target.value }))}
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="min-w-24 text-sm text-gray-600">Amount (USD)</label>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            className="border rounded px-2 py-1 text-sm w-40"
-            value={local.amount ?? ''}
-            onChange={(e) => setLocal((p: any) => ({ ...p, amount: e.target.value === '' ? '' : Number(e.target.value) }))}
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="min-w-24 text-sm text-gray-600">Due date</label>
-          <input
-            type="date"
-            className="border rounded px-2 py-1 text-sm"
-            value={local.dueDate ? toDateInput(local.dueDate) : ''}
-            onChange={(e) => setLocal((p: any) => ({ ...p, dueDate: e.target.value ? `${e.target.value}T00:00:00.000Z` : '' }))}
-          />
-        </div>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={!!local.completed}
-            onChange={(e) => setLocal((p: any) => ({ ...p, completed: e.target.checked }))}
-          />
-          Completed
-        </label>
-
-        <div className="sm:col-span-2">
-          <label className="block text-sm text-gray-600 mb-1">Proof (optional)</label>
-          <textarea
-            rows={2}
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={local.proof || ''}
-            onChange={(e) => setLocal((p: any) => ({ ...p, proof: e.target.value }))}
-          />
-        </div>
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-sm text-gray-500">Milestones</div>
+        {canEdit && editingIndex !== null && (
+          <button
+            className="text-xs underline"
+            onClick={() => setEditingIndex(null)}
+          >
+            Cancel edit
+          </button>
+        )}
       </div>
 
-      <div className="mt-3 flex gap-2">
+      {milestones.length === 0 ? (
+        <div className="text-sm text-slate-500">No milestones.</div>
+      ) : (
+        <ul className="space-y-2">
+          {milestones.map((m: any, i: number) => (
+            <li key={i} className="rounded border p-3">
+              {canEdit && editingIndex === i ? (
+                <MilestoneRowEditor
+                  bidId={bid.bidId}
+                  index={i}
+                  value={m}
+                  all={milestones}
+                  onDone={(updated) => { onUpdated(updated); setEditingIndex(null); }}
+                  onCancel={() => setEditingIndex(null)}
+                />
+              ) : (
+                <MilestoneRowDisplay
+                  m={m}
+                  index={i}
+                  canEdit={canEdit}
+                  onEdit={() => canEdit && setEditingIndex(i)}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function MilestoneRowDisplay({
+  m, index, canEdit, onEdit,
+}: {
+  m: any; index: number; canEdit: boolean; onEdit: ()=>void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="font-medium">
+          {m.name || `Milestone ${index + 1}`}
+          {m.completed ? ' · ✅ Completed' : ''}
+        </div>
+        <div className="text-sm text-gray-600">
+          Amount: ${Number(m.amount).toLocaleString()} · Due: {dateDisplay(m.dueDate)}
+        </div>
+      </div>
+      {canEdit && (
         <button
-          className="px-3 py-1.5 rounded bg-slate-900 text-white"
-          onClick={() => { onChange(local); onSave(); }}
+          type="button"
+          onClick={onEdit}
+          className="text-xs px-2 py-1 rounded bg-slate-900 text-white"
+          title="Edit milestone"
         >
-          Save
+          Edit
         </button>
-        <button className="px-3 py-1.5 rounded bg-slate-200" onClick={onCancel}>
+      )}
+    </div>
+  );
+}
+
+function MilestoneRowEditor({
+  bidId, index, value, all, onDone, onCancel,
+}: {
+  bidId: number;
+  index: number;
+  value: any;
+  all: any[];
+  onDone: (updatedBid:any)=>void;
+  onCancel: ()=>void;
+}) {
+  const [name, setName] = useState<string>(value?.name || `Milestone ${index + 1}`);
+  const [amount, setAmount] = useState<string>(String(value?.amount ?? '0'));
+  const [due, setDue] = useState<string>(toDateInput(value?.dueDate));
+  const [completed, setCompleted] = useState<boolean>(!!value?.completed);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    // Validate
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) { alert('Amount must be a non-negative number'); return; }
+    if (!due) { alert('Due date is required'); return; }
+
+    // Build new milestones array
+    const next = all.map((m, i) => i === index
+      ? {
+          ...m,
+          name: name || `Milestone ${index + 1}`,
+          amount: amt,
+          dueDate: new Date(due).toISOString(),
+          completed,
+        }
+      : m
+    );
+
+    setSaving(true);
+    try {
+      // Persist via dedicated endpoint
+      const updated = await api.updateBidMilestones(bidId, next);
+      onDone(updated);
+    } catch (e:any) {
+      alert(e?.message || 'Failed to update milestone');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="grid sm:grid-cols-2 gap-3">
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Name</label>
+        <input
+          className="border rounded px-2 py-1 text-sm w-full"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={`Milestone ${index + 1}`}
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Amount (USD)</label>
+        <input
+          type="number"
+          className="border rounded px-2 py-1 text-sm w-40"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          min={0}
+          step="0.01"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Due Date</label>
+        <input
+          type="date"
+          className="border rounded px-2 py-1 text-sm w-48"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600 min-w-24">Completed</label>
+        <input
+          type="checkbox"
+          className="h-4 w-4"
+          checked={completed}
+          onChange={(e) => setCompleted(e.target.checked)}
+        />
+      </div>
+
+      <div className="sm:col-span-2 flex gap-2">
+        <button
+          className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
+          onClick={save}
+          disabled={saving}
+        >
+          {saving ? 'Saving…' : 'Save milestone'}
+        </button>
+        <button
+          className="px-3 py-1.5 rounded bg-slate-200"
+          onClick={onCancel}
+          disabled={saving}
+        >
           Cancel
         </button>
       </div>
-    </li>
+    </div>
   );
 }
 
-function toDateInput(val: string | Date) {
+/* ---------------- helpers ---------------- */
+
+function dateDisplay(d: any) {
+  try { return new Date(d).toLocaleDateString(); } catch { return '—'; }
+}
+
+function toDateInput(d: any) {
   try {
-    const d = new Date(val);
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(d.getUTCDate()).padStart(2, '0');
+    const dt = new Date(d);
+    if (Number.isNaN(+dt)) return '';
+    // yyyy-mm-dd
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   } catch { return ''; }
-}
-
-function MilestoneController({
-  m, index, canEdit, all, saveMilestones,
-}: {
-  m: any;
-  index: number;
-  canEdit: boolean;
-  all: any[];
-  saveMilestones: (next: any[]) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<any>(m);
-
-  useEffect(() => { if (!editing) setDraft(m); }, [m, editing]);
-
-  const onChange = (nextOne: any) => setDraft(nextOne);
-
-  const onSave = async () => {
-    const amt = Number(draft.amount);
-    if (!Number.isFinite(amt) || amt < 0) { alert('Amount must be a non-negative number'); return; }
-
-    const copy = all.map((x, idx) => (idx === index ? { ...draft, amount: amt } : x));
-    await saveMilestones(copy);
-    setEditing(false);
-  };
-
-  const onCancel = () => { setDraft(m); setEditing(false); };
-
-  return (
-    <MilestoneRow
-      m={m}
-      i={index}
-      canEdit={canEdit}
-      isEditing={editing}
-      setEditing={setEditing}
-      onChange={onChange}
-      onSave={onSave}
-      onCancel={onCancel}
-    />
-  );
 }
