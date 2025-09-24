@@ -68,6 +68,8 @@ export default function Navigation() {
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
+          // ✅ NEW
+          { href: '/admin/entities', label: 'Entities' },
         ],
       },
       { href: '/vendor/dashboard', label: 'Vendors' },

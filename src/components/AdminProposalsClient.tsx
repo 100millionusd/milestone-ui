@@ -60,11 +60,15 @@ const TABS: { key: TabKey; label: string }[] = [
 
 interface AdminProposalsClientProps {
   initialProposals?: Proposal[];
+  defaultMode?: 'proposals' | 'entities';
 }
 
-export default function AdminProposalsClient({ initialProposals = [] }: AdminProposalsClientProps) {
+export default function AdminProposalsClient({
+  initialProposals = [],
+  defaultMode = 'proposals',
+}: AdminProposalsClientProps) {
   // ====== top-level mode: proposals vs entities ======
-  const [mode, setMode] = useState<'proposals' | 'entities'>('proposals');
+  const [mode, setMode] = useState<'proposals' | 'entities'>(defaultMode);
 
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [loading, setLoading] = useState(initialProposals.length === 0);
@@ -78,10 +82,15 @@ export default function AdminProposalsClient({ initialProposals = [] }: AdminPro
   // Entities filters
   const [includeArchived, setIncludeArchived] = useState(false);
 
-  useEffect(() => {
-    if (initialProposals.length === 0) fetchProposals();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProposals.length]);
+useEffect(() => {
+  if (mode !== 'proposals') {
+    // if we land on Entities, don’t show a proposals loading state
+    setLoading(false);
+    return;
+  }
+  if (initialProposals.length === 0) fetchProposals();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [initialProposals.length, mode]);
 
   const fetchProposals = async () => {
     try {
