@@ -16,12 +16,12 @@ const GATEWAY =
 
 // Admin tabs
 const TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
+  { key: 'all',       label: 'All' },
+  { key: 'pending',   label: 'Pending' },
+  { key: 'approved',  label: 'Approved' },
   { key: 'completed', label: 'Completed' },
-  { key: 'rejected', label: 'Rejected' },
-  { key: 'archived', label: 'Archived' },
+  { key: 'rejected',  label: 'Rejected' },
+  { key: 'archived',  label: 'Archived' },
 ] as const;
 type TabKey = typeof TABS[number]['key'];
 
@@ -51,7 +51,6 @@ export default function AdminBidsPage() {
         setLoading(false);
       }
     };
-
     fetchData();
   }, []);
 
@@ -163,6 +162,7 @@ export default function AdminBidsPage() {
           key={idx}
           onClick={() => setLightbox(href)}
           className="group relative overflow-hidden rounded border"
+          title={doc.name}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -178,8 +178,9 @@ export default function AdminBidsPage() {
       <div
         key={idx}
         className="p-2 rounded border bg-gray-50 text-xs text-gray-700 max-w-[200px]"
+        title={doc.name}
       >
-        <p className="truncate" title={doc.name}>{doc.name}</p>
+        <p className="truncate">{doc.name}</p>
         <a
           href={href}
           target="_blank"
@@ -194,7 +195,7 @@ export default function AdminBidsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-screen-xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">Admin - Bids Management</h1>
         <div className="text-center py-12">Loading bids...</div>
       </div>
@@ -202,7 +203,7 @@ export default function AdminBidsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-screen-xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Admin - Bids Management</h1>
         <Link
@@ -241,42 +242,30 @@ export default function AdminBidsPage() {
         </div>
       </div>
 
-      {/* TABLE with sticky right Actions */}
+      {/* Desktop/table view — aims to avoid horizontal scroll */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full table-fixed divide-y divide-gray-200">
-            {/* Column widths */}
+        {/* Allow scroll only if truly necessary on small screens; visible on xl */}
+        <div className="overflow-x-auto xl:overflow-visible">
+          <table className="min-w-full table-auto xl:table-fixed divide-y divide-gray-200">
+            {/* Column widths (xl and up) sum ≈ 100% */}
             <colgroup>
-              <col className="w-[30%]" /> {/* Project */}
-              <col className="w-[22%]" /> {/* Vendor */}
-              <col className="w-[10%]" /> {/* Price */}
-              <col className="w-[12%]" /> {/* Timeline */}
-              <col className="w-[16%]" /> {/* Attachments */}
-              <col className="w-[10%]" /> {/* Status */}
-              <col className="w-[180px]" /> {/* Actions (sticky) */}
+              <col className="xl:w-[28%]" />  {/* Project */}
+              <col className="xl:w-[22%]" />  {/* Vendor */}
+              <col className="xl:w-[10%]" />  {/* Price */}
+              <col className="xl:w-[12%]" />  {/* Timeline */}
+              <col className="xl:w-[16%]" />  {/* Attachments */}
+              <col className="xl:w-[6%]"  />  {/* Status */}
+              <col className="xl:w-[6%]"  />  {/* Actions (sticky width via padding) */}
             </colgroup>
 
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Project
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Vendor
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Price
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Timeline
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Attachments
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                {/* Sticky header cell for actions */}
+                <Th>Project</Th>
+                <Th>Vendor</Th>
+                <Th>Price</Th>
+                <Th>Timeline</Th>
+                <Th>Attachments</Th>
+                <Th>Status</Th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50 z-10 border-l">
                   Actions
                 </th>
@@ -287,57 +276,57 @@ export default function AdminBidsPage() {
               {filteredBids.map((bid) => (
                 <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
                   {/* Project */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     <div
-                      className="text-sm font-medium text-gray-900 truncate max-w-[420px]"
+                      className="text-sm font-medium text-gray-900 whitespace-normal break-words max-w-[520px]"
                       title={getProposalTitle(bid.proposalId)}
                     >
                       {getProposalTitle(bid.proposalId)}
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-xs text-gray-500 mt-0.5">
                       Project #{bid.proposalId}
                     </div>
-                  </td>
+                  </Td>
 
                   {/* Vendor */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     <div
-                      className="text-sm font-medium text-gray-900 truncate max-w-[320px]"
+                      className="text-sm font-medium text-gray-900 whitespace-normal break-words max-w-[420px]"
                       title={bid.vendorName}
                     >
                       {bid.vendorName}
                     </div>
-                    <div className="text-xs font-mono text-gray-500">
+                    <div className="text-xs font-mono text-gray-500 mt-0.5">
                       {bid.walletAddress
                         ? `${bid.walletAddress.slice(0, 8)}…${bid.walletAddress.slice(-6)}`
                         : '—'}
                     </div>
-                  </td>
+                  </Td>
 
                   {/* Price */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-900">
                       ${Number(bid.priceUSD).toLocaleString()}
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-xs text-gray-500">
                       {bid.preferredStablecoin}
                     </div>
-                  </td>
+                  </Td>
 
                   {/* Timeline */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     <div className="text-sm text-gray-900">
                       {bid.days} days
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-xs text-gray-500">
                       {bid.milestones?.length || 0} milestones
                     </div>
-                  </td>
+                  </Td>
 
                   {/* Attachments */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     {bid.doc ? (
-                      <div className="flex flex-wrap gap-2 max-w-[240px]">
+                      <div className="flex flex-wrap gap-2 max-w-[260px]">
                         {renderAttachment(bid.doc, 0)}
                       </div>
                     ) : (
@@ -345,10 +334,10 @@ export default function AdminBidsPage() {
                         No files
                       </span>
                     )}
-                  </td>
+                  </Td>
 
                   {/* Status */}
-                  <td className="px-6 py-4">
+                  <Td className="px-6 py-4">
                     <span
                       className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
                         bid.status
@@ -356,11 +345,11 @@ export default function AdminBidsPage() {
                     >
                       {bid.status}
                     </span>
-                  </td>
+                  </Td>
 
                   {/* Sticky Actions */}
                   <td className="px-4 py-4 sticky right-0 bg-white z-10 border-l">
-                    <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex flex-col md:flex-row gap-2">
                       <Link
                         href={`/admin/bids/${bid.bidId}`}
                         className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50 text-center"
@@ -447,4 +436,23 @@ export default function AdminBidsPage() {
       )}
     </div>
   );
+}
+
+/* ------------- tiny table cell helpers ------------- */
+function Th({
+  children,
+  className = '',
+}: React.PropsWithChildren<{ className?: string }>) {
+  return (
+    <th className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${className}`}>
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  className = '',
+}: React.PropsWithChildren<{ className?: string }>) {
+  return <td className={`align-top ${className}`}>{children}</td>;
 }
