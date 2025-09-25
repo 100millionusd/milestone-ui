@@ -841,19 +841,6 @@ export function approveProof(bidId: number, milestoneIndex: number) {
   );
 }
 
-// ✅ Use this instead (keeps your apiFetch style)
-export async function rejectMilestoneProof(bidId: number, milestoneIndex: number, reason?: string) {
-  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(
-    `/bids/${encodeURIComponent(String(bidId))}/milestones/${encodeURIComponent(String(milestoneIndex))}/reject`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason ?? "" }),
-    }
-  );
-}
-
 /* ==========================
    Agent2 Proof Chat (SSE)
    - Streams tokens from POST /proofs/:id/chat
@@ -1016,7 +1003,8 @@ export default {
   // proofs
   getSubmittedProofs,
   approveProof,
-  rejectProof,
+  rejectMilestoneProof,
+  rejectProof: rejectMilestoneProof,
   submitProof,
   analyzeProof,
   getProofs,
