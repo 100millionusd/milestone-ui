@@ -1,21 +1,24 @@
+// src/components/AdminEntitiesTable.tsx
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { listProposers, type ProposerSummary } from '@/lib/api';
+import { listProposers, listProposals, type Proposal } from '@/lib/api';
+
+/* ---------------- types (normalized row) ---------------- */
 
 type Row = {
-  orgName: string;
+  entity: string | null;
 
   // location
-  address?: string | null;
-  city?: string | null;
-  country?: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
 
   // contacts
-  primaryEmail?: string | null;
-  ownerEmail?: string | null;
-  ownerWallet?: string | null;
+  contactEmail: string | null;
+  ownerEmail: string | null;
+  ownerWallet: string | null;
 
   // counts
   proposalsCount: number;
@@ -25,11 +28,11 @@ type Row = {
 
   // money + recency
   totalBudgetUSD: number;
-  lastActivityAt?: string | null;
+  lastActivityAt: string | null;
 };
 
 type SortKey =
-  | 'org'
+  | 'entity'
   | 'wallet'
   | 'proposals'
   | 'approved'
@@ -38,12 +41,99 @@ type SortKey =
   | 'budget'
   | 'last';
 
+/* ---------------- helpers: normalize + fallback ---------------- */
+
+function normalizeRow(r: any): Row {
+  return {
+    entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
+
+    address: r.address ?? null,
+    city: r.city ?? null,
+    country: r.country ?? null,
+
+    contactEmail:
+      r.primaryEmail ??
+      r.primary_email ??
+      r.contactEmail ??
+      r.contact_email ??
+      r.ownerEmail ??
+      r.owner_email ??
+      null,
+    ownerEmail: r.ownerEmail ?? r.owner_email ?? null,
+    ownerWallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet ?? null,
+
+    proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
+    approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
+    pendingCount: Number(r.pendingCount ?? r.pending_count ?? 0),
+    rejectedCount: Number(r.rejectedCount ?? r.rejected_count ?? 0),
+
+    totalBudgetUSD: Number(
+      r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
+    ),
+
+    lastActivityAt:
+      r.lastActivityAt ??
+      r.last_activity_at ??
+      r.updatedAt ??
+      r.updated_at ??
+      r.createdAt ??
+      r.created_at ??
+      null,
+  };
+}
+
+function aggregateFromProposals(props: Proposal[]): Row[] {
+  const byKey = new Map<string, Row>();
+
+  for (const p of props) {
+    const org = (p.orgName || 'Unknown Org').trim();
+    const key = `${org}|${p.contact || ''}|${p.ownerWallet || ''}`;
+
+    const existing = byKey.get(key);
+    const row: Row =
+      existing || {
+        entity: org || null,
+        address: p.address || null,
+        city: p.city || null,
+        country: p.country || null,
+        contactEmail: p.contact || p.ownerEmail || null,
+        ownerEmail: p.ownerEmail || null,
+        ownerWallet: p.ownerWallet || null,
+
+        proposalsCount: 0,
+        approvedCount: 0,
+        pendingCount: 0,
+        rejectedCount: 0,
+
+        totalBudgetUSD: 0,
+        lastActivityAt: null,
+      };
+
+    row.proposalsCount += 1;
+    row.totalBudgetUSD += Number(p.amountUSD) || 0;
+
+    const st = p.status || 'pending';
+    if (st === 'approved') row.approvedCount += 1;
+    else if (st === 'rejected') row.rejectedCount += 1;
+    else row.pendingCount += 1;
+
+    const prev = row.lastActivityAt ? new Date(row.lastActivityAt).getTime() : 0;
+    const cand = new Date(p.updatedAt || p.createdAt).getTime();
+    if (cand > prev) row.lastActivityAt = p.updatedAt || p.createdAt;
+
+    byKey.set(key, row);
+  }
+
+  return Array.from(byKey.values());
+}
+
+/* ---------------- component ---------------- */
+
 export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // UI state
   const [q, setQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('last');
   const [asc, setAsc] = useState(false);
@@ -54,28 +144,47 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
     (async () => {
       try {
         setLoading(true);
-        const data = await listProposers();
-        if (!alive) return;
-        const normalized = (Array.isArray(data) ? data : []).map(normalize);
-        setRows(normalized);
+        setError(null);
+
+        // 1) server aggregation
+        const server = await listProposers().catch(() => []);
+        let data: Row[] = (Array.isArray(server) ? server : []).map(normalizeRow);
+
+        // 2) fallback: build from proposals if empty
+        if (!data.length) {
+          const proposals = await listProposals({ includeArchived: true });
+          data = aggregateFromProposals(proposals);
+        }
+
+        if (alive) setRows(data);
       } catch (e: any) {
         if (alive) setError(e?.message || 'Failed to load entities');
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // filter
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return rows;
-    return rows.filter(r => {
+    return rows.filter((r) => {
       const hay = [
-        r.orgName, r.address, r.city, r.country,
-        r.primaryEmail, r.ownerEmail, r.ownerWallet
-      ].filter(Boolean).join(' ').toLowerCase();
+        r.entity,
+        r.address,
+        r.city,
+        r.country,
+        r.contactEmail,
+        r.ownerEmail,
+        r.ownerWallet,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return hay.includes(needle);
     });
   }, [rows, q]);
@@ -83,30 +192,26 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
   // sort
   const sorted = useMemo(() => {
     const arr = [...filtered];
-    arr.sort((a, b) => {
-      let va: any = 0, vb: any = 0;
+    const getVal = (r: Row) => {
       switch (sortKey) {
-        case 'org':       va = a.orgName || ''; vb = b.orgName || ''; break;
-        case 'wallet':    va = a.ownerWallet || ''; vb = b.ownerWallet || ''; break;
-        case 'proposals': va = a.proposalsCount; vb = b.proposalsCount; break;
-        case 'approved':  va = a.approvedCount;  vb = b.approvedCount;  break;
-        case 'pending':   va = a.pendingCount;   vb = b.pendingCount;   break;
-        case 'rejected':  va = a.rejectedCount;  vb = b.rejectedCount;  break;
-        case 'budget':    va = a.totalBudgetUSD; vb = b.totalBudgetUSD; break;
-        case 'last': {
-          const ta = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0;
-          const tb = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0;
-          va = ta; vb = tb;
-          break;
-        }
+        case 'entity': return r.entity || '';
+        case 'wallet': return r.ownerWallet || '';
+        case 'proposals': return r.proposalsCount;
+        case 'approved': return r.approvedCount;
+        case 'pending': return r.pendingCount;
+        case 'rejected': return r.rejectedCount;
+        case 'budget': return r.totalBudgetUSD;
+        case 'last': return r.lastActivityAt ? new Date(r.lastActivityAt).getTime() : 0;
       }
+    };
+    arr.sort((a, b) => {
+      const va = getVal(a);
+      const vb = getVal(b);
       if (typeof va === 'string' && typeof vb === 'string') {
         const cmp = va.localeCompare(vb);
         return asc ? cmp : -cmp;
       }
-      if (va < vb) return asc ? -1 : 1;
-      if (va > vb) return asc ? 1 : -1;
-      return 0;
+      return asc ? (Number(va) - Number(vb)) : (Number(vb) - Number(va));
     });
     return arr;
   }, [filtered, sortKey, asc]);
@@ -118,13 +223,11 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
     return sorted.slice(start, start + perPage);
   }, [sorted, page, perPage]);
 
-  // UI
   if (loading) return <div className="p-6">Loading entities…</div>;
   if (error)   return <div className="p-6 text-red-600">Error: {error}</div>;
 
   return (
     <div className="max-w-7xl mx-auto p-6">
-      {/* Header + controls */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Admin — Entities</h1>
         <div className="flex items-center gap-2 text-sm">
@@ -153,7 +256,7 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
             onChange={(e) => setSortKey(e.target.value as SortKey)}
           >
             <option value="last">Last activity</option>
-            <option value="org">Entity</option>
+            <option value="entity">Entity</option>
             <option value="wallet">Wallet</option>
             <option value="proposals">Proposals</option>
             <option value="approved">Approved</option>
@@ -171,7 +274,6 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
         </div>
       </div>
 
-      {/* Table — designed to AVOID horizontal scrolling */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full table-fixed text-sm">
           <thead className="bg-slate-50 text-slate-600">
@@ -198,9 +300,9 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
               const proposalsHref = buildProposalsHref(r);
 
               return (
-                <tr key={`${r.orgName || '—'}-${i}`} className="align-top hover:bg-slate-50/60">
+                <tr key={`${r.ownerWallet || r.contactEmail || r.entity || ''}-${i}`} className="align-top hover:bg-slate-50/60">
                   <Td>
-                    <div className="font-medium text-slate-900 truncate">{r.orgName || '—'}</div>
+                    <div className="font-medium text-slate-900 truncate">{r.entity || '—'}</div>
                     {(r.city || r.country) && (
                       <div className="text-xs text-slate-500">
                         {[r.city, r.country].filter(Boolean).join(', ')}
@@ -213,7 +315,7 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
 
                   <Td>
                     <div className="text-slate-700 break-words">
-                      {r.primaryEmail || r.ownerEmail || '—'}
+                      {r.contactEmail || r.ownerEmail || '—'}
                     </div>
                   </Td>
 
@@ -221,10 +323,10 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
                     {walletDisp}
                   </Td>
 
-                  <Td className="text-right">{r.proposalsCount}</Td>
-                  <Td className="text-right">{r.approvedCount}</Td>
-                  <Td className="text-right">{r.pendingCount}</Td>
-                  <Td className="text-right">{r.rejectedCount}</Td>
+                  <Td className="text-right">{r.proposalsCount ?? 0}</Td>
+                  <Td className="text-right">{r.approvedCount ?? 0}</Td>
+                  <Td className="text-right">{r.pendingCount ?? 0}</Td>
+                  <Td className="text-right">{r.rejectedCount ?? 0}</Td>
                   <Td className="text-right">${Number(r.totalBudgetUSD || 0).toLocaleString()}</Td>
 
                   <Td>{r.lastActivityAt ? new Date(r.lastActivityAt).toLocaleString() : '—'}</Td>
@@ -238,7 +340,6 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
                       >
                         Proposals
                       </Link>
-                      {/* Placeholder actions; wire up if/when API exists */}
                       <button
                         className="px-3 py-1 rounded text-xs bg-amber-100 text-amber-800 border border-amber-200 cursor-not-allowed"
                         title="Archive (not wired)"
@@ -296,34 +397,12 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
   );
 }
 
-/* ---------------- helpers ---------------- */
-
-function normalize(r: ProposerSummary): Row {
-  return {
-    orgName: r.orgName || '',
-
-    address: r.address ?? null,
-    city: r.city ?? null,
-    country: r.country ?? null,
-
-    primaryEmail: r.primaryEmail ?? null,
-    ownerEmail: r.ownerEmail ?? null,
-    ownerWallet: r.ownerWallet ?? null,
-
-    proposalsCount: Number(r.proposalsCount || 0),
-    approvedCount: Number(r.approvedCount || 0),
-    pendingCount: Number(r.pendingCount || 0),
-    rejectedCount: Number(r.rejectedCount || 0),
-
-    totalBudgetUSD: Number(r.totalBudgetUSD || 0),
-    lastActivityAt: r.lastActivityAt ?? null,
-  };
-}
+/* ---------------- small UI helpers ---------------- */
 
 function buildProposalsHref(r: Row) {
   const params = new URLSearchParams();
-  if (r.orgName)      params.set('org', r.orgName);
-  if (r.primaryEmail) params.set('contactEmail', r.primaryEmail);
+  if (r.entity)       params.set('org', r.entity);
+  if (r.contactEmail) params.set('contactEmail', r.contactEmail);
   if (r.ownerEmail)   params.set('ownerEmail', r.ownerEmail);
   if (r.ownerWallet)  params.set('wallet', r.ownerWallet);
   return `/admin/proposals?${params.toString()}`;
