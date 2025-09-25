@@ -1,6 +1,6 @@
 // src/app/admin/entities/page.tsx
-import AdminProposersClient from '@/components/AdminProposersClient';
+import AdminEntitiesTable from '@/components/AdminEntitiesTable';
 
 export default function AdminEntitiesPage() {
-  return <AdminProposersClient />;
+  return <AdminEntitiesTable perPage={10} />;
 }
