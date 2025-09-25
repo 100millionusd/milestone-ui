@@ -1,15 +1,13 @@
 // src/components/AdminEntitiesTable.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import {
   listProposers,
   listProposals,
   type Proposal,
-  adminArchiveEntity,
-  adminUnarchiveEntity,
-  adminDeleteEntity,
+  adminArchiveEntity as archiveEntity,
+  adminUnarchiveEntity as unarchiveEntity,
+  adminDeleteEntity as deleteEntity,
 } from '@/lib/api';
 
 /* ---------- Types ---------- */
