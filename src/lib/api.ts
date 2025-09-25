@@ -109,6 +109,13 @@ export interface ProposerSummary {
   lastActivityAt?: string | null;
 }
 
+/** Admin: identify an entity by any of these keys */
+export type EntitySelector = {
+  orgName?: string | null;
+  contactEmail?: string | null;
+  ownerWallet?: string | null;
+};
+
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
@@ -634,31 +641,71 @@ export async function listProposers(): Promise<ProposerSummary[]> {
   try {
     const rows = await apiFetch("/admin/proposers");
 
-    // Defensive mapping for snake_case / alt keys
+    // Defensive mapping for snake_case / alt keys from server
     return (Array.isArray(rows) ? rows : []).map((r: any): ProposerSummary => ({
       orgName: r.orgName ?? r.org_name ?? r.organization ?? "",
 
-      address: r.address ?? null,
+      // address fields: accept either structured or one-line display from server
+      address: r.address ?? r.addr_display ?? null,
       city: r.city ?? null,
       country: r.country ?? null,
 
-      primaryEmail: r.primaryEmail ?? r.primary_email ?? r.contactEmail ?? r.contact_email ?? null,
-      ownerEmail:   r.ownerEmail   ?? r.owner_email   ?? null,
-      ownerWallet:  r.ownerWallet  ?? r.owner_wallet  ?? null,
+      primaryEmail:
+        r.primaryEmail ??
+        r.primary_email ??
+        r.contactEmail ??
+        r.contact_email ??
+        null,
+      ownerEmail:  r.ownerEmail  ?? r.owner_email  ?? null,
+
+      // 👇 add wallet_address fallback here
+      ownerWallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet_address ?? null,
 
       proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
       approvedCount:  Number(r.approvedCount  ?? r.approved_count  ?? 0),
       pendingCount:   Number(r.pendingCount   ?? r.pending_count   ?? 0),
       rejectedCount:  Number(r.rejectedCount  ?? r.rejected_count  ?? 0),
 
-      totalBudgetUSD: Number(r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0),
+      totalBudgetUSD: Number(
+        r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
+      ),
 
-      lastActivityAt: r.lastActivityAt ?? r.last_activity_at ?? r.updatedAt ?? r.updated_at ?? null,
+      lastActivityAt:
+        r.lastActivityAt ??
+        r.last_activity_at ??
+        r.updatedAt ??
+        r.updated_at ??
+        null,
     }));
   } catch (e) {
     if (isAuthError(e)) return [];
     throw e;
   }
+}
+
+/** Admin — entity actions */
+export async function adminArchiveEntity(sel: EntitySelector) {
+  // POST /admin/entities/archive  { orgName?, contactEmail?, ownerWallet? }
+  return apiFetch("/admin/entities/archive", {
+    method: "POST",
+    body: JSON.stringify(sel),
+  });
+}
+
+export async function adminUnarchiveEntity(sel: EntitySelector) {
+  // POST /admin/entities/unarchive  { orgName?, contactEmail?, ownerWallet? }
+  return apiFetch("/admin/entities/unarchive", {
+    method: "POST",
+    body: JSON.stringify(sel),
+  });
+}
+
+export async function adminDeleteEntity(sel: EntitySelector) {
+  // DELETE /admin/entities  { orgName?, contactEmail?, ownerWallet? }
+  return apiFetch("/admin/entities", {
+    method: "DELETE",
+    body: JSON.stringify(sel),
+  });
 }
 
 /** ✅ Alias to keep older UI calls working */
@@ -929,6 +976,11 @@ export default {
   getAdminVendors,
   getVendors, // alias
   listProposers,
+
+  // admin entities
+  adminArchiveEntity,
+  adminUnarchiveEntity,
+  adminDeleteEntity,
 
   // proofs
   getSubmittedProofs,
