@@ -3,11 +3,19 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { listProposers, listProposals, type Proposal } from '@/lib/api';
+import {
+  listProposers,
+  listProposals,
+  type Proposal,
+  archiveEntity,
+  unarchiveEntity,
+  deleteEntity,
+} from '@/lib/api';
 
 /* ---------- Types ---------- */
 
 export type ProposerAgg = {
+  id?: number | string | null;          // NEW (if backend provides)
   entity: string | null;
   address: string | null;
   city: string | null;
@@ -20,7 +28,8 @@ export type ProposerAgg = {
   pendingCount: number;
   rejectedCount: number;
   totalBudgetUSD: number;
-  lastActivity: string | null; // ISO
+  lastActivity: string | null;          // ISO
+  archived?: boolean;                   // NEW
 };
 
 type SortKey =
@@ -38,6 +47,7 @@ type Props = { initial?: ProposerAgg[] };
 
 function normalizeRow(r: any): ProposerAgg {
   return {
+    id: r.id ?? r.entityId ?? r.proposerId ?? null,
     entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
     address: r.address ?? null,
     city: r.city ?? null,
@@ -67,6 +77,7 @@ function normalizeRow(r: any): ProposerAgg {
       r.createdAt ??
       r.created_at ??
       null,
+    archived: !!(r.archived ?? r.is_archived ?? false),
   };
 }
 
@@ -80,6 +91,7 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     const existing = byKey.get(key);
     const row: ProposerAgg =
       existing || {
+        id: null,
         entity: org || null,
         address: p.address || null,
         city: p.city || null,
@@ -93,6 +105,7 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
         rejectedCount: 0,
         totalBudgetUSD: 0,
         lastActivity: null,
+        archived: false,
       };
 
     row.proposalsCount += 1;
@@ -117,6 +130,11 @@ function fmtMoney(n: number) {
   return `$${Number(n || 0).toLocaleString()}`;
 }
 
+// helper to create a stable row key for optimistic updates
+function keyOf(r: ProposerAgg) {
+  return `${r.id ?? ''}|${r.entity ?? ''}|${r.contactEmail ?? ''}|${r.wallet ?? ''}`;
+}
+
 /* ---------- Component ---------- */
 
 export default function AdminEntitiesTable({ initial = [] }: Props) {
@@ -131,6 +149,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [page, setPage] = useState(1);
   const pageSize = 5;
 
+  // per-row busy state
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (initial.length) return;
     let alive = true;
@@ -139,11 +160,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       try {
         setLoading(true);
 
-        // 1) Server rollup
         const server = await listProposers().catch(() => []);
         let data: ProposerAgg[] = (Array.isArray(server) ? server : []).map(normalizeRow);
 
-        // 2) Fallback from proposals if server returns nothing
         if (!data.length) {
           const proposals = await listProposals({ includeArchived: true });
           data = aggregateFromProposals(proposals);
@@ -214,24 +233,6 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const start = (safePage - 1) * pageSize;
   const pageRows = sorted.slice(start, start + pageSize);
 
-  // Actions (archive/delete are placeholders for now)
-  const archiveRow = (r: ProposerAgg) => {
-    alert(`Archive "${r.entity || '—'}" (not yet wired to backend)`);
-  };
-  const deleteRow = (r: ProposerAgg) => {
-    if (!confirm(`Delete "${r.entity || '—'}"? This cannot be undone.`)) return;
-    setRows((prev) =>
-      prev.filter(
-        (x) =>
-          !(
-            (x.entity || '') === (r.entity || '') &&
-            (x.contactEmail || '') === (r.contactEmail || '') &&
-            (x.wallet || '') === (r.wallet || '')
-          )
-      )
-    );
-  };
-
   // Build proposals filter link
   function proposalsHref(r: ProposerAgg) {
     const sp = new URLSearchParams();
@@ -240,6 +241,54 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     if (r.ownerEmail) sp.set('ownerEmail', r.ownerEmail);
     if (r.wallet) sp.set('wallet', r.wallet);
     return `/admin/proposals?${sp.toString()}`;
+  }
+
+  // Payload for backend (id if present, otherwise the triple)
+  function toIdOrKey(r: ProposerAgg) {
+    if (r.id != null) return { id: r.id };
+    return { entity: r.entity, contactEmail: r.contactEmail, wallet: r.wallet };
+  }
+
+  async function onArchive(r: ProposerAgg, nextArchived: boolean) {
+    const k = keyOf(r);
+    setBusy((b) => ({ ...b, [k]: true }));
+    const payload = toIdOrKey(r);
+
+    // optimistic
+    setRows((prev) =>
+      prev.map((x) => (keyOf(x) === k ? { ...x, archived: nextArchived } : x))
+    );
+    try {
+      if (nextArchived) await archiveEntity(payload);
+      else await unarchiveEntity(payload);
+    } catch (e: any) {
+      // revert on error
+      setRows((prev) =>
+        prev.map((x) => (keyOf(x) === k ? { ...x, archived: !nextArchived } : x))
+      );
+      alert(e?.message || 'Failed to update archive state');
+    } finally {
+      setBusy((b) => ({ ...b, [k]: false }));
+    }
+  }
+
+  async function onDelete(r: ProposerAgg) {
+    if (!confirm(`Delete "${r.entity || '—'}"? This cannot be undone.`)) return;
+    const k = keyOf(r);
+    setBusy((b) => ({ ...b, [k]: true }));
+    const payload = toIdOrKey(r);
+
+    // optimistic
+    const prev = rows;
+    setRows((p) => p.filter((x) => keyOf(x) !== k));
+    try {
+      await deleteEntity(payload);
+    } catch (e: any) {
+      setRows(prev); // revert
+      alert(e?.message || 'Failed to delete entity');
+    } finally {
+      setBusy((b) => ({ ...b, [k]: false }));
+    }
   }
 
   // UI
@@ -295,7 +344,6 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
 
         {/* Card + Table */}
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          {/* Important: allow horizontal scroll; do NOT hide overflow */}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
@@ -314,75 +362,100 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
               </thead>
 
               <tbody className="divide-y divide-slate-100">
-                {pageRows.map((r, i) => (
-                  <tr
-                    key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
-                    className="hover:bg-slate-50/60"
-                  >
-                    {/* Entity + city, country */}
-                    <Td>
-                      <div className="font-medium text-slate-900">{r.entity || '—'}</div>
-                      {(r.city || r.country) && (
-                        <div className="text-xs text-slate-500">
-                          {[r.city, r.country].filter(Boolean).join(', ')}
+                {pageRows.map((r, i) => {
+                  const k = keyOf(r);
+                  const isBusy = !!busy[k];
+                  return (
+                    <tr
+                      key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
+                      className={`hover:bg-slate-50/60 ${r.archived ? 'opacity-70' : ''}`}
+                    >
+                      {/* Entity + city, country */}
+                      <Td>
+                        <div className="font-medium text-slate-900 flex items-center gap-2">
+                          {r.entity || '—'}
+                          {r.archived && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600">
+                              archived
+                            </span>
+                          )}
                         </div>
-                      )}
-                    </Td>
+                        {(r.city || r.country) && (
+                          <div className="text-xs text-slate-500">
+                            {[r.city, r.country].filter(Boolean).join(', ')}
+                          </div>
+                        )}
+                      </Td>
 
-                    {/* Contact */}
-                    <Td>
-                      <div className="text-slate-700">
-                        {r.contactEmail || r.ownerEmail || '—'}
-                      </div>
-                      {r.address && (
-                        <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
-                          {r.address}
+                      {/* Contact */}
+                      <Td>
+                        <div className="text-slate-700">
+                          {r.contactEmail || r.ownerEmail || '—'}
                         </div>
-                      )}
-                    </Td>
+                        {r.address && (
+                          <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
+                            {r.address}
+                          </div>
+                        )}
+                      </Td>
 
-                    {/* Wallet */}
-                    <Td className="font-mono text-xs text-slate-700">
-                      {r.wallet ? `${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}` : '—'}
-                    </Td>
+                      {/* Wallet */}
+                      <Td className="font-mono text-xs text-slate-700">
+                        {r.wallet ? `${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}` : '—'}
+                      </Td>
 
-                    {/* Counts */}
-                    <Td className="text-right">{r.proposalsCount ?? 0}</Td>
-                    <Td className="text-right">{r.approvedCount ?? 0}</Td>
-                    <Td className="text-right">{r.pendingCount ?? 0}</Td>
-                    <Td className="text-right">{r.rejectedCount ?? 0}</Td>
-                    <Td className="text-right">{fmtMoney(r.totalBudgetUSD)}</Td>
+                      {/* Counts */}
+                      <Td className="text-right">{r.proposalsCount ?? 0}</Td>
+                      <Td className="text-right">{r.approvedCount ?? 0}</Td>
+                      <Td className="text-right">{r.pendingCount ?? 0}</Td>
+                      <Td className="text-right">{r.rejectedCount ?? 0}</Td>
+                      <Td className="text-right">{fmtMoney(r.totalBudgetUSD)}</Td>
 
-                    {/* Last activity */}
-                    <Td>
-                      {r.lastActivity ? new Date(r.lastActivity).toLocaleString() : '—'}
-                    </Td>
+                      {/* Last activity */}
+                      <Td>
+                        {r.lastActivity ? new Date(r.lastActivity).toLocaleString() : '—'}
+                      </Td>
 
-                    {/* Actions — right aligned, clean spacing */}
-                    <Td className="text-right">
-                      <div className="inline-flex flex-wrap justify-end gap-2">
-                        <Link
-                          href={proposalsHref(r)}
-                          className="inline-flex items-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
-                        >
-                          Proposals
-                        </Link>
-                        <button
-                          onClick={() => archiveRow(r)}
-                          className="inline-flex items-center px-3 py-1.5 rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200"
-                        >
-                          Archive
-                        </button>
-                        <button
-                          onClick={() => deleteRow(r)}
-                          className="inline-flex items-center px-3 py-1.5 rounded-md bg-rose-100 text-rose-800 hover:bg-rose-200"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                      {/* Actions */}
+                      <Td className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-2">
+                          <Link
+                            href={proposalsHref(r)}
+                            className="inline-flex items-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
+                          >
+                            Proposals
+                          </Link>
+
+                          {r.archived ? (
+                            <button
+                              onClick={() => onArchive(r, false)}
+                              disabled={isBusy}
+                              className="inline-flex items-center px-3 py-1.5 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50"
+                            >
+                              Unarchive
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onArchive(r, true)}
+                              disabled={isBusy}
+                              className="inline-flex items-center px-3 py-1.5 rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50"
+                            >
+                              Archive
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => onDelete(r)}
+                            disabled={isBusy}
+                            className="inline-flex items-center px-3 py-1.5 rounded-md bg-rose-100 text-rose-800 hover:bg-rose-200 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
 
                 {pageRows.length === 0 && (
                   <tr>
@@ -430,9 +503,7 @@ function Th({
   className = '',
 }: React.PropsWithChildren<{ className?: string }>) {
   return (
-    <th
-      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}
-    >
+    <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}>
       {children}
     </th>
   );
