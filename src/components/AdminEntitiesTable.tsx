@@ -7,6 +7,7 @@ import {
   listProposers,
   listProposals,
   type Proposal,
+  // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
   adminDeleteEntity as deleteEntity,
@@ -15,7 +16,7 @@ import {
 /* ---------- Types ---------- */
 
 export type ProposerAgg = {
-  id?: number | string | null;          // optional (if backend provides)
+  id?: number | string | null;
   entity: string | null;
   address: string | null;
   city: string | null;
@@ -28,7 +29,7 @@ export type ProposerAgg = {
   pendingCount: number;
   rejectedCount: number;
   totalBudgetUSD: number;
-  lastActivity: string | null;          // ISO
+  lastActivity: string | null;
   archived?: boolean;
 };
 
@@ -146,6 +147,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('entity');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
+  const [showArchived, setShowArchived] = useState(false); // ← NEW
   const pageSize = 5;
 
   // per-row busy state
@@ -159,7 +161,16 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       try {
         setLoading(true);
 
-        const server = await listProposers().catch(() => []);
+        // Try to ask the server for archived as well; fall back if unsupported.
+        let server: any[] = [];
+        try {
+          server = await (listProposers as unknown as (p?: any) => Promise<any[]>)({
+            includeArchived: true,
+          });
+        } catch {
+          server = await listProposers();
+        }
+
         let data: ProposerAgg[] = (Array.isArray(server) ? server : []).map(normalizeRow);
 
         if (!data.length) {
@@ -180,11 +191,12 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     };
   }, [initial.length]);
 
-  // Search
+  // Search + archived filter
   const filtered = useMemo(() => {
+    const base = showArchived ? rows : rows.filter(r => !r.archived); // ← filter archived
     const n = q.trim().toLowerCase();
-    if (!n) return rows;
-    return rows.filter((r) => {
+    if (!n) return base;
+    return base.filter((r) => {
       const hay = [
         r.entity,
         r.address,
@@ -199,7 +211,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
         .toLowerCase();
       return hay.includes(n);
     });
-  }, [rows, q]);
+  }, [rows, q, showArchived]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -302,7 +314,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <h1 className="text-2xl font-bold">Admin — Entities</h1>
 
-          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <div className="w-full sm:w-72">
               <input
                 value={q}
@@ -314,6 +326,20 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
               />
             </div>
+
+            {/* Show archived toggle */}
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700 select-none">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300"
+                checked={showArchived}
+                onChange={(e) => {
+                  setShowArchived(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              Show archived
+            </label>
 
             <div className="flex items-center gap-2">
               <select
