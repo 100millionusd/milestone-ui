@@ -130,7 +130,6 @@ function fmtMoney(n: number) {
   return `$${Number(n || 0).toLocaleString()}`;
 }
 
-// helper to create a stable row key for optimistic updates
 function keyOf(r: ProposerAgg) {
   return `${r.id ?? ''}|${r.entity ?? ''}|${r.contactEmail ?? ''}|${r.wallet ?? ''}`;
 }
@@ -243,10 +242,10 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     return `/admin/proposals?${sp.toString()}`;
   }
 
-  // Payload for backend (id if present, otherwise orgName/contactEmail/ownerWallet)
+  // Payload for backend (id if present, otherwise the triple)
   function toIdOrKey(r: ProposerAgg) {
     if (r.id != null) return { id: r.id };
-    return { orgName: r.entity, contactEmail: r.contactEmail, ownerWallet: r.wallet };
+    return { entity: r.entity, contactEmail: r.contactEmail, wallet: r.wallet };
   }
 
   async function onArchive(r: ProposerAgg, nextArchived: boolean) {
@@ -259,8 +258,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       prev.map((x) => (keyOf(x) === k ? { ...x, archived: nextArchived } : x))
     );
     try {
-      if (nextArchived) await adminArchiveEntity(payload);
-      else await adminUnarchiveEntity(payload);
+      if (nextArchived) await archiveEntity(payload);
+      else await unarchiveEntity(payload);
     } catch (e: any) {
       // revert on error
       setRows((prev) =>
@@ -282,7 +281,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     const prev = rows;
     setRows((p) => p.filter((x) => keyOf(x) !== k));
     try {
-      await adminDeleteEntity(payload);
+      await deleteEntity(payload);
     } catch (e: any) {
       setRows(prev); // revert
       alert(e?.message || 'Failed to delete entity');
