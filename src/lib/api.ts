@@ -619,6 +619,34 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
+// Reject a milestone’s proof (admin)
+export function rejectMilestoneProof(
+  bidId: number,
+  milestoneIndex: number,
+  reason?: string
+) {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  if (!Number.isInteger(milestoneIndex) || milestoneIndex < 0) {
+    throw new Error("Invalid milestone index");
+  }
+
+  // Backend route you added: POST /bids/:bidId/milestones/:idx/reject
+  return apiFetch(
+    `/bids/${encodeURIComponent(String(bidId))}/milestones/${encodeURIComponent(
+      String(milestoneIndex)
+    )}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? "" }),
+    }
+  );
+}
+
+// Keep a named alias so any `import { rejectProof }` still works
+export { rejectMilestoneProof as rejectProof };
+
+
 /** ✅ NEW: Admin — list all vendors (server must expose GET /admin/vendors) */
 export async function getAdminVendors(): Promise<VendorSummary[]> {
   try {
@@ -824,15 +852,21 @@ export function approveProof(bidId: number, milestoneIndex: number) {
   );
 }
 
-export function rejectProof(bidId: number, milestoneIndex: number) {
+// ✅ Use this instead (keeps your apiFetch style)
+export async function rejectMilestoneProof(bidId: number, milestoneIndex: number, reason?: string) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
   return apiFetch(
-    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
-      String(milestoneIndex)
-    )}/reject`,
-    { method: "POST" }
+    `/bids/${encodeURIComponent(String(bidId))}/milestones/${encodeURIComponent(String(milestoneIndex))}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? "" }),
+    }
   );
 }
+
+// (Optional) alias so any old imports keep working:
+export const rejectProof = rejectMilestoneProof;
 
 /* ==========================
    Agent2 Proof Chat (SSE)

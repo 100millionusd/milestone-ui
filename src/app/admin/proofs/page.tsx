@@ -484,5 +484,6 @@ export default function AdminProofsPage() {
         </button>
       </div>
     )}
-  </div>
+   </div>
 );
+}
