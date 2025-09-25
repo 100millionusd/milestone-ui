@@ -9,24 +9,16 @@ import { listProposers, listProposals, type Proposal } from '@/lib/api';
 
 type Row = {
   entity: string | null;
-
-  // location
   address: string | null;
   city: string | null;
   country: string | null;
-
-  // contacts
   contactEmail: string | null;
   ownerEmail: string | null;
   ownerWallet: string | null;
-
-  // counts
   proposalsCount: number;
   approvedCount: number;
   pendingCount: number;
   rejectedCount: number;
-
-  // money + recency
   totalBudgetUSD: number;
   lastActivityAt: string | null;
 };
@@ -46,11 +38,9 @@ type SortKey =
 function normalizeRow(r: any): Row {
   return {
     entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
-
     address: r.address ?? null,
     city: r.city ?? null,
     country: r.country ?? null,
-
     contactEmail:
       r.primaryEmail ??
       r.primary_email ??
@@ -61,16 +51,13 @@ function normalizeRow(r: any): Row {
       null,
     ownerEmail: r.ownerEmail ?? r.owner_email ?? null,
     ownerWallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet ?? null,
-
     proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
     approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
     pendingCount: Number(r.pendingCount ?? r.pending_count ?? 0),
     rejectedCount: Number(r.rejectedCount ?? r.rejected_count ?? 0),
-
     totalBudgetUSD: Number(
       r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
     ),
-
     lastActivityAt:
       r.lastActivityAt ??
       r.last_activity_at ??
@@ -99,12 +86,10 @@ function aggregateFromProposals(props: Proposal[]): Row[] {
         contactEmail: p.contact || p.ownerEmail || null,
         ownerEmail: p.ownerEmail || null,
         ownerWallet: p.ownerWallet || null,
-
         proposalsCount: 0,
         approvedCount: 0,
         pendingCount: 0,
         rejectedCount: 0,
-
         totalBudgetUSD: 0,
         lastActivityAt: null,
       };
@@ -146,11 +131,9 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
         setLoading(true);
         setError(null);
 
-        // 1) server aggregation
         const server = await listProposers().catch(() => []);
         let data: Row[] = (Array.isArray(server) ? server : []).map(normalizeRow);
 
-        // 2) fallback: build from proposals if empty
         if (!data.length) {
           const proposals = await listProposals({ includeArchived: true });
           data = aggregateFromProposals(proposals);
@@ -168,7 +151,6 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
     };
   }, []);
 
-  // filter
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return rows;
@@ -189,7 +171,6 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
     });
   }, [rows, q]);
 
-  // sort
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const getVal = (r: Row) => {
@@ -216,7 +197,6 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
     return arr;
   }, [filtered, sortKey, asc]);
 
-  // pagination
   const pageCount = Math.max(1, Math.ceil(sorted.length / perPage));
   const current = useMemo(() => {
     const start = (page - 1) * perPage;
@@ -274,20 +254,34 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="min-w-full table-fixed text-sm">
+          {/* Ensure consistent widths and a comfy Actions column */}
+          <colgroup>
+            <col className="w-[22%]" />
+            <col className="w-[18%]" />
+            <col className="w-[14%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[10%]" />
+            <col className="w-[12%]" />
+            <col className="min-w-[220px] w-[14%]" />
+          </colgroup>
+
           <thead className="bg-slate-50 text-slate-600">
             <tr>
-              <Th className="w-[22%]">Entity / Location</Th>
-              <Th className="w-[20%]">Primary contact</Th>
-              <Th className="w-[16%]">Wallet</Th>
-              <Th className="w-[10%] text-right">Proposals</Th>
-              <Th className="w-[10%] text-right">Approved</Th>
-              <Th className="w-[10%] text-right">Pending</Th>
-              <Th className="w-[10%] text-right">Rejected</Th>
-              <Th className="w-[12%] text-right">Total Budget</Th>
-              <Th className="w-[14%]">Last Activity</Th>
-              <Th className="w-[12%]">Actions</Th>
+              <Th>Entity / Location</Th>
+              <Th>Primary contact</Th>
+              <Th>Wallet</Th>
+              <Th className="text-right">Proposals</Th>
+              <Th className="text-right">Approved</Th>
+              <Th className="text-right">Pending</Th>
+              <Th className="text-right">Rejected</Th>
+              <Th className="text-right">Total Budget</Th>
+              <Th>Last Activity</Th>
+              <Th className="text-right">Actions</Th>
             </tr>
           </thead>
 
@@ -331,24 +325,25 @@ export default function AdminEntitiesTable({ perPage = 10 }: { perPage?: number 
 
                   <Td>{r.lastActivityAt ? new Date(r.lastActivityAt).toLocaleString() : '—'}</Td>
 
-                  <Td>
-                    <div className="flex flex-wrap gap-2">
+                  {/* Actions: tidy, right-aligned, fixed height buttons */}
+                  <Td className="text-right">
+                    <div className="inline-flex flex-wrap justify-end gap-2 min-w-[220px]">
                       <Link
                         href={proposalsHref}
-                        className="px-3 py-1 rounded text-xs border border-cyan-600 text-cyan-700 hover:bg-cyan-50"
+                        className="h-8 px-3 rounded-lg border border-cyan-600 text-cyan-700 hover:bg-cyan-50 text-xs font-medium leading-8"
                         title="See proposals for this entity"
                       >
                         Proposals
                       </Link>
                       <button
-                        className="px-3 py-1 rounded text-xs bg-amber-100 text-amber-800 border border-amber-200 cursor-not-allowed"
+                        className="h-8 px-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs font-medium leading-8 cursor-not-allowed"
                         title="Archive (not wired)"
                         disabled
                       >
                         Archive
                       </button>
                       <button
-                        className="px-3 py-1 rounded text-xs bg-rose-100 text-rose-800 border border-rose-200 cursor-not-allowed"
+                        className="h-8 px-3 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-xs font-medium leading-8 cursor-not-allowed"
                         title="Delete (not wired)"
                         disabled
                       >
@@ -410,11 +405,11 @@ function buildProposalsHref(r: Row) {
 
 function Th({ children, className = '' }: React.PropsWithChildren<{ className?: string }>) {
   return (
-    <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}>
+    <th className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}>
       {children}
     </th>
   );
 }
 function Td({ children, className = '' }: React.PropsWithChildren<{ className?: string }>) {
-  return <td className={`px-4 py-3 align-top whitespace-normal break-words ${className}`}>{children}</td>;
+  return <td className={`px-6 py-3 align-top whitespace-normal break-words ${className}`}>{children}</td>;
 }
