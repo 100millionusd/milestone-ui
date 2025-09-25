@@ -7,15 +7,15 @@ import {
   listProposers,
   listProposals,
   type Proposal,
-  archiveEntity,
-  unarchiveEntity,
-  deleteEntity,
+  adminArchiveEntity,
+  adminUnarchiveEntity,
+  adminDeleteEntity,
 } from '@/lib/api';
 
 /* ---------- Types ---------- */
 
 export type ProposerAgg = {
-  id?: number | string | null;          // NEW (if backend provides)
+  id?: number | string | null;          // optional (if backend provides)
   entity: string | null;
   address: string | null;
   city: string | null;
@@ -29,7 +29,7 @@ export type ProposerAgg = {
   rejectedCount: number;
   totalBudgetUSD: number;
   lastActivity: string | null;          // ISO
-  archived?: boolean;                   // NEW
+  archived?: boolean;
 };
 
 type SortKey =
@@ -243,10 +243,10 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     return `/admin/proposals?${sp.toString()}`;
   }
 
-  // Payload for backend (id if present, otherwise the triple)
+  // Payload for backend (id if present, otherwise orgName/contactEmail/ownerWallet)
   function toIdOrKey(r: ProposerAgg) {
     if (r.id != null) return { id: r.id };
-    return { entity: r.entity, contactEmail: r.contactEmail, wallet: r.wallet };
+    return { orgName: r.entity, contactEmail: r.contactEmail, ownerWallet: r.wallet };
   }
 
   async function onArchive(r: ProposerAgg, nextArchived: boolean) {
@@ -259,8 +259,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       prev.map((x) => (keyOf(x) === k ? { ...x, archived: nextArchived } : x))
     );
     try {
-      if (nextArchived) await archiveEntity(payload);
-      else await unarchiveEntity(payload);
+      if (nextArchived) await adminArchiveEntity(payload);
+      else await adminUnarchiveEntity(payload);
     } catch (e: any) {
       // revert on error
       setRows((prev) =>
@@ -282,7 +282,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     const prev = rows;
     setRows((p) => p.filter((x) => keyOf(x) !== k));
     try {
-      await deleteEntity(payload);
+      await adminDeleteEntity(payload);
     } catch (e: any) {
       setRows(prev); // revert
       alert(e?.message || 'Failed to delete entity');
