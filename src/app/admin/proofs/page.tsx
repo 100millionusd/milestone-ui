@@ -24,6 +24,8 @@ export default function AdminProofsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
 
   const [lightbox, setLightbox] = useState<LightboxState>(null);
+  const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
+  const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
   // NEW: tabs + search
   const [tab, setTab] = useState<TabKey>('all');
@@ -155,7 +157,15 @@ export default function AdminProofsPage() {
   try {
     setProcessing(`reject-${bidId}-${milestoneIndex}`);
     await rejectMilestoneProof(bidId, milestoneIndex, reason);
-    await loadProofs(); // re-fetch list
+
+    // keep this button disabled from now on
+    setRejectedLocal(prev => {
+      const next = new Set(prev);
+      next.add(mkRejectKey(bidId, milestoneIndex));
+      return next;
+    });
+
+    await loadProofs(); // re-fetch list if you want the server state reflected too
   } catch (e: any) {
     console.error('Error rejecting proof:', e);
     alert(e?.message || 'Failed to reject proof');
@@ -408,15 +418,26 @@ export default function AdminProofsPage() {
                         )}
 
                         {/* NEW: Reject button */}
-                        {hasProof(m) && !isCompleted(m) && (
-                          <button
-                            onClick={() => handleReject(bid.bidId, idx)}
-                            disabled={processing === `reject-${bid.bidId}-${idx}`}
-                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded disabled:opacity-50"
-                          >
-                            {processing === `reject-${bid.bidId}-${idx}` ? 'Rejecting...' : 'Reject'}
-                          </button>
-                        )}
+                        {hasProof(m) && !isCompleted(m) && (() => {
+  const key = mkRejectKey(bid.bidId, idx);
+  const isProcessing = processing === `reject-${bid.bidId}-${idx}`;
+  const isLocked = rejectedLocal.has(key);
+  const disabled = isProcessing || isLocked;
+
+  return (
+    <button
+      onClick={() => handleReject(bid.bidId, idx)}
+      disabled={disabled}
+      className={[
+        "px-4 py-2 rounded disabled:opacity-50",
+        disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                 : "bg-red-600 hover:bg-red-700 text-white"
+      ].join(" ")}
+    >
+      {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
+    </button>
+  );
+})()}
 
                         {showPay && (
                           <button
