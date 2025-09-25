@@ -831,17 +831,6 @@ export async function getProofs(bidId?: number): Promise<Proof[]> {
   return (Array.isArray(rows) ? rows : []).map(toProof);
 }
 
-export async function rejectProof(proofId: number, reason?: string) {
-  const res = await fetch(`${API_BASE}/proofs/${proofId}/reject`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ reason: reason ?? "" }),
-  });
-  if (!res.ok) throw new Error(`rejectProof failed: ${res.status}`);
-  return res.json();
-}
-
 export function approveProof(bidId: number, milestoneIndex: number) {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
   return apiFetch(
@@ -864,9 +853,6 @@ export async function rejectMilestoneProof(bidId: number, milestoneIndex: number
     }
   );
 }
-
-// (Optional) alias so any old imports keep working:
-export const rejectProof = rejectMilestoneProof;
 
 /* ==========================
    Agent2 Proof Chat (SSE)
