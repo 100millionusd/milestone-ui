@@ -1,9 +1,9 @@
 // src/app/new/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createProposal, uploadFileToIPFS } from "@/lib/api";
+import { createProposal, uploadFileToIPFS, API_BASE } from "@/lib/api";
 
 // ✅ Guard: only allow submit when the clicked button opts in
 const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
@@ -17,6 +17,9 @@ const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => 
 export default function NewProposalPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [wallet, setWallet] = useState<string | null>(null);
+  const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
+
   const [formData, setFormData] = useState({
     orgName: '',
     title: '',
@@ -26,8 +29,22 @@ export default function NewProposalPage() {
     city: '',
     country: '',
     amountUSD: '',
+    ownerPhone: '', // NEW
   });
   const [files, setFiles] = useState<File[]>([]);
+
+  // Load connected wallet (for Telegram deep-link)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/auth/role`, { credentials: 'include' });
+        const j = await r.json().catch(() => ({}));
+        if (j?.address) setWallet(j.address);
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,9 +65,16 @@ export default function NewProposalPage() {
 
       const amount = parseFloat(formData.amountUSD);
       const body = {
-        ...formData,
+        orgName: formData.orgName,
+        title: formData.title,
+        summary: formData.summary,
+        contact: formData.contact,
+        address: formData.address,
+        city: formData.city,
+        country: formData.country,
         amountUSD: Number.isFinite(amount) ? amount : 0,
-        docs
+        docs,
+        ownerPhone: (formData.ownerPhone || '').trim(), // NEW (E.164 recommended, e.g. +34600111222)
       };
 
       const res = await createProposal(body);
@@ -167,6 +191,40 @@ export default function NewProposalPage() {
             className="w-full p-2 border rounded"
             rows={2}
           />
+        </div>
+
+        {/* NEW: Phone + Connect Telegram */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Phone (for WhatsApp)</label>
+            <input
+              type="tel"
+              placeholder="+34600111222"
+              value={formData.ownerPhone}
+              onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
+              className="w-full p-2 border rounded"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Telegram</label>
+            {wallet ? (
+              <a
+                href={`https://t.me/${bot}?start=link_${encodeURIComponent(wallet)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
+              >
+                Connect Telegram
+              </a>
+            ) : (
+              <div className="text-sm text-gray-500">
+                Connect wallet to enable Telegram linking.
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-1">
+              Opens Telegram to link this wallet to your account.
+            </p>
+          </div>
         </div>
 
         <div>
