@@ -18,7 +18,25 @@ type ProfileForm = {
   phone: string;
   website: string;
   address: Address;
+  telegramConnected?: boolean;
 };
+
+// Deep-link button to connect Telegram via /start link_<WALLET>
+function ConnectTelegramButton({ wallet }: { wallet: string }) {
+  const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
+  if (!wallet) return null;
+  const deepLink = `https://t.me/${bot}?start=link_${encodeURIComponent(wallet)}`;
+  return (
+    <a
+      href={deepLink}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
+    >
+      Connect Telegram
+    </a>
+  );
+}
 
 export default function VendorProfilePage() {
   const router = useRouter();
@@ -32,6 +50,7 @@ export default function VendorProfilePage() {
     phone: '',
     website: '',
     address: { line1: '', city: '', postalCode: '', country: '' },
+    telegramConnected: false,
   });
 
   useEffect(() => {
@@ -62,6 +81,8 @@ export default function VendorProfilePage() {
           phone: j?.phone || '',
           website: j?.website || '',
           address,
+          // Consider any truthy chat id as connected; support snake/camel
+          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
         });
       } catch (e: any) {
         setErr(e?.message || 'Failed to load profile');
@@ -87,7 +108,7 @@ export default function VendorProfilePage() {
 
     try {
       const payload = {
-        vendorName: (p.vendorName || '').trim(),   // required (>= 2 chars)
+        vendorName: (p.vendorName || '').trim(), // required (>= 2 chars)
         email: (p.email || '').trim(),
         phone: (p.phone || '').trim(),
         website: normalizeWebsite(p.website || ''),
@@ -170,6 +191,7 @@ export default function VendorProfilePage() {
               className="border rounded px-3 py-2 w-full"
               value={p.phone}
               onChange={(e) => setP({ ...p, phone: e.target.value })}
+              placeholder="+34600111222"
             />
           </label>
           <label className="block">
@@ -181,6 +203,25 @@ export default function VendorProfilePage() {
               placeholder="https://yourdomain.com"
             />
           </label>
+        </div>
+
+        {/* Telegram connect row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="block">
+            <div className="text-sm text-slate-600 mb-1">Telegram</div>
+            {p.telegramConnected ? (
+              <div className="inline-flex items-center gap-2">
+                <span className="text-green-600">Connected</span>
+                {/* Allow re-link just in case */}
+                <ConnectTelegramButton wallet={p.walletAddress} />
+              </div>
+            ) : (
+              <ConnectTelegramButton wallet={p.walletAddress} />
+            )}
+            <p className="text-xs text-slate-500 mt-1">
+              Opens Telegram to link this wallet to your account.
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
