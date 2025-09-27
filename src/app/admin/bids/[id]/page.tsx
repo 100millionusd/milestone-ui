@@ -19,6 +19,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [actedByIdx, setActedByIdx] = useState<Record<number, 'approved' | 'rejected'>>({});
+  const [lockByIdx, setLockByIdx] = useState<Record<number, boolean>>({});
 
   // who am I (gate admin-only edit controls)
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
@@ -101,6 +102,22 @@ const fallbackLatestByIdx = useMemo(() => {
   })();
 }, [bidId]);
 
+// hydrate reject locks from localStorage so buttons stay disabled after refresh/navigation
+useEffect(() => {
+  if (!bidId) return;
+  try {
+    const next: Record<number, boolean> = {};
+    for (const p of proofs) {
+      const idx = Number(p.milestoneIndex ?? p.milestone_index);
+      if (typeof window !== 'undefined' &&
+          localStorage.getItem(`rej:${bidId}:${idx}`) === '1') {
+        next[idx] = true;
+      }
+    }
+    setLockByIdx(next);
+  } catch { /* ignore */ }
+}, [bidId, proofs]);
+
   async function runProofAnalysis(proofId: number) {
     try {
       setBusyById((prev) => ({ ...prev, [proofId]: true }));
@@ -131,18 +148,20 @@ async function refreshLatest() {
 
 // one-shot reject; disables button + persists lock
 async function onRejectOnce(idx: number) {
-  // already rejected in this session? bail
-  if (actedByIdx[idx] === 'rejected') return;
+  // already locked in this session? bail.
+  if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
   try {
-    await rejectProof(bidId, idx);                    // your existing call
+    await rejectProof(bidId, idx); // your existing API call
     setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setLockByIdx(prev => ({ ...prev, [idx]: true }));
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1'); // persist lock
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1'); // persist across refresh
     }
     await refreshLatest();
   } catch {
     // even if server says already rejected, lock locally
     setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setLockByIdx(prev => ({ ...prev, [idx]: true }));
     if (typeof window !== 'undefined') {
       localStorage.setItem(`rej:${bidId}:${idx}`, '1');
     }
@@ -255,10 +274,7 @@ async function onRejectOnce(idx: number) {
   const idx = Number(p.milestoneIndex ?? p.milestone_index);
   const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
   const canReview = latestStatus === 'pending';
-  const rejectedLocally =
-    typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1';
-  const rejectLocked =
-    actedByIdx[idx] === 'rejected' || rejectedLocally || latestStatus !== 'pending';
+  const rejectLocked = !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
   const isLatestCard = id === latestIdByIdx[idx]; 
 
           return (
