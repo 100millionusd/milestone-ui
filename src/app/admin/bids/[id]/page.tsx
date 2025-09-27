@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as api from '@/lib/api';
+import { API_BASE } from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
 import BidChatAgent from '@/components/BidChatAgent';
 
@@ -24,6 +25,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   // per-proof prompt + busy state
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
+  const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
@@ -52,6 +54,19 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       }
     })();
   }, [bidId]);
+
+  useEffect(() => {
+  if (!bidId) return;
+  (async () => {
+    try {
+      const r = await fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, { credentials: 'include' });
+      const j = await r.json();
+      setProofStatusByIdx(j?.byIndex || {});
+    } catch {
+      setProofStatusByIdx({});
+    }
+  })();
+}, [bidId]);
 
   async function runProofAnalysis(proofId: number) {
     try {
@@ -170,6 +185,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         {proofs.map((p) => {
           const id = Number(p.proofId ?? p.id);
           const a = p.aiAnalysis ?? p.ai_analysis;
+          const idx = Number(p.milestoneIndex ?? p.milestone_index);
+const latestStatus = proofStatusByIdx[idx] ?? p.status;   // prefer server's latest
+const canReview = latestStatus === 'pending';
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
@@ -179,7 +197,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
                 </div>
                 <span
                   className={`text-xs rounded px-2 py-0.5 border ${
-                    p.status === 'approved'
+                    latestStatus === 'approved'
                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                       : p.status === 'rejected'
                       ? 'bg-rose-100 text-rose-800 border-rose-200'
