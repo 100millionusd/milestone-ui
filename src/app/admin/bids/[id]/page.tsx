@@ -199,7 +199,7 @@ const canReview = latestStatus === 'pending';
                   className={`text-xs rounded px-2 py-0.5 border ${
                     latestStatus === 'approved'
                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                      : p.status === 'rejected'
+                      : latestStatus === 'rejected'
                       ? 'bg-rose-100 text-rose-800 border-rose-200'
                       : 'bg-amber-100 text-amber-800 border-amber-200'
                   }`}
