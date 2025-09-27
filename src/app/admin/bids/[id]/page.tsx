@@ -18,6 +18,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [proposal, setProposal] = useState<any>(null);
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [actedByIdx, setActedByIdx] = useState<Record<number, 'approved' | 'rejected'>>({});
 
   // who am I (gate admin-only edit controls)
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
@@ -105,6 +106,40 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       setBusyById((prev) => ({ ...prev, [proofId]: false }));
     }
   }
+
+  // refresh latest map (used after actions)
+async function refreshLatest() {
+  if (!bidId) return;
+  try {
+    const r = await fetch(
+      `${API_BASE}/bids/${bidId}/proofs/latest-status`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+    const j = await r.json();
+    setProofStatusByIdx(j?.byIndex || {});
+  } catch { /* ignore */ }
+}
+
+// one-shot reject; disables button + persists lock
+async function onRejectOnce(idx: number) {
+  // already rejected in this session? bail
+  if (actedByIdx[idx] === 'rejected') return;
+  try {
+    await rejectProof(bidId, idx);                    // your existing call
+    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1'); // persist lock
+    }
+    await refreshLatest();
+  } catch {
+    // even if server says already rejected, lock locally
+    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
+    }
+    await refreshLatest();
+  }
+}
 
   if (loading) {
     return (
@@ -211,6 +246,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           const idx = Number(p.milestoneIndex ?? p.milestone_index);
           const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
           const canReview = latestStatus === 'pending';
+          const rejectedLocally =
+  typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1';
+const rejectLocked = actedByIdx[idx] === 'rejected' || rejectedLocally || latestStatus !== 'pending';
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
@@ -271,10 +309,13 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   Approve Proof
 </button>
 <button
-  className="px-4 py-2 rounded bg-red-600 text-white"
-  onClick={async () => { await rejectProof(bidId, idx); await refreshLatest(); }}
+  className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+  onClick={() => onRejectOnce(idx)}
+  disabled={rejectLocked}
+  aria-disabled={rejectLocked}
+  title={rejectLocked ? 'Already rejected' : 'Reject'}
 >
-  Reject
+  {rejectLocked ? 'Rejected' : 'Reject'}
 </button>
   </div>
 ) : (
