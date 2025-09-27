@@ -27,23 +27,31 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
   const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
-  const fallbackLatestByIdx = useMemo(() => {
-  const map: Record<number, { ts: number; id: number; status: string }> = {};
+  // latest proof_id per milestone index (by max id — simplest, robust)
+const latestIdByIdx = useMemo(() => {
+  const ids: Record<number, number> = {};
   for (const p of proofs) {
     const idx = Number(p.milestoneIndex ?? p.milestone_index);
-    const ts = Date.parse(
-      (p.submittedAt ?? p.submitted_at ??
-       p.updatedAt   ?? p.updated_at   ??
-       p.createdAt   ?? p.created_at   ?? 0) as any
-    ) || 0;
-    const id = Number(p.proofId ?? p.id ?? 0);
-    const prev = map[idx];
-    if (!prev || ts > prev.ts || (ts === prev.ts && id > prev.id)) {
-      map[idx] = { ts, id, status: String(p.status || 'pending') };
+    const pid = Number(p.proofId ?? p.id ?? 0);
+    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+    if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
+  }
+  return ids;
+}, [proofs]);
+
+// fallback latest *status* per milestone (by max id)
+const fallbackLatestByIdx = useMemo(() => {
+  const out: Record<number, string> = {};
+  const ids: Record<number, number> = {};
+  for (const p of proofs) {
+    const idx = Number(p.milestoneIndex ?? p.milestone_index);
+    const pid = Number(p.proofId ?? p.id ?? 0);
+    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+    if (!ids[idx] || pid > ids[idx]) {
+      ids[idx] = pid;
+      out[idx] = String(p.status || 'pending');
     }
   }
-  const out: Record<number, string> = {};
-  for (const k in map) out[Number(k)] = map[Number(k)].status;
   return out;
 }, [proofs]);
 
@@ -249,6 +257,7 @@ async function onRejectOnce(idx: number) {
           const rejectedLocally =
   typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1';
 const rejectLocked = actedByIdx[idx] === 'rejected' || rejectedLocally || latestStatus !== 'pending';
+const isLatestCard = id === latestIdByIdx[idx];
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
@@ -298,8 +307,8 @@ const rejectLocked = actedByIdx[idx] === 'rejected' || rejectedLocally || latest
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — only show when the latest status is pending AND not locally locked */}
-{(canReview && !rejectLocked) ? (
+                {/* Actions — only show on the latest card, when status is pending, and not locally locked */}
+{(isLatestCard && canReview && !rejectLocked) ? (
   <div className="mt-3 flex gap-2">
     {/* Replace the onClick handlers with your existing ones */}
     <button
