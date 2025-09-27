@@ -209,8 +209,8 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           const id = Number(p.proofId ?? p.id);
           const a = p.aiAnalysis ?? p.ai_analysis;
           const idx = Number(p.milestoneIndex ?? p.milestone_index);
-const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
-const canReview = latestStatus === 'pending';
+          const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
+          const canReview = latestStatus === 'pending';
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
