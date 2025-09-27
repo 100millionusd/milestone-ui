@@ -274,7 +274,7 @@ async function onRejectOnce(idx: number) {
   const idx = Number(p.milestoneIndex ?? p.milestone_index);
   const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
   const canReview = latestStatus === 'pending';
-  const rejectLocked = !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
+  const rejectLocked = !!lockByIdx[idx] || actedByIdx[idx] === 'rejected';
   const isLatestCard = id === latestIdByIdx[idx]; 
 
           return (
@@ -325,29 +325,29 @@ async function onRejectOnce(idx: number) {
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — only show on the latest card, when status is pending, and not locally locked */}
-{(isLatestCard && canReview && !rejectLocked) ? (
+                {/* Actions — always show on the latest card.
+    Approve is only enabled while pending.
+    Reject stays disabled forever once locally locked. */}
+{isLatestCard && (
   <div className="mt-3 flex gap-2">
-    {/* Replace the onClick handlers with your existing ones */}
     <button
-  className="px-4 py-2 rounded bg-amber-500 text-white"
-  onClick={async () => { await approveProof(bidId, idx); await refreshLatest(); }}
->
-  Approve Proof
-</button>
-<button
-  className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-  onClick={() => onRejectOnce(idx)}
-  disabled={rejectLocked}
-  aria-disabled={rejectLocked}
-  title={rejectLocked ? 'Already rejected' : 'Reject'}
->
-  {rejectLocked ? 'Rejected' : 'Reject'}
-</button>
-  </div>
-) : (
-  <div className="mt-2 text-xs text-slate-500">
-    Latest proof is <span className="font-medium">{latestStatus}</span>.
+      className="px-4 py-2 rounded bg-amber-500 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+      onClick={async () => { await approveProof(bidId, idx); await refreshLatest(); }}
+      disabled={latestStatus !== 'pending'}
+      title={latestStatus !== 'pending' ? `Cannot approve (${latestStatus})` : 'Approve'}
+    >
+      Approve Proof
+    </button>
+
+    <button
+      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+      onClick={() => onRejectOnce(idx)}
+      disabled={rejectLocked}
+      aria-disabled={rejectLocked}
+      title={rejectLocked ? 'Already rejected' : 'Reject'}
+    >
+      {rejectLocked ? 'Rejected' : 'Reject'}
+    </button>
   </div>
 )}
 
