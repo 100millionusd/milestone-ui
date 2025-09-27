@@ -178,26 +178,22 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       localStorage.setItem(`rej:${bidId}:${idx}`, '1');
     }
 
-    // 2) mark the latest proof as rejected in local UI state immediately
-    setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    setProofs(prev => {
-      // compute latest id for this milestone from the current list
-      let latestId = 0;
-      for (const q of prev) {
-        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-        const pid  = Number(q.proofId ?? q.id ?? 0);
-        if (qIdx === idx && pid > latestId) latestId = pid;
-      }
-      // flip that row’s status locally
-      return prev.map(q => {
-        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-        const pid  = Number(q.proofId ?? q.id ?? 0);
-        if (qIdx === idx && pid === latestId) {
-          return { ...q, status: 'rejected', updatedAt: new Date().toISOString() };
-        }
-        return q;
-      });
-    });
+    // 2) remove the latest rejected proof from local state immediately
+setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+setProofs(prev => {
+  let latestId = 0;
+  for (const q of prev) {
+    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+    const pid  = Number(q.proofId ?? q.id ?? 0);
+    if (qIdx === idx && pid > latestId) latestId = pid;
+  }
+  // drop that row entirely
+  return prev.filter(q => {
+    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+    const pid  = Number(q.proofId ?? q.id ?? 0);
+    return !(qIdx === idx && pid === latestId);
+  });
+});
 
     // 3) refresh server truth (won’t re-enable the button, local state already flipped)
     refreshLatest(); // fire-and-forget
