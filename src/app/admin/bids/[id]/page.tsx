@@ -24,11 +24,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   // who am I (gate admin-only edit controls)
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
 
-  // per-proof prompt + busy state
+ // per-proof prompt + busy state
 const [promptById, setPromptById] = useState<Record<number, string>>({});
 const [busyById, setBusyById] = useState<Record<number, boolean>>({});
-const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
-
 const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
 
 // latest proof_id per milestone (by max id — single source of truth)
