@@ -18,59 +18,57 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [proposal, setProposal] = useState<any>(null);
   const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
+
+  // local action locks (approve/reject) by milestone index
   const [actedByIdx, setActedByIdx] = useState<Record<number, 'approved' | 'rejected'>>({});
   const [lockByIdx, setLockByIdx] = useState<Record<number, boolean>>({});
 
   // who am I (gate admin-only edit controls)
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
 
- // per-proof prompt + busy state
-const [promptById, setPromptById] = useState<Record<number, string>>({});
-const [busyById, setBusyById] = useState<Record<number, boolean>>({});
-const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
+  // per-proof prompt + busy state
+  const [promptById, setPromptById] = useState<Record<number, string>>({});
+  const [busyById, setBusyById] = useState<Record<number, boolean>>({});
+  const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
 
-// latest proof_id per milestone (by max id — single source of truth)
-const latestIdByIdx = useMemo(() => {
-  const ids: Record<number, number> = {};
-  for (const p of proofs) {
-    const idx = Number(p.milestoneIndex ?? p.milestone_index);
-    const pid = Number(p.proofId ?? p.id ?? 0);
-    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
-    if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
-  }
-  return ids;
-}, [proofs]);
-
-const visibleProofs = useMemo(() => {
-  const keep = new Set<number>(Object.values(latestIdByIdx));
-  return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
-}, [proofs, latestIdByIdx]);
-
-// fallback latest *status* per milestone (by max id)
-const fallbackLatestByIdx = useMemo(() => {
-  const out: Record<number, string> = {};
-  const ids: Record<number, number> = {};
-  for (const p of proofs) {
-    const idx = Number(p.milestoneIndex ?? p.milestone_index);
-    const pid = Number(p.proofId ?? p.id ?? 0);
-    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
-    if (!ids[idx] || pid > ids[idx]) {
-      ids[idx] = pid;
-      out[idx] = String(p.status || 'pending');
+  // latest proof_id per milestone (by max id — single source of truth)
+  const latestIdByIdx = useMemo(() => {
+    const ids: Record<number, number> = {};
+    for (const p of proofs) {
+      const idx = Number(p.milestoneIndex ?? p.milestone_index);
+      const pid = Number(p.proofId ?? p.id ?? 0);
+      if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+      if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
     }
-  }
-  return out;
-}, [proofs]);
+    return ids;
+  }, [proofs]);
 
-// only show the latest proof card per milestone in the UI
-const visibleProofs = useMemo(() => {
-  const keep = new Set<number>(Object.values(latestIdByIdx));
-  return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
-}, [proofs, latestIdByIdx]);
+  // fallback latest *status* per milestone (by max id)
+  const fallbackLatestByIdx = useMemo(() => {
+    const out: Record<number, string> = {};
+    const ids: Record<number, number> = {};
+    for (const p of proofs) {
+      const idx = Number(p.milestoneIndex ?? p.milestone_index);
+      const pid = Number(p.proofId ?? p.id ?? 0);
+      if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+      if (!ids[idx] || pid > ids[idx]) {
+        ids[idx] = pid;
+        out[idx] = String(p.status || 'pending');
+      }
+    }
+    return out;
+  }, [proofs]);
+
+  // only show the latest proof card per milestone in the UI
+  const visibleProofs = useMemo(() => {
+    const keep = new Set<number>(Object.values(latestIdByIdx));
+    return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
+  }, [proofs, latestIdByIdx]);
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
 
+  // Initial load
   useEffect(() => {
     (async () => {
       try {
@@ -96,38 +94,39 @@ const visibleProofs = useMemo(() => {
     })();
   }, [bidId]);
 
+  // Fetch latest per-milestone status map (server truth)
   useEffect(() => {
-  if (!bidId) return;
-  (async () => {
-    try {
-      const r = await fetch(
-        `${API_BASE}/bids/${bidId}/proofs/latest-status`,
-        { credentials: 'include', cache: 'no-store' } // prevent stale cache
-      );
-      const j = await r.json();
-      setProofStatusByIdx(j?.byIndex || {});
-    } catch (e) {
-      console.warn('latest-status fetch failed', e);
-      setProofStatusByIdx({});
-    }
-  })();
-}, [bidId]);
-
-// hydrate reject locks from localStorage so buttons stay disabled after refresh/navigation
-useEffect(() => {
-  if (!bidId) return;
-  try {
-    const next: Record<number, boolean> = {};
-    for (const p of proofs) {
-      const idx = Number(p.milestoneIndex ?? p.milestone_index);
-      if (typeof window !== 'undefined' &&
-          localStorage.getItem(`rej:${bidId}:${idx}`) === '1') {
-        next[idx] = true;
+    if (!bidId) return;
+    (async () => {
+      try {
+        const r = await fetch(
+          `${API_BASE}/bids/${bidId}/proofs/latest-status`,
+          { credentials: 'include', cache: 'no-store' } // prevent stale cache
+        );
+        const j = await r.json();
+        setProofStatusByIdx(j?.byIndex || {});
+      } catch (e) {
+        console.warn('latest-status fetch failed', e);
+        setProofStatusByIdx({});
       }
-    }
-    setLockByIdx(next);
-  } catch { /* ignore */ }
-}, [bidId, proofs]);
+    })();
+  }, [bidId]);
+
+  // hydrate reject locks from localStorage so buttons stay disabled after refresh/navigation
+  useEffect(() => {
+    if (!bidId) return;
+    try {
+      const next: Record<number, boolean> = {};
+      for (const p of proofs) {
+        const idx = Number(p.milestoneIndex ?? p.milestone_index);
+        if (typeof window !== 'undefined' &&
+            localStorage.getItem(`rej:${bidId}:${idx}`) === '1') {
+          next[idx] = true;
+        }
+      }
+      setLockByIdx(next);
+    } catch { /* ignore */ }
+  }, [bidId, proofs]);
 
   async function runProofAnalysis(proofId: number) {
     try {
@@ -145,62 +144,60 @@ useEffect(() => {
   }
 
   // refresh latest map (used after actions)
-async function refreshLatest() {
-  if (!bidId) return;
-  try {
-    const r = await fetch(
-      `${API_BASE}/bids/${bidId}/proofs/latest-status`,
-      { credentials: 'include', cache: 'no-store' }
-    );
-    const j = await r.json();
-    setProofStatusByIdx(j?.byIndex || {});
-  } catch { /* ignore */ }
-}
-
-// one-shot reject; disables button + updates local state so the card stops showing as pending
-async function onRejectOnce(idx: number) {
-  // if already locked locally, bail
-  if (actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1')) {
-    return;
+  async function refreshLatest() {
+    if (!bidId) return;
+    try {
+      const r = await fetch(
+        `${API_BASE}/bids/${bidId}/proofs/latest-status`,
+        { credentials: 'include', cache: 'no-store' }
+      );
+      const j = await r.json();
+      setProofStatusByIdx(j?.byIndex || {});
+    } catch { /* ignore */ }
   }
 
-  try {
-    await rejectProof(bidId, idx); // your existing API call
-  } catch {
-    // ignore server error; we still lock locally to prevent repeat clicks
-  }
+  // one-shot reject; disables button + persists lock + flips local status immediately
+  async function onRejectOnce(idx: number) {
+    // already locked in this session? bail
+    if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
 
-  // 1) lock locally & persist
-  setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(`rej:${bidId}:${idx}`, '1');
-  }
-
-  // 2) mark the latest proof for this milestone as rejected in local UI state
-  setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-
-  setProofs(prev => {
-    // compute latest id for this milestone from the current list
-    let latestId = 0;
-    for (const p of prev) {
-      const pIdx = Number(p.milestoneIndex ?? p.milestone_index);
-      const pid  = Number(p.proofId ?? p.id ?? 0);
-      if (pIdx === idx && pid > latestId) latestId = pid;
+    try {
+      await api.rejectProof(bidId, idx); // <-- use api.* (not a bare function)
+    } catch {
+      // non-fatal — we still lock locally to prevent repeat clicks
     }
-    // flip that row’s status locally
-    return prev.map(p => {
-      const pIdx = Number(p.milestoneIndex ?? p.milestone_index);
-      const pid  = Number(p.proofId ?? p.id ?? 0);
-      if (pIdx === idx && pid === latestId) {
-        return { ...p, status: 'rejected', updatedAt: new Date().toISOString() };
-      }
-      return p;
-    });
-  });
 
-  // 3) optionally refresh server truth (won’t flicker because we already fixed local UI)
-  refreshLatest(); // don't await
-}
+    // 1) lock locally & persist
+    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setLockByIdx(prev => ({ ...prev, [idx]: true }));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
+    }
+
+    // 2) mark the latest proof as rejected in local UI state immediately
+    setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setProofs(prev => {
+      // compute latest id for this milestone from the current list
+      let latestId = 0;
+      for (const q of prev) {
+        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+        const pid  = Number(q.proofId ?? q.id ?? 0);
+        if (qIdx === idx && pid > latestId) latestId = pid;
+      }
+      // flip that row’s status locally
+      return prev.map(q => {
+        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+        const pid  = Number(q.proofId ?? q.id ?? 0);
+        if (qIdx === idx && pid === latestId) {
+          return { ...q, status: 'rejected', updatedAt: new Date().toISOString() };
+        }
+        return q;
+      });
+    });
+
+    // 3) refresh server truth (won’t re-enable the button, local state already flipped)
+    refreshLatest(); // fire-and-forget
+  }
 
   if (loading) {
     return (
@@ -302,17 +299,14 @@ async function onRejectOnce(idx: number) {
         )}
 
         {visibleProofs.map((p) => {
-  const id = Number(p.proofId ?? p.id);
-  const a = p.aiAnalysis ?? p.ai_analysis;
-  const idx = Number(p.milestoneIndex ?? p.milestone_index);
-  const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
-  const canReview = latestStatus === 'pending';
-  const rejectLocked = 
-    !!lockByIdx[idx] || 
-    actedByIdx[idx] === 'rejected' || 
-    latestStatus !== 'pending' || 
-    latestStatus === 'rejected';
-  const isLatestCard = id === latestIdByIdx[idx]; 
+          const id = Number(p.proofId ?? p.id);
+          const a = p.aiAnalysis ?? p.ai_analysis;
+          const idx = Number(p.milestoneIndex ?? p.milestone_index);
+          const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
+          const canReview = latestStatus === 'pending';
+          const rejectLocked =
+            !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
+          const isLatestCard = id === latestIdByIdx[idx];
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
@@ -362,31 +356,42 @@ async function onRejectOnce(idx: number) {
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — only show for the latest card when status is pending and not locally locked */}
-{(isLatestCard && latestStatus === 'pending' && !(actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1'))) ? (
-  <div className="mt-3 flex gap-2">
-    <button
-      className="px-4 py-2 rounded bg-amber-500 text-white"
-      onClick={async () => { await approveProof(bidId, idx); await refreshLatest(); }}
-    >
-      Approve Proof
-    </button>
-    <button
-      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-      onClick={() => onRejectOnce(idx)}
-      disabled={actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1')}
-      title="Reject"
-    >
-      {actedByIdx[idx] === 'rejected' ? 'Rejected' : 'Reject'}
-    </button>
-  </div>
-) : (
-  <div className="mt-2 text-xs text-slate-500">
-    Latest proof is <span className="font-medium">{latestStatus}</span>.
-  </div>
-)}
 
-                {a ? <AnalysisView a={a} /> : <div className="text-sm text-slate-600">No analysis yet for this proof.</div>}
+                {/* Actions — only on latest card, when status is pending, and not locally locked */}
+                {(isLatestCard && canReview && !rejectLocked) ? (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      className="px-4 py-2 rounded bg-amber-500 text-white"
+                      onClick={async () => {
+                        await api.approveProof(bidId, idx);   // <-- use api.*
+                        setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' })); // instant flip
+                        await refreshLatest();
+                      }}
+                    >
+                      Approve Proof
+                    </button>
+
+                    <button
+                      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                      onClick={() => onRejectOnce(idx)}
+                      disabled={rejectLocked}
+                      aria-disabled={rejectLocked}
+                      title={rejectLocked ? 'Already rejected' : 'Reject'}
+                    >
+                      {rejectLocked ? 'Rejected' : 'Reject'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-slate-500">
+                    Latest proof is <span className="font-medium">{latestStatus}</span>.
+                  </div>
+                )}
+
+                {a ? (
+                  <AnalysisView a={a} />
+                ) : (
+                  <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
+                )}
 
                 <div className="mt-3">
                   <textarea
