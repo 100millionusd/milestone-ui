@@ -61,9 +61,13 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
 
   // only show the latest proof card per milestone in the UI
   const visibleProofs = useMemo(() => {
-    const keep = new Set<number>(Object.values(latestIdByIdx));
-    return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
-  }, [proofs, latestIdByIdx]);
+  const keep = new Set<number>(Object.values(latestIdByIdx));
+  return proofs.filter(p => {
+    const id = Number(p.proofId ?? p.id);
+    const status = String(p.status || '').toLowerCase();
+    return keep.has(id) && status !== 'rejected';
+  });
+}, [proofs, latestIdByIdx]);
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
