@@ -204,7 +204,7 @@ const canReview = latestStatus === 'pending';
                       : 'bg-amber-100 text-amber-800 border-amber-200'
                   }`}
                 >
-                  {p.status}
+                  {latestStatus}
                 </span>
               </div>
 
