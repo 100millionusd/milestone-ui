@@ -39,6 +39,18 @@ const latestIdByIdx = useMemo(() => {
   return ids;
 }, [proofs]);
 
+// latest proof_id per milestone index (by max id — simplest and robust)
+const latestIdByIdx = useMemo(() => {
+  const ids: Record<number, number> = {};
+  for (const p of proofs) {
+    const idx = Number(p.milestoneIndex ?? p.milestone_index);
+    const pid = Number(p.proofId ?? p.id ?? 0);
+    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+    if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
+  }
+  return ids;
+}, [proofs]);
+
 // fallback latest *status* per milestone (by max id)
 const fallbackLatestByIdx = useMemo(() => {
   const out: Record<number, string> = {};
@@ -249,15 +261,16 @@ async function onRejectOnce(idx: number) {
         )}
 
         {proofs.map((p) => {
-          const id = Number(p.proofId ?? p.id);
-          const a = p.aiAnalysis ?? p.ai_analysis;
-          const idx = Number(p.milestoneIndex ?? p.milestone_index);
-          const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
-          const canReview = latestStatus === 'pending';
-          const rejectedLocally =
-  typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1';
-const rejectLocked = actedByIdx[idx] === 'rejected' || rejectedLocally || latestStatus !== 'pending';
-const isLatestCard = id === latestIdByIdx[idx];
+  const id = Number(p.proofId ?? p.id);
+  const a = p.aiAnalysis ?? p.ai_analysis;
+  const idx = Number(p.milestoneIndex ?? p.milestone_index);
+  const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
+  const canReview = latestStatus === 'pending';
+  const rejectedLocally =
+    typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1';
+  const rejectLocked =
+    actedByIdx[idx] === 'rejected' || rejectedLocally || latestStatus !== 'pending';
+  const isLatestCard = id === latestIdByIdx[idx]; 
 
           return (
             <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
