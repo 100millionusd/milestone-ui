@@ -57,6 +57,24 @@ const fallbackLatestByIdx = useMemo(() => {
   return out;
 }, [proofs]);
 
+// latest proof_id per milestone (by max id)
+const latestIdByIdx = useMemo(() => {
+  const ids: Record<number, number> = {};
+  for (const p of proofs) {
+    const idx = Number(p.milestoneIndex ?? p.milestone_index);
+    const pid = Number(p.proofId ?? p.id ?? 0);
+    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+    if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
+  }
+  return ids;
+}, [proofs]);
+
+// only show the latest proof card per milestone in the UI
+const visibleProofs = useMemo(() => {
+  const keep = new Set<number>(Object.values(latestIdByIdx));
+  return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
+}, [proofs, latestIdByIdx]);
+
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
 
@@ -280,7 +298,7 @@ async function onRejectOnce(idx: number) {
           <div className="text-sm text-slate-500">No proofs submitted yet.</div>
         )}
 
-        {proofs.map((p) => {
+        {visibleProofs.map((p) => {
   const id = Number(p.proofId ?? p.id);
   const a = p.aiAnalysis ?? p.ai_analysis;
   const idx = Number(p.milestoneIndex ?? p.milestone_index);
