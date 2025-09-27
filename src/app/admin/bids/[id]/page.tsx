@@ -24,22 +24,11 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
 
   // per-proof prompt + busy state
-  const [promptById, setPromptById] = useState<Record<number, string>>({});
-  const [busyById, setBusyById] = useState<Record<number, boolean>>({});
-  const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
-  // latest proof_id per milestone index (by max id — simplest, robust)
-const latestIdByIdx = useMemo(() => {
-  const ids: Record<number, number> = {};
-  for (const p of proofs) {
-    const idx = Number(p.milestoneIndex ?? p.milestone_index);
-    const pid = Number(p.proofId ?? p.id ?? 0);
-    if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
-    if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
-  }
-  return ids;
-}, [proofs]);
+const [promptById, setPromptById] = useState<Record<number, string>>({});
+const [busyById, setBusyById] = useState<Record<number, boolean>>({});
+const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
 
-// latest proof_id per milestone index (by max id — simplest and robust)
+// latest proof_id per milestone index (by max id — single source of truth)
 const latestIdByIdx = useMemo(() => {
   const ids: Record<number, number> = {};
   for (const p of proofs) {
