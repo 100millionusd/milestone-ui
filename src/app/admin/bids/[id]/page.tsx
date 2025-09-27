@@ -148,14 +148,26 @@ async function refreshLatest() {
 
 // one-shot reject; disables button + persists lock
 async function onRejectOnce(idx: number) {
-  // already locked in this session? bail.
-  if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
-  try {
-    await rejectProof(bidId, idx); // your existing API call
+  // Check server status first - if already rejected, just lock locally
+  const currentStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx];
+  if (currentStatus === 'rejected') {
     setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
     setLockByIdx(prev => ({ ...prev, [idx]: true }));
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1'); // persist across refresh
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
+    }
+    return;
+  }
+
+  // already locked in this session? bail.
+  if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
+  
+  try {
+    await rejectProof(bidId, idx);
+    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setLockByIdx(prev => ({ ...prev, [idx]: true }));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
     }
     await refreshLatest();
   } catch {
@@ -274,7 +286,11 @@ async function onRejectOnce(idx: number) {
   const idx = Number(p.milestoneIndex ?? p.milestone_index);
   const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
   const canReview = latestStatus === 'pending';
-  const rejectLocked = !!lockByIdx[idx] || actedByIdx[idx] === 'rejected';
+  const rejectLocked = 
+    !!lockByIdx[idx] || 
+    actedByIdx[idx] === 'rejected' || 
+    latestStatus !== 'pending' || 
+    latestStatus === 'rejected';
   const isLatestCard = id === latestIdByIdx[idx]; 
 
           return (
@@ -325,20 +341,15 @@ async function onRejectOnce(idx: number) {
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — always show on the latest card.
-    Approve is only enabled while pending.
-    Reject stays disabled forever once locally locked. */}
-{isLatestCard && (
+                {/* Actions — only show on the latest card, when status is pending, and not locally locked */}
+{(isLatestCard && canReview && !rejectLocked) ? (
   <div className="mt-3 flex gap-2">
     <button
-      className="px-4 py-2 rounded bg-amber-500 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+      className="px-4 py-2 rounded bg-amber-500 text-white"
       onClick={async () => { await approveProof(bidId, idx); await refreshLatest(); }}
-      disabled={latestStatus !== 'pending'}
-      title={latestStatus !== 'pending' ? `Cannot approve (${latestStatus})` : 'Approve'}
     >
       Approve Proof
     </button>
-
     <button
       className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
       onClick={() => onRejectOnce(idx)}
@@ -348,6 +359,11 @@ async function onRejectOnce(idx: number) {
     >
       {rejectLocked ? 'Rejected' : 'Reject'}
     </button>
+  </div>
+) : (
+  <div className="mt-2 text-xs text-slate-500">
+    Latest proof is <span className="font-medium">{latestStatus}</span>.
+    {latestStatus === 'rejected' && ' This proof has been rejected.'}
   </div>
 )}
 
