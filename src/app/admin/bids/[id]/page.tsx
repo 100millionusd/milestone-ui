@@ -41,6 +41,11 @@ const latestIdByIdx = useMemo(() => {
   return ids;
 }, [proofs]);
 
+const visibleProofs = useMemo(() => {
+  const keep = new Set<number>(Object.values(latestIdByIdx));
+  return proofs.filter(p => keep.has(Number(p.proofId ?? p.id)));
+}, [proofs, latestIdByIdx]);
+
 // fallback latest *status* per milestone (by max id)
 const fallbackLatestByIdx = useMemo(() => {
   const out: Record<number, string> = {};
@@ -152,39 +157,49 @@ async function refreshLatest() {
   } catch { /* ignore */ }
 }
 
-// one-shot reject; disables button + persists lock
+// one-shot reject; disables button + updates local state so the card stops showing as pending
 async function onRejectOnce(idx: number) {
-  // Check server status first - if already rejected, just lock locally
-  const currentStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx];
-  if (currentStatus === 'rejected') {
-    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    setLockByIdx(prev => ({ ...prev, [idx]: true }));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
-    }
+  // if already locked locally, bail
+  if (actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1')) {
     return;
   }
 
-  // already locked in this session? bail.
-  if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
-  
   try {
-    await rejectProof(bidId, idx);
-    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    setLockByIdx(prev => ({ ...prev, [idx]: true }));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
-    }
-    await refreshLatest();
+    await rejectProof(bidId, idx); // your existing API call
   } catch {
-    // even if server says already rejected, lock locally
-    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    setLockByIdx(prev => ({ ...prev, [idx]: true }));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
-    }
-    await refreshLatest();
+    // ignore server error; we still lock locally to prevent repeat clicks
   }
+
+  // 1) lock locally & persist
+  setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(`rej:${bidId}:${idx}`, '1');
+  }
+
+  // 2) mark the latest proof for this milestone as rejected in local UI state
+  setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+
+  setProofs(prev => {
+    // compute latest id for this milestone from the current list
+    let latestId = 0;
+    for (const p of prev) {
+      const pIdx = Number(p.milestoneIndex ?? p.milestone_index);
+      const pid  = Number(p.proofId ?? p.id ?? 0);
+      if (pIdx === idx && pid > latestId) latestId = pid;
+    }
+    // flip that row’s status locally
+    return prev.map(p => {
+      const pIdx = Number(p.milestoneIndex ?? p.milestone_index);
+      const pid  = Number(p.proofId ?? p.id ?? 0);
+      if (pIdx === idx && pid === latestId) {
+        return { ...p, status: 'rejected', updatedAt: new Date().toISOString() };
+      }
+      return p;
+    });
+  });
+
+  // 3) optionally refresh server truth (won’t flicker because we already fixed local UI)
+  refreshLatest(); // don't await
 }
 
   if (loading) {
@@ -347,8 +362,8 @@ async function onRejectOnce(idx: number) {
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — only show on the latest card, when status is pending, and not locally locked */}
-{(isLatestCard && canReview && !rejectLocked) ? (
+                {/* Actions — only show for the latest card when status is pending and not locally locked */}
+{(isLatestCard && latestStatus === 'pending' && !(actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1'))) ? (
   <div className="mt-3 flex gap-2">
     <button
       className="px-4 py-2 rounded bg-amber-500 text-white"
@@ -359,20 +374,17 @@ async function onRejectOnce(idx: number) {
     <button
       className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
       onClick={() => onRejectOnce(idx)}
-      disabled={rejectLocked}
-      aria-disabled={rejectLocked}
-      title={rejectLocked ? 'Already rejected' : 'Reject'}
+      disabled={actedByIdx[idx] === 'rejected' || (typeof window !== 'undefined' && localStorage.getItem(`rej:${bidId}:${idx}`) === '1')}
+      title="Reject"
     >
-      {rejectLocked ? 'Rejected' : 'Reject'}
+      {actedByIdx[idx] === 'rejected' ? 'Rejected' : 'Reject'}
     </button>
   </div>
 ) : (
   <div className="mt-2 text-xs text-slate-500">
     Latest proof is <span className="font-medium">{latestStatus}</span>.
-    {latestStatus === 'rejected' && ' This proof has been rejected.'}
   </div>
 )}
-
 
                 {a ? <AnalysisView a={a} /> : <div className="text-sm text-slate-600">No analysis yet for this proof.</div>}
 
