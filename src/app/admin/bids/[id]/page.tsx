@@ -298,8 +298,8 @@ const rejectLocked = actedByIdx[idx] === 'rejected' || rejectedLocally || latest
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
-                {/* Actions — only show when the latest status is pending */}
-{canReview ? (
+                {/* Actions — only show when the latest status is pending AND not locally locked */}
+{(canReview && !rejectLocked) ? (
   <div className="mt-3 flex gap-2">
     {/* Replace the onClick handlers with your existing ones */}
     <button
