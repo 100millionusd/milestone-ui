@@ -237,6 +237,29 @@ const canReview = latestStatus === 'pending';
                     Ask Agent 2 (Chat)
                   </button>
                 </div>
+                {/* Actions — only show when the latest status is pending */}
+{canReview ? (
+  <div className="mt-3 flex gap-2">
+    {/* Replace the onClick handlers with your existing ones */}
+    <button
+      className="px-4 py-2 rounded bg-amber-500 text-white"
+      onClick={() => approveProof(bidId, idx)}   // your existing approve handler
+    >
+      Approve Proof
+    </button>
+    <button
+      className="px-4 py-2 rounded bg-red-600 text-white"
+      onClick={() => rejectProof(bidId, idx)}    // your existing reject handler
+    >
+      Reject
+    </button>
+  </div>
+) : (
+  <div className="mt-2 text-xs text-slate-500">
+    Latest proof is <span className="font-medium">{latestStatus}</span>.
+  </div>
+)}
+
 
                 {a ? <AnalysisView a={a} /> : <div className="text-sm text-slate-600">No analysis yet for this proof.</div>}
 
