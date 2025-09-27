@@ -26,6 +26,25 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [promptById, setPromptById] = useState<Record<number, string>>({});
   const [busyById, setBusyById] = useState<Record<number, boolean>>({});
   const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
+  const fallbackLatestByIdx = useMemo(() => {
+  const map: Record<number, { ts: number; id: number; status: string }> = {};
+  for (const p of proofs) {
+    const idx = Number(p.milestoneIndex ?? p.milestone_index);
+    const ts = Date.parse(
+      (p.submittedAt ?? p.submitted_at ??
+       p.updatedAt   ?? p.updated_at   ??
+       p.createdAt   ?? p.created_at   ?? 0) as any
+    ) || 0;
+    const id = Number(p.proofId ?? p.id ?? 0);
+    const prev = map[idx];
+    if (!prev || ts > prev.ts || (ts === prev.ts && id > prev.id)) {
+      map[idx] = { ts, id, status: String(p.status || 'pending') };
+    }
+  }
+  const out: Record<number, string> = {};
+  for (const k in map) out[Number(k)] = map[Number(k)].status;
+  return out;
+}, [proofs]);
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
@@ -59,10 +78,14 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   if (!bidId) return;
   (async () => {
     try {
-      const r = await fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, { credentials: 'include' });
+      const r = await fetch(
+        `${API_BASE}/bids/${bidId}/proofs/latest-status`,
+        { credentials: 'include', cache: 'no-store' } // prevent stale cache
+      );
       const j = await r.json();
       setProofStatusByIdx(j?.byIndex || {});
-    } catch {
+    } catch (e) {
+      console.warn('latest-status fetch failed', e);
       setProofStatusByIdx({});
     }
   })();
@@ -186,7 +209,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           const id = Number(p.proofId ?? p.id);
           const a = p.aiAnalysis ?? p.ai_analysis;
           const idx = Number(p.milestoneIndex ?? p.milestone_index);
-const latestStatus = proofStatusByIdx[idx] ?? p.status;   // prefer server's latest
+const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
 const canReview = latestStatus === 'pending';
 
           return (
@@ -242,17 +265,17 @@ const canReview = latestStatus === 'pending';
   <div className="mt-3 flex gap-2">
     {/* Replace the onClick handlers with your existing ones */}
     <button
-      className="px-4 py-2 rounded bg-amber-500 text-white"
-      onClick={() => approveProof(bidId, idx)}   // your existing approve handler
-    >
-      Approve Proof
-    </button>
-    <button
-      className="px-4 py-2 rounded bg-red-600 text-white"
-      onClick={() => rejectProof(bidId, idx)}    // your existing reject handler
-    >
-      Reject
-    </button>
+  className="px-4 py-2 rounded bg-amber-500 text-white"
+  onClick={async () => { await approveProof(bidId, idx); await refreshLatest(); }}
+>
+  Approve Proof
+</button>
+<button
+  className="px-4 py-2 rounded bg-red-600 text-white"
+  onClick={async () => { await rejectProof(bidId, idx); await refreshLatest(); }}
+>
+  Reject
+</button>
   </div>
 ) : (
   <div className="mt-2 text-xs text-slate-500">
