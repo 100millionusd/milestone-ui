@@ -147,18 +147,30 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
   }
 
-  // refresh latest map (used after actions)
-  async function refreshLatest() {
-    if (!bidId) return;
-    try {
-      const r = await fetch(
-        `${API_BASE}/bids/${bidId}/proofs/latest-status`,
-        { credentials: 'include', cache: 'no-store' }
-      );
-      const j = await r.json();
-      setProofStatusByIdx(j?.byIndex || {});
-    } catch { /* ignore */ }
+  // refresh latest status map AND the proofs list (no stale cache)
+async function refreshLatest() {
+  if (!bidId) return;
+  try {
+    const [statusRes, proofsRes] = await Promise.all([
+      fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+      fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+    ]);
+
+    const statusJson = await statusRes.json();
+    const proofsJson = await proofsRes.json();
+
+    setProofStatusByIdx(statusJson?.byIndex || {});
+    setProofs(Array.isArray(proofsJson) ? proofsJson : []);
+  } catch {
+    /* ignore */
   }
+}
 
   // one-shot reject; disables button + persists lock + flips local status immediately
   async function onRejectOnce(idx: number) {
@@ -294,9 +306,9 @@ setProofs(prev => {
           </Link>
         </div>
 
-        {proofs.length === 0 && (
-          <div className="text-sm text-slate-500">No proofs submitted yet.</div>
-        )}
+        {visibleProofs.length === 0 && (
+  <div className="text-sm text-slate-500">No proofs submitted yet.</div>
+)}
 
         {visibleProofs.map((p) => {
           const id = Number(p.proofId ?? p.id);
