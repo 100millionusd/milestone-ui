@@ -351,11 +351,13 @@ export default function VendorDashboard() {
                   {canArchive && (
   <button
     type="button"
-    onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} // keep it clickable even if a parent is clickable
-    onClick={() => onArchive(b.bidId)}
+    onClick={(e) => {
+      e.preventDefault();
+      e.stopPropagation();           // stop any parent Link/row handlers
+      onArchive(b.bidId);
+    }}
     disabled={isArchiving}
     className={[
-      'relative z-10 pointer-events-auto',
       'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
       'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
     ].join(' ')}
