@@ -98,9 +98,8 @@ function parseIpfsRef(s: string): { cid: string; path: string } | null {
 }
 function encodeIpfsPath(path: string): string {
   if (!path) return '';
-  const clean = path.replace(/^\/*/, ''); // strip leading slashes
+  const clean = path.replace(/^\/*/, '');
   if (!clean) return '';
-  // encode each segment (so raw % and spaces become safe)
   return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
 }
 /** Normalize any "doc" (string CID/URL or object with {url|cid,name}). If just a label, return doc w/o href. */
@@ -164,6 +163,38 @@ function hrefForDoc(doc: any): string | null {
   return null;
 }
 /* -------------------------------------------------------------------------- */
+
+/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid). Only linkable files are returned. */
+function collectMilestoneFiles(bid: any) {
+  const arr = parseMilestones(bid?.milestones);
+  const out: Array<{ scope: string; doc: any }> = [];
+
+  arr.forEach((m: Milestone, idx: number) => {
+    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${bid?.vendorName ? ` (${bid.vendorName})` : ''}`;
+
+    // files[]
+    if (Array.isArray(m?.files)) {
+      m.files.forEach((f: any) => {
+        const doc = normalizeDoc(f);
+        const href = doc && hrefForDoc(doc);
+        if (href) out.push({ scope, doc });
+      });
+    }
+
+    // proof/proofCid (single)
+    const single = m?.proofCid ?? m?.proof;
+    if (single) {
+      const doc: any = normalizeDoc(single);
+      const href = doc && hrefForDoc(doc);
+      if (href) {
+        doc.name ||= m?.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
+        out.push({ scope, doc });
+      }
+    }
+  });
+
+  return out;
+}
 
 function fmt(dt?: string | null) {
   if (!dt) return '';
