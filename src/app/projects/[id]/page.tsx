@@ -62,97 +62,108 @@ function parseDocs(raw: unknown): any[] {
   if (typeof raw === 'string') {
     try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
   }
-  // if it's a single object/string doc, wrap later where used
   return [];
 }
 
+/* --------------------------- ROBUST IPFS HELPERS --------------------------- */
+// handles ipfs://CID, ipfs://CID/path, and CID/path; safely encodes path segments
 const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
+const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
+const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i; // group1 = CID, group2 = /path (optional)
+const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 
 function isHttpUrl(s: string): boolean {
   try {
     const u = new URL(s, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
     return /^https?:$/i.test(u.protocol);
-  } catch {
-    return false;
+  } catch { return false; }
+}
+function parseIpfsRef(s: string): { cid: string; path: string } | null {
+  // ipfs://CID[/path]
+  let m = s.match(IPFS_URI_RE);
+  if (m) {
+    const cid = m[1];
+    const path = m[2] || '';
+    if (CID_RE.test(cid)) return { cid, path };
+    return null;
   }
+  // CID[/path]
+  m = s.match(CID_WITH_PATH_RE);
+  if (m) {
+    const cid = m[1];
+    const path = m[2] || '';
+    if (CID_RE.test(cid)) return { cid, path };
+  }
+  return null;
 }
-function isIpfsUrl(s: string): boolean {
-  return /^ipfs:\/\//i.test(s);
+function encodeIpfsPath(path: string): string {
+  if (!path) return '';
+  const clean = path.replace(/^\/*/, ''); // strip leading slashes
+  if (!clean) return '';
+  // encode each segment (so raw % and spaces become safe)
+  return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
 }
-
-/** Normalize any "doc" (string CID/URL or object with {url|cid,name}). If it's just a label, return a doc without href. */
+/** Normalize any "doc" (string CID/URL or object with {url|cid,name}). If just a label, return doc w/o href. */
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
-  // String input: could be URL, ipfs://..., CID, or just a label
   if (typeof raw === 'string') {
     const s = raw.trim();
+
+    // http(s) direct
     if (isHttpUrl(s)) return { url: s, name: s.split('/').pop() || 'file' };
-    if (isIpfsUrl(s)) {
-      const cid = s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
-      return { cid, name: `${cid.slice(0, 8)}…` };
+
+    // ipfs forms
+    const ref = parseIpfsRef(s);
+    if (ref) {
+      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
+      return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
     }
-    if (CID_RE.test(s)) return { cid: s, name: `${s.slice(0, 8)}…` };
-    // plain text label (NOT a link)
+
+    // bare CID
+    if (CID_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
+
+    // plain label (not a link)
     return { name: s };
   }
 
-  // Object input
+  // object input
   const doc: any = { ...raw };
+
   if (typeof doc.url === 'string') {
-    if (isHttpUrl(doc.url)) return doc;
-    if (isIpfsUrl(doc.url)) {
-      const cid = String(doc.url).replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
+    const s = doc.url.trim();
+    if (isHttpUrl(s)) return doc;
+    const ref = parseIpfsRef(s);
+    if (ref) {
+      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
       delete doc.url;
-      return { ...doc, cid };
+      return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || baseName || `${ref.cid.slice(0, 8)}…` };
     }
   }
-  if (typeof doc.cid === 'string' && CID_RE.test(doc.cid)) return doc;
 
-  // no valid url/cid — treat as label if there's a name
+  if (typeof doc.cid === 'string') {
+    const ref = parseIpfsRef(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
+    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '' };
+  }
+
   if (doc.name) return { name: String(doc.name) };
   return null;
 }
-
-/** Build a safe href if the doc is linkable; otherwise return null. */
+/** Build a safe href if the doc is linkable; otherwise null. */
 function hrefForDoc(doc: any): string | null {
   if (!doc) return null;
+
   if (doc.url && isHttpUrl(doc.url)) return doc.url;
-  if (doc.cid && CID_RE.test(doc.cid)) return `${GATEWAY}/${encodeURIComponent(doc.cid)}`;
+
+  if (doc.cid && CID_RE.test(doc.cid)) {
+    const suffix = encodeIpfsPath(doc.ipfsPath || '');
+    return VIA_PROXY
+      ? `/api/ipfs?cid=${encodeURIComponent(doc.cid)}${suffix ? `&path=${encodeURIComponent(suffix)}` : ''}`
+      : `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
+  }
   return null;
 }
-
-/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid). Only linkable files are returned. */
-function collectMilestoneFiles(bid: any) {
-  const arr = parseMilestones(bid?.milestones);
-  const out: Array<{ scope: string; doc: any }> = [];
-
-  arr.forEach((m: Milestone, idx: number) => {
-    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${bid?.vendorName ? ` (${bid.vendorName})` : ''}`;
-
-    // files[]
-    if (Array.isArray(m?.files)) {
-      m.files.forEach((f: any) => {
-        const doc = normalizeDoc(f);
-        const href = doc && hrefForDoc(doc);
-        if (href) out.push({ scope, doc });
-      });
-    }
-
-    // proof/proofCid (single)
-    const single = m?.proofCid ?? m?.proof;
-    if (single) {
-      const doc: any = normalizeDoc(single);
-      const href = doc && hrefForDoc(doc);
-      if (href) {
-        doc.name ||= m?.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
-        out.push({ scope, doc });
-      }
-    }
-  });
-
-  return out;
-}
+/* -------------------------------------------------------------------------- */
 
 function fmt(dt?: string | null) {
   if (!dt) return '';
@@ -320,12 +331,9 @@ export default function ProjectDetailPage() {
 
   /* ------------------------------ Files (robust) ------------------------------ */
 
-  // Raw collection (proposal docs + bid docs + milestone files)
+  // Collect proposal docs + bid docs + milestone files
   const allFilesRaw = [
-    // Proposal-level docs (array in project.docs)
     ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
-
-    // Bid submission docs (b.docs array + optional b.doc single)
     ...bids.flatMap((b: any) => {
       const docsArr = parseDocs(b.docs);
       const single = b.doc ? [b.doc] : [];
@@ -335,12 +343,10 @@ export default function ProjectDetailPage() {
         doc: d
       }));
     }),
-
-    // Milestone proof files from the bid JSON (only linkable files are returned)
     ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
   ];
 
-  // Normalize & de-duplicate files by URL/CID+name so the list stays clean; ignore non-link docs (labels)
+  // Normalize, build hrefs, de-dupe
   const allFiles = (() => {
     const seen = new Set<string>();
     const out: Array<{ scope: string; doc: any; href: string }> = [];
@@ -348,7 +354,7 @@ export default function ProjectDetailPage() {
       const doc = normalizeDoc(item.doc);
       if (!doc) continue;
       const href = hrefForDoc(doc);
-      if (!href) continue; // skip labels like "10%: Upon contract signing..."
+      if (!href) continue;
       const name = doc.name || href.split('/').pop() || 'file';
       const key = `${href}|${name}`;
       if (seen.has(key)) continue;
@@ -360,7 +366,6 @@ export default function ProjectDetailPage() {
 
   /* --------------------------------- Render --------------------------------- */
 
-  // Early returns
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
@@ -648,7 +653,6 @@ function renderAttachment(docIn: any, hrefIn: string | null, key: number) {
   const href = hrefIn || hrefForDoc(doc);
   const name = doc.name || (href ? href.split('/').pop() : 'file');
 
-  // No valid link (label/metadata only) — show as non-clickable card
   if (!href) {
     return (
       <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
