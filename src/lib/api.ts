@@ -834,19 +834,14 @@ export async function archiveProof(proofId: number): Promise<Proof> {
 }
 
 export async function getProofs(bidId?: number): Promise<Proof[]> {
-  const q = Number.isFinite(bidId as number) ? `?bidId=${bidId}` : "";
-  const rows = await apiFetch(`/proofs${q}`);
+  if (Number.isFinite(bidId as number)) {
+    // vendor-safe (server should allow admin OR bid owner)
+    const rows = await apiFetch(`/proofs/${encodeURIComponent(String(bidId))}`);
+    return (Array.isArray(rows) ? rows : []).map(toProof);
+  }
+  // no bidId → admin list (still admin-only)
+  const rows = await apiFetch(`/proofs`);
   return (Array.isArray(rows) ? rows : []).map(toProof);
-}
-
-export function approveProof(bidId: number, milestoneIndex: number) {
-  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-  return apiFetch(
-    `/proofs/${encodeURIComponent(String(bidId))}/${encodeURIComponent(
-      String(milestoneIndex)
-    )}/approve`,
-    { method: "POST" }
-  );
 }
 
 /* ==========================
