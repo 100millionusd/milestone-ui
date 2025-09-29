@@ -116,6 +116,10 @@ export default function ProjectDetailPage() {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
+  useEffect(() => {
+  (window as any).__BIDS = bids;
+}, [bids]);
+
   // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
