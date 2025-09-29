@@ -65,7 +65,7 @@ export interface Proof {
   title: string;
   description: string;
   files: { name: string; url: string }[];
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "archived";
   submittedAt: string;
   aiAnalysis?: any;
 }
@@ -825,6 +825,16 @@ export async function analyzeProof(proofId: number, prompt?: string): Promise<Pr
   return toProof(p);
 }
 
+export async function archiveProof(proofId: number): Promise<Proof> {
+  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
+  // Server may return { ok: true, proof: {...} } or just the proof object
+  const res = await apiFetch(
+    `/proofs/${encodeURIComponent(String(proofId))}/archive`,
+    { method: "POST" }
+  );
+  return toProof(res?.proof ?? res);
+}
+
 export async function getProofs(bidId?: number): Promise<Proof[]> {
   const q = Number.isFinite(bidId as number) ? `?bidId=${bidId}` : "";
   const rows = await apiFetch(`/proofs${q}`);
@@ -1008,6 +1018,7 @@ export default {
   submitProof,
   analyzeProof,
   getProofs,
+  archiveProof,
 
   // chat
   chatProof,
