@@ -78,9 +78,12 @@ const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 
 function isHttpUrl(s: string): boolean {
   try {
-    const u = new URL(s, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
-    return /^https?:$/i.test(u.protocol);
-  } catch { return false; }
+    // new URL(s) throws for non-absolute; perfect.
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 function parseIpfsRef(s: string): { cid: string; path: string } | null {
   let m = s.match(IPFS_URI_RE);
