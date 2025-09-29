@@ -1,15 +1,46 @@
 // src/app/projects/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { listProposals, getBids, archiveProposal } from '@/lib/api';
 
 type TabKey = 'active' | 'completed' | 'archived';
 
+type Project = {
+  proposalId: number;
+  title: string;
+  orgName?: string;
+  amountUSD?: number;
+  status: 'pending' | 'approved' | 'rejected' | 'completed' | 'archived';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type Milestone = {
+  name?: string;
+  amount?: number;
+  dueDate?: string;
+  completed?: boolean;
+  completionDate?: string | null;
+  paymentTxHash?: string | null;
+  paymentDate?: string | null;
+  proof?: string;
+};
+
+type Bid = {
+  bidId: number;
+  proposalId: number;
+  status: string; // 'pending' | 'approved' | 'rejected' | 'completed' | ...
+  milestones?: Milestone[] | string; // server may serialize JSON
+  createdAt?: string;
+  updatedAt?: string;
+  vendorName?: string;
+};
+
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<any[]>([]);
-  const [bids, setBids] = useState<any[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [bids, setBids] = useState<Bid[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('active');
   const [archiving, setArchiving] = useState<Record<number, boolean>>({}); // proposalId -> busy
@@ -22,8 +53,8 @@ export default function ProjectsPage() {
           listProposals({ includeArchived: true }),
           getBids(),
         ]);
-        setProjects(proposalsData);
-        setBids(bidsData);
+        setProjects(proposalsData || []);
+        setBids(bidsData || []);
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -32,32 +63,105 @@ export default function ProjectsPage() {
     })();
   }, []);
 
+  // --------------------------
+  // Helpers
+  // --------------------------
   const getBidsForProject = (projectId: number) =>
-    bids.filter((bid: any) => bid.proposalId === projectId);
+    bids.filter((bid) => bid.proposalId === projectId);
 
-  const isProjectCompleted = (project: any) => {
+  function parseMilestones(raw: Bid['milestones']): Milestone[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try {
+      const arr = JSON.parse(String(raw));
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getBidMilestoneStats(bid: Bid) {
+    const m = parseMilestones(bid.milestones);
+    let total = m.length;
+    let completed = 0;
+    let paid = 0;
+    let lastMsActivity: Date | null = null;
+
+    for (const it of m) {
+      const isPaid = !!it?.paymentTxHash;
+      const isCompleted = isPaid || !!it?.completed;
+      if (isCompleted) completed += 1;
+      if (isPaid) paid += 1;
+
+      const dts: (string | undefined | null)[] = [
+        it?.paymentDate,
+        it?.completionDate,
+        it?.dueDate,
+      ];
+      for (const d of dts) {
+        const dt = d ? new Date(d) : null;
+        if (dt && (!lastMsActivity || dt > lastMsActivity)) lastMsActivity = dt;
+      }
+    }
+    return { total, completed, paid, lastMsActivity };
+  }
+
+  function getProjectLastActivity(project: Project, projectBids: Bid[]) {
+    const candidateDates: (string | undefined)[] = [
+      project.updatedAt,
+      project.createdAt,
+    ];
+
+    for (const b of projectBids) {
+      candidateDates.push(b.updatedAt, b.createdAt);
+      const stats = getBidMilestoneStats(b);
+      if (stats.lastMsActivity) candidateDates.push(stats.lastMsActivity.toISOString());
+    }
+
+    const valid = candidateDates
+      .filter(Boolean)
+      .map((s) => new Date(String(s)))
+      .filter((d) => !isNaN(d.getTime()));
+
+    if (valid.length === 0) return null;
+    return valid.sort((a, b) => b.getTime() - a.getTime())[0];
+  }
+
+  const isProjectCompleted = (project: Project) => {
     if (project.status === 'completed') return true;
 
     const projectBids = getBidsForProject(project.proposalId);
-    const acceptedBid = projectBids.find((b: any) => b.status === 'approved');
+    const acceptedBid = projectBids.find((b) => b.status === 'approved');
     if (!acceptedBid) return false;
 
-    // If bid has milestones, all must be completed
-    if (Array.isArray(acceptedBid.milestones) && acceptedBid.milestones.length > 0) {
-      return acceptedBid.milestones.every((m: any) => m.completed === true);
-    }
-    // Or bid is explicitly completed
+    const { total, completed } = getBidMilestoneStats(acceptedBid);
+    if (total > 0 && completed === total) return true;
+
+    // explicit completed status on bid
     if (acceptedBid.status === 'completed') return true;
 
     return false;
   };
 
-  const archivedProjects = projects.filter((p) => p.status === 'archived');
-  const completedProjects = projects.filter(
-    (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p))
+  const archivedProjects = useMemo(
+    () => projects.filter((p) => p.status === 'archived'),
+    [projects]
   );
-  const activeProjects = projects.filter(
-    (p) => p.status === 'approved' && !isProjectCompleted(p)
+
+  const completedProjects = useMemo(
+    () =>
+      projects.filter(
+        (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p))
+      ),
+    [projects, bids]
+  );
+
+  const activeProjects = useMemo(
+    () =>
+      projects.filter(
+        (p) => p.status === 'approved' && !isProjectCompleted(p)
+      ),
+    [projects, bids]
   );
 
   const handleArchive = async (proposalId: number) => {
@@ -87,9 +191,18 @@ export default function ProjectsPage() {
     }
   };
 
-  const renderCard = (project: any, badge: { text: string; cls: string }, extra?: React.ReactNode) => {
+  // --------------------------
+  // UI helpers
+  // --------------------------
+  const renderCard = (
+    project: Project,
+    badge: { text: string; cls: string },
+    extra?: React.ReactNode
+  ) => {
     const projectBids = getBidsForProject(project.proposalId);
     const acceptedBid = projectBids.find((bid) => bid.status === 'approved');
+    const msStats = acceptedBid ? getBidMilestoneStats(acceptedBid) : { total: 0, completed: 0, paid: 0 };
+    const lastActivity = getProjectLastActivity(project, projectBids);
 
     return (
       <div
@@ -104,11 +217,14 @@ export default function ProjectsPage() {
                 {badge.text}
               </span>
             </div>
-            <p className="text-gray-600">{project.orgName}</p>
-            <p className="text-green-600 font-medium text-lg mt-2">
-              Budget: ${project.amountUSD}
-            </p>
+            {project.orgName && <p className="text-gray-600">{project.orgName}</p>}
+            {typeof project.amountUSD === 'number' && (
+              <p className="text-green-600 font-medium text-lg mt-2">
+                Budget: ${Number(project.amountUSD).toLocaleString()}
+              </p>
+            )}
           </div>
+
           <div className="text-right">
             {badge.text === 'Active' && (
               <p className="text-sm text-gray-500 mb-3">
@@ -131,6 +247,28 @@ export default function ProjectsPage() {
                   Submit a Bid
                 </Link>
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* small rollups */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <div className="text-gray-500">Bids</div>
+            <div className="font-medium">
+              {acceptedBid ? '1 (awarded)' : projectBids.length || 0}
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-500">Milestones (paid)</div>
+            <div className="font-medium">
+              {msStats.paid}/{msStats.total}
+            </div>
+          </div>
+          <div className="md:text-right col-span-2 md:col-span-1">
+            <div className="text-gray-500">Last activity</div>
+            <div className="font-medium">
+              {lastActivity ? new Date(lastActivity).toLocaleString() : '—'}
             </div>
           </div>
         </div>
@@ -163,8 +301,8 @@ export default function ProjectsPage() {
             renderCard(
               p,
               { text: 'Completed', cls: 'bg-green-100 text-green-800' },
-              <div className="mt-3 flex gap-2">
-                <p className="text-sm text-gray-500">✅ This project has been fully completed.</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <p className="text-sm text-gray-600">✅ This project has been fully completed.</p>
                 {/* ✅ Archive button only on Completed tab */}
                 <button
                   onClick={() => handleArchive(p.proposalId)}
@@ -206,9 +344,9 @@ export default function ProjectsPage() {
       {/* Tabs */}
       <div className="mb-6">
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="active" label="Active" />
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="completed" label="Completed" />
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="archived" label="Archived" />
+          <TabButton current={activeTab} setCurrent={setActiveTab} id="active" label={`Active (${activeProjects.length})`} />
+          <TabButton current={activeTab} setCurrent={setActiveTab} id="completed" label={`Completed (${completedProjects.length})`} />
+          <TabButton current={activeTab} setCurrent={setActiveTab} id="archived" label={`Archived (${archivedProjects.length})`} />
         </div>
       </div>
 
@@ -234,10 +372,9 @@ function TabButton({
       onClick={() => setCurrent(id)}
       className={[
         'px-4 py-2 text-sm font-medium rounded-lg transition',
-        isActive
-          ? 'bg-slate-900 text-white shadow'
-          : 'text-slate-700 hover:bg-slate-100',
+        isActive ? 'bg-slate-900 text-white shadow' : 'text-slate-700 hover:bg-slate-100',
       ].join(' ')}
+      aria-pressed={isActive}
     >
       {label}
     </button>

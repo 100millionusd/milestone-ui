@@ -35,6 +35,37 @@ function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   return a;
 }
 
+// ---------- small helpers that make the page resilient to server variations ----------
+type Milestone = {
+  name?: string;
+  amount?: number;
+  dueDate?: string;
+  completed?: boolean;
+  completionDate?: string | null;
+  paymentTxHash?: string | null;
+  paymentDate?: string | null;
+  proof?: string;
+};
+function parseMilestones(raw: unknown): Milestone[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as Milestone[];
+  try {
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? (arr as Milestone[]) : [];
+  } catch {
+    return [];
+  }
+}
+function parseDocs(raw: unknown): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
+  }
+  return [];
+}
+// ------------------------------------------------------------------------------------
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
@@ -61,7 +92,7 @@ export default function ProjectDetailPage() {
       try {
         const [projectData, bidsData] = await Promise.all([
           getProposal(projectIdNum),
-          getBids(projectIdNum),
+          getBids(projectIdNum), // your server accepts ?proposalId=
         ]);
         if (!active) return;
         setProject(projectData);
@@ -140,8 +171,9 @@ export default function ProjectDetailPage() {
     if (proj.status === 'completed') return true;
     const acceptedBid = rows.find((r: any) => r.status === 'approved');
     if (!acceptedBid) return false;
-    if (!acceptedBid.milestones || acceptedBid.milestones.length === 0) return false;
-    return acceptedBid.milestones.every((m: any) => m.completed === true);
+    const ms = parseMilestones(acceptedBid.milestones);
+    if (ms.length === 0) return false;
+    return ms.every((m: any) => m?.completed === true || !!m?.paymentTxHash);
   };
 
   const completed = isProjectCompleted(project, bids);
@@ -257,6 +289,12 @@ export default function ProjectDetailPage() {
     );
   };
 
+  // derived: accepted bid + stats for quick display
+  const acceptedBid = useMemo(() => bids.find((b) => b.status === 'approved') || null, [bids]);
+  const acceptedMs = useMemo(() => parseMilestones(acceptedBid?.milestones), [acceptedBid]);
+
+  const projectDocs = useMemo(() => parseDocs(project?.docs), [project?.docs]);
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-start mb-6">
@@ -280,7 +318,17 @@ export default function ProjectDetailPage() {
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">Budget: {currency.format(project.amountUSD || 0)}</p>
+          <p className="text-green-600 font-medium text-lg">
+            Budget: {currency.format(Number(project.amountUSD || 0))}
+          </p>
+          {acceptedBid && (
+            <p className="text-sm text-gray-600 mt-1">
+              Awarded: {currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))} •{' '}
+              {acceptedMs.length
+                ? `${acceptedMs.filter(m => m?.paymentTxHash).length}/${acceptedMs.length} milestones paid`
+                : 'no milestones'}
+            </p>
+          )}
         </div>
         {!completed && (
           <Link
@@ -301,9 +349,9 @@ export default function ProjectDetailPage() {
       {/* Project Attachments */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-3">Project Attachments</h2>
-        {project.docs?.length > 0 ? (
+        {projectDocs.length > 0 ? (
           <div className="flex flex-wrap gap-3">
-            {project.docs.map((doc: any, i: number) => renderAttachment(doc, i))}
+            {projectDocs.map((doc: any, i: number) => renderAttachment(doc, i))}
           </div>
         ) : (
           <p className="text-sm text-gray-500">No attachments provided.</p>
@@ -312,21 +360,37 @@ export default function ProjectDetailPage() {
 
       {/* Bids */}
       <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
+          {acceptedBid && (
+            <span className="text-sm text-green-700 bg-green-50 px-2 py-0.5 rounded">
+              Contract awarded to <b>{acceptedBid.vendorName}</b>
+            </span>
+          )}
+        </div>
         {bids.length > 0 ? (
           <div className="space-y-3">
             {bids.map((bid) => {
               const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
               const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
+              const price = Number((bid.priceUSD ?? bid.priceUsd) || 0);
+              const msArr = parseMilestones(bid.milestones);
+              const paidCount = msArr.filter(m => m?.paymentTxHash).length;
               return (
                 <div key={bid.bidId} className="border p-4 rounded">
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-medium">{bid.vendorName}</h3>
                       <p className="text-gray-600">
-                        {currency.format(Number(bid.priceUSD || 0))} • {bid.days} days
+                        {currency.format(price)} • {bid.days} days
                       </p>
                       <p className="text-sm text-gray-500">{bid.notes}</p>
+
+                      {msArr.length > 0 && (
+                        <p className="text-xs text-gray-600 mt-1">
+                          Milestones: {paidCount}/{msArr.length} paid
+                        </p>
+                      )}
 
                       {docs.length > 0 ? (
                         <div className="mt-2 flex flex-wrap gap-2">
