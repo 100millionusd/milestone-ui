@@ -9,6 +9,7 @@ import {
   submitProof,
   analyzeProof,
   Proof,
+  archiveProof,
 } from '@/lib/api';
 
 export default function VendorProofPage() {
@@ -143,6 +144,17 @@ export default function VendorProofPage() {
       setRerunBusy(false);
     }
   }
+
+  async function archiveCurrentProof() {
+  if (!lastProof?.proofId) return;
+  try {
+    const updated = await archiveProof(lastProof.proofId);
+    setLastProof(updated);                  // reflect new status
+    alert('Proof archived.');
+  } catch (e: any) {
+    alert(e?.message || 'Archive failed');
+  }
+}
 
   if (loading) {
     return (
