@@ -117,11 +117,6 @@ function normalizeDoc(raw: any) {
 
     if (CID_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
 
-    // Only filter out strings that look like milestone descriptions, not actual file references
-    if (s.includes('%:') && s.includes('Upon contract signing')) {
-      return null; // This is specifically the problematic milestone name
-    }
-
     return { name: s };
   }
 
@@ -169,56 +164,68 @@ function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
 
+  // Debug: log milestone structure
+  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    console.log('Milestones for bid', bid?.bidId, ':', arr);
+  }
+
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
+    // Check for proof files first
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
       (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
       (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
       (m.cid ? { cid: m.cid, path: '' } : null);
 
+    // Process files array
     let files: any[] = [];
-    if (Array.isArray(m.files)) files = m.files as any[];
-    else if (typeof m.files === 'string') {
-      try { const parsed = JSON.parse(m.files as string); if (Array.isArray(parsed)) files = parsed; } catch {}
+    if (Array.isArray(m.files)) {
+      files = m.files as any[];
+    } else if (typeof m.files === 'string') {
+      try { 
+        const parsed = JSON.parse(m.files as string); 
+        if (Array.isArray(parsed)) files = parsed; 
+      } catch {
+        // If it's not JSON, treat it as a single file string
+        if (m.files) files = [m.files];
+      }
     }
 
+    // Debug: log files found
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      console.log(`Milestone M${idx+1} files:`, files);
+      console.log(`Milestone M${idx+1} baseRef:`, baseRef);
+    }
+
+    // Process each file in the files array
     files.forEach((f: any) => {
       let doc = normalizeDoc(f);
-      let href = doc && hrefForDoc(doc);
-
-      if (!href && baseRef) {
-        const fileName =
-          typeof f === 'string' ? f :
-          (f && typeof f.path === 'string') ? f.path :
-          (f && typeof f.name === 'string') ? f.name : '';
-
-        if (fileName) {
-          const stitchedPath =
-            (baseRef.path || '') + (fileName.startsWith('/') ? fileName : `/${fileName}`);
-
-          const stitchedDoc = {
-            cid: baseRef.cid,
-            ipfsPath: stitchedPath,
-            name: (typeof f === 'object' && f?.name) ? f.name : fileName.split('/').pop(),
-          };
-          const stitchedHref = hrefForDoc(stitchedDoc);
-          if (stitchedHref) {
-            out.push({ scope, doc: stitchedDoc });
-            return;
-          }
-        }
+      
+      // If we have a base reference (proof CID), try to construct full path
+      if (!doc && baseRef && typeof f === 'string') {
+        const fileName = f;
+        const stitchedPath = (baseRef.path || '') + (fileName.startsWith('/') ? fileName : `/${fileName}`);
+        doc = {
+          cid: baseRef.cid,
+          ipfsPath: stitchedPath,
+          name: fileName.split('/').pop() || 'file',
+        };
       }
 
-      if (href) out.push({ scope, doc });
+      const href = doc && hrefForDoc(doc);
+      if (href && !href.includes('%:') && !href.includes('Upon contract signing')) {
+        out.push({ scope, doc });
+      }
     });
 
+    // Handle single proof file
     const single = (m.proofCid ?? m.proof) as any;
-    if (single) {
+    if (single && !files.length) { // Only add if no files array already handled it
       const doc: any = normalizeDoc(single);
       const href = doc && hrefForDoc(doc);
-      if (href) {
+      if (href && !href.includes('%:') && !href.includes('Upon contract signing')) {
         doc.name ||= m.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
         out.push({ scope, doc });
       }
@@ -284,6 +291,13 @@ export default function ProjectDetailPage() {
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
+
+  // Store bids in window for debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined' && bids.length > 0) {
+      (window as any).__BIDS = bids;
+    }
+  }, [bids]);
 
   // URL normalization effect - fixes problematic URLs on mount
   useEffect(() => {
@@ -436,8 +450,8 @@ export default function ProjectDetailPage() {
       const href = hrefForDoc(doc);
       if (!href) continue;
       
-      // Only filter out the specific problematic milestone name, not all files
-      if (href === "10%: Upon contract signing. Site Preparation and Assessment") {
+      // Filter out problematic milestone names
+      if (href.includes('%:') && href.includes('Upon contract signing')) {
         continue;
       }
       
@@ -689,8 +703,8 @@ function renderAttachmentButton(docIn: any, hrefPre?: string) {
   const href = hrefPre || hrefForDoc(doc);
   const name = doc.name || (href ? href.split('/').pop() : 'file');
 
-  // Only filter out the specific problematic milestone name
-  if (href === "10%: Upon contract signing. Site Preparation and Assessment") {
+  // Filter out problematic milestone names
+  if (href && href.includes('%:') && href.includes('Upon contract signing')) {
     return null;
   }
 
