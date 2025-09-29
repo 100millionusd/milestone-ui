@@ -2,14 +2,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-// Force your Pinata gateway (use .env later if you want)
-const GATEWAY = 'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
-const VIA_PROXY = false; // set true only if you implement /api/ipfs proxy
+const GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
 
+const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 /* ----------------------------- Types / Helpers ----------------------------- */
@@ -44,11 +45,11 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;        // ipfs://CID[/path] or CID or http(s)://.../ipfs/CID[/path]
+  proof?: string;        // may be ipfs://CID[/path]
   proofCid?: string;     // bare CID
-  folderCid?: string;    // alt
-  cid?: string;          // alt
-  files?: any[] | string; // array or JSON string (filenames, urls, or objects)
+  folderCid?: string;    // alternative
+  cid?: string;          // alternative
+  files?: any[] | string; // array or JSON string (filenames or objects)
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -74,147 +75,92 @@ function parseDocs(raw: unknown): any[] {
 const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
-const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
 
-// ABSOLUTE http(s) only
 function isHttpUrl(s: string): boolean {
   try {
-    const u = new URL(s);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
+    const u = new URL(s, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    return /^https?:$/i.test(u.protocol);
+  } catch { return false; }
 }
-
-function parseIpfsLike(s: string): { cid: string; path: string } | null {
-  let m = s.match(IPFS_URI_RE); // ipfs://CID[/path]
+function parseIpfsRef(s: string): { cid: string; path: string } | null {
+  let m = s.match(IPFS_URI_RE);
   if (m) {
     const cid = m[1]; const path = m[2] || '';
     return CID_RE.test(cid) ? { cid, path } : null;
   }
-  m = s.match(HTTP_IPFS_RE); // https://host/ipfs/CID[/path]
-  if (m) {
-    const cid = m[1]; const path = m[2] || '';
-    return CID_RE.test(cid) ? { cid, path } : null;
-  }
-  m = s.match(CID_WITH_PATH_RE); // CID[/path]
+  m = s.match(CID_WITH_PATH_RE);
   if (m) {
     const cid = m[1]; const path = m[2] || '';
     return CID_RE.test(cid) ? { cid, path } : null;
   }
   return null;
 }
-
 function encodeIpfsPath(path: string): string {
   if (!path) return '';
   const clean = path.replace(/^\/*/, '');
   if (!clean) return '';
   return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
 }
-
-// Try to extract file-ish name from any object/string
-function pickName(doc: any, fallbackHref?: string): string {
-  if (!doc) return fallbackHref?.split('/').pop() || 'file';
-  if (typeof doc === 'string') return doc.split('/').pop() || doc;
-  return (
-    doc.name ||
-    doc.filename ||
-    doc.fileName ||
-    doc.file ||
-    (typeof doc.path === 'string' ? doc.path.split('/').pop() : '') ||
-    (fallbackHref ? fallbackHref.split('/').pop() : '') ||
-    'file'
-  );
-}
-
-/** Normalize *anything* into a canonical doc.
- * Accepted inputs:
- *  - string: http(s)://... OR ipfs://CID[/path] OR CID[/path] OR CID
- *  - object: { url | gatewayUrl | ipfsUrl | href } OR { cid, path/ipfsPath } OR { filename/fileName/file }
- */
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
-  // string
   if (typeof raw === 'string') {
     const s = raw.trim();
 
-    // http(s) gateway or direct URL
-    if (isHttpUrl(s)) {
-      const ref = s.match(HTTP_IPFS_RE);
-      if (ref && CID_RE.test(ref[1])) {
-        // Normalize to configured gateway
-        return { cid: ref[1], ipfsPath: ref[2] || '', name: pickName(null, s) };
-      }
-      return { url: s, name: pickName(null, s) };
-    }
+    if (isHttpUrl(s)) return { url: s, name: s.split('/').pop() || 'file' };
 
-    // ipfs-like (ipfs://, CID[/path], etc)
-    const ref = parseIpfsLike(s);
+    const ref = parseIpfsRef(s);
     if (ref) {
       const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
       return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
     }
 
-    // bare CID
     if (CID_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
 
-    // plain label
+    // Only filter out strings that look like milestone descriptions, not actual file references
+    if (s.includes('%:') && s.includes('Upon contract signing')) {
+      return null; // This is specifically the problematic milestone name
+    }
+
     return { name: s };
   }
 
-  // object
   const doc: any = { ...raw };
 
-  // Map alt url fields
-  const urlLike = doc.url || doc.gatewayUrl || doc.ipfsUrl || doc.href;
-  if (typeof urlLike === 'string') {
-    const s = urlLike.trim();
-    if (isHttpUrl(s)) {
-      const ref = s.match(HTTP_IPFS_RE);
-      if (ref && CID_RE.test(ref[1])) {
-        return { cid: ref[1], ipfsPath: ref[2] || '', name: doc.name || pickName(null, s) };
-      }
-      return { url: s, name: doc.name || pickName(null, s) };
-    }
-    const ref = parseIpfsLike(s);
-    if (ref) {
-      return { cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || pickName(null, s) };
-    }
-  }
-
-  // map `path` alias
   if (typeof doc.path === 'string' && !doc.ipfsPath) {
     doc.ipfsPath = doc.path;
   }
 
-  // Support filename-only objects when combined with a base CID later
+  if (typeof doc.url === 'string') {
+    const s = doc.url.trim();
+    if (isHttpUrl(s)) return doc;
+    const ref = parseIpfsRef(s);
+    if (ref) {
+      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
+      delete doc.url;
+      return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || baseName || `${ref.cid.slice(0, 8)}…` };
+    }
+  }
+
   if (typeof doc.cid === 'string') {
-    const ref = parseIpfsLike(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
-    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: pickName(doc) };
+    const ref = parseIpfsRef(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
+    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '' };
   }
 
-  // As a last resort, if it has a filename-ish field, keep as label (will be stitched if baseRef exists)
-  if (doc.name || doc.filename || doc.fileName || doc.file || doc.path) {
-    return { name: pickName(doc) };
-  }
-
+  if (doc.name) return { name: String(doc.name) };
   return null;
 }
-
 function hrefForDoc(doc: any): string | null {
   if (!doc) return null;
 
-  // Prefer normalized cid/path to re-point to our configured gateway
+  if (doc.url && isHttpUrl(doc.url)) return doc.url;
+
   if (doc.cid && CID_RE.test(doc.cid)) {
     const suffix = encodeIpfsPath(doc.ipfsPath || '');
     return VIA_PROXY
       ? `/api/ipfs?cid=${encodeURIComponent(doc.cid)}${suffix ? `&path=${encodeURIComponent(suffix)}` : ''}`
       : `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
   }
-
-  if (doc.url && isHttpUrl(doc.url)) return doc.url;
-
   return null;
 }
 
@@ -226,15 +172,12 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
-    // Find a base folder ref from multiple fields
     const baseRef =
-      (typeof m.proof === 'string' && parseIpfsLike(m.proof)) ||
-      (typeof m.proofCid === 'string' && { cid: m.proofCid, path: '' }) ||
-      (typeof m.folderCid === 'string' && { cid: m.folderCid, path: '' }) ||
-      (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
-      null;
+      (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
+      (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
+      (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
+      (m.cid ? { cid: m.cid, path: '' } : null);
 
-    // normalize files[]
     let files: any[] = [];
     if (Array.isArray(m.files)) files = m.files as any[];
     else if (typeof m.files === 'string') {
@@ -242,24 +185,23 @@ function collectMilestoneFiles(bid: any) {
     }
 
     files.forEach((f: any) => {
-      // Try direct normalization
       let doc = normalizeDoc(f);
       let href = doc && hrefForDoc(doc);
 
-      // If it's just a filename-like object/string and we have a base CID, stitch
       if (!href && baseRef) {
         const fileName =
           typeof f === 'string' ? f :
-          (f && (f.path || f.filename || f.fileName || f.file || f.name)) ? (f.path || f.filename || f.fileName || f.file || f.name) : '';
+          (f && typeof f.path === 'string') ? f.path :
+          (f && typeof f.name === 'string') ? f.name : '';
 
         if (fileName) {
           const stitchedPath =
-            (baseRef.path || '') + (String(fileName).startsWith('/') ? String(fileName) : `/${String(fileName)}`);
+            (baseRef.path || '') + (fileName.startsWith('/') ? fileName : `/${fileName}`);
 
           const stitchedDoc = {
             cid: baseRef.cid,
             ipfsPath: stitchedPath,
-            name: pickName(f) || String(fileName).split('/').pop(),
+            name: (typeof f === 'object' && f?.name) ? f.name : fileName.split('/').pop(),
           };
           const stitchedHref = hrefForDoc(stitchedDoc);
           if (stitchedHref) {
@@ -272,14 +214,14 @@ function collectMilestoneFiles(bid: any) {
       if (href) out.push({ scope, doc });
     });
 
-    // Also show single proof/proofCid (often a PDF/folder root)
-    const singleRef = typeof m.proof === 'string' ? parseIpfsLike(m.proof) : null;
-    const singleCid = m.proofCid || m.folderCid || m.cid || (singleRef ? singleRef.cid : null);
-    const singlePath = singleRef ? singleRef.path : '';
-    if (singleCid) {
-      const doc = { cid: singleCid, ipfsPath: singlePath, name: (m.name ? `${m.name}` : `milestone-${idx + 1}`) };
-      const href = hrefForDoc(doc);
-      if (href) out.push({ scope, doc });
+    const single = (m.proofCid ?? m.proof) as any;
+    if (single) {
+      const doc: any = normalizeDoc(single);
+      const href = doc && hrefForDoc(doc);
+      if (href) {
+        doc.name ||= m.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
+        out.push({ scope, doc });
+      }
     }
   });
 
@@ -297,13 +239,42 @@ function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
 
-type TabKey = 'overview' | 'bids' | 'milestones' | 'files';
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 /* -------------------------------- Component -------------------------------- */
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
+  const router = useRouter();
+  
+  // Enhanced project ID parsing with URL normalization
+  const projectIdNum = useMemo(() => {
+    try {
+      const id = (params as any)?.id;
+      if (!id) return NaN;
+      
+      // Handle encoded URLs and extract numeric ID
+      const decodedId = decodeURIComponent(String(id));
+      
+      // Extract first numeric value from the string
+      const numericMatch = decodedId.match(/(\d+)/);
+      const extractedId = numericMatch ? Number(numericMatch[1]) : NaN;
+      
+      // If the URL contains problematic characters, normalize the URL
+      if (decodedId.includes('%:') || decodedId.includes('%20')) {
+        const cleanUrl = `/projects/${extractedId}`;
+        // Replace the current URL without triggering a full navigation
+        if (typeof window !== 'undefined') {
+          window.history.replaceState(null, '', cleanUrl);
+        }
+      }
+      
+      return extractedId;
+    } catch (error) {
+      console.error('Error parsing project ID:', error);
+      return NaN;
+    }
+  }, [params]);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
@@ -314,7 +285,32 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Fetch
+  // URL normalization effect - fixes problematic URLs on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentUrl = window.location.href;
+      // Check for problematic encoded characters in the URL
+      if (currentUrl.includes('%3A') || currentUrl.includes('%20') || currentUrl.includes('%:')) {
+        const url = new URL(currentUrl);
+        const pathParts = url.pathname.split('/');
+        const projectId = pathParts[pathParts.length - 1];
+        
+        // Extract numeric ID and create clean URL
+        const numericMatch = projectId.match(/(\d+)/);
+        if (numericMatch) {
+          const cleanId = numericMatch[1];
+          const cleanUrl = `${url.origin}/projects/${cleanId}`;
+          
+          // Only replace if the URL is actually different
+          if (cleanUrl !== currentUrl) {
+            window.history.replaceState(null, '', cleanUrl);
+          }
+        }
+      }
+    }
+  }, []);
+
+  // Fetch project data
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -394,11 +390,6 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // Expose for quick console debugging
-  useEffect(() => {
-    if (typeof window !== 'undefined') (window as any).__BIDS = bids;
-  }, [bids]);
-
   /* ---------------------------- Derived values ---------------------------- */
 
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
@@ -444,14 +435,23 @@ export default function ProjectDetailPage() {
       if (!doc) continue;
       const href = hrefForDoc(doc);
       if (!href) continue;
-      const name = pickName(doc, href);
+      
+      // Only filter out the specific problematic milestone name, not all files
+      if (href === "10%: Upon contract signing. Site Preparation and Assessment") {
+        continue;
+      }
+      
+      const name = doc.name || href.split('/').pop() || 'file';
       const key = `${href}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ scope: item.scope, doc: { ...doc, name }, href });
     }
 
-    if (typeof window !== 'undefined') (window as any).__FILES = out;
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      (window as any).__FILES = out;
+    }
+
     return out;
   }, [projectDocs, bids]);
 
@@ -476,6 +476,21 @@ export default function ProjectDetailPage() {
   })();
 
   /* --------------------------------- Render --------------------------------- */
+
+  // Enhanced error handling for invalid project IDs
+  if (!Number.isFinite(projectIdNum)) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+          <h2 className="text-red-800 font-semibold mb-2">Invalid Project URL</h2>
+          <p className="text-red-700 text-sm">
+            The project URL contains invalid characters or format. Please check the link and try again.
+          </p>
+        </div>
+        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      </div>
+    );
+  }
 
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
@@ -522,8 +537,9 @@ export default function ProjectDetailPage() {
       <div className="border-b">
         <div className="flex gap-2">
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
       </div>
@@ -615,7 +631,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Files (buttons, not anchors) */}
+      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
@@ -631,13 +647,6 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
           )}
-
-          <details className="mt-3">
-            <summary className="cursor-pointer text-xs text-gray-500">debug: show file URLs</summary>
-            <ul className="mt-2 text-xs break-all space-y-1">
-              {allFiles.map((f, i) => (<li key={i}>{f.href}</li>))}
-            </ul>
-          </details>
         </section>
       )}
 
@@ -672,13 +681,18 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
 }
 
 /* ----------------------------- File render helper ---------------------------- */
-/* Render as BUTTONS (never <a>) so the router can’t create relative links. */
+/* Render as BUTTONS (no <a>) so the router can never treat them as relative links. */
 function renderAttachmentButton(docIn: any, hrefPre?: string) {
   const doc = normalizeDoc(docIn);
   if (!doc) return null;
 
   const href = hrefPre || hrefForDoc(doc);
-  const name = pickName(doc, href);
+  const name = doc.name || (href ? href.split('/').pop() : 'file');
+
+  // Only filter out the specific problematic milestone name
+  if (href === "10%: Upon contract signing. Site Preparation and Assessment") {
+    return null;
+  }
 
   if (!href) {
     return (
@@ -689,13 +703,13 @@ function renderAttachmentButton(docIn: any, hrefPre?: string) {
     );
   }
 
-  const isImage =
-    /\.(png|jpe?g|gif|webp|svg)$/i.test(name) ||
-    /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
-
   const open = () => {
     try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
   };
+
+  const isImage =
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(name) ||
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 
   if (isImage) {
     return (
