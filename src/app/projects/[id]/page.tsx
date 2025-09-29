@@ -35,7 +35,6 @@ function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   return a;
 }
 
-// ---------- small helpers that make the page resilient to server variations ----------
 type Milestone = {
   name?: string;
   amount?: number;
@@ -46,6 +45,7 @@ type Milestone = {
   paymentDate?: string | null;
   proof?: string;
 };
+
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as Milestone[];
@@ -64,7 +64,6 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
-// ------------------------------------------------------------------------------------
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -92,7 +91,7 @@ export default function ProjectDetailPage() {
       try {
         const [projectData, bidsData] = await Promise.all([
           getProposal(projectIdNum),
-          getBids(projectIdNum), // your server accepts ?proposalId=
+          getBids(projectIdNum),
         ]);
         if (!active) return;
         setProject(projectData);
@@ -164,25 +163,15 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  if (loading) return <div>Loading project...</div>;
-  if (!project) return <div>Project not found</div>;
-
+  // ---- helpers used in render (no hooks below this line!) ----
   const isProjectCompleted = (proj: any, rows: any[]) => {
     if (proj.status === 'completed') return true;
-    const acceptedBid = rows.find((r: any) => r.status === 'approved');
-    if (!acceptedBid) return false;
-    const ms = parseMilestones(acceptedBid.milestones);
+    const accepted = rows.find((r: any) => r.status === 'approved');
+    if (!accepted) return false;
+    const ms = parseMilestones(accepted.milestones);
     if (ms.length === 0) return false;
     return ms.every((m: any) => m?.completed === true || !!m?.paymentTxHash);
   };
-
-  const completed = isProjectCompleted(project, bids);
-
-  const canEdit =
-    me?.role === 'admin' ||
-    (!!project?.ownerWallet &&
-     !!me?.address &&
-     String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
@@ -289,11 +278,21 @@ export default function ProjectDetailPage() {
     );
   };
 
-  // derived: accepted bid + stats for quick display
-  const acceptedBid = useMemo(() => bids.find((b) => b.status === 'approved') || null, [bids]);
-  const acceptedMs = useMemo(() => parseMilestones(acceptedBid?.milestones), [acceptedBid]);
+  // ---- EARLY RETURNS SAFE NOW (no hooks below return paths were introduced) ----
+  if (loading) return <div>Loading project...</div>;
+  if (!project) return <div>Project not found</div>;
 
-  const projectDocs = useMemo(() => parseDocs(project?.docs), [project?.docs]);
+  // derived values (plain variables, not hooks)
+  const completed = isProjectCompleted(project, bids);
+  const canEdit =
+    me?.role === 'admin' ||
+    (!!project?.ownerWallet &&
+      !!me?.address &&
+      String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
+
+  const acceptedBid = bids.find((b) => b.status === 'approved') || null;
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  const projectDocs = parseDocs(project?.docs);
 
   return (
     <div className="max-w-4xl mx-auto p-6">
