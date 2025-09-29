@@ -383,7 +383,7 @@ export default function ProjectDetailPage() {
 
   // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // declared ONCE here
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -523,8 +523,7 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  // Derived values (plain variables)
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  // Derived values (reuse acceptedMs defined above)
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -848,7 +847,7 @@ function Progress({ value }: { value: number }) {
   );
 }
 
-function TabBtn({ id, label, tab, setTab }: { id: 'overview'|'timeline'|'bids'|'milestones'|'files'; label: string; tab: 'overview'|'timeline'|'bids'|'milestones'|'files'; setTab: (t: any) => void }) {
+function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
     <button
