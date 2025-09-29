@@ -19,19 +19,15 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
-
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
-
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   return a;
 }
 
@@ -43,7 +39,14 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;
+  proof?: string;         // may be ipfs://CID[/path] or https://.../ipfs/CID[/path] or CID
+  proofCid?: string;      // (not in your type earlier, but we’ll read if present)
+  folderCid?: string;     // (fallback)
+  cid?: string;           // (fallback)
+  files?: any[] | string; // filenames/urls/objects (sometimes the URL is in `name`)
+  attachments?: any;      // just in case
+  images?: any;           // just in case
+  docs?: any;             // just in case
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -52,9 +55,7 @@ function parseMilestones(raw: unknown): Milestone[] {
   try {
     const arr = JSON.parse(String(raw));
     return Array.isArray(arr) ? (arr as Milestone[]) : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 function parseDocs(raw: unknown): any[] {
   if (!raw) return [];
@@ -72,6 +73,185 @@ function fmt(dt?: string | null) {
 function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
+
+/* ------------------------- Robust IPFS/URL helpers ------------------------- */
+
+const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
+const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;               // ipfs://CID[/path]
+const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;        // https://host/ipfs/CID[/path]
+const FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
+
+function isHttpUrl(s: string): boolean {
+  try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; }
+  catch { return false; }
+}
+function encodeIpfsPath(path: string): string {
+  if (!path) return '';
+  const clean = path.replace(/^\/*/, '');
+  if (!clean) return '';
+  return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
+}
+function parseIpfsLike(s: string): { cid: string; path: string } | null {
+  let m = s.match(IPFS_URI_RE);
+  if (m) { const cid = m[1]; const path = m[2] || ''; return CID_ONLY_RE.test(cid) ? { cid, path } : null; }
+  m = s.match(HTTP_IPFS_RE);
+  if (m) { const cid = m[1]; const path = m[2] || ''; return CID_ONLY_RE.test(cid) ? { cid, path } : null; }
+  if (CID_ONLY_RE.test(s)) return { cid: s, path: '' };
+  return null;
+}
+function pickName(doc: any, fallbackHref?: string): string {
+  if (!doc) return fallbackHref?.split('/').pop() || 'file';
+  if (typeof doc === 'string') return doc.split('/').pop() || doc;
+  return (
+    doc.name || doc.filename || doc.fileName || doc.file ||
+    (typeof doc.path === 'string' ? doc.path.split('/').pop() : '') ||
+    (fallbackHref ? fallbackHref.split('/').pop() : '') ||
+    'file'
+  );
+}
+/** Normalize any input (string/object) into a canonical doc */
+function normalizeDoc(raw: any) {
+  if (!raw) return null;
+
+  // If raw itself is a string (URL/ipfs/CID/label)
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+
+    if (isHttpUrl(s)) {
+      const m = s.match(HTTP_IPFS_RE);
+      if (m && CID_ONLY_RE.test(m[1])) return { cid: m[1], ipfsPath: m[2] || '', name: pickName(null, s) };
+      return { url: s, name: pickName(null, s) };
+    }
+    const ref = parseIpfsLike(s);
+    if (ref) {
+      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
+      return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
+    }
+    return { name: s }; // plain label
+  }
+
+  // Object
+  const doc: any = { ...raw };
+
+  // 👈 Your case: the URL/CID is sitting inside "name"
+  if (typeof doc.name === 'string') {
+    const n = doc.name.trim();
+    if (isHttpUrl(n)) {
+      const m = n.match(HTTP_IPFS_RE);
+      if (m && CID_ONLY_RE.test(m[1])) return { cid: m[1], ipfsPath: m[2] || '', name: pickName(null, n) };
+      return { url: n, name: pickName(null, n) };
+    }
+    const ref = parseIpfsLike(n);
+    if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: pickName(null, n) };
+  }
+
+  // Alternate url-ish fields
+  const urlLike = doc.url || doc.gatewayUrl || doc.ipfsUrl || doc.href;
+  if (typeof urlLike === 'string') {
+    const s = urlLike.trim();
+    if (isHttpUrl(s)) {
+      const m = s.match(HTTP_IPFS_RE);
+      if (m && CID_ONLY_RE.test(m[1])) return { cid: m[1], ipfsPath: m[2] || '', name: doc.name || pickName(null, s) };
+      return { url: s, name: doc.name || pickName(null, s) };
+    }
+    const ref = parseIpfsLike(s);
+    if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || pickName(null, s) };
+  }
+
+  // Path alias
+  if (typeof doc.path === 'string' && !doc.ipfsPath) doc.ipfsPath = doc.path;
+
+  // cid+path
+  if (typeof doc.cid === 'string') {
+    const ref = parseIpfsLike(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
+    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: pickName(doc) };
+  }
+
+  // As label-only
+  if (doc.name || doc.filename || doc.fileName || doc.file || doc.path) return { name: pickName(doc) };
+
+  return null;
+}
+function hrefForDoc(doc: any): string | null {
+  if (!doc) return null;
+  if (doc.cid && CID_ONLY_RE.test(doc.cid)) {
+    const suffix = encodeIpfsPath(doc.ipfsPath || '');
+    return `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
+  }
+  if (doc.url && isHttpUrl(doc.url)) return doc.url;
+  return null;
+}
+
+/* ------------------------ Milestone file collection ------------------------ */
+
+const FILE_KEYS = ['files', 'attachments', 'images', 'docs', 'proofs', 'uploads', 'items', 'paths'];
+function toArray(x: any): any[] {
+  if (!x) return [];
+  if (Array.isArray(x)) return x;
+  if (typeof x === 'string') {
+    try { const v = JSON.parse(x); return Array.isArray(v) ? v : [x]; } catch { return [x]; }
+  }
+  return [x];
+}
+function collectMilestoneFiles(bid: any) {
+  const arr = parseMilestones(bid?.milestones);
+  const out: Array<{ scope: string; doc: any }> = [];
+
+  arr.forEach((m: any, idx: number) => {
+    const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
+
+    // Determine a base CID/folder (from proof/proofCid/folderCid/cid or embedded ipfs URL)
+    const baseRef =
+      (typeof m.proof === 'string' && parseIpfsLike(m.proof)) ||
+      (typeof m.proofCid === 'string' && { cid: m.proofCid, path: '' }) ||
+      (typeof m.folderCid === 'string' && { cid: m.folderCid, path: '' }) ||
+      (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
+      null;
+
+    // Gather candidates from common fields
+    const candidates: any[] = [];
+    for (const k of FILE_KEYS) candidates.push(...toArray(m[k]));
+    // Also consider single-file-ish fields
+    ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'].forEach((k) => {
+      if (m && m[k] != null) candidates.push(m[k]);
+    });
+
+    // Convert each candidate into a link
+    for (const c of candidates) {
+      const doc = normalizeDoc(c);
+      const direct = doc && hrefForDoc(doc);
+
+      if (direct) { out.push({ scope, doc: { ...doc, name: pickName(doc, direct) } }); continue; }
+
+      // If it's a bare filename/label and we have a base folder, stitch it
+      const maybeName =
+        typeof c === 'string'
+          ? c
+          : (c && (c.path || c.filename || c.fileName || c.file || c.name)) ? (c.path || c.filename || c.fileName || c.file || c.name) : '';
+
+      if (maybeName && baseRef) {
+        const stitchedDoc = {
+          cid: baseRef.cid,
+          ipfsPath: String(maybeName).startsWith('/') ? String(maybeName) : `/${String(maybeName)}`,
+          name: pickName({ name: maybeName })
+        };
+        const stitchedHref = hrefForDoc(stitchedDoc);
+        if (stitchedHref) { out.push({ scope, doc: stitchedDoc }); continue; }
+      }
+    }
+
+    // Also show the proof link itself (useful if it’s a direct file)
+    if (typeof m.proof === 'string') {
+      const pr = normalizeDoc(m.proof);
+      const prHref = pr && hrefForDoc(pr);
+      if (prHref) out.push({ scope, doc: { ...pr, name: pickName(pr, prHref) } });
+    }
+  });
+
+  return out;
+}
+
+/* -------------------------------- Component -------------------------------- */
 
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
@@ -116,9 +296,10 @@ export default function ProjectDetailPage() {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
+  // Expose for quick console debugging
   useEffect(() => {
-  (window as any).__BIDS = bids;
-}, [bids]);
+    (window as any).__BIDS = bids;
+  }, [bids]);
 
   // Poll bids while analysis runs
   useEffect(() => {
@@ -194,27 +375,39 @@ export default function ProjectDetailPage() {
 
   const projectDocs = parseDocs(project?.docs);
 
-  const renderAttachment = (doc: any, idx: number) => {
+  const renderAttachment = (docIn: any, idx: number) => {
+    const doc = normalizeDoc(docIn);
     if (!doc) return null;
-    const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+    const href = hrefForDoc(doc);
+    const name = pickName(doc, href || undefined);
+    const isImage = !!href && (FILE_EXT_RE.test(name) || FILE_EXT_RE.test(href));
 
-    if (isImage) {
+    if (!href) {
+      return (
+        <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
+          <p className="truncate">{name}</p>
+          <p className="italic">No file link</p>
+        </div>
+      );
+    }
+
+    if (isImage && /\.(png|jpe?g|gif|webp|svg)$/i.test(href)) {
       return (
         <button
           key={idx}
           onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
+          className="group relative overflow-hidden rounded border w-[96px] h-[96px]"
+          title={name}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={doc.name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
         </button>
       );
     }
 
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate">{doc.name}</p>
+        <p className="truncate" title={name}>{name}</p>
         <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
       </div>
     );
@@ -304,6 +497,7 @@ export default function ProjectDetailPage() {
   if (!project) return <div className="p-6">Project not found</div>;
 
   // Derived values (plain variables)
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -340,13 +534,22 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  const allFiles = [
-    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
+  // Files roll-up = Project docs + Bid docs + Milestone files
+  const allFiles: Array<{ scope: string; doc: any }> = [
+    ...(parseDocs(project?.docs) || []).map((d) => ({ scope: 'Project', doc: d })),
     ...bids.flatMap((b) => {
-      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+      const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
       return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
     }),
+    ...bids.flatMap((b) => collectMilestoneFiles(b)),
   ];
+
+  // Expose URLs for a quick console check
+  if (typeof window !== 'undefined') {
+    (window as any).__FILES = allFiles
+      .map(({ doc }) => hrefForDoc(normalizeDoc(doc)))
+      .filter(Boolean);
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -392,12 +595,12 @@ export default function ProjectDetailPage() {
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
           <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
       </div>
 
-      {/* Tab content */}
+      {/* Overview */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -406,7 +609,7 @@ export default function ProjectDetailPage() {
 
             <div className="mt-6">
               <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
-              <Progress value={msTotal ? Math.round((msCompleted / msTotal) * 100) : 0} />
+              <Progress value={acceptedMs.length ? Math.round((msCompleted / msTotal) * 100) : 0} />
               <p className="text-xs text-gray-600 mt-1">
                 {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
               </p>
@@ -456,6 +659,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Timeline */}
       {tab === 'timeline' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Activity Timeline</h3>
@@ -475,6 +679,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Bids */}
       {tab === 'bids' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">All Bids</h3>
@@ -507,6 +712,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Milestones */}
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
@@ -532,9 +738,7 @@ export default function ProjectDetailPage() {
                       <td className="py-2 pr-4">M{idx+1}</td>
                       <td className="py-2 pr-4">{m.name || '—'}</td>
                       <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">
-                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
-                      </td>
+                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
                       <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                       <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                       <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
@@ -551,6 +755,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
@@ -566,6 +771,15 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
           )}
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-gray-500">debug: show file URLs</summary>
+            <ul className="mt-2 text-xs break-all space-y-1">
+              {allFiles.map((f, i) => {
+                const href = hrefForDoc(normalizeDoc(f.doc));
+                return <li key={i}>{href || '(no link)'}</li>;
+              })}
+            </ul>
+          </details>
         </section>
       )}
 
@@ -597,7 +811,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-// Simple progress bar (Tailwind)
+// Simple progress bar
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
@@ -621,4 +835,3 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
     </button>
   );
 }
-
