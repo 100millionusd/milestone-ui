@@ -9,6 +9,8 @@ import { getProposal, getBids, getAuthRole } from '@/lib/api';
 const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
+/* ----------------------------- Types / Helpers ----------------------------- */
+
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -25,7 +27,6 @@ type AnalysisV1 = {
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
-
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
   if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
@@ -61,45 +62,95 @@ function parseDocs(raw: unknown): any[] {
   if (typeof raw === 'string') {
     try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
   }
+  // if it's a single object/string doc, wrap later where used
   return [];
 }
 
-/** Normalize any "doc" (string CID/URL or object with {url|cid,name}) */
-function normalizeDoc(raw: any) {
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    const isHttp = /^https?:\/\//i.test(raw);
-    return isHttp
-      ? { url: raw, name: raw.split('/').pop() || 'file' }
-      : { cid: raw, name: `${raw.slice(0, 8)}…` };
+const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
+
+function isHttpUrl(s: string): boolean {
+  try {
+    const u = new URL(s, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    return /^https?:$/i.test(u.protocol);
+  } catch {
+    return false;
   }
-  // Already an object (supports { url?, cid?, name? })
-  return raw;
+}
+function isIpfsUrl(s: string): boolean {
+  return /^ipfs:\/\//i.test(s);
 }
 
-/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid) */
+/** Normalize any "doc" (string CID/URL or object with {url|cid,name}). If it's just a label, return a doc without href. */
+function normalizeDoc(raw: any) {
+  if (!raw) return null;
+
+  // String input: could be URL, ipfs://..., CID, or just a label
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (isHttpUrl(s)) return { url: s, name: s.split('/').pop() || 'file' };
+    if (isIpfsUrl(s)) {
+      const cid = s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
+      return { cid, name: `${cid.slice(0, 8)}…` };
+    }
+    if (CID_RE.test(s)) return { cid: s, name: `${s.slice(0, 8)}…` };
+    // plain text label (NOT a link)
+    return { name: s };
+  }
+
+  // Object input
+  const doc: any = { ...raw };
+  if (typeof doc.url === 'string') {
+    if (isHttpUrl(doc.url)) return doc;
+    if (isIpfsUrl(doc.url)) {
+      const cid = String(doc.url).replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
+      delete doc.url;
+      return { ...doc, cid };
+    }
+  }
+  if (typeof doc.cid === 'string' && CID_RE.test(doc.cid)) return doc;
+
+  // no valid url/cid — treat as label if there's a name
+  if (doc.name) return { name: String(doc.name) };
+  return null;
+}
+
+/** Build a safe href if the doc is linkable; otherwise return null. */
+function hrefForDoc(doc: any): string | null {
+  if (!doc) return null;
+  if (doc.url && isHttpUrl(doc.url)) return doc.url;
+  if (doc.cid && CID_RE.test(doc.cid)) return `${GATEWAY}/${encodeURIComponent(doc.cid)}`;
+  return null;
+}
+
+/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid). Only linkable files are returned. */
 function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
+
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${bid?.vendorName ? ` (${bid.vendorName})` : ''}`;
+
     // files[]
     if (Array.isArray(m?.files)) {
       m.files.forEach((f: any) => {
         const doc = normalizeDoc(f);
-        if (doc) out.push({ scope, doc });
+        const href = doc && hrefForDoc(doc);
+        if (href) out.push({ scope, doc });
       });
     }
-    // proof/proofCid single
+
+    // proof/proofCid (single)
     const single = m?.proofCid ?? m?.proof;
     if (single) {
       const doc: any = normalizeDoc(single);
-      if (doc) {
+      const href = doc && hrefForDoc(doc);
+      if (href) {
         doc.name ||= m?.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
         out.push({ scope, doc });
       }
     }
   });
+
   return out;
 }
 
@@ -113,6 +164,8 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 }
 
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
+
+/* -------------------------------- Component -------------------------------- */
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -208,7 +261,8 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // ---- derived values (plain variables; no hooks) ----
+  /* ---------------------------- Derived values (vars) ---------------------------- */
+
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
@@ -264,150 +318,49 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // ----------------- FILES (now includes milestone files) -----------------
+  /* ------------------------------ Files (robust) ------------------------------ */
+
+  // Raw collection (proposal docs + bid docs + milestone files)
   const allFilesRaw = [
-    // Proposal-level docs
+    // Proposal-level docs (array in project.docs)
     ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
 
-    // Bid submission docs
+    // Bid submission docs (b.docs array + optional b.doc single)
     ...bids.flatMap((b: any) => {
-      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+      const docsArr = parseDocs(b.docs);
+      const single = b.doc ? [b.doc] : [];
+      const ds = [...docsArr, ...single].filter(Boolean);
       return ds.map((d: any) => ({
         scope: `Bid #${b.bidId}${b.vendorName ? ` — ${b.vendorName}` : ''}`,
         doc: d
       }));
     }),
 
-    // NEW: Milestone proof files (from the bid JSON)
+    // Milestone proof files from the bid JSON (only linkable files are returned)
     ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
   ];
 
-  // Normalize & de-duplicate files by URL/CID+name so the list stays clean
+  // Normalize & de-duplicate files by URL/CID+name so the list stays clean; ignore non-link docs (labels)
   const allFiles = (() => {
     const seen = new Set<string>();
-    const out: Array<{ scope: string; doc: any }> = [];
+    const out: Array<{ scope: string; doc: any; href: string }> = [];
     for (const item of allFilesRaw) {
       const doc = normalizeDoc(item.doc);
       if (!doc) continue;
-      const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '');
-      const key = `${href}|${doc.name || ''}`;
+      const href = hrefForDoc(doc);
+      if (!href) continue; // skip labels like "10%: Upon contract signing..."
+      const name = doc.name || href.split('/').pop() || 'file';
+      const key = `${href}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ scope: item.scope, doc });
+      out.push({ scope: item.scope, doc: { ...doc, name }, href });
     }
     return out;
   })();
 
-  // ----------------- UI helpers -----------------
-  const renderAttachment = (docIn: any, idx: number) => {
-    const doc = normalizeDoc(docIn);
-    if (!doc) return null;
+  /* --------------------------------- Render --------------------------------- */
 
-    const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
-    const name = doc.name || 'file';
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
-
-    if (isImage) {
-      return (
-        <button
-          key={idx}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-        </button>
-      );
-    }
-
-    return (
-      <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate">{name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-      </div>
-    );
-  };
-
-  const renderAnalysis = (raw: any) => {
-    const analysis = coerceAnalysis(raw);
-    const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
-
-    if (isPending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
-    if (!analysis) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-
-    const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
-    const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
-
-    return (
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
-
-        {isV2 && (
-          <>
-            {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
-            <div className="text-sm">
-              {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
-              {typeof analysis.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
-                </>
-              )}
-            </div>
-            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Risks</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                </ul>
-              </div>
-            )}
-            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Milestone Notes</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                </ul>
-              </div>
-            )}
-            {typeof analysis.pdfUsed === 'boolean' && (
-              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
-                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
-                {analysis.pdfDebug?.url && (
-                  <div>
-                    File:{' '}
-                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                      {analysis.pdfDebug.name || 'open'}
-                    </a>
-                  </div>
-                )}
-                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
-                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
-                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
-                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
-              </div>
-            )}
-          </>
-        )}
-
-        {isV1 && (
-          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
-            {analysis.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {analysis.verdict}</p>)}
-            {analysis.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {analysis.reasoning}</p>)}
-            {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
-              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
-      </div>
-    );
-  };
-
-  // ---- EARLY RETURNS ----
+  // Early returns
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
@@ -455,7 +408,7 @@ export default function ProjectDetailPage() {
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
           <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
       </div>
@@ -624,7 +577,7 @@ export default function ProjectDetailPage() {
               {allFiles.map((f, i) => (
                 <div key={`${f.scope}-${i}`}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachment(f.doc, i)}
+                  {renderAttachment(f.doc, f.href, i)}
                 </div>
               ))}
             </div>
@@ -662,7 +615,8 @@ export default function ProjectDetailPage() {
   );
 }
 
-// Simple progress bar (Tailwind)
+/* ---------------------------- Small UI components ---------------------------- */
+
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
@@ -682,5 +636,43 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
     >
       {label}
     </button>
+  );
+}
+
+/* ----------------------------- File render helper ---------------------------- */
+
+function renderAttachment(docIn: any, hrefIn: string | null, key: number) {
+  const doc = normalizeDoc(docIn);
+  if (!doc) return null;
+
+  const href = hrefIn || hrefForDoc(doc);
+  const name = doc.name || (href ? href.split('/').pop() : 'file');
+
+  // No valid link (label/metadata only) — show as non-clickable card
+  if (!href) {
+    return (
+      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
+        <p className="truncate">{name}</p>
+        <p className="italic">No file link</p>
+      </div>
+    );
+  }
+
+  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
+
+  if (isImage) {
+    return (
+      <a key={key} href={href} target="_blank" rel="noopener noreferrer" title={name} className="group block overflow-hidden rounded border">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+      </a>
+    );
+  }
+
+  return (
+    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+      <p className="truncate" title={name}>{name}</p>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+    </div>
   );
 }
