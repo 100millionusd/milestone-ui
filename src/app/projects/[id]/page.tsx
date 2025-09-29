@@ -107,6 +107,11 @@ function normalizeDoc(raw: any) {
   if (typeof raw === 'string') {
     const s = raw.trim();
 
+    // First, filter out milestone names
+    if (s.includes('%:') && s.includes('Upon contract signing')) {
+      return null;
+    }
+
     if (isHttpUrl(s)) return { url: s, name: s.split('/').pop() || 'file' };
 
     const ref = parseIpfsRef(s);
@@ -159,44 +164,50 @@ function hrefForDoc(doc: any): string | null {
   return null;
 }
 
+// Replace the collectMilestoneFiles function with this corrected version:
+
 /* -------------------- Milestone → files (folder + filenames) -------------------- */
 function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
 
-  // Debug: log milestone structure
-  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    console.log('Milestones for bid', bid?.bidId, ':', arr);
-  }
-
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
-    // Check for proof files first
+    // Check for actual file references, not milestone names
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
       (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
       (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
       (m.cid ? { cid: m.cid, path: '' } : null);
 
-    // Process files array
+    // Process files array - only if it contains actual file references
     let files: any[] = [];
     if (Array.isArray(m.files)) {
-      files = m.files as any[];
+      files = m.files.filter(f => {
+        // Filter out milestone names masquerading as files
+        if (typeof f === 'string') {
+          return !f.includes('%:') && !f.includes('Upon contract signing');
+        }
+        return true;
+      });
     } else if (typeof m.files === 'string') {
       try { 
         const parsed = JSON.parse(m.files as string); 
-        if (Array.isArray(parsed)) files = parsed; 
+        if (Array.isArray(parsed)) {
+          files = parsed.filter(f => {
+            if (typeof f === 'string') {
+              return !f.includes('%:') && !f.includes('Upon contract signing');
+            }
+            return true;
+          });
+        }
       } catch {
-        // If it's not JSON, treat it as a single file string
-        if (m.files) files = [m.files];
+        // If it's not JSON, check if it's a valid file reference
+        if (m.files && !m.files.includes('%:') && !m.files.includes('Upon contract signing')) {
+          files = [m.files];
+        }
       }
-    }
-
-    // Debug: log files found
-    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-      console.log(`Milestone M${idx+1} files:`, files);
-      console.log(`Milestone M${idx+1} baseRef:`, baseRef);
     }
 
     // Process each file in the files array
@@ -215,17 +226,30 @@ function collectMilestoneFiles(bid: any) {
       }
 
       const href = doc && hrefForDoc(doc);
-      if (href && !href.includes('%:') && !href.includes('Upon contract signing')) {
+      if (href) {
         out.push({ scope, doc });
       }
     });
 
-    // Handle single proof file
+    // Handle single proof file - but only if it's a valid file reference
     const single = (m.proofCid ?? m.proof) as any;
-    if (single && !files.length) { // Only add if no files array already handled it
+    if (single && typeof single === 'string') {
+      // Skip if it's the problematic milestone name
+      if (single.includes('%:') && single.includes('Upon contract signing')) {
+        return; // Skip this milestone proof
+      }
+      
       const doc: any = normalizeDoc(single);
       const href = doc && hrefForDoc(doc);
-      if (href && !href.includes('%:') && !href.includes('Upon contract signing')) {
+      if (href) {
+        doc.name ||= m.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
+        out.push({ scope, doc });
+      }
+    } else if (single && typeof single === 'object') {
+      // Handle proof as object
+      const doc: any = normalizeDoc(single);
+      const href = doc && hrefForDoc(doc);
+      if (href) {
         doc.name ||= m.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
         out.push({ scope, doc });
       }
