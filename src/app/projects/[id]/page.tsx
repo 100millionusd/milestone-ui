@@ -19,7 +19,6 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
-
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
@@ -29,9 +28,7 @@ type AnalysisV1 = {
 
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   return a;
 }
 
@@ -44,6 +41,8 @@ type Milestone = {
   paymentTxHash?: string | null;
   paymentDate?: string | null;
   proof?: string;
+  proofCid?: string;
+  files?: any[];
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -64,6 +63,46 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
+
+/** Normalize any "doc" (string CID/URL or object with {url|cid,name}) */
+function normalizeDoc(raw: any) {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const isHttp = /^https?:\/\//i.test(raw);
+    return isHttp
+      ? { url: raw, name: raw.split('/').pop() || 'file' }
+      : { cid: raw, name: `${raw.slice(0, 8)}…` };
+  }
+  // Already an object (supports { url?, cid?, name? })
+  return raw;
+}
+
+/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid) */
+function collectMilestoneFiles(bid: any) {
+  const arr = parseMilestones(bid?.milestones);
+  const out: Array<{ scope: string; doc: any }> = [];
+  arr.forEach((m: Milestone, idx: number) => {
+    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${bid?.vendorName ? ` (${bid.vendorName})` : ''}`;
+    // files[]
+    if (Array.isArray(m?.files)) {
+      m.files.forEach((f: any) => {
+        const doc = normalizeDoc(f);
+        if (doc) out.push({ scope, doc });
+      });
+    }
+    // proof/proofCid single
+    const single = m?.proofCid ?? m?.proof;
+    if (single) {
+      const doc: any = normalizeDoc(single);
+      if (doc) {
+        doc.name ||= m?.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
+        out.push({ scope, doc });
+      }
+    }
+  });
+  return out;
+}
+
 function fmt(dt?: string | null) {
   if (!dt) return '';
   const d = new Date(dt);
@@ -115,10 +154,6 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
-
-  useEffect(() => {
-  (window as any).__BIDS = bids;
-}, [bids]);
 
   // Poll bids while analysis runs
   useEffect(() => {
@@ -173,7 +208,7 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // ---- helpers used in render (no hooks below this line!) ----
+  // ---- derived values (plain variables; no hooks) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
@@ -194,10 +229,83 @@ export default function ProjectDetailPage() {
 
   const projectDocs = parseDocs(project?.docs);
 
-  const renderAttachment = (doc: any, idx: number) => {
+  // rollups
+  const msTotal = acceptedMs.length;
+  const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+  const lastActivity = (() => {
+    const dates: (string | undefined | null)[] = [project?.updatedAt, project?.createdAt];
+    for (const b of bids) {
+      dates.push(b?.createdAt, b?.updatedAt);
+      const arr = parseMilestones(b?.milestones);
+      for (const m of arr) { dates.push(m?.paymentDate, m?.completionDate, m?.dueDate); }
+    }
+    const valid = dates
+      .filter(Boolean)
+      .map((s) => new Date(String(s)))
+      .filter((d) => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+    return valid[0] ? valid[0].toLocaleString() : '—';
+  })();
+
+  // Timeline (synthesized)
+  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
+  const timeline: EventItem[] = [];
+  if (project?.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project?.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  for (const b of bids) {
+    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b.milestones);
+    arr.forEach((m, idx) => {
+      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
+      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
+    });
+  }
+  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
+
+  // ----------------- FILES (now includes milestone files) -----------------
+  const allFilesRaw = [
+    // Proposal-level docs
+    ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
+
+    // Bid submission docs
+    ...bids.flatMap((b: any) => {
+      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+      return ds.map((d: any) => ({
+        scope: `Bid #${b.bidId}${b.vendorName ? ` — ${b.vendorName}` : ''}`,
+        doc: d
+      }));
+    }),
+
+    // NEW: Milestone proof files (from the bid JSON)
+    ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
+  ];
+
+  // Normalize & de-duplicate files by URL/CID+name so the list stays clean
+  const allFiles = (() => {
+    const seen = new Set<string>();
+    const out: Array<{ scope: string; doc: any }> = [];
+    for (const item of allFilesRaw) {
+      const doc = normalizeDoc(item.doc);
+      if (!doc) continue;
+      const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '');
+      const key = `${href}|${doc.name || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ scope: item.scope, doc });
+    }
+    return out;
+  })();
+
+  // ----------------- UI helpers -----------------
+  const renderAttachment = (docIn: any, idx: number) => {
+    const doc = normalizeDoc(docIn);
     if (!doc) return null;
+
     const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+    const name = doc.name || 'file';
+    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 
     if (isImage) {
       return (
@@ -207,14 +315,14 @@ export default function ProjectDetailPage() {
           className="group relative overflow-hidden rounded border"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={doc.name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
         </button>
       );
     }
 
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate">{doc.name}</p>
+        <p className="truncate">{name}</p>
         <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
       </div>
     );
@@ -299,54 +407,9 @@ export default function ProjectDetailPage() {
     );
   };
 
-  // ---- EARLY RETURNS (no hooks below) ----
+  // ---- EARLY RETURNS ----
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
-
-  // Derived values (plain variables)
-  const msTotal = acceptedMs.length;
-  const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
-  const lastActivity = (() => {
-    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
-    for (const b of bids) {
-      dates.push(b.createdAt, b.updatedAt);
-      const arr = parseMilestones(b.milestones);
-      for (const m of arr) {
-        dates.push(m.paymentDate, m.completionDate, m.dueDate);
-      }
-    }
-    const valid = dates
-      .filter(Boolean)
-      .map((s) => new Date(String(s)))
-      .filter((d) => !isNaN(d.getTime()))
-      .sort((a, b) => b.getTime() - a.getTime());
-    return valid[0] ? valid[0].toLocaleString() : '—';
-  })();
-
-  // Build Timeline (synthesized)
-  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
-  const timeline: EventItem[] = [];
-  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
-  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
-  for (const b of bids) {
-    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
-    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
-    const arr = parseMilestones(b.milestones);
-    arr.forEach((m, idx) => {
-      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
-    });
-  }
-  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
-
-  const allFiles = [
-    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
-    ...bids.flatMap((b) => {
-      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-      return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-    }),
-  ];
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -397,7 +460,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Tab content */}
+      {/* Overview */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -456,6 +519,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Timeline */}
       {tab === 'timeline' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Activity Timeline</h3>
@@ -475,6 +539,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Bids */}
       {tab === 'bids' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">All Bids</h3>
@@ -507,6 +572,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Milestones */}
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
@@ -532,9 +598,7 @@ export default function ProjectDetailPage() {
                       <td className="py-2 pr-4">M{idx+1}</td>
                       <td className="py-2 pr-4">{m.name || '—'}</td>
                       <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">
-                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
-                      </td>
+                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
                       <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                       <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                       <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
@@ -551,13 +615,14 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
-                <div key={i}>
+                <div key={`${f.scope}-${i}`}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
                   {renderAttachment(f.doc, i)}
                 </div>
@@ -611,10 +676,8 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
   return (
     <button
       onClick={() => setTab(id)}
-      className={classNames(
-        'px-3 py-2 text-sm -mb-px border-b-2',
-        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black'
-      )}
+      className={classNames('px-3 py-2 text-sm -mb-px border-b-2',
+        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black')}
       aria-pressed={active}
     >
       {label}
