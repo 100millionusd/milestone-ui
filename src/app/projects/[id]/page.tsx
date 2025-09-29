@@ -6,7 +6,12 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+const GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  // if you have a dedicated Pinata gateway, set NEXT_PUBLIC_IPFS_GATEWAY to e.g.
+  // https://sapphire-given-snake-741.mypinata.cloud/ipfs
+  'https://gateway.pinata.cloud/ipfs';
+
 const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -69,10 +74,9 @@ function parseDocs(raw: unknown): any[] {
 }
 
 /* --------------------------- ROBUST IPFS HELPERS --------------------------- */
-// Supports ipfs://CID, ipfs://CID/path, and CID/path; safely encodes path segments
 const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
-const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i; // group1 = CID, group2 = /path (optional)
+const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 
 function isHttpUrl(s: string): boolean {
   try {
@@ -99,7 +103,6 @@ function encodeIpfsPath(path: string): string {
   if (!clean) return '';
   return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
 }
-/** Normalize any doc (string CID/URL or object with {url|cid,name}). If just a label, return a doc without href fields. */
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
@@ -166,14 +169,12 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
-    // base folder from proof/proofCid/folderCid/cid
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
       (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
       (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
       (m.cid ? { cid: m.cid, path: '' } : null);
 
-    // normalize files[]
     let files: any[] = [];
     if (Array.isArray(m.files)) files = m.files as any[];
     else if (typeof m.files === 'string') {
@@ -181,11 +182,9 @@ function collectMilestoneFiles(bid: any) {
     }
 
     files.forEach((f: any) => {
-      // As-is first
       let doc = normalizeDoc(f);
       let href = doc && hrefForDoc(doc);
 
-      // If only filename/label and base folder exists, stitch it
       if (!href && baseRef) {
         const fileName =
           typeof f === 'string' ? f :
@@ -212,7 +211,6 @@ function collectMilestoneFiles(bid: any) {
       if (href) out.push({ scope, doc });
     });
 
-    // Also show single proof/proofCid (often a PDF)
     const single = (m.proofCid ?? m.proof) as any;
     if (single) {
       const doc: any = normalizeDoc(single);
@@ -335,21 +333,6 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // ===== Guard: kill ANY rogue anchors (like href="10%: Upon …") =====
-  useEffect(() => {
-    const anchors = Array.from(document.querySelectorAll('a[href]'));
-    anchors.forEach(a => {
-      const raw = a.getAttribute('href') || '';
-      const allowed =
-        raw.startsWith('/api/ipfs') ||
-        raw.startsWith('https://') ||
-        raw.startsWith('http://') ||
-        raw.startsWith('/') ||
-        raw.startsWith('#');
-      if (!allowed) a.removeAttribute('href');
-    });
-  }, [project, bids, tab]);
-
   /* ---------------------------- Derived values ---------------------------- */
 
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
@@ -402,10 +385,8 @@ export default function ProjectDetailPage() {
       out.push({ scope: item.scope, doc: { ...doc, name }, href });
     }
 
-    // Debug (dev only)
     if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
       (window as any).__FILES = out;
-      console.table(out.map(x => ({ scope: x.scope, name: x.doc.name, href: x.href })));
     }
 
     return out;
@@ -485,7 +466,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Overview */}
+      {/* Overview (minimal) */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -498,18 +479,6 @@ export default function ProjectDetailPage() {
               <p className="text-xs text-gray-600 mt-1">
                 {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
               </p>
-            </div>
-
-            <div className="mt-6">
-              <h4 className="font-semibold mb-2">Latest activity</h4>
-              {bids.length || acceptedMs.length ? (
-                <ul className="text-sm space-y-1">
-                  {/* Minimal sample; you can plug the timeline from earlier versions */}
-                  <li><b>Project updated</b> • {lastActivity}</li>
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500">No activity yet.</p>
-              )}
             </div>
           </div>
 
@@ -589,11 +558,11 @@ export default function ProjectDetailPage() {
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
-            <div id="files-grid" className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
                 <div key={`${f.scope}-${i}`}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachment(f.doc, f.href)}
+                  {renderAttachmentButton(f.doc, f.href)}
                 </div>
               ))}
             </div>
@@ -634,8 +603,8 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
 }
 
 /* ----------------------------- File render helper ---------------------------- */
-
-function renderAttachment(docIn: any, hrefPre?: string) {
+/* Render as BUTTONS (no <a>) so the router can never treat them as relative links. */
+function renderAttachmentButton(docIn: any, hrefPre?: string) {
   const doc = normalizeDoc(docIn);
   if (!doc) return null;
 
@@ -651,37 +620,27 @@ function renderAttachment(docIn: any, hrefPre?: string) {
     );
   }
 
-  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
-
-  // Open in new tab even if something else mangles anchors
-  const open = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const open = () => {
     try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
   };
 
+  const isImage =
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(name) ||
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
+
   if (isImage) {
     return (
-      <a
-        href={href}
-        onClick={open}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={name}
-        className="group block overflow-hidden rounded border"
-        data-safe-link="1"
-      >
+      <button type="button" onClick={open} title={name} className="group block overflow-hidden rounded border w-[96px] h-[96px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-      </a>
+      </button>
     );
   }
 
   return (
     <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
       <p className="truncate" title={name}>{name}</p>
-      <a href={href} onClick={open} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" data-safe-link="1">
-        Open
-      </a>
+      <button type="button" onClick={open} className="text-blue-600 hover:underline">Open</button>
     </div>
   );
 }
