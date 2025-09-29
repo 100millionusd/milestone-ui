@@ -39,14 +39,14 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;         // may be ipfs://CID[/path] or https://.../ipfs/CID[/path] or CID
-  proofCid?: string;      // (not in your type earlier, but we’ll read if present)
-  folderCid?: string;     // (fallback)
-  cid?: string;           // (fallback)
-  files?: any[] | string; // filenames/urls/objects (sometimes the URL is in `name`)
-  attachments?: any;      // just in case
-  images?: any;           // just in case
-  docs?: any;             // just in case
+  proof?: string;
+  proofCid?: string;
+  folderCid?: string;
+  cid?: string;
+  files?: any[] | string;
+  attachments?: any;
+  images?: any;
+  docs?: any;
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -77,8 +77,8 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 /* ------------------------- Robust IPFS/URL helpers ------------------------- */
 
 const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
-const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;               // ipfs://CID[/path]
-const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;        // https://host/ipfs/CID[/path]
+const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
+const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
 const FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
 
 function isHttpUrl(s: string): boolean {
@@ -113,7 +113,6 @@ function pickName(doc: any, fallbackHref?: string): string {
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
-  // If raw itself is a string (URL/ipfs/CID/label)
   if (typeof raw === 'string') {
     const s = raw.trim();
 
@@ -127,13 +126,12 @@ function normalizeDoc(raw: any) {
       const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
       return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
     }
-    return { name: s }; // plain label
+    return { name: s };
   }
 
-  // Object
   const doc: any = { ...raw };
 
-  // 👈 Your case: the URL/CID is sitting inside "name"
+  // IMPORTANT: URL/CID might be inside "name"
   if (typeof doc.name === 'string') {
     const n = doc.name.trim();
     if (isHttpUrl(n)) {
@@ -145,7 +143,6 @@ function normalizeDoc(raw: any) {
     if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: pickName(null, n) };
   }
 
-  // Alternate url-ish fields
   const urlLike = doc.url || doc.gatewayUrl || doc.ipfsUrl || doc.href;
   if (typeof urlLike === 'string') {
     const s = urlLike.trim();
@@ -158,16 +155,13 @@ function normalizeDoc(raw: any) {
     if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || pickName(null, s) };
   }
 
-  // Path alias
   if (typeof doc.path === 'string' && !doc.ipfsPath) doc.ipfsPath = doc.path;
 
-  // cid+path
   if (typeof doc.cid === 'string') {
     const ref = parseIpfsLike(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
     if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: pickName(doc) };
   }
 
-  // As label-only
   if (doc.name || doc.filename || doc.fileName || doc.file || doc.path) return { name: pickName(doc) };
 
   return null;
@@ -200,7 +194,6 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: any, idx: number) => {
     const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
 
-    // Determine a base CID/folder (from proof/proofCid/folderCid/cid or embedded ipfs URL)
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsLike(m.proof)) ||
       (typeof m.proofCid === 'string' && { cid: m.proofCid, path: '' }) ||
@@ -208,22 +201,18 @@ function collectMilestoneFiles(bid: any) {
       (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
       null;
 
-    // Gather candidates from common fields
     const candidates: any[] = [];
     for (const k of FILE_KEYS) candidates.push(...toArray(m[k]));
-    // Also consider single-file-ish fields
     ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'].forEach((k) => {
       if (m && m[k] != null) candidates.push(m[k]);
     });
 
-    // Convert each candidate into a link
     for (const c of candidates) {
       const doc = normalizeDoc(c);
       const direct = doc && hrefForDoc(doc);
 
       if (direct) { out.push({ scope, doc: { ...doc, name: pickName(doc, direct) } }); continue; }
 
-      // If it's a bare filename/label and we have a base folder, stitch it
       const maybeName =
         typeof c === 'string'
           ? c
@@ -240,7 +229,6 @@ function collectMilestoneFiles(bid: any) {
       }
     }
 
-    // Also show the proof link itself (useful if it’s a direct file)
     if (typeof m.proof === 'string') {
       const pr = normalizeDoc(m.proof);
       const prHref = pr && hrefForDoc(pr);
@@ -356,7 +344,7 @@ export default function ProjectDetailPage() {
 
   // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // <-- defined ONCE here
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -496,11 +484,11 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  // Derived values (plain variables)
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  // Derived values (plain variables) - use acceptedMs declared above
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
     for (const b of bids) {
@@ -544,7 +532,6 @@ export default function ProjectDetailPage() {
     ...bids.flatMap((b) => collectMilestoneFiles(b)),
   ];
 
-  // Expose URLs for a quick console check
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles
       .map(({ doc }) => hrefForDoc(normalizeDoc(doc)))
@@ -776,7 +763,7 @@ export default function ProjectDetailPage() {
             <ul className="mt-2 text-xs break-all space-y-1">
               {allFiles.map((f, i) => {
                 const href = hrefForDoc(normalizeDoc(f.doc));
-                return <li key={i}>{href || '(no link)'}</li>;
+                return <li key={i}>{href || '(no link)'} </li>;
               })}
             </ul>
           </details>
