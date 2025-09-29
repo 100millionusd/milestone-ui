@@ -233,7 +233,6 @@ export default function ProjectDetailPage() {
           getProposal(projectIdNum),
           getBids(projectIdNum),
         ]);
-        if (!active) return;
         setProject(projectData);
         setBids(bidsData);
       } catch (e) {
@@ -394,6 +393,22 @@ export default function ProjectDetailPage() {
     }
     return out;
   })();
+
+  /* ------------------- ANTI-BAD-LINK GUARD (kills rogue hrefs) ------------------- */
+  useEffect(() => {
+    // Remove any <a href="10%: ..."> or other non-absolute/non-root links that slipped in
+    const anchors = Array.from(document.querySelectorAll('a[href]'));
+    anchors.forEach(a => {
+      const raw = a.getAttribute('href') || '';
+      const isHttp = /^https?:\/\//i.test(raw);
+      const isRooted = raw.startsWith('/');
+      const isHash = raw.startsWith('#');
+      const isAllowed = isHttp || isRooted || isHash || raw.startsWith('/api/ipfs');
+      if (!isAllowed) {
+        a.removeAttribute('href');
+      }
+    });
+  }, [project, bids, tab]);
 
   /* --------------------------------- Render --------------------------------- */
 
@@ -626,27 +641,6 @@ export default function ProjectDetailPage() {
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
       </div>
-
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightbox}
-            alt="attachment preview"
-            className="max-h-full max-w-full rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            className="absolute top-4 right-4 text-white text-2xl"
-            onClick={() => setLightbox(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
     </div>
   );
 }
