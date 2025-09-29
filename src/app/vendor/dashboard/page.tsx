@@ -53,6 +53,25 @@ export default function VendorDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
 
+  async function archiveAnyProofForBid(bidId: number) {
+    // Load proofs for this bid (vendor-safe)
+    const proofs = await getProofs(bidId);
+
+    // Pick a proof we’re allowed to archive (not pending, not already archived)
+    const target =
+      proofs.find(p => p.status !== 'pending' && p.status !== 'archived') ??
+      proofs[0];
+
+    if (!target?.proofId && !target?.proof_id) {
+      throw new Error('No proofs to archive for this bid.');
+    }
+
+    const proofId = target.proofId ?? target.proof_id;
+
+    // Vendor-safe endpoint → POST /proofs/:proofId/archive
+    return await archiveProof(proofId);
+  }
+
   const loadBids = async () => {
     try {
       const all = await getBids();
