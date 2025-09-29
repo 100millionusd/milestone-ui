@@ -827,12 +827,10 @@ export async function analyzeProof(proofId: number, prompt?: string): Promise<Pr
 
 export async function archiveProof(proofId: number): Promise<Proof> {
   if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
-  // Server may return { ok: true, proof: {...} } or just the proof object
-  const res = await apiFetch(
-    `/proofs/${encodeURIComponent(String(proofId))}/archive`,
-    { method: "POST" }
-  );
-  return toProof(res?.proof ?? res);
+  const p = await apiFetch(`/proofs/${encodeURIComponent(String(proofId))}/archive`, {
+    method: "POST",
+  });
+  return toProof(p);
 }
 
 export async function getProofs(bidId?: number): Promise<Proof[]> {

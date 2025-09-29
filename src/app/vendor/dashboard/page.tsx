@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ethers } from 'ethers';
-import { getBids, archiveBid } from '@/lib/api';
+import { getBids, getProofs, archiveProof } from '@/lib/api';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import SendFunds from '@/components/SendFunds';
 
@@ -150,7 +150,7 @@ export default function VendorDashboard() {
 
     setArchivingIds((prev) => new Set(prev).add(bidId));
     try {
-      const updated = await archiveBid(bidId);
+      const updated = await archiveAnyProofForBid(bidId);
       setBids((prev) => prev.map((b) => (b.bidId === bidId ? updated : b)));
     } catch (e: any) {
       alert('Failed to archive bid: ' + (e?.message || 'Unknown error'));
@@ -331,7 +331,7 @@ export default function VendorDashboard() {
 
                   {canArchive && (
                     <button
-                      onClick={() => onArchive(bid.bidId)}
+                      onClick={() => archiveAnyProofForBid(b.bidId)}
                       disabled={isArchiving}
                       className={[
                         'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
