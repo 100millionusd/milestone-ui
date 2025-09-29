@@ -8,8 +8,6 @@ import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  // if you have a dedicated Pinata gateway, set NEXT_PUBLIC_IPFS_GATEWAY to e.g.
-  // https://sapphire-given-snake-741.mypinata.cloud/ipfs
   'https://gateway.pinata.cloud/ipfs';
 
 const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
@@ -242,7 +240,24 @@ type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
+  
+  // Enhanced project ID parsing with better error handling for encoded URLs
+  const projectIdNum = useMemo(() => {
+    try {
+      const id = (params as any)?.id;
+      if (!id) return NaN;
+      
+      // Handle encoded URLs and extract numeric ID
+      const decodedId = decodeURIComponent(String(id));
+      
+      // Extract first numeric value from the string
+      const numericMatch = decodedId.match(/(\d+)/);
+      return numericMatch ? Number(numericMatch[1]) : NaN;
+    } catch (error) {
+      console.error('Error parsing project ID:', error);
+      return NaN;
+    }
+  }, [params]);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
@@ -413,6 +428,21 @@ export default function ProjectDetailPage() {
   })();
 
   /* --------------------------------- Render --------------------------------- */
+
+  // Enhanced error handling for invalid project IDs
+  if (!Number.isFinite(projectIdNum)) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+          <h2 className="text-red-800 font-semibold mb-2">Invalid Project URL</h2>
+          <p className="text-red-700 text-sm">
+            The project URL contains invalid characters or format. Please check the link and try again.
+          </p>
+        </div>
+        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      </div>
+    );
+  }
 
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
