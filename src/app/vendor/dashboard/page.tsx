@@ -351,13 +351,17 @@ export default function VendorDashboard() {
                   {canArchive && (
   <button
     type="button"
+    // ensure the event reaches *this* handler, then prevent parents from hijacking it
     onClick={(e) => {
       e.preventDefault();
-      e.stopPropagation();           // stop any parent Link/row handlers
+      e.stopPropagation();
+      console.log('archive click → bidId=', b.bidId); // TEMP: verify the handler fires
       onArchive(b.bidId);
     }}
     disabled={isArchiving}
     className={[
+      // keep the button on top and clickable no matter what
+      'relative z-50 pointer-events-auto',
       'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
       'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
     ].join(' ')}
