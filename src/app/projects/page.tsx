@@ -15,6 +15,7 @@ type Project = {
   status: 'pending' | 'approved' | 'rejected' | 'completed' | 'archived';
   createdAt?: string;
   updatedAt?: string;
+  ownerWallet?: string;
 };
 
 type Milestone = {
@@ -25,18 +26,73 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;
 };
 
 type Bid = {
   bidId: number;
   proposalId: number;
+  vendorName?: string;
   status: string; // 'pending' | 'approved' | 'rejected' | 'completed' | ...
   milestones?: Milestone[] | string; // server may serialize JSON
+  priceUSD?: number;
+  priceUsd?: number;
   createdAt?: string;
   updatedAt?: string;
-  vendorName?: string;
 };
+
+const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
+// ---------- helpers ----------
+function parseMilestones(raw: Bid['milestones']): Milestone[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function bidMsStats(bid: Bid) {
+  const arr = parseMilestones(bid.milestones);
+  const total = arr.length;
+  const completed = arr.filter(m => m?.completed || m?.paymentTxHash).length;
+  const paid = arr.filter(m => m?.paymentTxHash).length;
+  // find last activity among milestone dates
+  const lastMsDate = arr
+    .flatMap(m => [m.paymentDate, m.completionDate, m.dueDate].filter(Boolean) as string[])
+    .map(s => new Date(s))
+    .filter(d => !isNaN(d.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+  return { total, completed, paid, lastMsDate };
+}
+
+function projectLastActivity(project: Project, projectBids: Bid[]) {
+  const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
+  for (const b of projectBids) {
+    dates.push(b.updatedAt, b.createdAt);
+    const { lastMsDate } = bidMsStats(b);
+    if (lastMsDate) dates.push(lastMsDate.toISOString());
+  }
+  const valid = dates
+    .filter(Boolean)
+    .map(s => new Date(String(s)))
+    .filter(d => !isNaN(d.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime());
+  return valid[0] || null;
+}
+
+function isProjectCompleted(project: Project, allBids: Bid[]) {
+  if (project.status === 'completed') return true;
+  const projectBids = allBids.filter(b => b.proposalId === project.proposalId);
+  const accepted = projectBids.find(b => b.status === 'approved');
+  if (!accepted) return false;
+  const { total, completed } = bidMsStats(accepted);
+  if (total === 0) return false;
+  return completed === total;
+}
+// -----------------------------
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -48,10 +104,10 @@ export default function ProjectsPage() {
   useEffect(() => {
     (async () => {
       try {
-        // includeArchived=true so the Archived tab actually has data
+        // includeArchived=true so the Archived tab has data
         const [proposalsData, bidsData] = await Promise.all([
           listProposals({ includeArchived: true }),
-          getBids(),
+          getBids(), // fetch ALL bids, used to compute aggregates per project
         ]);
         setProjects(proposalsData || []);
         setBids(bidsData || []);
@@ -63,106 +119,28 @@ export default function ProjectsPage() {
     })();
   }, []);
 
-  // --------------------------
-  // Helpers
-  // --------------------------
-  const getBidsForProject = (projectId: number) =>
-    bids.filter((bid) => bid.proposalId === projectId);
-
-  function parseMilestones(raw: Bid['milestones']): Milestone[] {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    try {
-      const arr = JSON.parse(String(raw));
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function getBidMilestoneStats(bid: Bid) {
-    const m = parseMilestones(bid.milestones);
-    let total = m.length;
-    let completed = 0;
-    let paid = 0;
-    let lastMsActivity: Date | null = null;
-
-    for (const it of m) {
-      const isPaid = !!it?.paymentTxHash;
-      const isCompleted = isPaid || !!it?.completed;
-      if (isCompleted) completed += 1;
-      if (isPaid) paid += 1;
-
-      const dts: (string | undefined | null)[] = [
-        it?.paymentDate,
-        it?.completionDate,
-        it?.dueDate,
-      ];
-      for (const d of dts) {
-        const dt = d ? new Date(d) : null;
-        if (dt && (!lastMsActivity || dt > lastMsActivity)) lastMsActivity = dt;
-      }
-    }
-    return { total, completed, paid, lastMsActivity };
-  }
-
-  function getProjectLastActivity(project: Project, projectBids: Bid[]) {
-    const candidateDates: (string | undefined)[] = [
-      project.updatedAt,
-      project.createdAt,
-    ];
-
-    for (const b of projectBids) {
-      candidateDates.push(b.updatedAt, b.createdAt);
-      const stats = getBidMilestoneStats(b);
-      if (stats.lastMsActivity) candidateDates.push(stats.lastMsActivity.toISOString());
-    }
-
-    const valid = candidateDates
-      .filter(Boolean)
-      .map((s) => new Date(String(s)))
-      .filter((d) => !isNaN(d.getTime()));
-
-    if (valid.length === 0) return null;
-    return valid.sort((a, b) => b.getTime() - a.getTime())[0];
-  }
-
-  const isProjectCompleted = (project: Project) => {
-    if (project.status === 'completed') return true;
-
-    const projectBids = getBidsForProject(project.proposalId);
-    const acceptedBid = projectBids.find((b) => b.status === 'approved');
-    if (!acceptedBid) return false;
-
-    const { total, completed } = getBidMilestoneStats(acceptedBid);
-    if (total > 0 && completed === total) return true;
-
-    // explicit completed status on bid
-    if (acceptedBid.status === 'completed') return true;
-
-    return false;
-  };
-
+  // partitions (memoized to avoid recompute churn)
   const archivedProjects = useMemo(
     () => projects.filter((p) => p.status === 'archived'),
     [projects]
   );
 
   const completedProjects = useMemo(
-    () =>
-      projects.filter(
-        (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p))
-      ),
+    () => projects.filter(
+      (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p, bids))
+    ),
     [projects, bids]
   );
 
   const activeProjects = useMemo(
-    () =>
-      projects.filter(
-        (p) => p.status === 'approved' && !isProjectCompleted(p)
-      ),
+    () => projects.filter(
+      (p) => p.status === 'approved' && !isProjectCompleted(p, bids)
+    ),
     [projects, bids]
   );
+
+  const getBidsForProject = (projectId: number) =>
+    bids.filter((bid) => bid.proposalId === projectId);
 
   const handleArchive = async (proposalId: number) => {
     const ok = confirm('Archive this completed project?');
@@ -191,18 +169,25 @@ export default function ProjectsPage() {
     }
   };
 
-  // --------------------------
-  // UI helpers
-  // --------------------------
-  const renderCard = (
-    project: Project,
-    badge: { text: string; cls: string },
-    extra?: React.ReactNode
-  ) => {
+  // --------- UI ---------
+  const renderCard = (project: Project, badge: { text: string; cls: string }, extra?: React.ReactNode) => {
     const projectBids = getBidsForProject(project.proposalId);
-    const acceptedBid = projectBids.find((bid) => bid.status === 'approved');
-    const msStats = acceptedBid ? getBidMilestoneStats(acceptedBid) : { total: 0, completed: 0, paid: 0 };
-    const lastActivity = getProjectLastActivity(project, projectBids);
+    const bidsApproved = projectBids.filter(b => b.status === 'approved').length;
+    const accepted = projectBids.find(b => b.status === 'approved') || null;
+
+    // Aggregate milestones across ALL bids to mirror the overview design
+    const msAgg = projectBids.reduce(
+      (acc, b) => {
+        const { total, completed, paid } = bidMsStats(b);
+        acc.total += total;
+        acc.completed += completed;
+        acc.paid += paid;
+        return acc;
+      },
+      { total: 0, completed: 0, paid: 0 }
+    );
+
+    const lastAct = projectLastActivity(project, projectBids);
 
     return (
       <div
@@ -220,16 +205,15 @@ export default function ProjectsPage() {
             {project.orgName && <p className="text-gray-600">{project.orgName}</p>}
             {typeof project.amountUSD === 'number' && (
               <p className="text-green-600 font-medium text-lg mt-2">
-                Budget: ${Number(project.amountUSD).toLocaleString()}
+                Budget: {currency.format(Number(project.amountUSD))}
               </p>
             )}
           </div>
-
           <div className="text-right">
             {badge.text === 'Active' && (
               <p className="text-sm text-gray-500 mb-3">
                 {projectBids.length} {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
-                {acceptedBid ? 'Contract awarded' : 'Accepting bids'}
+                {accepted ? 'Contract awarded' : 'Accepting bids'}
               </p>
             )}
             <div className="space-x-2">
@@ -239,7 +223,7 @@ export default function ProjectsPage() {
               >
                 View Project
               </Link>
-              {!acceptedBid && badge.text === 'Active' && (
+              {!accepted && badge.text === 'Active' && (
                 <Link
                   href={`/bids/new?proposalId=${project.proposalId}`}
                   className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
@@ -251,25 +235,23 @@ export default function ProjectsPage() {
           </div>
         </div>
 
-        {/* small rollups */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+        {/* rollups */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <div className="text-gray-500">Bids</div>
-            <div className="font-medium">
-              {acceptedBid ? '1 (awarded)' : projectBids.length || 0}
-            </div>
+            <div className="font-medium">{bidsApproved}/{projectBids.length || 0} approved</div>
+          </div>
+          <div>
+            <div className="text-gray-500">Milestones (completed)</div>
+            <div className="font-medium">{msAgg.completed}/{msAgg.total}</div>
           </div>
           <div>
             <div className="text-gray-500">Milestones (paid)</div>
-            <div className="font-medium">
-              {msStats.paid}/{msStats.total}
-            </div>
+            <div className="font-medium">{msAgg.paid}/{msAgg.total}</div>
           </div>
           <div className="md:text-right col-span-2 md:col-span-1">
             <div className="text-gray-500">Last activity</div>
-            <div className="font-medium">
-              {lastActivity ? new Date(lastActivity).toLocaleString() : '—'}
-            </div>
+            <div className="font-medium">{lastAct ? lastAct.toLocaleString() : '—'}</div>
           </div>
         </div>
 
@@ -344,9 +326,24 @@ export default function ProjectsPage() {
       {/* Tabs */}
       <div className="mb-6">
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="active" label={`Active (${activeProjects.length})`} />
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="completed" label={`Completed (${completedProjects.length})`} />
-          <TabButton current={activeTab} setCurrent={setActiveTab} id="archived" label={`Archived (${archivedProjects.length})`} />
+          <TabButton
+            current={activeTab}
+            setCurrent={setActiveTab}
+            id="active"
+            label={`Active (${activeProjects.length})`}
+          />
+          <TabButton
+            current={activeTab}
+            setCurrent={setActiveTab}
+            id="completed"
+            label={`Completed (${completedProjects.length})`}
+          />
+          <TabButton
+            current={activeTab}
+            setCurrent={setActiveTab}
+            id="archived"
+            label={`Archived (${archivedProjects.length})`}
+          />
         </div>
       </div>
 
@@ -361,9 +358,9 @@ function TabButton({
   id,
   label,
 }: {
-  current: 'active' | 'completed' | 'archived';
-  setCurrent: (t: 'active' | 'completed' | 'archived') => void;
-  id: 'active' | 'completed' | 'archived';
+  current: TabKey;
+  setCurrent: (t: TabKey) => void;
+  id: TabKey;
   label: string;
 }) {
   const isActive = current === id;

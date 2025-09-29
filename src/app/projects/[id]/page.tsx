@@ -1,7 +1,7 @@
 // src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
@@ -64,24 +64,30 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
+function fmt(dt?: string | null) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
+}
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
+}
+
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
+  const projectIdNum = Number((params as any)?.id);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
+  const [tab, setTab] = useState<TabKey>('overview');
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearPoll = () => {
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-      pollTimer.current = null;
-    }
-  };
+  const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
   // Initial fetch
   useEffect(() => {
@@ -105,12 +111,12 @@ export default function ProjectDetailPage() {
     return () => { active = false; };
   }, [projectIdNum]);
 
-  // Fetch current user role/address (for Edit gating)
+  // Auth (for Edit button)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Poll bids until all analyses are terminal (ready/error) or 90s passes
+  // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -164,14 +170,25 @@ export default function ProjectDetailPage() {
   }, [projectIdNum, bids]);
 
   // ---- helpers used in render (no hooks below this line!) ----
-  const isProjectCompleted = (proj: any, rows: any[]) => {
+  const acceptedBid = bids.find((b) => b.status === 'approved') || null;
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+
+  const isProjectCompleted = (proj: any) => {
+    if (!proj) return false;
     if (proj.status === 'completed') return true;
-    const accepted = rows.find((r: any) => r.status === 'approved');
-    if (!accepted) return false;
-    const ms = parseMilestones(accepted.milestones);
-    if (ms.length === 0) return false;
-    return ms.every((m: any) => m?.completed === true || !!m?.paymentTxHash);
+    if (!acceptedBid) return false;
+    if (acceptedMs.length === 0) return false;
+    return acceptedMs.every((m) => m?.completed === true || !!m?.paymentTxHash);
   };
+  const completed = isProjectCompleted(project);
+
+  const canEdit =
+    me?.role === 'admin' ||
+    (!!project?.ownerWallet &&
+      !!me?.address &&
+      String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
+
+  const projectDocs = parseDocs(project?.docs);
 
   const renderAttachment = (doc: any, idx: number) => {
     if (!doc) return null;
@@ -278,56 +295,82 @@ export default function ProjectDetailPage() {
     );
   };
 
-  // ---- EARLY RETURNS SAFE NOW (no hooks below return paths were introduced) ----
-  if (loading) return <div>Loading project...</div>;
-  if (!project) return <div>Project not found</div>;
+  // ---- EARLY RETURNS (no hooks below) ----
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
 
-  // derived values (plain variables, not hooks)
-  const completed = isProjectCompleted(project, bids);
-  const canEdit =
-    me?.role === 'admin' ||
-    (!!project?.ownerWallet &&
-      !!me?.address &&
-      String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
+  // Derived values (plain variables)
+  const msTotal = acceptedMs.length;
+  const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+  const lastActivity = (() => {
+    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
+    for (const b of bids) {
+      dates.push(b.createdAt, b.updatedAt);
+      const arr = parseMilestones(b.milestones);
+      for (const m of arr) {
+        dates.push(m.paymentDate, m.completionDate, m.dueDate);
+      }
+    }
+    const valid = dates
+      .filter(Boolean)
+      .map((s) => new Date(String(s)))
+      .filter((d) => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+    return valid[0] ? valid[0].toLocaleString() : '—';
+  })();
 
-  const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
-  const projectDocs = parseDocs(project?.docs);
+  // Build Timeline (synthesized)
+  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
+  const timeline: EventItem[] = [];
+  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  for (const b of bids) {
+    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b.milestones);
+    arr.forEach((m, idx) => {
+      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
+      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
+    });
+  }
+  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
+
+  const allFiles = [
+    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
+    ...bids.flatMap((b) => {
+      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+      return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+    }),
+  ];
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="flex justify-between items-start mb-6">
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-start">
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{project.title}</h1>
             {canEdit && (
-              <Link
-                href={`/proposals/${projectIdNum}/edit`}
-                className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
-              >
+              <Link href={`/proposals/${projectIdNum}/edit`} className="px-3 py-1 rounded bg-indigo-600 text-white text-sm">
                 Edit
               </Link>
             )}
-            <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-              }`}
-            >
+            <span className={classNames(
+              'px-2 py-0.5 text-xs font-medium rounded-full',
+              completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+            )}>
               {completed ? 'Completed' : 'Active'}
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
-          <p className="text-green-600 font-medium text-lg">
-            Budget: {currency.format(Number(project.amountUSD || 0))}
-          </p>
-          {acceptedBid && (
-            <p className="text-sm text-gray-600 mt-1">
-              Awarded: {currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))} •{' '}
-              {acceptedMs.length
-                ? `${acceptedMs.filter(m => m?.paymentTxHash).length}/${acceptedMs.length} milestones paid`
-                : 'no milestones'}
-            </p>
-          )}
+          <div className="flex flex-wrap gap-4 mt-2 text-sm">
+            <span>Budget: <b>{currency.format(Number(project.amountUSD || 0))}</b></span>
+            <span>Last activity: <b>{lastActivity}</b></span>
+            {acceptedBid && (
+              <span>Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b></span>
+            )}
+          </div>
         </div>
         {!completed && (
           <Link
@@ -339,90 +382,192 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* Project Description */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Project Description</h2>
-        <p className="text-gray-700">{project.summary}</p>
-      </div>
-
-      {/* Project Attachments */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-3">Project Attachments</h2>
-        {projectDocs.length > 0 ? (
-          <div className="flex flex-wrap gap-3">
-            {projectDocs.map((doc: any, i: number) => renderAttachment(doc, i))}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">No attachments provided.</p>
-        )}
-      </div>
-
-      {/* Bids */}
-      <div className="mb-6">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-xl font-semibold mb-3">Bids ({bids.length})</h2>
-          {acceptedBid && (
-            <span className="text-sm text-green-700 bg-green-50 px-2 py-0.5 rounded">
-              Contract awarded to <b>{acceptedBid.vendorName}</b>
-            </span>
-          )}
+      {/* Tabs */}
+      <div className="border-b">
+        <div className="flex gap-2">
+          <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
+          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
+          <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
-        {bids.length > 0 ? (
-          <div className="space-y-3">
-            {bids.map((bid) => {
-              const docs = (bid.docs || (bid.doc ? [bid.doc] : [])).filter(Boolean);
-              const analysisRaw = bid.aiAnalysis ?? bid.ai_analysis ?? null;
-              const price = Number((bid.priceUSD ?? bid.priceUsd) || 0);
-              const msArr = parseMilestones(bid.milestones);
-              const paidCount = msArr.filter(m => m?.paymentTxHash).length;
-              return (
-                <div key={bid.bidId} className="border p-4 rounded">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-medium">{bid.vendorName}</h3>
-                      <p className="text-gray-600">
-                        {currency.format(price)} • {bid.days} days
-                      </p>
-                      <p className="text-sm text-gray-500">{bid.notes}</p>
-
-                      {msArr.length > 0 && (
-                        <p className="text-xs text-gray-600 mt-1">
-                          Milestones: {paidCount}/{msArr.length} paid
-                        </p>
-                      )}
-
-                      {docs.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {docs.map((d: any, i: number) => renderAttachment(d, i))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-400 mt-2">No attachments</p>
-                      )}
-
-                      {renderAnalysis(analysisRaw)}
-                    </div>
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${
-                        bid.status === 'approved'
-                          ? 'bg-green-100 text-green-800'
-                          : bid.status === 'rejected'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {bid.status}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-gray-500">No bids yet. Be the first to bid on this project!</p>
-        )}
       </div>
 
-      <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      {/* Tab content */}
+      {tab === 'overview' && (
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 border rounded p-4">
+            <h3 className="font-semibold mb-3">Project Description</h3>
+            <p className="text-gray-700">{project.summary || '—'}</p>
+
+            <div className="mt-6">
+              <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
+              <Progress value={msTotal ? Math.round((msCompleted / msTotal) * 100) : 0} />
+              <p className="text-xs text-gray-600 mt-1">
+                {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
+              </p>
+            </div>
+
+            <div className="mt-6">
+              <h4 className="font-semibold mb-2">Latest activity</h4>
+              {timeline.length ? (
+                <ul className="text-sm space-y-1">
+                  {timeline.slice(-5).reverse().map((e, i) => (
+                    <li key={i}>
+                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">No activity yet.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="border rounded p-4">
+            <h3 className="font-semibold mb-3">Bids snapshot</h3>
+            {bids.length ? (
+              <ul className="space-y-2 text-sm">
+                {bids.slice(0,5).map((b) => (
+                  <li key={b.bidId} className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{b.vendorName}</div>
+                      <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                    </div>
+                    <span className={classNames(
+                      'px-2 py-1 rounded text-xs',
+                      b.status === 'approved'
+                        ? 'bg-green-100 text-green-800'
+                        : b.status === 'rejected'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                    )}>
+                      {b.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+          </div>
+        </section>
+      )}
+
+      {tab === 'timeline' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Activity Timeline</h3>
+          {timeline.length ? (
+            <ol className="relative border-l pl-4">
+              {timeline.map((e, i) => (
+                <li key={i} className="mb-4">
+                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
+                  <div className="text-sm">
+                    <div className="font-medium">{e.label}</div>
+                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
+        </section>
+      )}
+
+      {tab === 'bids' && (
+        <section className="border rounded p-4 overflow-x-auto">
+          <h3 className="font-semibold mb-3">All Bids</h3>
+          {bids.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600">
+                  <th className="py-2 pr-4">Vendor</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Days</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Submitted</th>
+                  <th className="py-2 pr-4">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bids.map((b) => (
+                  <tr key={b.bidId} className="border-t">
+                    <td className="py-2 pr-4">{b.vendorName}</td>
+                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
+                    <td className="py-2 pr-4">{b.days}</td>
+                    <td className="py-2 pr-4">{b.status}</td>
+                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
+                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+        </section>
+      )}
+
+      {tab === 'milestones' && (
+        <section className="border rounded p-4 overflow-x-auto">
+          <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+          {acceptedBid && acceptedMs.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600">
+                  <th className="py-2 pr-4">#</th>
+                  <th className="py-2 pr-4">Title</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Completed</th>
+                  <th className="py-2 pr-4">Paid</th>
+                  <th className="py-2 pr-4">Tx</th>
+                </tr>
+              </thead>
+              <tbody>
+                {acceptedMs.map((m, idx) => {
+                  const paid = !!m.paymentTxHash;
+                  const completedRow = paid || !!m.completed;
+                  return (
+                    <tr key={idx} className="border-t">
+                      <td className="py-2 pr-4">M{idx+1}</td>
+                      <td className="py-2 pr-4">{m.name || '—'}</td>
+                      <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
+                      <td className="py-2 pr-4">
+                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
+                      </td>
+                      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-sm text-gray-500">
+              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+            </p>
+          )}
+        </section>
+      )}
+
+      {tab === 'files' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Files</h3>
+          {allFiles.length ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {allFiles.map((f, i) => (
+                <div key={i}>
+                  <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
+                  {renderAttachment(f.doc, i)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No files yet.</p>
+          )}
+        </section>
+      )}
+
+      <div className="pt-2">
+        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      </div>
 
       {lightbox && (
         <div
@@ -445,5 +590,30 @@ export default function ProjectDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Simple progress bar (Tailwind)
+function Progress({ value }: { value: number }) {
+  return (
+    <div className="h-2 bg-gray-200 rounded">
+      <div className="h-2 bg-black rounded transition-all" style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+    </div>
+  );
+}
+
+function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
+  const active = tab === id;
+  return (
+    <button
+      onClick={() => setTab(id)}
+      className={classNames(
+        'px-3 py-2 text-sm -mb-px border-b-2',
+        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black'
+      )}
+      aria-pressed={active}
+    >
+      {label}
+    </button>
   );
 }
