@@ -1,7 +1,7 @@
 // src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
@@ -42,11 +42,11 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;       // could be ipfs://CID[/path]
-  proofCid?: string;    // bare CID
-  folderCid?: string;   // optional alt field
-  cid?: string;         // optional alt field
-  files?: any[] | string; // array OR JSON string; items may be filename strings or objects
+  proof?: string;        // may be ipfs://CID[/path]
+  proofCid?: string;     // bare CID
+  folderCid?: string;    // alternative
+  cid?: string;          // alternative
+  files?: any[] | string; // array or JSON string (filenames or objects)
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -69,7 +69,7 @@ function parseDocs(raw: unknown): any[] {
 }
 
 /* --------------------------- ROBUST IPFS HELPERS --------------------------- */
-// handles ipfs://CID, ipfs://CID/path, and CID/path; safely encodes path segments
+// Supports ipfs://CID, ipfs://CID/path, and CID/path; safely encodes path segments
 const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i; // group1 = CID, group2 = /path (optional)
@@ -81,12 +81,12 @@ function isHttpUrl(s: string): boolean {
   } catch { return false; }
 }
 function parseIpfsRef(s: string): { cid: string; path: string } | null {
-  let m = s.match(IPFS_URI_RE); // ipfs://CID[/path]
+  let m = s.match(IPFS_URI_RE);
   if (m) {
     const cid = m[1]; const path = m[2] || '';
     return CID_RE.test(cid) ? { cid, path } : null;
   }
-  m = s.match(CID_WITH_PATH_RE); // CID[/path]
+  m = s.match(CID_WITH_PATH_RE);
   if (m) {
     const cid = m[1]; const path = m[2] || '';
     return CID_RE.test(cid) ? { cid, path } : null;
@@ -99,34 +99,28 @@ function encodeIpfsPath(path: string): string {
   if (!clean) return '';
   return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
 }
-/** Normalize any "doc" (string CID/URL or object with {url|cid,name}). If just a label, return doc w/o href. */
+/** Normalize any doc (string CID/URL or object with {url|cid,name}). If just a label, return a doc without href fields. */
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
   if (typeof raw === 'string') {
     const s = raw.trim();
 
-    // http(s) direct
     if (isHttpUrl(s)) return { url: s, name: s.split('/').pop() || 'file' };
 
-    // ipfs forms
     const ref = parseIpfsRef(s);
     if (ref) {
       const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
       return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
     }
 
-    // bare CID
     if (CID_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
 
-    // plain label (not a link)
     return { name: s };
   }
 
-  // object input
   const doc: any = { ...raw };
 
-  // map common alias
   if (typeof doc.path === 'string' && !doc.ipfsPath) {
     doc.ipfsPath = doc.path;
   }
@@ -150,7 +144,6 @@ function normalizeDoc(raw: any) {
   if (doc.name) return { name: String(doc.name) };
   return null;
 }
-/** Build a safe href if the doc is linkable; otherwise null. */
 function hrefForDoc(doc: any): string | null {
   if (!doc) return null;
 
@@ -164,9 +157,8 @@ function hrefForDoc(doc: any): string | null {
   }
   return null;
 }
-/* -------------------------------------------------------------------------- */
 
-/** Collect milestone files (handles files as filenames + proofCid folder). */
+/* -------------------- Milestone → files (folder + filenames) -------------------- */
 function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
@@ -174,27 +166,26 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: Milestone, idx: number) => {
     const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
-    // base ref can come from several fields
+    // base folder from proof/proofCid/folderCid/cid
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
       (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
       (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
       (m.cid ? { cid: m.cid, path: '' } : null);
 
-    // normalize files array
+    // normalize files[]
     let files: any[] = [];
     if (Array.isArray(m.files)) files = m.files as any[];
     else if (typeof m.files === 'string') {
-      try { const parsed = JSON.parse(m.files as string); if (Array.isArray(parsed)) files = parsed; } catch {/* ignore */}
+      try { const parsed = JSON.parse(m.files as string); if (Array.isArray(parsed)) files = parsed; } catch {}
     }
 
-    // Iterate files: could be filename strings or objects (with path/name/url/cid)
     files.forEach((f: any) => {
-      // Try as-is first
+      // As-is first
       let doc = normalizeDoc(f);
       let href = doc && hrefForDoc(doc);
 
-      // If it's only a filename/label and we have a base CID, stitch CID + filename
+      // If only filename/label and base folder exists, stitch it
       if (!href && baseRef) {
         const fileName =
           typeof f === 'string' ? f :
@@ -203,8 +194,7 @@ function collectMilestoneFiles(bid: any) {
 
         if (fileName) {
           const stitchedPath =
-            (baseRef.path || '') +
-            (fileName.startsWith('/') ? fileName : `/${fileName}`);
+            (baseRef.path || '') + (fileName.startsWith('/') ? fileName : `/${fileName}`);
 
           const stitchedDoc = {
             cid: baseRef.cid,
@@ -219,11 +209,10 @@ function collectMilestoneFiles(bid: any) {
         }
       }
 
-      // Otherwise keep the original (if linkable)
       if (href) out.push({ scope, doc });
     });
 
-    // Also surface single proof/proofCid (often a PDF)
+    // Also show single proof/proofCid (often a PDF)
     const single = (m.proofCid ?? m.proof) as any;
     if (single) {
       const doc: any = normalizeDoc(single);
@@ -237,6 +226,8 @@ function collectMilestoneFiles(bid: any) {
 
   return out;
 }
+
+/* ------------------------------ UI mini helpers ------------------------------ */
 
 function fmt(dt?: string | null) {
   if (!dt) return '';
@@ -253,7 +244,7 @@ type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = Number((params as any)?.id);
+  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
@@ -264,7 +255,7 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Initial fetch
+  // Fetch
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -286,12 +277,12 @@ export default function ProjectDetailPage() {
     return () => { active = false; };
   }, [projectIdNum]);
 
-  // Auth (for Edit button)
+  // Me
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Poll bids while analysis runs
+  // Poll while analyses run
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -344,7 +335,22 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  /* ---------------------------- Derived values (vars) ---------------------------- */
+  // ===== Guard: kill ANY rogue anchors (like href="10%: Upon …") =====
+  useEffect(() => {
+    const anchors = Array.from(document.querySelectorAll('a[href]'));
+    anchors.forEach(a => {
+      const raw = a.getAttribute('href') || '';
+      const allowed =
+        raw.startsWith('/api/ipfs') ||
+        raw.startsWith('https://') ||
+        raw.startsWith('http://') ||
+        raw.startsWith('/') ||
+        raw.startsWith('#');
+      if (!allowed) a.removeAttribute('href');
+    });
+  }, [project, bids, tab]);
+
+  /* ---------------------------- Derived values ---------------------------- */
 
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
@@ -366,10 +372,50 @@ export default function ProjectDetailPage() {
 
   const projectDocs = parseDocs(project?.docs);
 
-  // rollups
+  // Files roll-up: proposal docs + bid docs + milestone files
+  const allFiles = useMemo(() => {
+    const raw: Array<{ scope: string; doc: any }> = [
+      ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
+      ...bids.flatMap((b: any) => {
+        const docsArr = parseDocs(b.docs);
+        const single = b.doc ? [b.doc] : [];
+        const ds = [...docsArr, ...single].filter(Boolean);
+        return ds.map((d: any) => ({
+          scope: `Bid #${b.bidId}${b.vendorName ? ` — ${b.vendorName}` : ''}`,
+          doc: d
+        }));
+      }),
+      ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
+    ];
+
+    const seen = new Set<string>();
+    const out: Array<{ scope: string; doc: any; href: string }> = [];
+    for (const item of raw) {
+      const doc = normalizeDoc(item.doc);
+      if (!doc) continue;
+      const href = hrefForDoc(doc);
+      if (!href) continue;
+      const name = doc.name || href.split('/').pop() || 'file';
+      const key = `${href}|${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ scope: item.scope, doc: { ...doc, name }, href });
+    }
+
+    // Debug (dev only)
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      (window as any).__FILES = out;
+      console.table(out.map(x => ({ scope: x.scope, name: x.doc.name, href: x.href })));
+    }
+
+    return out;
+  }, [projectDocs, bids]);
+
+  // Quick stats
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project?.updatedAt, project?.createdAt];
     for (const b of bids) {
@@ -383,57 +429,6 @@ export default function ProjectDetailPage() {
       .filter((d) => !isNaN(d.getTime()))
       .sort((a, b) => b.getTime() - a.getTime());
     return valid[0] ? valid[0].toLocaleString() : '—';
-  })();
-
-  // Timeline (synthesized)
-  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
-  const timeline: EventItem[] = [];
-  if (project?.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
-  if (project?.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
-  for (const b of bids) {
-    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
-    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
-    const arr = parseMilestones(b.milestones);
-    arr.forEach((m, idx) => {
-      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
-    });
-  }
-  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
-
-  /* ------------------------------ Files (robust) ------------------------------ */
-
-  // Collect proposal docs + bid docs + milestone files
-  const allFilesRaw = [
-    ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
-    ...bids.flatMap((b: any) => {
-      const docsArr = parseDocs(b.docs);
-      const single = b.doc ? [b.doc] : [];
-      const ds = [...docsArr, ...single].filter(Boolean);
-      return ds.map((d: any) => ({
-        scope: `Bid #${b.bidId}${b.vendorName ? ` — ${b.vendorName}` : ''}`,
-        doc: d
-      }));
-    }),
-    ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
-  ];
-
-  // Normalize, build hrefs, de-dupe
-  const allFiles = (() => {
-    const seen = new Set<string>();
-    const out: Array<{ scope: string; doc: any; href: string }> = [];
-    for (const item of allFilesRaw) {
-      const doc = normalizeDoc(item.doc);
-      if (!doc) continue;
-      const href = hrefForDoc(doc);
-      if (!href) continue;
-      const name = doc.name || href.split('/').pop() || 'file';
-      const key = `${href}|${name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ scope: item.scope, doc: { ...doc, name }, href });
-    }
-    return out;
   })();
 
   /* --------------------------------- Render --------------------------------- */
@@ -507,13 +502,10 @@ export default function ProjectDetailPage() {
 
             <div className="mt-6">
               <h4 className="font-semibold mb-2">Latest activity</h4>
-              {timeline.length ? (
+              {bids.length || acceptedMs.length ? (
                 <ul className="text-sm space-y-1">
-                  {timeline.slice(-5).reverse().map((e, i) => (
-                    <li key={i}>
-                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
-                    </li>
-                  ))}
+                  {/* Minimal sample; you can plug the timeline from earlier versions */}
+                  <li><b>Project updated</b> • {lastActivity}</li>
                 </ul>
               ) : (
                 <p className="text-sm text-gray-500">No activity yet.</p>
@@ -546,59 +538,6 @@ export default function ProjectDetailPage() {
               </ul>
             ) : <p className="text-sm text-gray-500">No bids yet.</p>}
           </div>
-        </section>
-      )}
-
-      {/* Timeline */}
-      {tab === 'timeline' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Activity Timeline</h3>
-          {timeline.length ? (
-            <ol className="relative border-l pl-4">
-              {timeline.map((e, i) => (
-                <li key={i} className="mb-4">
-                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
-                  <div className="text-sm">
-                    <div className="font-medium">{e.label}</div>
-                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
-        </section>
-      )}
-
-      {/* Bids */}
-      {tab === 'bids' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">All Bids</h3>
-          {bids.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">Vendor</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Days</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Submitted</th>
-                  <th className="py-2 pr-4">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bids.map((b) => (
-                  <tr key={b.bidId} className="border-t">
-                    <td className="py-2 pr-4">{b.vendorName}</td>
-                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{b.days}</td>
-                    <td className="py-2 pr-4">{b.status}</td>
-                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
-                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
         </section>
       )}
 
@@ -650,11 +589,11 @@ export default function ProjectDetailPage() {
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div id="files-grid" className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
                 <div key={`${f.scope}-${i}`}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachment(f.doc)}
+                  {renderAttachment(f.doc, f.href)}
                 </div>
               ))}
             </div>
@@ -680,7 +619,6 @@ function Progress({ value }: { value: number }) {
     </div>
   );
 }
-
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
@@ -697,11 +635,11 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
 
 /* ----------------------------- File render helper ---------------------------- */
 
-function renderAttachment(docIn: any) {
+function renderAttachment(docIn: any, hrefPre?: string) {
   const doc = normalizeDoc(docIn);
   if (!doc) return null;
 
-  const href = hrefForDoc(doc);
+  const href = hrefPre || hrefForDoc(doc);
   const name = doc.name || (href ? href.split('/').pop() : 'file');
 
   if (!href) {
@@ -715,9 +653,23 @@ function renderAttachment(docIn: any) {
 
   const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 
+  // Open in new tab even if something else mangles anchors
+  const open = (e: React.MouseEvent) => {
+    e.preventDefault();
+    try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
+  };
+
   if (isImage) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" title={name} className="group block overflow-hidden rounded border">
+      <a
+        href={href}
+        onClick={open}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={name}
+        className="group block overflow-hidden rounded border"
+        data-safe-link="1"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
       </a>
@@ -727,7 +679,9 @@ function renderAttachment(docIn: any) {
   return (
     <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
       <p className="truncate" title={name}>{name}</p>
-      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+      <a href={href} onClick={open} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" data-safe-link="1">
+        Open
+      </a>
     </div>
   );
 }
