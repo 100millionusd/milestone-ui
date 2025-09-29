@@ -164,23 +164,23 @@ export default function VendorDashboard() {
   }, [bids, tab, query]);
 
   const onArchive = async (bidId: number) => {
-    const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
-    if (!ok) return;
+  const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
+  if (!ok) return;
 
-    setArchivingIds((prev) => new Set(prev).add(bidId));
-    try {
-      const updated = await archiveAnyProofForBid(bidId);
-      setBids((prev) => prev.map((b) => (b.bidId === bidId ? updated : b)));
-    } catch (e: any) {
-      alert('Failed to archive bid: ' + (e?.message || 'Unknown error'));
-    } finally {
-      setArchivingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(bidId);
-        return next;
-      });
-    }
-  };
+  setArchivingIds(prev => new Set(prev).add(bidId));
+  try {
+    await archiveAnyProofForBid(bidId);  // archives a proof (vendor-safe)
+    await loadBids();                    // refresh the list; don't replace a bid with a proof
+  } catch (e: any) {
+    alert('Failed to archive: ' + (e?.message || 'Unknown error'));
+  } finally {
+    setArchivingIds(prev => {
+      const next = new Set(prev);
+      next.delete(bidId);
+      return next;
+    });
+  }
+};
 
   if (loading) {
     return (
@@ -349,18 +349,21 @@ export default function VendorDashboard() {
                   )}
 
                   {canArchive && (
-                    <button
-                      onClick={() => archiveAnyProofForBid(b.bidId)}
-                      disabled={isArchiving}
-                      className={[
-                        'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
-                        'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
-                      ].join(' ')}
-                      title="Move this bid to Archived"
-                    >
-                      {isArchiving ? 'Archiving…' : 'Move to Archived'}
-                    </button>
-                  )}
+  <button
+    type="button"
+    onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} // keep it clickable even if a parent is clickable
+    onClick={() => onArchive(b.bidId)}
+    disabled={isArchiving}
+    className={[
+      'relative z-10 pointer-events-auto',
+      'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
+      'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
+    ].join(' ')}
+    title="Move this bid to Archived"
+  >
+    {isArchiving ? 'Archiving…' : 'Move to Archived'}
+  </button>
+)}
                 </div>
 
                 {/* Quick facts */}
