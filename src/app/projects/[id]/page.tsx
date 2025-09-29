@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
 const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 /* ----------------------------- Types / Helpers ----------------------------- */
@@ -41,9 +42,11 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;
-  proofCid?: string;
-  files?: any[];
+  proof?: string;       // could be ipfs://CID[/path]
+  proofCid?: string;    // bare CID
+  folderCid?: string;   // optional alt field
+  cid?: string;         // optional alt field
+  files?: any[] | string; // array OR JSON string; items may be filename strings or objects
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -70,7 +73,6 @@ function parseDocs(raw: unknown): any[] {
 const CID_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i; // group1 = CID, group2 = /path (optional)
-const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 
 function isHttpUrl(s: string): boolean {
   try {
@@ -79,20 +81,15 @@ function isHttpUrl(s: string): boolean {
   } catch { return false; }
 }
 function parseIpfsRef(s: string): { cid: string; path: string } | null {
-  // ipfs://CID[/path]
-  let m = s.match(IPFS_URI_RE);
+  let m = s.match(IPFS_URI_RE); // ipfs://CID[/path]
   if (m) {
-    const cid = m[1];
-    const path = m[2] || '';
-    if (CID_RE.test(cid)) return { cid, path };
-    return null;
+    const cid = m[1]; const path = m[2] || '';
+    return CID_RE.test(cid) ? { cid, path } : null;
   }
-  // CID[/path]
-  m = s.match(CID_WITH_PATH_RE);
+  m = s.match(CID_WITH_PATH_RE); // CID[/path]
   if (m) {
-    const cid = m[1];
-    const path = m[2] || '';
-    if (CID_RE.test(cid)) return { cid, path };
+    const cid = m[1]; const path = m[2] || '';
+    return CID_RE.test(cid) ? { cid, path } : null;
   }
   return null;
 }
@@ -129,6 +126,11 @@ function normalizeDoc(raw: any) {
   // object input
   const doc: any = { ...raw };
 
+  // map common alias
+  if (typeof doc.path === 'string' && !doc.ipfsPath) {
+    doc.ipfsPath = doc.path;
+  }
+
   if (typeof doc.url === 'string') {
     const s = doc.url.trim();
     if (isHttpUrl(s)) return doc;
@@ -164,30 +166,70 @@ function hrefForDoc(doc: any): string | null {
 }
 /* -------------------------------------------------------------------------- */
 
-/** Collect milestone files from one bid (supports m.files[] and m.proof / m.proofCid). Only linkable files are returned. */
+/** Collect milestone files (handles files as filenames + proofCid folder). */
 function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
 
   arr.forEach((m: Milestone, idx: number) => {
-    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${bid?.vendorName ? ` (${bid.vendorName})` : ''}`;
+    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
 
-    // files[]
-    if (Array.isArray(m?.files)) {
-      m.files.forEach((f: any) => {
-        const doc = normalizeDoc(f);
-        const href = doc && hrefForDoc(doc);
-        if (href) out.push({ scope, doc });
-      });
+    // base ref can come from several fields
+    const baseRef =
+      (typeof m.proof === 'string' && parseIpfsRef(m.proof)) ||
+      (m.proofCid ? { cid: m.proofCid, path: '' } : null) ||
+      (m.folderCid ? { cid: m.folderCid, path: '' } : null) ||
+      (m.cid ? { cid: m.cid, path: '' } : null);
+
+    // normalize files array
+    let files: any[] = [];
+    if (Array.isArray(m.files)) files = m.files as any[];
+    else if (typeof m.files === 'string') {
+      try { const parsed = JSON.parse(m.files as string); if (Array.isArray(parsed)) files = parsed; } catch {/* ignore */}
     }
 
-    // proof/proofCid (single)
-    const single = m?.proofCid ?? m?.proof;
+    // Iterate files: could be filename strings or objects (with path/name/url/cid)
+    files.forEach((f: any) => {
+      // Try as-is first
+      let doc = normalizeDoc(f);
+      let href = doc && hrefForDoc(doc);
+
+      // If it's only a filename/label and we have a base CID, stitch CID + filename
+      if (!href && baseRef) {
+        const fileName =
+          typeof f === 'string' ? f :
+          (f && typeof f.path === 'string') ? f.path :
+          (f && typeof f.name === 'string') ? f.name : '';
+
+        if (fileName) {
+          const stitchedPath =
+            (baseRef.path || '') +
+            (fileName.startsWith('/') ? fileName : `/${fileName}`);
+
+          const stitchedDoc = {
+            cid: baseRef.cid,
+            ipfsPath: stitchedPath,
+            name: (typeof f === 'object' && f?.name) ? f.name : fileName.split('/').pop(),
+          };
+          const stitchedHref = hrefForDoc(stitchedDoc);
+          if (stitchedHref) {
+            out.push({ scope, doc: stitchedDoc });
+            return;
+          }
+        }
+      }
+
+      // Otherwise keep the original (if linkable)
+      if (href) out.push({ scope, doc });
+    });
+
+    // Also surface single proof/proofCid (often a PDF)
+    const single = (m.proofCid ?? m.proof) as any;
     if (single) {
       const doc: any = normalizeDoc(single);
       const href = doc && hrefForDoc(doc);
       if (href) {
-        doc.name ||= m?.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
+        doc.name ||= m.name ? `${m.name}.pdf` : `proof-m${idx + 1}.pdf`;
         out.push({ scope, doc });
       }
     }
@@ -216,7 +258,6 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lightbox, setLightbox] = useState<string | null>(null);
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
   const [tab, setTab] = useState<TabKey>('overview');
 
@@ -233,6 +274,7 @@ export default function ProjectDetailPage() {
           getProposal(projectIdNum),
           getBids(projectIdNum),
         ]);
+        if (!active) return;
         setProject(projectData);
         setBids(bidsData);
       } catch (e) {
@@ -393,22 +435,6 @@ export default function ProjectDetailPage() {
     }
     return out;
   })();
-
-  /* ------------------- ANTI-BAD-LINK GUARD (kills rogue hrefs) ------------------- */
-  useEffect(() => {
-    // Remove any <a href="10%: ..."> or other non-absolute/non-root links that slipped in
-    const anchors = Array.from(document.querySelectorAll('a[href]'));
-    anchors.forEach(a => {
-      const raw = a.getAttribute('href') || '';
-      const isHttp = /^https?:\/\//i.test(raw);
-      const isRooted = raw.startsWith('/');
-      const isHash = raw.startsWith('#');
-      const isAllowed = isHttp || isRooted || isHash || raw.startsWith('/api/ipfs');
-      if (!isAllowed) {
-        a.removeAttribute('href');
-      }
-    });
-  }, [project, bids, tab]);
 
   /* --------------------------------- Render --------------------------------- */
 
@@ -628,7 +654,7 @@ export default function ProjectDetailPage() {
               {allFiles.map((f, i) => (
                 <div key={`${f.scope}-${i}`}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachment(f.doc, f.href, i)}
+                  {renderAttachment(f.doc)}
                 </div>
               ))}
             </div>
@@ -671,16 +697,16 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
 
 /* ----------------------------- File render helper ---------------------------- */
 
-function renderAttachment(docIn: any, hrefIn: string | null, key: number) {
+function renderAttachment(docIn: any) {
   const doc = normalizeDoc(docIn);
   if (!doc) return null;
 
-  const href = hrefIn || hrefForDoc(doc);
+  const href = hrefForDoc(doc);
   const name = doc.name || (href ? href.split('/').pop() : 'file');
 
   if (!href) {
     return (
-      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
+      <div className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
         <p className="truncate">{name}</p>
         <p className="italic">No file link</p>
       </div>
@@ -691,7 +717,7 @@ function renderAttachment(docIn: any, hrefIn: string | null, key: number) {
 
   if (isImage) {
     return (
-      <a key={key} href={href} target="_blank" rel="noopener noreferrer" title={name} className="group block overflow-hidden rounded border">
+      <a href={href} target="_blank" rel="noopener noreferrer" title={name} className="group block overflow-hidden rounded border">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
       </a>
@@ -699,7 +725,7 @@ function renderAttachment(docIn: any, hrefIn: string | null, key: number) {
   }
 
   return (
-    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+    <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
       <p className="truncate" title={name}>{name}</p>
       <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
     </div>
