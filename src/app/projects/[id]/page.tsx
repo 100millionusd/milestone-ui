@@ -1,17 +1,13 @@
+// src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-// Pinata gateway (hard-wired). You can move to .env later if you prefer.
-const GATEWAY = 'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
-const VIA_PROXY = false;
-
+const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-
-/* ----------------------------- Types / Helpers ----------------------------- */
 
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
@@ -23,15 +19,19 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
+
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
+
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
   return a;
 }
 
@@ -44,11 +44,6 @@ type Milestone = {
   paymentTxHash?: string | null;
   paymentDate?: string | null;
   proof?: string;
-  proofCid?: string;
-  folderCid?: string;
-  cid?: string;
-  files?: any[] | string;
-  // (other possible keys exist; we’ll scan generically)
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -69,265 +64,6 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
-
-/* --------------------------- ROBUST IPFS HELPERS --------------------------- */
-const CID_RE = /(?:^|\/)(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(?:$|\/)/i;
-const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
-const CID_WITH_PATH_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})(\/[^?#]*)?$/i;
-const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
-const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
-const FILE_LIKE_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
-
-function isHttpUrl(s: string): boolean {
-  try {
-    const u = new URL(s);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-function encodeIpfsPath(path: string): string {
-  if (!path) return '';
-  const clean = path.replace(/^\/*/, '');
-  if (!clean) return '';
-  return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
-}
-function parseIpfsLike(s: string): { cid: string; path: string } | null {
-  let m = s.match(IPFS_URI_RE);
-  if (m) {
-    const cid = m[1]; const path = m[2] || '';
-    return CID_ONLY_RE.test(cid) ? { cid, path } : null;
-  }
-  m = s.match(HTTP_IPFS_RE);
-  if (m) {
-    const cid = m[1]; const path = m[2] || '';
-    return CID_ONLY_RE.test(cid) ? { cid, path } : null;
-  }
-  m = s.match(CID_WITH_PATH_RE);
-  if (m) {
-    const cid = m[1]; const path = m[2] || '';
-    return CID_ONLY_RE.test(cid) ? { cid, path } : null;
-  }
-  return null;
-}
-function hrefForDoc(doc: any): string | null {
-  if (!doc) return null;
-
-  if (doc.cid && CID_ONLY_RE.test(doc.cid)) {
-    const suffix = encodeIpfsPath(doc.ipfsPath || '');
-    return VIA_PROXY
-      ? `/api/ipfs?cid=${encodeURIComponent(doc.cid)}${suffix ? `&path=${encodeURIComponent(suffix)}` : ''}`
-      : `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
-  }
-  if (doc.url && isHttpUrl(doc.url)) return doc.url;
-
-  return null;
-}
-function pickName(doc: any, fallbackHref?: string): string {
-  if (!doc) return fallbackHref?.split('/').pop() || 'file';
-  if (typeof doc === 'string') return doc.split('/').pop() || doc;
-  return (
-    doc.name ||
-    doc.filename ||
-    doc.fileName ||
-    doc.file ||
-    (typeof doc.path === 'string' ? doc.path.split('/').pop() : '') ||
-    (fallbackHref ? fallbackHref.split('/').pop() : '') ||
-    'file'
-  );
-}
-
-/** Normalize any doc-like value to a standard shape */
-function normalizeDoc(raw: any) {
-  if (!raw) return null;
-
-  if (typeof raw === 'string') {
-    const s = raw.trim();
-
-    if (isHttpUrl(s)) {
-      const m = s.match(HTTP_IPFS_RE);
-      if (m && CID_ONLY_RE.test(m[1])) {
-        return { cid: m[1], ipfsPath: m[2] || '', name: pickName(null, s) };
-      }
-      return { url: s, name: pickName(null, s) };
-    }
-    const ref = parseIpfsLike(s);
-    if (ref) {
-      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
-      return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
-    }
-    if (CID_ONLY_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
-
-    // Not a URL/CID — treat as plain label (may be stitched later)
-    return { name: s };
-  }
-
-  const doc: any = { ...raw };
-  const urlLike = doc.url || doc.gatewayUrl || doc.ipfsUrl || doc.href;
-  if (typeof urlLike === 'string') {
-    const s = urlLike.trim();
-    if (isHttpUrl(s)) {
-      const m = s.match(HTTP_IPFS_RE);
-      if (m && CID_ONLY_RE.test(m[1])) {
-        return { cid: m[1], ipfsPath: m[2] || '', name: doc.name || pickName(null, s) };
-      }
-      return { url: s, name: doc.name || pickName(null, s) };
-    }
-    const ref = parseIpfsLike(s);
-    if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || pickName(null, s) };
-  }
-
-  if (typeof doc.path === 'string' && !doc.ipfsPath) {
-    doc.ipfsPath = doc.path;
-  }
-  if (typeof doc.cid === 'string') {
-    const ref = parseIpfsLike(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
-    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: pickName(doc) };
-  }
-  if (doc.name || doc.filename || doc.fileName || doc.file || doc.path) {
-    return { name: pickName(doc) };
-  }
-  return null;
-}
-
-/* -------------------------- Deep scanning for CIDs/files -------------------------- */
-
-// Prefer keys which likely hold a folder CID:
-const PREFERRED_CID_KEYS = ['proofCid', 'folderCid', 'cid', 'proof', 'ipfs', 'ipfsCid', 'folder', 'baseCid', 'rootCid'];
-
-function findCidsInAny(value: any, depth = 0, preferOnly = false): string[] {
-  const out: string[] = [];
-  if (!value || depth > 3) return out;
-
-  if (typeof value === 'string') {
-    const m1 = value.match(IPFS_URI_RE) || value.match(HTTP_IPFS_RE);
-    if (m1 && CID_ONLY_RE.test(m1[1])) out.push(m1[1]);
-    const m2 = value.match(CID_RE);
-    if (m2 && CID_ONLY_RE.test(m2[1])) out.push(m2[1]);
-    return out;
-  }
-  if (Array.isArray(value)) {
-    for (const v of value) out.push(...findCidsInAny(v, depth + 1, preferOnly));
-    return out;
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value);
-    // Prefer “cid-like” keys first (so we use the right folder)
-    const preferred = entries
-      .filter(([k]) => PREFERRED_CID_KEYS.includes(k))
-      .flatMap(([, v]) => findCidsInAny(v, depth + 1, false));
-    const rest = preferOnly ? [] : entries.flatMap(([, v]) => findCidsInAny(v, depth + 1, false));
-    return [...preferred, ...rest];
-  }
-  return out;
-}
-
-const FILE_KEYS = [
-  'files', 'images', 'pics', 'pictures', 'attachments', 'attachment', 'docs', 'documents',
-  'proofs', 'proofFiles', 'uploads', 'assets', 'paths', 'pathList', 'items'
-];
-
-function gatherFileCandidates(obj: any, depth = 0): any[] {
-  const out: any[] = [];
-  if (!obj || depth > 2) return out;
-
-  if (typeof obj === 'string') {
-    if (FILE_LIKE_RE.test(obj) || isHttpUrl(obj) || parseIpfsLike(obj) || CID_ONLY_RE.test(obj)) out.push(obj);
-    return out;
-  }
-  if (Array.isArray(obj)) {
-    for (const v of obj) out.push(...gatherFileCandidates(v, depth + 1));
-    return out;
-  }
-  if (typeof obj === 'object') {
-    for (const [k, v] of Object.entries(obj)) {
-      if (FILE_KEYS.includes(k)) out.push(...gatherFileCandidates(v, depth + 1));
-      // also pick obvious single-file objects
-      if (['file', 'filename', 'fileName', 'href', 'url', 'path'].includes(k)) out.push(v as any);
-      // strings with file-like endings anywhere:
-      if (typeof v === 'string' && FILE_LIKE_RE.test(v)) out.push(v);
-      // Recurse
-      out.push(...gatherFileCandidates(v, depth + 1));
-    }
-    return out;
-  }
-  return out;
-}
-
-/* -------------------- Milestone → files (scan + stitch smartly) -------------------- */
-function collectMilestoneFiles(bid: any) {
-  const arr = parseMilestones(bid?.milestones);
-  const out: Array<{ scope: string; doc: any }> = [];
-
-  arr.forEach((m: Milestone, idx: number) => {
-    const scope = `Milestone M${idx + 1} — Bid #${bid?.bidId}${(bid as any)?.vendorName ? ` (${(bid as any).vendorName})` : ''}`;
-
-    // 1) Find best base CID (folder) inside milestone first, then fall back to bid
-    const preferredCids = [
-      ...(typeof m.proof === 'string' ? findCidsInAny(m.proof) : []),
-      ...(m.proofCid ? [m.proofCid] : []),
-      ...(m.folderCid ? [m.folderCid] : []),
-      ...(m.cid ? [m.cid] : []),
-      ...findCidsInAny(m, 0, true),
-    ].filter(c => CID_ONLY_RE.test(String(c)));
-
-    let baseCid = preferredCids[0];
-    if (!baseCid) {
-      const bidCidsPreferred = findCidsInAny(bid, 0, true).filter(c => CID_ONLY_RE.test(String(c)));
-      const bidCidsAny = findCidsInAny(bid).filter(c => CID_ONLY_RE.test(String(c)));
-      baseCid = bidCidsPreferred[0] || bidCidsAny[0] || undefined;
-    }
-
-    // 2) Gather candidates for files from any likely field
-    const candidates = [
-      ...gatherFileCandidates(m),
-    ];
-
-    // 3) Convert candidates into docs/links
-    for (const c of candidates) {
-      const doc = normalizeDoc(c);
-      const directHref = doc && hrefForDoc(doc);
-
-      if (directHref) {
-        out.push({ scope, doc: { ...doc, name: pickName(doc, directHref) } });
-        continue;
-      }
-
-      // If it looks like a filename and we have a base CID, stitch it
-      const maybeName =
-        typeof c === 'string' ? c :
-        (c && (c.path || c.filename || c.fileName || c.file || c.name)) ? (c.path || c.filename || c.fileName || c.file || c.name) : '';
-
-      if (maybeName && baseCid) {
-        const stitched = {
-          cid: baseCid,
-          ipfsPath: String(maybeName).startsWith('/') ? String(maybeName) : `/${String(maybeName)}`,
-          name: pickName({ name: maybeName }),
-        };
-        const stitchedHref = hrefForDoc(stitched);
-        if (stitchedHref) {
-          out.push({ scope, doc: stitched });
-          continue;
-        }
-      }
-    }
-
-    // 4) Also add single proof/proofCid reference if present (useful when it’s a file, not a folder)
-    const proofRef = (typeof m.proof === 'string' && parseIpfsLike(m.proof)) || null;
-    const singleCid = m.proofCid || m.folderCid || m.cid || (proofRef ? proofRef.cid : null);
-    const singlePath = proofRef ? proofRef.path : '';
-    if (singleCid) {
-      const doc = { cid: singleCid, ipfsPath: singlePath, name: m.name ? `${m.name}` : `milestone-${idx + 1}` };
-      const href = hrefForDoc(doc);
-      if (href) out.push({ scope, doc });
-    }
-  });
-
-  return out;
-}
-
-/* ------------------------------ UI mini helpers ------------------------------ */
-
 function fmt(dt?: string | null) {
   if (!dt) return '';
   const d = new Date(dt);
@@ -337,24 +73,23 @@ function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
 
-type TabKey = 'overview' | 'milestones' | 'bids' | 'files';
-
-/* -------------------------------- Component -------------------------------- */
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
+  const projectIdNum = Number((params as any)?.id);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
   const [tab, setTab] = useState<TabKey>('overview');
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Fetch
+  // Initial fetch
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -376,12 +111,16 @@ export default function ProjectDetailPage() {
     return () => { active = false; };
   }, [projectIdNum]);
 
-  // Me
+  // Auth (for Edit button)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Poll while analyses run
+  useEffect(() => {
+  (window as any).__BIDS = bids;
+}, [bids]);
+
+  // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -434,13 +173,7 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // Expose for quick console debugging
-  useEffect(() => {
-    if (typeof window !== 'undefined') (window as any).__BIDS = bids;
-  }, [bids]);
-
-  /* ---------------------------- Derived values ---------------------------- */
-
+  // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
@@ -461,51 +194,127 @@ export default function ProjectDetailPage() {
 
   const projectDocs = parseDocs(project?.docs);
 
-  // Files roll-up: proposal docs + bid docs + milestone files (deep-scan)
-  const allFiles = useMemo(() => {
-    const raw: Array<{ scope: string; doc: any }> = [
-      ...(projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d })),
-      ...bids.flatMap((b: any) => {
-        const docsArr = parseDocs(b.docs);
-        const single = b.doc ? [b.doc] : [];
-        const ds = [...docsArr, ...single].filter(Boolean);
-        return ds.map((d: any) => ({
-          scope: `Bid #${b.bidId}${b.vendorName ? ` — ${b.vendorName}` : ''}`,
-          doc: d
-        }));
-      }),
-      ...bids.flatMap((b: any) => collectMilestoneFiles(b)),
-    ];
+  const renderAttachment = (doc: any, idx: number) => {
+    if (!doc) return null;
+    const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
+    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
 
-    const seen = new Set<string>();
-    const out: Array<{ scope: string; doc: any; href: string }> = [];
-    for (const item of raw) {
-      const doc = normalizeDoc(item.doc);
-      if (!doc) continue;
-      const href = hrefForDoc(doc);
-      if (!href) continue;
-      const name = pickName(doc, href);
-      const key = `${href}|${name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ scope: item.scope, doc: { ...doc, name }, href });
+    if (isImage) {
+      return (
+        <button
+          key={idx}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={href} alt={doc.name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+        </button>
+      );
     }
 
-    if (typeof window !== 'undefined') (window as any).__FILES = out;
-    return out;
-  }, [projectDocs, bids]);
+    return (
+      <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate">{doc.name}</p>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+      </div>
+    );
+  };
 
-  // Quick stats
+  const renderAnalysis = (raw: any) => {
+    const analysis = coerceAnalysis(raw);
+    const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
+
+    if (isPending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    if (!analysis) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
+
+    const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
+    const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
+
+    return (
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+        {isV2 && (
+          <>
+            {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
+            <div className="text-sm">
+              {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
+              {typeof analysis.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                </>
+              )}
+            </div>
+            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Risks</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Milestone Notes</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {typeof analysis.pdfUsed === 'boolean' && (
+              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
+                {analysis.pdfDebug?.url && (
+                  <div>
+                    File:{' '}
+                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                      {analysis.pdfDebug.name || 'open'}
+                    </a>
+                  </div>
+                )}
+                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
+                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
+                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
+                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        {isV1 && (
+          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+            {analysis.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {analysis.verdict}</p>)}
+            {analysis.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {analysis.reasoning}</p>)}
+            {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
+              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
+      </div>
+    );
+  };
+
+  // ---- EARLY RETURNS (no hooks below) ----
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
+
+  // Derived values (plain variables)
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
-
   const lastActivity = (() => {
-    const dates: (string | undefined | null)[] = [project?.updatedAt, project?.createdAt];
+    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
     for (const b of bids) {
-      dates.push(b?.createdAt, b?.updatedAt);
-      const arr = parseMilestones(b?.milestones);
-      for (const m of arr) { dates.push(m?.paymentDate, m?.completionDate, m?.dueDate); }
+      dates.push(b.createdAt, b.updatedAt);
+      const arr = parseMilestones(b.milestones);
+      for (const m of arr) {
+        dates.push(m.paymentDate, m.completionDate, m.dueDate);
+      }
     }
     const valid = dates
       .filter(Boolean)
@@ -515,10 +324,29 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  /* --------------------------------- Render --------------------------------- */
+  // Build Timeline (synthesized)
+  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
+  const timeline: EventItem[] = [];
+  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  for (const b of bids) {
+    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b.milestones);
+    arr.forEach((m, idx) => {
+      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
+      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
+    });
+  }
+  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  if (loading) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found</div>;
+  const allFiles = [
+    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
+    ...bids.flatMap((b) => {
+      const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+      return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+    }),
+  ];
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -562,13 +390,14 @@ export default function ProjectDetailPage() {
       <div className="border-b">
         <div className="flex gap-2">
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
       </div>
 
-      {/* Overview (minimal) */}
+      {/* Tab content */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -581,6 +410,21 @@ export default function ProjectDetailPage() {
               <p className="text-xs text-gray-600 mt-1">
                 {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
               </p>
+            </div>
+
+            <div className="mt-6">
+              <h4 className="font-semibold mb-2">Latest activity</h4>
+              {timeline.length ? (
+                <ul className="text-sm space-y-1">
+                  {timeline.slice(-5).reverse().map((e, i) => (
+                    <li key={i}>
+                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">No activity yet.</p>
+              )}
             </div>
           </div>
 
@@ -612,7 +456,57 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Milestones */}
+      {tab === 'timeline' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Activity Timeline</h3>
+          {timeline.length ? (
+            <ol className="relative border-l pl-4">
+              {timeline.map((e, i) => (
+                <li key={i} className="mb-4">
+                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
+                  <div className="text-sm">
+                    <div className="font-medium">{e.label}</div>
+                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
+        </section>
+      )}
+
+      {tab === 'bids' && (
+        <section className="border rounded p-4 overflow-x-auto">
+          <h3 className="font-semibold mb-3">All Bids</h3>
+          {bids.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600">
+                  <th className="py-2 pr-4">Vendor</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Days</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Submitted</th>
+                  <th className="py-2 pr-4">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bids.map((b) => (
+                  <tr key={b.bidId} className="border-t">
+                    <td className="py-2 pr-4">{b.vendorName}</td>
+                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
+                    <td className="py-2 pr-4">{b.days}</td>
+                    <td className="py-2 pr-4">{b.status}</td>
+                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
+                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+        </section>
+      )}
+
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
@@ -638,7 +532,9 @@ export default function ProjectDetailPage() {
                       <td className="py-2 pr-4">M{idx+1}</td>
                       <td className="py-2 pr-4">{m.name || '—'}</td>
                       <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                      <td className="py-2 pr-4">
+                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
+                      </td>
                       <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                       <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                       <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
@@ -655,41 +551,53 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
-                <div key={`${f.scope}-${i}`}>
+                <div key={i}>
                   <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachmentButton(f.doc, f.href)}
+                  {renderAttachment(f.doc, i)}
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
           )}
-
-          <details className="mt-3">
-            <summary className="cursor-pointer text-xs text-gray-500">debug: show file URLs</summary>
-            <ul className="mt-2 text-xs break-all space-y-1">
-              {allFiles.map((f, i) => (<li key={i}>{f.href}</li>))}
-            </ul>
-          </details>
         </section>
       )}
 
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
       </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="attachment preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------------------------- Small UI components ---------------------------- */
-
+// Simple progress bar (Tailwind)
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
@@ -697,13 +605,16 @@ function Progress({ value }: { value: number }) {
     </div>
   );
 }
+
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
     <button
       onClick={() => setTab(id)}
-      className={classNames('px-3 py-2 text-sm -mb-px border-b-2',
-        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black')}
+      className={classNames(
+        'px-3 py-2 text-sm -mb-px border-b-2',
+        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black'
+      )}
       aria-pressed={active}
     >
       {label}
@@ -711,40 +622,3 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
   );
 }
 
-/* ----------------------------- File render helper ---------------------------- */
-
-function renderAttachmentButton(docIn: any, hrefPre?: string) {
-  const href = hrefPre || hrefForDoc(normalizeDoc(docIn));
-  const name = pickName(docIn, href || undefined);
-
-  if (!href) {
-    return (
-      <div className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
-        <p className="truncate">{name}</p>
-        <p className="italic">No file link</p>
-      </div>
-    );
-  }
-
-  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name) || /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
-
-  const open = () => {
-    try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
-  };
-
-  if (isImage) {
-    return (
-      <button type="button" onClick={open} title={name} className="group block overflow-hidden rounded border w-[96px] h-[96px]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-      </button>
-    );
-  }
-
-  return (
-    <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-      <p className="truncate" title={name}>{name}</p>
-      <button type="button" onClick={open} className="text-blue-600 hover:underline">Open</button>
-    </div>
-  );
-}
