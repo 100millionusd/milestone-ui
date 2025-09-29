@@ -2,15 +2,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-// ⛳ Force your Pinata gateway (you can move this to .env later if you like)
-const GATEWAY = 'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
-// If you prefer proxying via /api/ipfs, set this true and implement that route:
-const VIA_PROXY = false;
+const GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
 
+const VIA_PROXY = process.env.NEXT_PUBLIC_IPFS_VIA_PROXY === '1';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 /* ----------------------------- Types / Helpers ----------------------------- */
@@ -45,10 +45,10 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;        // ipfs://CID[/path] or CID
+  proof?: string;        // may be ipfs://CID[/path]
   proofCid?: string;     // bare CID
-  folderCid?: string;    // alt
-  cid?: string;          // alt
+  folderCid?: string;    // alternative
+  cid?: string;          // alternative
   files?: any[] | string; // array or JSON string (filenames or objects)
 };
 
@@ -78,12 +78,9 @@ const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 
 function isHttpUrl(s: string): boolean {
   try {
-    // new URL(s) throws for non-absolute; perfect.
-    const u = new URL(s);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
+    const u = new URL(s, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    return /^https?:$/i.test(u.protocol);
+  } catch { return false; }
 }
 function parseIpfsRef(s: string): { cid: string; path: string } | null {
   let m = s.match(IPFS_URI_RE);
@@ -119,6 +116,11 @@ function normalizeDoc(raw: any) {
     }
 
     if (CID_RE.test(s)) return { cid: s, ipfsPath: '', name: `${s.slice(0, 8)}…` };
+
+    // FIX: Don't treat milestone names as documents
+    if (s.includes(':') || s.includes('%')) {
+      return null; // This is likely a milestone name, not a file
+    }
 
     return { name: s };
   }
@@ -186,7 +188,6 @@ function collectMilestoneFiles(bid: any) {
       let doc = normalizeDoc(f);
       let href = doc && hrefForDoc(doc);
 
-      // If it's just a filename and we have a base CID, stitch it
       if (!href && baseRef) {
         const fileName =
           typeof f === 'string' ? f :
@@ -244,7 +245,36 @@ type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectIdNum = useMemo(() => Number((params as any)?.id), [params]);
+  const router = useRouter();
+  
+  // Enhanced project ID parsing with URL normalization
+  const projectIdNum = useMemo(() => {
+    try {
+      const id = (params as any)?.id;
+      if (!id) return NaN;
+      
+      // Handle encoded URLs and extract numeric ID
+      const decodedId = decodeURIComponent(String(id));
+      
+      // Extract first numeric value from the string
+      const numericMatch = decodedId.match(/(\d+)/);
+      const extractedId = numericMatch ? Number(numericMatch[1]) : NaN;
+      
+      // If the URL contains problematic characters, normalize the URL
+      if (decodedId.includes('%:') || decodedId.includes('%20')) {
+        const cleanUrl = `/projects/${extractedId}`;
+        // Replace the current URL without triggering a full navigation
+        if (typeof window !== 'undefined') {
+          window.history.replaceState(null, '', cleanUrl);
+        }
+      }
+      
+      return extractedId;
+    } catch (error) {
+      console.error('Error parsing project ID:', error);
+      return NaN;
+    }
+  }, [params]);
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
@@ -255,7 +285,32 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Fetch
+  // URL normalization effect - fixes problematic URLs on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentUrl = window.location.href;
+      // Check for problematic encoded characters in the URL
+      if (currentUrl.includes('%3A') || currentUrl.includes('%20') || currentUrl.includes('%:')) {
+        const url = new URL(currentUrl);
+        const pathParts = url.pathname.split('/');
+        const projectId = pathParts[pathParts.length - 1];
+        
+        // Extract numeric ID and create clean URL
+        const numericMatch = projectId.match(/(\d+)/);
+        if (numericMatch) {
+          const cleanId = numericMatch[1];
+          const cleanUrl = `${url.origin}/projects/${cleanId}`;
+          
+          // Only replace if the URL is actually different
+          if (cleanUrl !== currentUrl) {
+            window.history.replaceState(null, '', cleanUrl);
+          }
+        }
+      }
+    }
+  }, []);
+
+  // Fetch project data
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -335,27 +390,6 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  /* 🔒 Nuclear option: kill any rogue anchors the moment they appear (router-safe) */
-  useEffect(() => {
-    const sanitizeAnchors = () => {
-      const anchors = Array.from(document.querySelectorAll('a[href]'));
-      anchors.forEach(a => {
-        const raw = a.getAttribute('href') || '';
-        const allowed =
-          raw.startsWith('/api/ipfs') ||
-          raw.startsWith('https://') ||
-          raw.startsWith('http://') ||
-          raw.startsWith('/') ||
-          raw.startsWith('#');
-        if (!allowed) a.removeAttribute('href');
-      });
-    };
-    sanitizeAnchors();
-    const mo = new MutationObserver(sanitizeAnchors);
-    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
-    return () => mo.disconnect();
-  }, [project, bids, tab]);
-
   /* ---------------------------- Derived values ---------------------------- */
 
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
@@ -401,6 +435,12 @@ export default function ProjectDetailPage() {
       if (!doc) continue;
       const href = hrefForDoc(doc);
       if (!href) continue;
+      
+      // FIX: Skip invalid hrefs that are actually milestone names
+      if (href.includes('%:') || href.includes('Upon contract signing')) {
+        continue;
+      }
+      
       const name = doc.name || href.split('/').pop() || 'file';
       const key = `${href}|${name}`;
       if (seen.has(key)) continue;
@@ -408,8 +448,9 @@ export default function ProjectDetailPage() {
       out.push({ scope: item.scope, doc: { ...doc, name }, href });
     }
 
-    // Expose for debugging (prod too)
-    if (typeof window !== 'undefined') (window as any).__FILES = out;
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      (window as any).__FILES = out;
+    }
 
     return out;
   }, [projectDocs, bids]);
@@ -435,6 +476,21 @@ export default function ProjectDetailPage() {
   })();
 
   /* --------------------------------- Render --------------------------------- */
+
+  // Enhanced error handling for invalid project IDs
+  if (!Number.isFinite(projectIdNum)) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+          <h2 className="text-red-800 font-semibold mb-2">Invalid Project URL</h2>
+          <p className="text-red-700 text-sm">
+            The project URL contains invalid characters or format. Please check the link and try again.
+          </p>
+        </div>
+        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      </div>
+    );
+  }
 
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
@@ -481,8 +537,9 @@ export default function ProjectDetailPage() {
       <div className="border-b">
         <div className="flex gap-2">
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
         </div>
       </div>
@@ -574,7 +631,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Files (buttons, not anchors) */}
+      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
@@ -590,13 +647,6 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
           )}
-          {/* tiny debug: show raw URLs as text (helps verify) */}
-          <details className="mt-3">
-            <summary className="cursor-pointer text-xs text-gray-500">debug: show file URLs</summary>
-            <ul className="mt-2 text-xs break-all space-y-1">
-              {allFiles.map((f, i) => (<li key={i}>{f.href}</li>))}
-            </ul>
-          </details>
         </section>
       )}
 
@@ -631,13 +681,18 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
 }
 
 /* ----------------------------- File render helper ---------------------------- */
-/* Render as BUTTONS (never <a>) so the router can’t create relative links. */
+/* Render as BUTTONS (no <a>) so the router can never treat them as relative links. */
 function renderAttachmentButton(docIn: any, hrefPre?: string) {
   const doc = normalizeDoc(docIn);
   if (!doc) return null;
 
   const href = hrefPre || hrefForDoc(doc);
   const name = doc.name || (href ? href.split('/').pop() : 'file');
+
+  // FIX: Skip invalid documents that are actually milestone names
+  if (!href || href.includes('%:') || href.includes('Upon contract signing')) {
+    return null;
+  }
 
   if (!href) {
     return (
@@ -648,13 +703,13 @@ function renderAttachmentButton(docIn: any, hrefPre?: string) {
     );
   }
 
-  const isImage =
-    /\.(png|jpe?g|gif|webp|svg)$/i.test(name) ||
-    /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
-
   const open = () => {
     try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
   };
+
+  const isImage =
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(name) ||
+    /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 
   if (isImage) {
     return (
