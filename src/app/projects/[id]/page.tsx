@@ -6,7 +6,12 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+// Prefer explicit env gateway; fall back to Pinata default
+const GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
+
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 type AnalysisV2 = {
@@ -39,7 +44,7 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;
+  proof?: string;         // ipfs://CID[/path] or https://…/ipfs/CID[/path] or CID
   proofCid?: string;
   folderCid?: string;
   cid?: string;
@@ -47,15 +52,14 @@ type Milestone = {
   attachments?: any;
   images?: any;
   docs?: any;
+  [k: string]: any;
 };
 
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as Milestone[];
-  try {
-    const arr = JSON.parse(String(raw));
-    return Array.isArray(arr) ? (arr as Milestone[]) : [];
-  } catch { return []; }
+  try { const arr = JSON.parse(String(raw)); return Array.isArray(arr) ? (arr as Milestone[]) : []; }
+  catch { return []; }
 }
 function parseDocs(raw: unknown): any[] {
   if (!raw) return [];
@@ -179,6 +183,8 @@ function hrefForDoc(doc: any): string | null {
 /* ------------------------ Milestone file collection ------------------------ */
 
 const FILE_KEYS = ['files', 'attachments', 'images', 'docs', 'proofs', 'uploads', 'items', 'paths'];
+const SINGLE_FILE_KEYS = ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'];
+
 function toArray(x: any): any[] {
   if (!x) return [];
   if (Array.isArray(x)) return x;
@@ -187,6 +193,34 @@ function toArray(x: any): any[] {
   }
   return [x];
 }
+
+/** Recursively pull anything that looks like a file-ish value */
+function gatherFileCandidates(obj: any, depth = 0): any[] {
+  const out: any[] = [];
+  if (!obj || depth > 3) return out;
+
+  if (typeof obj === 'string') {
+    out.push(obj);
+    return out;
+  }
+  if (Array.isArray(obj)) {
+    for (const v of obj) out.push(...gatherFileCandidates(v, depth + 1));
+    return out;
+  }
+  if (typeof obj === 'object') {
+    for (const [k, v] of Object.entries(obj)) {
+      if (FILE_KEYS.includes(k) || SINGLE_FILE_KEYS.includes(k)) {
+        out.push(...gatherFileCandidates(v, depth + 1));
+      } else {
+        // still look into unknown keys (in case they hold nested file objects)
+        out.push(...gatherFileCandidates(v, depth + 1));
+      }
+    }
+    return out;
+  }
+  return out;
+}
+
 function collectMilestoneFiles(bid: any) {
   const arr = parseMilestones(bid?.milestones);
   const out: Array<{ scope: string; doc: any }> = [];
@@ -194,6 +228,7 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: any, idx: number) => {
     const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
 
+    // Base folder reference (for stitching bare names)
     const baseRef =
       (typeof m.proof === 'string' && parseIpfsLike(m.proof)) ||
       (typeof m.proofCid === 'string' && { cid: m.proofCid, path: '' }) ||
@@ -201,34 +236,38 @@ function collectMilestoneFiles(bid: any) {
       (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
       null;
 
-    const candidates: any[] = [];
-    for (const k of FILE_KEYS) candidates.push(...toArray(m[k]));
-    ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'].forEach((k) => {
-      if (m && m[k] != null) candidates.push(m[k]);
-    });
+    // Recursively gather candidates from the milestone object
+    const candidates = gatherFileCandidates(m);
 
     for (const c of candidates) {
       const doc = normalizeDoc(c);
       const direct = doc && hrefForDoc(doc);
+      if (direct) {
+        out.push({ scope, doc: { ...doc, name: pickName(doc, direct) } });
+        continue;
+      }
 
-      if (direct) { out.push({ scope, doc: { ...doc, name: pickName(doc, direct) } }); continue; }
-
+      // If not a direct link, try stitching a bare filename against a base CID
       const maybeName =
         typeof c === 'string'
           ? c
-          : (c && (c.path || c.filename || c.fileName || c.file || c.name)) ? (c.path || c.filename || c.fileName || c.file || c.name) : '';
+          : (c && (c as any).path) || (c as any)?.filename || (c as any)?.fileName || (c as any)?.file || (c as any)?.name;
 
       if (maybeName && baseRef) {
         const stitchedDoc = {
           cid: baseRef.cid,
           ipfsPath: String(maybeName).startsWith('/') ? String(maybeName) : `/${String(maybeName)}`,
-          name: pickName({ name: maybeName })
+          name: pickName({ name: String(maybeName) })
         };
         const stitchedHref = hrefForDoc(stitchedDoc);
-        if (stitchedHref) { out.push({ scope, doc: stitchedDoc }); continue; }
+        if (stitchedHref) {
+          out.push({ scope, doc: stitchedDoc });
+          continue;
+        }
       }
     }
 
+    // Show the proof reference itself (often a folder or a single file)
     if (typeof m.proof === 'string') {
       const pr = normalizeDoc(m.proof);
       const prHref = pr && hrefForDoc(pr);
@@ -344,7 +383,7 @@ export default function ProjectDetailPage() {
 
   // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // <-- defined ONCE here
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -484,7 +523,8 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  // Derived values (plain variables) - use acceptedMs declared above
+  // Derived values (plain variables)
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -524,7 +564,7 @@ export default function ProjectDetailPage() {
 
   // Files roll-up = Project docs + Bid docs + Milestone files
   const allFiles: Array<{ scope: string; doc: any }> = [
-    ...(parseDocs(project?.docs) || []).map((d) => ({ scope: 'Project', doc: d })),
+    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
     ...bids.flatMap((b) => {
       const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
       return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
@@ -532,6 +572,7 @@ export default function ProjectDetailPage() {
     ...bids.flatMap((b) => collectMilestoneFiles(b)),
   ];
 
+  // Debug expose
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles
       .map(({ doc }) => hrefForDoc(normalizeDoc(doc)))
@@ -763,7 +804,7 @@ export default function ProjectDetailPage() {
             <ul className="mt-2 text-xs break-all space-y-1">
               {allFiles.map((f, i) => {
                 const href = hrefForDoc(normalizeDoc(f.doc));
-                return <li key={i}>{href || '(no link)'} </li>;
+                return <li key={i}>{href || '(no link)'}</li>;
               })}
             </ul>
           </details>
@@ -807,7 +848,7 @@ function Progress({ value }: { value: number }) {
   );
 }
 
-function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
+function TabBtn({ id, label, tab, setTab }: { id: 'overview'|'timeline'|'bids'|'milestones'|'files'; label: string; tab: 'overview'|'timeline'|'bids'|'milestones'|'files'; setTab: (t: any) => void }) {
   const active = tab === id;
   return (
     <button
