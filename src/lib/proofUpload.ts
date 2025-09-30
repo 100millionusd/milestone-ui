@@ -8,7 +8,7 @@ export async function uploadProofFiles(
   if (!files || files.length === 0) return [];
 
   const fd = new FormData();
-  // The API route accepts either "file" or "files"; sending "file" repeatedly is fine.
+  // Your /api/proofs/upload route accepts "file" entries (multiple), not "files"
   for (const f of files) {
     fd.append('file', f, (f as any).name || 'upload');
   }
@@ -17,7 +17,7 @@ export async function uploadProofFiles(
     method: 'POST',
     body: fd,
     credentials: 'include', // keep session cookies
-    // IMPORTANT: do NOT set Content-Type for FormData; browser sets the boundary
+    // DO NOT set Content-Type; the browser sets multipart boundary for FormData
   });
 
   if (!res.ok) {
