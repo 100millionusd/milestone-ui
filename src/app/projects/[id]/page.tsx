@@ -270,7 +270,7 @@ function collectMilestoneFiles(bid: any) {
   return out;
 }
 
-// NEW: scan bid-level “proof-ish” places so plain CID links get included
+// Scan bid-level “proof-ish” places so plain CID links get included
 const BID_PROOF_KEYS = [
   'proofs', 'proofUrls', 'proof', 'images', 'files', 'attachments', 'uploads', 'evidence', 'links', 'media'
 ];
@@ -290,8 +290,8 @@ function collectBidLevelFiles(bid: any) {
     }
   }
 
-  // 2) Gentle fallback: scan top-level strings for http/ipfs refs (avoid noise)
-  for (const [k, v] of Object.entries(bid || {})) {
+  // 2) Fallback: scan top-level strings for http/ipfs refs
+  for (const [, v] of Object.entries(bid || {})) {
     if (typeof v === 'string' && (isHttpUrl(v) || parseIpfsLike(v))) {
       const doc = normalizeDoc(v);
       const href = doc && hrefForDoc(doc);
@@ -320,6 +320,7 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
+  // Initial fetch
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -341,14 +342,17 @@ export default function ProjectDetailPage() {
     return () => { active = false; };
   }, [projectIdNum]);
 
+  // Auth (for Edit button)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
+  // Expose for debugging
   useEffect(() => {
     (window as any).__BIDS = bids;
   }, [bids]);
 
+  // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -401,9 +405,13 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  /* ---------- helpers used in render (no hooks below this line!) ---------- */
+  /* ---- EARLY RETURNS (no hooks below this line!) ---- */
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
+
+  /* ---------- Derived values computed exactly once here ---------- */
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // <-- declared ONCE
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -420,11 +428,15 @@ export default function ProjectDetailPage() {
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
+  /* ---------- render helpers that do NOT redeclare acceptedMs ---------- */
+
   const renderAttachment = (docIn: any, idx: number) => {
     const doc = normalizeDoc(docIn);
     if (!doc) return null;
     const href = hrefForDoc(doc);
     const name = pickName(doc, href || undefined);
+
+    // Try to decide if it’s an image (by filename or URL path). CID-only will not match; we'll still render a working link.
     const isImageByName = IMG_EXT_RE.test(name);
     const pathFromHref = href ? safePathnameFromHref(href) : '';
     const isImageByHrefPath = IMG_EXT_RE.test(pathFromHref);
@@ -441,18 +453,22 @@ export default function ProjectDetailPage() {
 
     if (isImage) {
       return (
-        <button
-          key={idx}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border w-[96px] h-[96px]"
-          title={name}
-        >
+        <div key={idx} className="p-2 rounded border bg-white">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-        </button>
+          <img
+            src={href}
+            alt={name}
+            className="w-full h-32 object-cover rounded mb-1"
+          />
+          <div className="flex justify-between items-center text-xs">
+            <span className="truncate" title={name}>{name}</span>
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+          </div>
+        </div>
       );
     }
 
+    // Fallback: generic tile (covers CID-only URLs like your images too; still clickable)
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
@@ -483,7 +499,7 @@ export default function ProjectDetailPage() {
               {typeof analysis.confidence === 'number' && (
                 <>
                   <span className="mx-1">·</span>
-                <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
                 </>
               )}
             </div>
@@ -523,12 +539,7 @@ export default function ProjectDetailPage() {
     );
   };
 
-  // ---- EARLY RETURNS (no hooks below) ----
-  if (loading) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found</div>;
-
-  // Derived values
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  /* ---------- more derived values (use acceptedMs computed once) ---------- */
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -550,7 +561,7 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  // Build Timeline
+  // Timeline
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -566,12 +577,11 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Files roll-up = Project docs + Bid docs + Milestone files + Bid-level proofs
+  // Files: Project docs + Bid docs + Milestones + Bid-level proofs
   const projectDocs = parseDocs(project?.docs);
 
-  // helper: dedupe by final href
   const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
-  const dedupeByHref = <T,>(rows: Array<{ scope: string; doc: any }>): Array<{ scope: string; doc: any }> => {
+  const dedupeByHref = (rows: Array<{ scope: string; doc: any }>) => {
     const seen = new Set<string>();
     const out: Array<{ scope: string; doc: any }> = [];
     for (const r of rows) {
@@ -591,12 +601,11 @@ export default function ProjectDetailPage() {
   });
   const filesMilestones = bids.flatMap((b) => collectMilestoneFiles(b));
   const filesBidLevel = bids.flatMap((b) => collectBidLevelFiles(b));
-
   const allFiles = dedupeByHref([
     ...filesProject,
     ...filesBidDocs,
     ...filesMilestones,
-    ...filesBidLevel, // ← this is what pulls your two image CIDs in
+    ...filesBidLevel, // this captures CID-only URLs like your two images
   ]);
 
   if (typeof window !== 'undefined') {
