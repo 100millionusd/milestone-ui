@@ -16,7 +16,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
   (process.env.NEXT_PUBLIC_API_BASE_URL
     ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
-    : '');
+    : '/api/proofs'); // ✅ fallback to Next API route
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -269,6 +269,17 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
+  // 🔁 Small helper to refresh proofs on demand
+  async function refreshProofs() {
+    try {
+      const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!r.ok) return;
+      const body = await r.json();
+      if (Array.isArray(body)) setProofs(body);
+    } catch {}
+  }
+
   // Initial fetch
   useEffect(() => {
     let active = true;
@@ -283,22 +294,8 @@ export default function ProjectDetailPage() {
         setProject(projectData);
         setBids(bidsData);
 
-        // Optional proofs fetch (from /api/proofs)
-        if (API_BASE) {
-          try {
-            const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}`;
-            const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
-            if (r.ok) {
-              const body = await r.json();
-              if (Array.isArray(body)) setProofs(body);
-            } else {
-              // keep UI alive even if /api/proofs 500s
-              console.warn('/api/proofs failed', r.status);
-            }
-          } catch (e) {
-            console.warn('proofs fetch error', e);
-          }
-        }
+        // proofs on first load
+        await refreshProofs();
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -312,6 +309,9 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
+
+  // Optional: expose to window for quick console inspection
+  useEffect(() => { (window as any).__BIDS = bids; (window as any).__PROOFS = proofs; }, [bids, proofs]);
 
   // Minimal poll (only while any bid analysis is pending)
   useEffect(() => {
@@ -344,6 +344,22 @@ export default function ProjectDetailPage() {
     }
     return clearPoll;
   }, [projectIdNum, bids]);
+
+  // 🔁 Auto-refresh proofs when Files tab is opened
+  useEffect(() => {
+    if (tab === 'files') refreshProofs();
+  }, [tab, projectIdNum]);
+
+  // 🔁 Refresh proofs when the window regains focus while Files tab is open
+  useEffect(() => {
+    const onFocus = () => { if (tab === 'files') refreshProofs(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [tab, projectIdNum]);
 
   /* ---- EARLY RETURNS ---- */
   if (loading) return <div className="p-6">Loading project...</div>;
@@ -681,7 +697,12 @@ export default function ProjectDetailPage() {
                       isImage ? (
                         <div className="p-2 rounded border bg-white">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={href} alt={name} className="w-full h-32 object-cover rounded mb-1" />
+                          <img
+                            src={href}
+                            alt={name}
+                            className="w-full h-32 object-cover rounded mb-1 cursor-zoom-in"
+                            onClick={() => setLightbox(href)}
+                          />
                           <div className="flex justify-between items-center text-xs">
                             <span className="truncate" title={name}>{name}</span>
                             <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
