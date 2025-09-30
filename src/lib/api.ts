@@ -193,20 +193,6 @@ function isAuthError(e: any) {
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
 
-// add near other helpers
-export async function uploadProofFiles(files: File[]): Promise<Array<{ cid: string; url: string; name: string }>> {
-  if (!files || files.length === 0) return [];
-  const fd = new FormData();
-  for (const f of files) fd.append('file', f, (f as any).name || 'upload');
-  const res = await fetch('/api/proofs/upload', { method: 'POST', body: fd, credentials: 'include' });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`upload failed: ${res.status} ${txt || res.statusText}`);
-  }
-  const json = await res.json();
-  return Array.isArray(json?.uploads) ? json.uploads : [];
-}
-
   // Bust caches on GETs
   let fullPath = path;
   if (method === "GET") {
@@ -775,6 +761,36 @@ export async function submitProof(input: {
   prompt?: string;
 }): Promise<Proof> {
   const files = Array.isArray(input.files) ? input.files : [];
+
+  // ========= Proof uploads (Pinata via our API) =========
+// Sends <input type="file"> files to /api/proofs/upload (which forwards to Pinata)
+// Returns: [{ cid, url, name }] for each uploaded file
+export async function uploadProofFiles(
+  files: File[]
+): Promise<Array<{ cid: string; url: string; name: string }>> {
+  if (!files || files.length === 0) return [];
+
+  const fd = new FormData();
+  // The server route accepts either "file" or "files"; we send "file" repeatedly.
+  for (const f of files) {
+    fd.append('file', f, (f as any).name || 'upload');
+  }
+
+  const res = await fetch('/api/proofs/upload', {
+    method: 'POST',
+    body: fd,
+    credentials: 'include', // keep cookies/session
+    // IMPORTANT: do NOT set Content-Type for FormData; the browser sets the boundary
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`upload failed: ${res.status} ${text || res.statusText}`);
+  }
+
+  const json = await res.json();
+  return Array.isArray(json?.uploads) ? json.uploads : [];
+}
 
   // Build a legacy-proof string in case the server only supports the old route
   let legacyProof = (input.description || "").trim();
