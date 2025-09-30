@@ -82,7 +82,7 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
-const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i; // images only
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
 
 function isHttpUrl(s: string): boolean {
@@ -116,7 +116,6 @@ function pickName(doc: any, fallbackHref?: string): string {
     'file'
   );
 }
-/** Normalize any input (string/object) into a canonical doc */
 function normalizeDoc(raw: any) {
   if (!raw) return null;
 
@@ -138,7 +137,6 @@ function normalizeDoc(raw: any) {
 
   const doc: any = { ...raw };
 
-  // URL/CID might be inside "name"
   if (typeof doc.name === 'string') {
     const n = doc.name.trim();
     if (isHttpUrl(n)) {
@@ -185,7 +183,6 @@ function hrefForDoc(doc: any): string | null {
 
 /* ------------------------ Milestone file collection ------------------------ */
 
-// We accept filenames anywhere and try to find *any* CID/ipfs ref in the milestone to stitch them.
 const BASE_CID_KEYS = [
   'proofCid', 'proof_cid', 'proofCID',
   'folderCid', 'folder_cid',
@@ -207,7 +204,6 @@ function gatherFileCandidates(obj: any, depth = 0): any[] {
 }
 
 function findBaseCidRef(m: any): { cid: string; path: string } | null {
-  // 1) Explicit keys
   for (const key of BASE_CID_KEYS) {
     const v = m?.[key];
     if (typeof v === 'string') {
@@ -216,12 +212,10 @@ function findBaseCidRef(m: any): { cid: string; path: string } | null {
       if (CID_ONLY_RE.test(v)) return { cid: v, path: '' };
     }
   }
-  // 2) Common "proof" might be a URL/CID
   if (typeof m?.proof === 'string') {
     const ref = parseIpfsLike(m.proof);
     if (ref) return { cid: ref.cid, path: ref.path || '' };
   }
-  // 3) Fallback: scan all string values in the milestone for any IPFS-ish thing
   for (const v of Object.values(m || {})) {
     if (typeof v === 'string') {
       const ref = parseIpfsLike(v);
@@ -238,8 +232,6 @@ function collectMilestoneFiles(bid: any) {
   arr.forEach((m: any, idx: number) => {
     const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
     const baseRef = findBaseCidRef(m);
-
-    // Grab anything that smells like a file reference
     const candidates = gatherFileCandidates(m);
 
     for (const c of candidates) {
@@ -250,7 +242,6 @@ function collectMilestoneFiles(bid: any) {
         continue;
       }
 
-      // Stitch bare filenames like "image (10).jpg" against the base CID
       const maybeName =
         typeof c === 'string'
           ? c
@@ -269,7 +260,6 @@ function collectMilestoneFiles(bid: any) {
       }
     }
 
-    // Also include the base "proof"/folder itself if it’s a direct file
     if (typeof m.proof === 'string') {
       const pr = normalizeDoc(m.proof);
       const prHref = pr && hrefForDoc(pr);
@@ -298,7 +288,6 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Initial fetch
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
@@ -320,17 +309,14 @@ export default function ProjectDetailPage() {
     return () => { active = false; };
   }, [projectIdNum]);
 
-  // Auth (for Edit button)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Expose for quick console debugging
   useEffect(() => {
     (window as any).__BIDS = bids;
   }, [bids]);
 
-  // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -383,9 +369,9 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // ---- helpers used in render (no hooks below this line!) ----
+  /* ---------- helpers used in render (no hooks below this line!) ---------- */
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // DECLARED ONCE
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // ← declared ONCE
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -401,8 +387,6 @@ export default function ProjectDetailPage() {
     (!!project?.ownerWallet &&
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
-
-  const projectDocs = parseDocs(project?.docs);
 
   const renderAttachment = (docIn: any, idx: number) => {
     const doc = normalizeDoc(docIn);
@@ -423,7 +407,6 @@ export default function ProjectDetailPage() {
       );
     }
 
-    // If it *looks* like an image by name OR by href path, render an image preview (even if href has no extension).
     if (isImage) {
       return (
         <button
@@ -438,7 +421,6 @@ export default function ProjectDetailPage() {
       );
     }
 
-    // Otherwise, generic "Open" tile.
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
@@ -530,7 +512,7 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+  // Derived values
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -552,7 +534,7 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  // Build Timeline (synthesized)
+  // Build Timeline
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -579,7 +561,6 @@ export default function ProjectDetailPage() {
     ...bids.flatMap((b) => collectMilestoneFiles(b)),
   ];
 
-  // Debug expose
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles
       .map(({ doc }) => hrefForDoc(normalizeDoc(doc)))
@@ -855,7 +836,6 @@ function Progress({ value }: { value: number }) {
   );
 }
 
-type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
