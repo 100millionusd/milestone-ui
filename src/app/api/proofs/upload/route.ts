@@ -1,66 +1,74 @@
 // src/app/api/proofs/upload/route.ts
 import { NextResponse } from 'next/server';
 
-const PINATA_JWT = process.env.PINATA_JWT; // recommended
-const PINATA_API_KEY = process.env.PINATA_API_KEY;     // legacy alt
-const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY; // legacy alt
+export const runtime = 'nodejs';            // ensure Node runtime (not edge)
+export const dynamic = 'force-dynamic';     // no caching
 
-if (!PINATA_JWT && !(PINATA_API_KEY && PINATA_SECRET_API_KEY)) {
-  console.warn('[proofs/upload] Missing Pinata credentials (PINATA_JWT or API key/secret).');
+const PINATA_URL = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+
+// Build gateway base: https://<host>/ipfs
+function gatewayBase(): string {
+  const gw =
+    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+    'gateway.pinata.cloud';
+  const host = gw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  return `https://${host}/ipfs`;
 }
 
-// Normalize gateway (so we can return a usable public URL)
-const GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '')}/ipfs`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
-        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
-        : 'https://gateway.pinata.cloud/ipfs');
+// Choose Pinata auth headers (JWT preferred)
+function pinataHeaders(): Record<string, string> {
+  const jwt = process.env.PINATA_JWT;
+  const apiKey = process.env.PINATA_API_KEY;
+  const apiSecret = process.env.PINATA_SECRET_API_KEY;
 
-export async function GET() {
-  return NextResponse.json({ error: 'method_not_allowed' }, { status: 405 });
+  if (jwt) return { Authorization: `Bearer ${jwt}` };
+  if (apiKey && apiSecret) {
+    return {
+      pinata_api_key: apiKey,
+      pinata_secret_api_key: apiSecret,
+    };
+  }
+  throw new Error('Missing Pinata credentials (set PINATA_JWT or PINATA_API_KEY + PINATA_SECRET_API_KEY).');
 }
 
 export async function POST(req: Request) {
   try {
-    const inFd = await req.formData();
+    // Read the multipart form data the browser sent
+    const form = await req.formData();
 
-    // Accept multiple under either "file" or "files"
-    const inFiles: File[] = [
-      ...inFd.getAll('file'),
-      ...inFd.getAll('files'),
-    ].filter((x): x is File => x instanceof File);
+    // Accept both "file" and "files" field names to be tolerant
+    const incoming = [
+      ...form.getAll('file'),
+      ...form.getAll('files'),
+    ].filter(Boolean) as Array<Blob & { name?: string; type?: string }>;
 
-    if (inFiles.length === 0) {
-      return NextResponse.json({ error: 'bad_request', message: 'No files found in form-data (use "file" or "files")' }, { status: 400 });
+    if (!incoming.length) {
+      return NextResponse.json(
+        { error: 'no_files', message: 'No files found. Send one or more files under field "file".' },
+        { status: 400 }
+      );
     }
 
+    const headers = pinataHeaders();
+    const gw = gatewayBase();
     const uploads: Array<{ cid: string; url: string; name: string }> = [];
 
-    for (const f of inFiles) {
-      const out = new FormData();
-      // Pinata expects "file" as the field name; can be appended multiple times.
-      out.append('file', f, (f as any).name || 'upload');
+    for (const blob of incoming) {
+      // Build a multipart form for Pinata. DO NOT construct new File() on the server.
+      const fd = new FormData();
+      // name is optional on server blobs; set a fallback
+      const filename = (blob as any).name || 'upload';
+      fd.append('file', blob, filename);
 
-      // Optional: give Pinata a readable name
-      out.append('pinataMetadata', JSON.stringify({
-        name: (f as any).name || 'upload',
-      }));
+      // (optional) metadata & options
+      fd.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
+      fd.append('pinataMetadata', JSON.stringify({ name: filename }));
 
-      // Optional: set cidVersion or other options
-      out.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
-
-      const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+      const res = await fetch(PINATA_URL, {
         method: 'POST',
-        headers: PINATA_JWT
-          ? { Authorization: `Bearer ${PINATA_JWT}` }
-          : {
-              pinata_api_key: PINATA_API_KEY || '',
-              pinata_secret_api_key: PINATA_SECRET_API_KEY || '',
-            },
-        body: out,
+        headers,         // only auth headers; DO NOT set Content-Type here
+        body: fd,
       });
 
       if (!res.ok) {
@@ -68,22 +76,29 @@ export async function POST(req: Request) {
         throw new Error(`Pinata ${res.status}: ${txt || res.statusText}`);
       }
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       const cid = json?.IpfsHash;
-      if (!cid) throw new Error('Pinata did not return IpfsHash');
+      if (!cid || typeof cid !== 'string') {
+        throw new Error('Pinata response missing IpfsHash');
+      }
 
       uploads.push({
         cid,
-        url: `${GATEWAY}/${cid}`,
-        name: (f as any).name || cid,
+        url: `${gw}/${cid}`,
+        name: filename,
       });
     }
 
-    return NextResponse.json({ ok: true, uploads }, { status: 200 });
-  } catch (e: any) {
+    return NextResponse.json({ ok: true, uploads });
+  } catch (err: any) {
     return NextResponse.json(
-      { error: 'upload_failed', message: String(e?.message || e) },
+      { error: 'upload_failed', message: String(err?.message || err) },
       { status: 500 }
     );
   }
+}
+
+// Make it explicit that GET is not supported here
+export async function GET() {
+  return NextResponse.json({ error: 'method_not_allowed' }, { status: 405 });
 }
