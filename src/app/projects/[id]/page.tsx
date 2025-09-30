@@ -6,8 +6,13 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
-const API_BASE =
+// ---- Constants ---------------------------------------------------------------
+const PINATA_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
+
+const PROOFS_ENDPOINT =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
   (process.env.NEXT_PUBLIC_API_BASE_URL
     ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
@@ -15,6 +20,7 @@ const API_BASE =
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
+// ---- Types -------------------------------------------------------------------
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -33,13 +39,6 @@ type AnalysisV1 = {
   status?: 'ready' | 'error' | string;
 };
 
-function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
-  if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
-  if (typeof a === 'object') return a as any;
-  return null;
-}
-
 type Milestone = {
   name?: string;
   amount?: number;
@@ -51,6 +50,38 @@ type Milestone = {
   proof?: string;
   files?: Array<{ url?: string; cid?: string; name?: string } | string>;
 };
+
+type ProofFile = { url?: string; cid?: string; name?: string } | string;
+type ProofRecord = {
+  proposalId: number;
+  milestoneIndex?: number;
+  note?: string;
+  files?: ProofFile[];
+  urls?: string[];
+  cids?: string[];
+};
+
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
+
+// ---- Helpers -----------------------------------------------------------------
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
+}
+
+function fmt(dt?: string | null) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
+}
+
+function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
+  if (!a) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
+  if (typeof a === 'object') return a as any;
+  return null;
+}
 
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
@@ -72,70 +103,93 @@ function parseDocs(raw: unknown): any[] {
   return [];
 }
 
-function fmt(dt?: string | null) {
-  if (!dt) return '';
-  const d = new Date(dt);
-  return isNaN(d.getTime()) ? '' : d.toLocaleString();
-}
-
-function classNames(...xs: (string | false | null | undefined)[]) {
-  return xs.filter(Boolean).join(' ');
-}
-
-type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
-
+// ---- Component ---------------------------------------------------------------
 export default function ProjectDetailPage() {
-  // --------- Plain values (no hooks) ----------
+  // Plain values
   const params = useParams();
-  const projectIdStr = (params as any)?.id;
-  const projectIdNum = Number(projectIdStr);
+  const projectIdNum = Number((params as any)?.id);
 
-  // --------- State hooks (always same order) ----------
+  // State hooks (fixed order)
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
-  const [proofs, setProofs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [proofs, setProofs] = useState<ProofRecord[]>([]);
+  const [loadingProject, setLoadingProject] = useState(true);
+  const [loadingProofs, setLoadingProofs] = useState(true);
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
   const [tab, setTab] = useState<TabKey>('overview');
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // --------- Effects (never conditional on render path) ----------
-  // Initial fetch (project + bids + proofs)
+  // Initial fetch: project + bids
   useEffect(() => {
-    let active = true;
-    if (!Number.isFinite(projectIdNum)) return;
-    (async () => {
+    let alive = true;
+    async function run() {
+      if (!Number.isFinite(projectIdNum)) return;
       try {
-        const [projectData, bidsData, proofsData] = await Promise.all([
+        const [p, b] = await Promise.all([
           getProposal(projectIdNum),
           getBids(projectIdNum),
-          fetch(`${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}`, {
-            credentials: 'include',
-            cache: 'no-store',
-          }).then(r => (r.ok ? r.json() : [])).catch(() => []),
         ]);
-        if (!active) return;
-        setProject(projectData);
-        setBids(bidsData);
-        setProofs(Array.isArray(proofsData) ? proofsData : []);
-      } catch (e) {
-        console.error('Error fetching project:', e);
+        if (!alive) return;
+        setProject(p);
+        setBids(b);
+        setErrorMsg(null);
+      } catch (e: any) {
+        if (!alive) return;
+        setErrorMsg(e?.message || 'Failed to load project');
       } finally {
-        if (active) setLoading(false);
+        if (alive) setLoadingProject(false);
       }
-    })();
-    return () => { active = false; };
+    }
+    run();
+    return () => { alive = false; };
   }, [projectIdNum]);
 
-  // Auth (for Edit button)
+  // Fetch proofs (separate so page still loads even if proofs API hiccups)
+  async function refreshProofs() {
+    if (!Number.isFinite(projectIdNum)) return;
+    setLoadingProofs(true);
+    try {
+      const url = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!r.ok) throw new Error(`Proofs HTTP ${r.status}`);
+      const body = await r.json();
+      setProofs(Array.isArray(body) ? (body as ProofRecord[]) : []);
+    } catch (e: any) {
+      // non-fatal
+      console.warn('/proofs load failed:', e?.message || e);
+      setProofs([]);
+    } finally {
+      setLoadingProofs(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!Number.isFinite(projectIdNum)) return;
+      try {
+        await refreshProofs();
+      } catch { /* handled in refreshProofs */ }
+      if (!alive) return;
+    })();
+    return () => { alive = false; };
+  }, [projectIdNum]);
+
+  // Re-pull proofs when user opens Files tab (so new uploads appear)
+  useEffect(() => {
+    if (tab === 'files') refreshProofs();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auth (for Edit gating)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Poll bids while analysis runs
+  // Poll bids while AI analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -188,158 +242,31 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // Refresh proofs when opening Files tab
-  useEffect(() => {
-    let abort = false;
-    async function refresh() {
-      if (!Number.isFinite(projectIdNum)) return;
-      try {
-        const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-        const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
-        if (!r.ok) return;
-        const body = await r.json();
-        if (!abort && Array.isArray(body)) setProofs(body);
-      } catch {}
-    }
-    if (tab === 'files') refresh();
-    return () => { abort = true; };
-  }, [tab, projectIdNum]);
+  // ---- Early returns only AFTER all hooks -----------------------------------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
 
-  // --------- EARLY RETURNS (no hooks below) ----------
-  if (loading) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found</div>;
-
-  // --------- Pure computations ----------
+  // ---- Derived data ----------------------------------------------------------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
-  const isProjectCompleted = (proj: any) => {
-    if (!proj) return false;
-    if (proj.status === 'completed') return true;
-    if (!acceptedBid) return false;
-    if (acceptedMs.length === 0) return false;
-    return acceptedMs.every((m) => m?.completed === true || !!m?.paymentTxHash);
-  };
-  const completed = isProjectCompleted(project);
-
+  const projectDocs = parseDocs(project?.docs) || [];
   const canEdit =
     me?.role === 'admin' ||
     (!!project?.ownerWallet &&
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
-  const projectDocs = parseDocs(project?.docs);
+  const isProjectCompleted = (() => {
+    if (project.status === 'completed') return true;
+    if (!acceptedBid) return false;
+    if (acceptedMs.length === 0) return false;
+    return acceptedMs.every((m) => m?.completed === true || !!m?.paymentTxHash);
+  })();
 
-  function renderAttachment(doc: any, idx: number) {
-    if (!doc) return null;
-    const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
-
-    if (isImage) {
-      return (
-        <button
-          key={idx}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-          title={doc.name || 'image'}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-        </button>
-      );
-    }
-
-    return (
-      <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate" title={doc.name}>{doc.name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-      </div>
-    );
-  }
-
-  function renderAnalysis(raw: any) {
-    const analysis = coerceAnalysis(raw);
-    const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
-
-    if (isPending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
-    if (!analysis) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-
-    const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
-    const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
-
-    return (
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
-
-        {isV2 && (
-          <>
-            {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
-            <div className="text-sm">
-              {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
-              {typeof analysis.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
-                </>
-              )}
-            </div>
-            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Risks</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                </ul>
-              </div>
-            )}
-            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Milestone Notes</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                </ul>
-              </div>
-            )}
-            {typeof analysis.pdfUsed === 'boolean' && (
-              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
-                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
-                {analysis.pdfDebug?.url && (
-                  <div>
-                    File:{' '}
-                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                      {analysis.pdfDebug.name || 'open'}
-                    </a>
-                  </div>
-                )}
-                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
-                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
-                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
-                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
-              </div>
-            )}
-          </>
-        )}
-
-        {isV1 && (
-          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
-            {analysis.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {analysis.verdict}</p>)}
-            {analysis.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {analysis.reasoning}</p>)}
-            {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
-              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
-      </div>
-    );
-  }
-
-  // Derived values
   const msTotal = acceptedMs.length;
-  const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+  const msCompleted = acceptedMs.filter((m) => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMs.filter((m) => m?.paymentTxHash).length;
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
@@ -358,7 +285,6 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  // Timeline
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -368,36 +294,36 @@ export default function ProjectDetailPage() {
     if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
     const arr = parseMilestones(b.milestones);
     arr.forEach((m, idx) => {
-      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx+1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx+1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0,10)}…` : undefined });
+      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
+      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined });
     });
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Files: project + bids + proofs
-  const projectFiles = (parseDocs(project?.docs) || []).map((d) => ({ scope: 'Project', doc: d }));
+  // Build Files (Project + Bid + Proofs)
+  const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
   const bidFiles = bids.flatMap((b) => {
     const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
     return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
   });
 
-  function filesFromProofRecords(items: any[]) {
+  function filesFromProofRecords(items: ProofRecord[]) {
     const rows: Array<{ scope: string; doc: any }> = [];
     for (const p of items || []) {
       const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
       const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
-      const list = []
+      const list: ProofFile[] = []
         .concat(p.files || [])
-        .concat(p.urls || [])
-        .concat(p.cids || []);
+        .concat((p.urls || []) as ProofFile[])
+        .concat((p.cids || []) as ProofFile[]);
       for (const raw of list) {
         const url =
           (typeof raw === 'string' ? raw : raw?.url) ||
-          (raw?.cid ? `${GATEWAY}/${raw.cid}` : undefined);
+          (typeof raw === 'object' && raw?.cid ? `${PINATA_GATEWAY}/${raw.cid}` : undefined);
         if (!url) continue;
         const name =
           (typeof raw === 'object' && raw?.name) ||
-          (typeof raw === 'string' ? (raw.split('/').pop() || 'file') : '') ||
+          (typeof raw === 'string' ? decodeURIComponent(raw.split('/').pop() || 'file') : 'file') ||
           'file';
         rows.push({ scope, doc: { url, name } });
       }
@@ -405,21 +331,124 @@ export default function ProjectDetailPage() {
     return rows;
   }
   const proofFiles = filesFromProofRecords(proofs);
-
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-  // (optional) expose for quick browser check
+  // Expose for quick console checks
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      (window as any).__FILES = allFiles.map((x: any) => ({
+      (window as any).__FILES = allFiles.map((x) => ({
         scope: x.scope,
-        href: x.doc?.url || (x.doc?.cid ? `${GATEWAY}/${x.doc.cid}` : null),
+        href: x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null),
         name: x.doc?.name || null,
       }));
+      (window as any).__PROOFS = proofs;
     }
-  }, [projectIdNum, proofs, bids, project]);
+  }, [allFiles, proofs]);
 
-  // --------- Render ----------
+  // ---- Small render helpers ---------------------------------------------------
+  function renderAttachment(doc: any, key: number) {
+    if (!doc) return null;
+    const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
+    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+    if (isImage) {
+      return (
+        <button
+          key={key}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+          title={doc.name || 'image'}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+        </button>
+      );
+    }
+    return (
+      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate" title={doc.name}>{doc.name}</p>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+      </div>
+    );
+  }
+
+  function renderAnalysis(raw: any) {
+    const a = coerceAnalysis(raw);
+    const pending = !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+    if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
+    const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
+    const isV1 = a.verdict || a.reasoning || a.suggestions;
+
+    return (
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+        {isV2 && (
+          <>
+            {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
+            <div className="text-sm">
+              {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
+              {typeof a.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
+                </>
+              )}
+            </div>
+            {!!a.risks?.length && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Risks</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {!!a.milestoneNotes?.length && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Milestone Notes</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {typeof a.pdfUsed === 'boolean' && (
+              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+                <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
+                {a.pdfDebug?.url && (
+                  <div>
+                    File:{' '}
+                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                      {a.pdfDebug.name || 'open'}
+                    </a>
+                  </div>
+                )}
+                {a.pdfDebug?.bytes !== undefined && <div>Bytes: {a.pdfDebug.bytes}</div>}
+                {a.pdfDebug?.first5 && <div>First bytes: {a.pdfDebug.first5}</div>}
+                {a.pdfDebug?.reason && <div>Reason: {a.pdfDebug.reason}</div>}
+                {a.pdfDebug?.error && <div className="text-rose-600">Error: {a.pdfDebug.error}</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        {isV1 && (
+          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+            {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
+            {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
+            {!!a.suggestions?.length && (
+              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
+      </div>
+    );
+  }
+
+  // ---- Render ----------------------------------------------------------------
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -434,9 +463,9 @@ export default function ProjectDetailPage() {
             )}
             <span className={classNames(
               'px-2 py-0.5 text-xs font-medium rounded-full',
-              completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+              isProjectCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
             )}>
-              {completed ? 'Completed' : 'Active'}
+              {isProjectCompleted ? 'Completed' : 'Active'}
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
@@ -448,7 +477,7 @@ export default function ProjectDetailPage() {
             )}
           </div>
         </div>
-        {!completed && (
+        {!isProjectCompleted && (
           <Link
             href={`/bids/new?proposalId=${projectIdNum}`}
             className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
@@ -504,7 +533,7 @@ export default function ProjectDetailPage() {
             <h3 className="font-semibold mb-3">Bids snapshot</h3>
             {bids.length ? (
               <ul className="space-y-2 text-sm">
-                {bids.slice(0,5).map((b) => (
+                {bids.slice(0, 5).map((b) => (
                   <li key={b.bidId} className="flex items-center justify-between">
                     <div>
                       <div className="font-medium">{b.vendorName}</div>
@@ -604,15 +633,13 @@ export default function ProjectDetailPage() {
                   const completedRow = paid || !!m.completed;
                   return (
                     <tr key={idx} className="border-t">
-                      <td className="py-2 pr-4">M{idx+1}</td>
+                      <td className="py-2 pr-4">M{idx + 1}</td>
                       <td className="py-2 pr-4">{m.name || '—'}</td>
                       <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">
-                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
-                      </td>
+                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
                       <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                       <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
+                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
                     </tr>
                   );
                 })}
@@ -629,7 +656,18 @@ export default function ProjectDetailPage() {
       {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Files</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">Files</h3>
+            <button
+              onClick={refreshProofs}
+              disabled={loadingProofs}
+              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
+              title="Refresh milestone proofs"
+            >
+              {loadingProofs ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+
           {allFiles.length ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
@@ -673,7 +711,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-// Simple progress bar
+// ---- Small UI bits -----------------------------------------------------------
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
