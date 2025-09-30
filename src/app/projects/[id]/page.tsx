@@ -6,6 +6,33 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
+type AnalysisV2 = {
+  status?: 'ready' | 'error' | string;
+  summary?: string;
+  fit?: 'low' | 'medium' | 'high';
+  risks?: string[];
+  milestoneNotes?: string[];
+  confidence?: number;
+  pdfUsed?: boolean;
+  pdfDebug?: any;
+};
+
+type AnalysisV1 = {
+  verdict?: string;
+  reasoning?: string;
+  suggestions?: string[];
+  status?: 'ready' | 'error' | string;
+};
+
+function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
+  if (!a) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
+  if (typeof a === 'object') return a as any;
+  return null;
+}
+
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||

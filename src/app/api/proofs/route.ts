@@ -1,50 +1,86 @@
 // src/app/api/proofs/route.ts
-export const runtime = 'nodejs';         // ensure Node runtime (not Edge) on Netlify
-export const revalidate = 0;             // no ISR
-export const dynamic = 'force-dynamic';  // always dynamic
+export const runtime = 'nodejs';
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 
-type FileInput = { url?: string; cid?: string; name?: string; path?: string } | string;
-
-function normalizeFileInput(x: FileInput) {
-  if (typeof x === 'string') {
-    // If it's a bare string, try to guess if it's a URL/CID and keep as url
-    return { url: x };
-  }
-  const o = x || {};
-  return {
-    url: o.url ?? undefined,
-    cid: o.cid ?? undefined,
-    name: o.name ?? undefined,
-    path: o.path ?? undefined,
-  };
+// Try to import prisma client safely (gives clearer errors if it fails)
+let prismaImportError: string | null = null;
+let prisma: any = null;
+try {
+  // If your tsconfig alias @/* is missing, change this to: '../../../lib/prisma'
+  const mod = await import('@/lib/prisma');
+  prisma = (mod as any).prisma;
+} catch (e: any) {
+  prismaImportError = String(e?.message || e);
 }
 
-/** GET /api/proofs?proposalId=110[&milestoneIndex=0]
- *  Returns: Array<{ proposalId, bidId?, milestoneIndex?, note?, files: {url?,cid?,name?,path?}[] }>
- */
-export async function GET(req: Request) {
+function maskDbUrl(url?: string) {
+  if (!url) return undefined;
   try {
-    const url = new URL(req.url);
-    const pidRaw = url.searchParams.get('proposalId');
-    if (!pidRaw) {
-      return NextResponse.json({ error: 'proposalId is required' }, { status: 400 });
-    }
-    const proposalId = Number(pidRaw);
-    if (!Number.isFinite(proposalId)) {
-      return NextResponse.json({ error: 'proposalId must be a number' }, { status: 400 });
-    }
+    const u = new URL(url);
+    const host = u.hostname;
+    const db = (u.pathname || '').replace(/^\//, '');
+    return `${u.protocol}//${host}/${db}?sslmode=${u.searchParams.get('sslmode') || ''}`;
+  } catch { return 'unparseable'; }
+}
 
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const diag = url.searchParams.get('diag') === '1';
+  const pidRaw = url.searchParams.get('proposalId');
+  const proposalId = Number(pidRaw);
+
+  // Quick parameter check
+  if (!pidRaw || !Number.isFinite(proposalId)) {
+    return NextResponse.json({ error: 'bad_request', details: 'proposalId is required and must be a number' }, { status: 400 });
+  }
+
+  // If prisma import failed, return actionable info
+  if (!prisma) {
+    return NextResponse.json({
+      error: 'prisma_import_failed',
+      message: prismaImportError || 'unknown import error',
+      hints: [
+        "Ensure src/lib/prisma.ts exists and exports `prisma`.",
+        "Ensure @prisma/client is installed and `npx prisma generate` ran.",
+        "If you don't use the @/* path alias, import '../../../lib/prisma' instead."
+      ]
+    }, { status: 500 });
+  }
+
+  // Optional: diagnostic payload to see exactly what's wrong in production
+  if (diag) {
+    let ping: any = null, pingErr: string | null = null, version: any = null;
+    try { version = (await import('@prisma/client')).Prisma?.prismaVersion; } catch {}
+    try { ping = await prisma.$queryRaw`SELECT 1::int AS x`; } catch (e: any) { pingErr = String(e?.message || e); }
+    return NextResponse.json({
+      ok: true,
+      node: process.versions.node,
+      env: {
+        has_DATABASE_URL: !!process.env.DATABASE_URL,
+        DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
+        PRISMA_CLIENT_ENGINE_TYPE: process.env.PRISMA_CLIENT_ENGINE_TYPE || undefined
+      },
+      prismaVersion: version,
+      pingResult: ping,
+      pingError: pingErr,
+      notes: [
+        "If pingError is set, DB connection/SSL/pooling is the issue.",
+        "On Netlify, prefer pooled Railway URL and set PRISMA engine to library or binary.",
+      ]
+    }, { headers: { 'cache-control': 'no-store' } });
+  }
+
+  // Normal path: fetch proofs
+  try {
     const miRaw = url.searchParams.get('milestoneIndex');
     const hasMi = miRaw !== null && miRaw !== '';
     const mi = hasMi ? Number(miRaw) : null;
     if (hasMi && !Number.isFinite(mi)) {
-      return NextResponse.json({ error: 'milestoneIndex must be a number' }, { status: 400 });
+      return NextResponse.json({ error: 'bad_request', details: 'milestoneIndex must be a number' }, { status: 400 });
     }
-
-    // TODO (optional): auth/role gating here
 
     const proofs = await prisma.proof.findMany({
       where: { proposalId, ...(hasMi ? { milestoneIndex: mi! } : {}) },
@@ -52,13 +88,12 @@ export async function GET(req: Request) {
       include: { files: true },
     });
 
-    // Normalize to frontend shape
-    const payload = proofs.map((p) => ({
+    const payload = proofs.map((p: any) => ({
       proposalId: p.proposalId,
       bidId: p.bidId ?? undefined,
       milestoneIndex: p.milestoneIndex ?? undefined,
       note: p.note ?? undefined,
-      files: p.files.map((f) => ({
+      files: (p.files || []).map((f: any) => ({
         url: f.url ?? undefined,
         cid: f.cid ?? undefined,
         name: f.name ?? undefined,
@@ -68,98 +103,17 @@ export async function GET(req: Request) {
 
     return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (err: any) {
-    console.error('GET /api/proofs error:', err);
-    return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
+    return NextResponse.json({
+      error: 'db_error',
+      message: String(err?.message || err),
+      // stack can be long; include first 500 chars for clarity
+      stack: String(err?.stack || '').slice(0, 500),
+      tips: [
+        "Set `engineType = \"library\"` in prisma/schema.prisma and run `npx prisma generate`.",
+        "In netlify.toml add [functions].included_files for node_modules/.prisma and @prisma/client.",
+        "Use pooled Railway DATABASE_URL with sslmode=require.",
+        "Ensure `postinstall: prisma generate` runs on CI."
+      ]
+    }, { status: 500 });
   }
-}
-
-/** POST /api/proofs
- *  Body:
- *  {
- *    proposalId: number,
- *    bidId?: number,
- *    milestoneIndex?: number,   // 0-based
- *    note?: string,
- *    createdBy?: string,        // wallet/user id
- *    files: Array<{url?, cid?, name?, path?} | string>
- *  }
- *  Returns: created Proof with files
- */
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const proposalId = Number(body?.proposalId);
-    if (!Number.isFinite(proposalId)) {
-      return NextResponse.json({ error: 'proposalId required (number)' }, { status: 400 });
-    }
-
-    const bidId = body?.bidId == null ? null : Number(body.bidId);
-    if (body?.bidId != null && !Number.isFinite(bidId)) {
-      return NextResponse.json({ error: 'bidId must be a number if provided' }, { status: 400 });
-    }
-
-    const milestoneIndex =
-      body?.milestoneIndex == null ? null : Number(body.milestoneIndex);
-    if (body?.milestoneIndex != null && !Number.isFinite(milestoneIndex)) {
-      return NextResponse.json({ error: 'milestoneIndex must be a number if provided' }, { status: 400 });
-    }
-
-    const filesIn = Array.isArray(body?.files) ? body.files as FileInput[] : [];
-    if (filesIn.length === 0) {
-      return NextResponse.json({ error: 'files[] required' }, { status: 400 });
-    }
-
-    const filesData = filesIn.map(normalizeFileInput).map((f) => ({
-      url: f.url ?? null,
-      cid: f.cid ?? null,
-      name: f.name ?? null,
-      path: f.path ?? null,
-    }));
-
-    const created = await prisma.proof.create({
-      data: {
-        proposalId,
-        bidId: bidId,
-        milestoneIndex: milestoneIndex,
-        note: body?.note ?? null,
-        createdBy: body?.createdBy ?? null,
-        files: { create: filesData },
-      },
-      include: { files: true },
-    });
-
-    // Respond in the same normalized shape as GET (optional)
-    const payload = {
-      proposalId: created.proposalId,
-      bidId: created.bidId ?? undefined,
-      milestoneIndex: created.milestoneIndex ?? undefined,
-      note: created.note ?? undefined,
-      files: created.files.map((f) => ({
-        url: f.url ?? undefined,
-        cid: f.cid ?? undefined,
-        name: f.name ?? undefined,
-        path: f.path ?? undefined,
-      })),
-    };
-
-    return NextResponse.json(payload, { status: 201 });
-  } catch (err: any) {
-    console.error('POST /api/proofs error:', err);
-    return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
-  }
-}
-
-/** Optional hard block for other verbs */
-export function PUT() {
-  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
-}
-export function PATCH() {
-  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
-}
-export function DELETE() {
-  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
-}
-export function OPTIONS() {
-  // same-origin; no special CORS needed, but respond cleanly
-  return NextResponse.json({}, { status: 204 });
 }
