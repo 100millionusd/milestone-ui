@@ -1,91 +1,105 @@
-// src/app/api/proofs/upload/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
-const PINATA_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+const PINATA_FILE_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
 
-// We’ll build gateway URLs with your public gateway host
-function gwUrl(cid: string) {
-  const host =
-    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-    process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace(/^https?:\/\//, '') ||
-    'gateway.pinata.cloud';
-  // ensure it looks like https://<host>/ipfs/<cid>
-  return `https://${host}/ipfs/${cid}`;
+function gatewayHost() {
+  return process.env.NEXT_PUBLIC_PINATA_GATEWAY || 'gateway.pinata.cloud';
 }
 
-export async function POST(req: Request) {
-  try {
-    const jwt = process.env.PINATA_JWT;
-    if (!jwt) {
-      return NextResponse.json(
-        { error: 'missing_pinata_jwt', message: 'Set PINATA_JWT in your server env.' },
-        { status: 500 }
-      );
-    }
+/**
+ * GET /api/proofs/upload?__ping=1  -> small health check
+ * (Plain GETs to this route otherwise return 405.)
+ */
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  if (url.searchParams.get('__ping')) {
+    return NextResponse.json({
+      ok: true,
+      method: 'GET',
+      has_PINATA_JWT: Boolean(process.env.PINATA_JWT),
+      gateway: gatewayHost(),
+    });
+  }
+  return new NextResponse('Method Not Allowed', { status: 405 });
+}
 
-    const form = await req.formData();
-    const files = form.getAll('files');
-
-    if (!files.length) {
-      return NextResponse.json(
-        { error: 'no_files', message: 'Attach at least one file field named "files".' },
-        { status: 400 }
-      );
-    }
-
-    const uploaded: Array<{ cid: string; url: string; name?: string }> = [];
-
-    // Upload each file to Pinata (one request per file keeps it robust across hosts)
-    for (const f of files) {
-      if (!(f instanceof Blob)) continue;
-
-      // Create a new multipart for this single file
-      const pinFD = new FormData();
-      // Try to keep a filename if provided
-      const filename = (f as any)?.name || 'file';
-      pinFD.append('file', f, filename);
-
-      // You can add optional metadata
-      pinFD.append(
-        'pinataMetadata',
-        JSON.stringify({ name: filename || 'proof-file' })
-      );
-
-      const res = await fetch(PINATA_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: pinFD,
-      });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        return NextResponse.json(
-          { error: 'pinata_error', status: res.status, body: txt.slice(0, 500) },
-          { status: 502 }
-        );
-      }
-
-      const json = (await res.json()) as { IpfsHash?: string };
-      const cid = json?.IpfsHash;
-      if (!cid) {
-        return NextResponse.json(
-          { error: 'bad_pinata_response' },
-          { status: 502 }
-        );
-      }
-
-      uploaded.push({ cid, url: gwUrl(cid), name: filename });
-    }
-
-    return NextResponse.json({ uploaded }, { status: 200 });
-  } catch (err: any) {
+/**
+ * POST /api/proofs/upload
+ * multipart/form-data with one or more fields named "files"
+ * Returns: { ok:true, uploads:[{ url, name }] }
+ */
+export async function POST(req: NextRequest) {
+  const jwt = process.env.PINATA_JWT;
+  if (!jwt) {
     return NextResponse.json(
-      { error: 'upload_failed', message: err?.message || String(err) },
+      { ok: false, error: 'Missing PINATA_JWT on server' },
       { status: 500 }
     );
   }
+
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: 'Invalid multipart form-data', details: String(e?.message || e) },
+      { status: 400 }
+    );
+  }
+
+  const files = form.getAll('files') as File[];
+  if (!files || files.length === 0) {
+    return NextResponse.json(
+      { ok: false, error: 'No files[] provided' },
+      { status: 400 }
+    );
+  }
+
+  const uploads: { url: string; name?: string }[] = [];
+
+  for (const f of files) {
+    // Forward each file to Pinata
+    const fd = new FormData();
+    fd.append('file', f, (f as any).name || 'file');
+
+    const res = await fetch(PINATA_FILE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: fd,
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Pinata upload failed',
+          status: res.status,
+          details: txt.slice(0, 500),
+        },
+        { status: 502 }
+      );
+    }
+
+    const data = await res.json() as any;
+    const cid = data?.IpfsHash || data?.ipfsHash || data?.cid;
+    if (!cid) {
+      return NextResponse.json(
+        { ok: false, error: 'Pinata response missing CID', raw: data },
+        { status: 502 }
+      );
+    }
+
+    const name = (f as any).name || 'file';
+    const url = `https://${gatewayHost()}/ipfs/${cid}`;
+    uploads.push({ url, name });
+  }
+
+  return NextResponse.json({ ok: true, uploads });
 }
