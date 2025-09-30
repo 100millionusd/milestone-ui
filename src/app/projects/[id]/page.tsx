@@ -6,7 +6,6 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-// Prefer explicit env gateway; fall back to Pinata default
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
@@ -83,11 +82,15 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i; // images only
 const FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
 
 function isHttpUrl(s: string): boolean {
   try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; }
   catch { return false; }
+}
+function safePathnameFromHref(href: string): string {
+  try { return new URL(href).pathname || ''; } catch { return ''; }
 }
 function encodeIpfsPath(path: string): string {
   if (!path) return '';
@@ -182,8 +185,13 @@ function hrefForDoc(doc: any): string | null {
 
 /* ------------------------ Milestone file collection ------------------------ */
 
-const FILE_KEYS = ['files', 'attachments', 'images', 'docs', 'proofs', 'uploads', 'items', 'paths'];
-const SINGLE_FILE_KEYS = ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'];
+// We accept filenames anywhere and try to find *any* CID/ipfs ref in the milestone to stitch them.
+const BASE_CID_KEYS = [
+  'proofCid', 'proof_cid', 'proofCID',
+  'folderCid', 'folder_cid',
+  'imagesCid', 'filesCid', 'uploadsCid', 'rootCid',
+  'cid'
+];
 
 function gatherFileCandidates(obj: any, depth = 0): any[] {
   const out: any[] = [];
@@ -192,12 +200,35 @@ function gatherFileCandidates(obj: any, depth = 0): any[] {
   if (typeof obj === 'string') { out.push(obj); return out; }
   if (Array.isArray(obj)) { for (const v of obj) out.push(...gatherFileCandidates(v, depth + 1)); return out; }
   if (typeof obj === 'object') {
-    for (const [, v] of Object.entries(obj)) {
-      out.push(...gatherFileCandidates(v, depth + 1));
-    }
+    for (const [, v] of Object.entries(obj)) out.push(...gatherFileCandidates(v, depth + 1));
     return out;
   }
   return out;
+}
+
+function findBaseCidRef(m: any): { cid: string; path: string } | null {
+  // 1) Explicit keys
+  for (const key of BASE_CID_KEYS) {
+    const v = m?.[key];
+    if (typeof v === 'string') {
+      const ref = parseIpfsLike(v);
+      if (ref) return { cid: ref.cid, path: ref.path || '' };
+      if (CID_ONLY_RE.test(v)) return { cid: v, path: '' };
+    }
+  }
+  // 2) Common "proof" might be a URL/CID
+  if (typeof m?.proof === 'string') {
+    const ref = parseIpfsLike(m.proof);
+    if (ref) return { cid: ref.cid, path: ref.path || '' };
+  }
+  // 3) Fallback: scan all string values in the milestone for any IPFS-ish thing
+  for (const v of Object.values(m || {})) {
+    if (typeof v === 'string') {
+      const ref = parseIpfsLike(v);
+      if (ref) return { cid: ref.cid, path: ref.path || '' };
+    }
+  }
+  return null;
 }
 
 function collectMilestoneFiles(bid: any) {
@@ -206,15 +237,9 @@ function collectMilestoneFiles(bid: any) {
 
   arr.forEach((m: any, idx: number) => {
     const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
+    const baseRef = findBaseCidRef(m);
 
-    // Base folder reference (for stitching bare names)
-    const baseRef =
-      (typeof m.proof === 'string' && parseIpfsLike(m.proof)) ||
-      (typeof m.proofCid === 'string' && { cid: m.proofCid, path: '' }) ||
-      (typeof m.folderCid === 'string' && { cid: m.folderCid, path: '' }) ||
-      (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
-      null;
-
+    // Grab anything that smells like a file reference
     const candidates = gatherFileCandidates(m);
 
     for (const c of candidates) {
@@ -225,7 +250,7 @@ function collectMilestoneFiles(bid: any) {
         continue;
       }
 
-      // Stitch a bare filename against a base CID
+      // Stitch bare filenames like "image (10).jpg" against the base CID
       const maybeName =
         typeof c === 'string'
           ? c
@@ -244,7 +269,7 @@ function collectMilestoneFiles(bid: any) {
       }
     }
 
-    // Also show the proof reference itself (often folder/single file)
+    // Also include the base "proof"/folder itself if it’s a direct file
     if (typeof m.proof === 'string') {
       const pr = normalizeDoc(m.proof);
       const prHref = pr && hrefForDoc(pr);
@@ -360,7 +385,7 @@ export default function ProjectDetailPage() {
 
   // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // ← DECLARED ONCE ONLY
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // DECLARED ONCE
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -384,7 +409,10 @@ export default function ProjectDetailPage() {
     if (!doc) return null;
     const href = hrefForDoc(doc);
     const name = pickName(doc, href || undefined);
-    const isImage = !!href && (FILE_EXT_RE.test(name) || FILE_EXT_RE.test(href));
+    const isImageByName = IMG_EXT_RE.test(name);
+    const pathFromHref = href ? safePathnameFromHref(href) : '';
+    const isImageByHrefPath = IMG_EXT_RE.test(pathFromHref);
+    const isImage = (isImageByName || isImageByHrefPath) && !!href;
 
     if (!href) {
       return (
@@ -395,7 +423,8 @@ export default function ProjectDetailPage() {
       );
     }
 
-    if (isImage && /\.(png|jpe?g|gif|webp|svg)$/i.test(href)) {
+    // If it *looks* like an image by name OR by href path, render an image preview (even if href has no extension).
+    if (isImage) {
       return (
         <button
           key={idx}
@@ -409,6 +438,7 @@ export default function ProjectDetailPage() {
       );
     }
 
+    // Otherwise, generic "Open" tile.
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
@@ -500,7 +530,7 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  // Derived values (use acceptedMs defined above)
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -539,6 +569,7 @@ export default function ProjectDetailPage() {
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
   // Files roll-up = Project docs + Bid docs + Milestone files
+  const projectDocs = parseDocs(project?.docs);
   const allFiles: Array<{ scope: string; doc: any }> = [
     ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
     ...bids.flatMap((b) => {
@@ -824,6 +855,7 @@ function Progress({ value }: { value: number }) {
   );
 }
 
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
