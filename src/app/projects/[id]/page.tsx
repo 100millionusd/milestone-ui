@@ -166,7 +166,7 @@ function hrefForDoc(doc: any): string | null {
   if (doc.cid && CID_ONLY_RE.test(doc.cid)) {
     const suffix = encodeIpfsPath(doc.ipfsPath || '');
     return `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
-    }
+  }
   if (doc.url && isHttpUrl(doc.url)) return doc.url;
   return null;
 }
@@ -745,7 +745,6 @@ function Progress({ value }: { value: number }) {
     </div>
   );
 }
-type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
