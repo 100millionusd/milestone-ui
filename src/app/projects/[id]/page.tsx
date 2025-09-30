@@ -11,7 +11,22 @@ const GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
   'https://gateway.pinata.cloud/ipfs';
 
+const API_BASE =
+  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
+  (process.env.NEXT_PUBLIC_API_BASE_URL
+    ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
+    : ''); // optional; safe to be empty
+
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
+/** >>>>>>>>>>>>>> TEMP emergency override: make the two image CIDs appear for project 110 now. REMOVE once backend proofs are wired. */
+const MANUAL_PROOF_CIDS: Record<number, string[]> = {
+  110: [
+    'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmXPxvvQSy19QTzNvoPtZc1P7SdCqEuMuNkBs9y4A94n6L',
+    'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmRqJGEmMdTjRNxyqWfj7TxymGkM8zNuKthdo4aa5ydgz9',
+  ],
+};
+/** <<<<<<<<<<<<<< TEMP emergency override */
 
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
@@ -53,6 +68,16 @@ type Milestone = {
   docs?: any;
   [k: string]: any;
 };
+type ProofRecord = {
+  proposalId?: number;
+  bidId?: number;
+  milestoneIndex?: number;
+  files?: Array<{ url?: string; cid?: string; name?: string; path?: string } | string>;
+  urls?: string[];
+  cids?: string[];
+  note?: string;
+  [k: string]: any;
+};
 
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
@@ -83,7 +108,6 @@ const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
 const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
 const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
 const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
-const FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?)$/i;
 
 function isHttpUrl(s: string): boolean {
   try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; }
@@ -312,6 +336,7 @@ export default function ProjectDetailPage() {
 
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
+  const [proofs, setProofs] = useState<ProofRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
@@ -333,6 +358,19 @@ export default function ProjectDetailPage() {
         if (!active) return;
         setProject(projectData);
         setBids(bidsData);
+
+        // Optional proofs fetch: endpoint may not exist yet; fails gracefully.
+        if (API_BASE) {
+          try {
+            const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}`;
+            const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+            if (r.ok) {
+              const body = await r.json();
+              if (Array.isArray(body)) setProofs(body as ProofRecord[]);
+            }
+          } catch {/* ignore */}
+        }
+
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -350,7 +388,8 @@ export default function ProjectDetailPage() {
   // Expose for debugging
   useEffect(() => {
     (window as any).__BIDS = bids;
-  }, [bids]);
+    (window as any).__PROOFS = proofs;
+  }, [bids, proofs]);
 
   // Poll bids while analysis runs
   useEffect(() => {
@@ -411,7 +450,7 @@ export default function ProjectDetailPage() {
 
   /* ---------- Derived values computed exactly once here ---------- */
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // <-- declared ONCE
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // declared ONCE
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -428,19 +467,108 @@ export default function ProjectDetailPage() {
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
-  /* ---------- render helpers that do NOT redeclare acceptedMs ---------- */
+  /* ---------- Files aggregation ---------- */
+
+  const filesFromProofRecords = (items: ProofRecord[]) => {
+    const rows: Array<{ scope: string; doc: any }> = [];
+    for (const p of items || []) {
+      const mi = Number.isFinite(p.milestoneIndex) ? (Number(p.milestoneIndex) as number) : undefined;
+      const scope = typeof mi === 'number'
+        ? `Milestone M${mi + 1} (Proofs)`
+        : `Proofs`;
+      const bag = []
+        .concat(p.files || [])
+        .concat(p.urls || [])
+        .concat(p.cids || []);
+      for (const raw of bag) {
+        const doc = normalizeDoc(raw);
+        const href = doc && hrefForDoc(doc);
+        if (href) rows.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
+      }
+    }
+    return rows;
+  };
+
+  // TEMP manual fallback for project 110 (your two image CIDs)
+  const filesManual = (MANUAL_PROOF_CIDS[projectIdNum] || []).map((url) => ({
+    scope: 'Milestone M1 (Proofs — manual)',
+    doc: { url, name: url.split('/').pop() || 'image' },
+  }));
+
+  const projectDocs = parseDocs(project?.docs);
+
+  // helpers for dedupe
+  const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
+  const dedupeByHref = (rows: Array<{ scope: string; doc: any }>) => {
+    const seen = new Set<string>();
+    const out: Array<{ scope: string; doc: any }> = [];
+    for (const r of rows) {
+      const h = asHref(r.doc);
+      if (!h) continue;
+      if (seen.has(h)) continue;
+      seen.add(h);
+      out.push(r);
+    }
+    return out;
+  };
+
+  const filesProject = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
+  const filesBidDocs = bids.flatMap((b) => {
+    const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+  const filesMilestones = bids.flatMap((b) => collectMilestoneFiles(b));
+  const filesBidLevel = bids.flatMap((b) => collectBidLevelFiles(b));
+  const filesFromProofs = filesFromProofRecords(proofs);
+
+  const allFiles = dedupeByHref([
+    ...filesProject,
+    ...filesBidDocs,
+    ...filesMilestones,
+    ...filesBidLevel,
+    ...filesFromProofs,
+    ...filesManual, // << ensure your two images show now
+  ]);
+
+  if (typeof window !== 'undefined') {
+    (window as any).__FILES = allFiles.map(({ doc }) => hrefForDoc(normalizeDoc(doc))).filter(Boolean);
+  }
+
+  /* ---------- Render helpers ---------- */
+
+  function ImageTile({ href, name }: { href: string; name: string }) {
+    const [failed, setFailed] = useState(false);
+    if (failed) {
+      return (
+        <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+          <p className="truncate" title={name}>{name}</p>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+        </div>
+      );
+    }
+    // Try image preview; if it fails, fall back to generic tile
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <div className="p-2 rounded border bg-white">
+        <img
+          src={href}
+          alt={name}
+          className="w-full h-32 object-cover rounded mb-1"
+          onError={() => setFailed(true)}
+        />
+        <div className="flex justify-between items-center text-xs">
+          <span className="truncate" title={name}>{name}</span>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+        </div>
+      </div>
+    );
+  }
 
   const renderAttachment = (docIn: any, idx: number) => {
     const doc = normalizeDoc(docIn);
     if (!doc) return null;
     const href = hrefForDoc(doc);
     const name = pickName(doc, href || undefined);
-
-    // Try to decide if it’s an image (by filename or URL path). CID-only will not match; we'll still render a working link.
-    const isImageByName = IMG_EXT_RE.test(name);
-    const pathFromHref = href ? safePathnameFromHref(href) : '';
-    const isImageByHrefPath = IMG_EXT_RE.test(pathFromHref);
-    const isImage = (isImageByName || isImageByHrefPath) && !!href;
 
     if (!href) {
       return (
@@ -451,24 +579,15 @@ export default function ProjectDetailPage() {
       );
     }
 
-    if (isImage) {
-      return (
-        <div key={idx} className="p-2 rounded border bg-white">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={href}
-            alt={name}
-            className="w-full h-32 object-cover rounded mb-1"
-          />
-          <div className="flex justify-between items-center text-xs">
-            <span className="truncate" title={name}>{name}</span>
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-          </div>
-        </div>
-      );
+    const pathFromHref = safePathnameFromHref(href);
+    const isImage = IMG_EXT_RE.test(name) || IMG_EXT_RE.test(pathFromHref);
+
+    // If not obviously an image but it's an IPFS CID link, *try* to preview anyway. Fallback on error.
+    const looksLikeIpfs = /\/ipfs\/[A-Za-z0-9]+/.test(href);
+    if (isImage || looksLikeIpfs) {
+      return <ImageTile key={idx} href={href} name={name} />;
     }
 
-    // Fallback: generic tile (covers CID-only URLs like your images too; still clickable)
     return (
       <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
@@ -539,7 +658,7 @@ export default function ProjectDetailPage() {
     );
   };
 
-  /* ---------- more derived values (use acceptedMs computed once) ---------- */
+  /* ---------- Stats & timeline (use acceptedMs computed once) ---------- */
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -561,7 +680,6 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  // Timeline
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -577,41 +695,7 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Files: Project docs + Bid docs + Milestones + Bid-level proofs
-  const projectDocs = parseDocs(project?.docs);
-
-  const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
-  const dedupeByHref = (rows: Array<{ scope: string; doc: any }>) => {
-    const seen = new Set<string>();
-    const out: Array<{ scope: string; doc: any }> = [];
-    for (const r of rows) {
-      const h = asHref(r.doc);
-      if (!h) continue;
-      if (seen.has(h)) continue;
-      seen.add(h);
-      out.push(r);
-    }
-    return out;
-  };
-
-  const filesProject = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
-  const filesBidDocs = bids.flatMap((b) => {
-    const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-  });
-  const filesMilestones = bids.flatMap((b) => collectMilestoneFiles(b));
-  const filesBidLevel = bids.flatMap((b) => collectBidLevelFiles(b));
-  const allFiles = dedupeByHref([
-    ...filesProject,
-    ...filesBidDocs,
-    ...filesMilestones,
-    ...filesBidLevel, // this captures CID-only URLs like your two images
-  ]);
-
-  if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles.map(({ doc }) => hrefForDoc(normalizeDoc(doc))).filter(Boolean);
-  }
-
+  /* ---------- UI ---------- */
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -651,170 +735,34 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b">
-        <div className="flex gap-2">
-          <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
-          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
-          <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
-          <TabBtn id="milestones" label={`Milestones${acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
-          <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
-        </div>
-      </div>
+      <Tabs
+        tab={tab}
+        setTab={setTab}
+        bidsCount={bids.length}
+        msLabel={acceptedMs.length ? ` (${msPaid}/${msTotal} paid)` : ''}
+        filesCount={allFiles.length}
+      />
 
       {/* Overview */}
       {tab === 'overview' && (
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 border rounded p-4">
-            <h3 className="font-semibold mb-3">Project Description</h3>
-            <p className="text-gray-700">{project.summary || '—'}</p>
-
-            <div className="mt-6">
-              <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
-              <Progress value={acceptedMs.length ? Math.round((msCompleted / msTotal) * 100) : 0} />
-              <p className="text-xs text-gray-600 mt-1">
-                {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
-              </p>
-            </div>
-
-            <div className="mt-6">
-              <h4 className="font-semibold mb-2">Latest activity</h4>
-              {timeline.length ? (
-                <ul className="text-sm space-y-1">
-                  {timeline.slice(-5).reverse().map((e, i) => (
-                    <li key={i}>
-                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500">No activity yet.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="border rounded p-4">
-            <h3 className="font-semibold mb-3">Bids snapshot</h3>
-            {bids.length ? (
-              <ul className="space-y-2 text-sm">
-                {bids.slice(0,5).map((b) => (
-                  <li key={b.bidId} className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{b.vendorName}</div>
-                      <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
-                    </div>
-                    <span className={classNames(
-                      'px-2 py-1 rounded text-xs',
-                      b.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : b.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    )}>
-                      {b.status}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : <p className="text-sm text-gray-500">No bids yet.</p>}
-          </div>
-        </section>
+        <Overview
+          project={project}
+          timeline={timeline}
+          msCompleted={msCompleted}
+          msPaid={msPaid}
+          msTotal={msTotal}
+          bids={bids}
+        />
       )}
 
       {/* Timeline */}
-      {tab === 'timeline' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Activity Timeline</h3>
-          {timeline.length ? (
-            <ol className="relative border-l pl-4">
-              {timeline.map((e, i) => (
-                <li key={i} className="mb-4">
-                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
-                  <div className="text-sm">
-                    <div className="font-medium">{e.label}</div>
-                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
-        </section>
-      )}
+      {tab === 'timeline' && <Timeline timeline={timeline} />}
 
       {/* Bids */}
-      {tab === 'bids' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">All Bids</h3>
-          {bids.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">Vendor</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Days</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Submitted</th>
-                  <th className="py-2 pr-4">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bids.map((b) => (
-                  <tr key={b.bidId} className="border-t">
-                    <td className="py-2 pr-4">{b.vendorName}</td>
-                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{b.days}</td>
-                    <td className="py-2 pr-4">{b.status}</td>
-                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
-                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
-        </section>
-      )}
+      {tab === 'bids' && <Bids bids={bids} />}
 
       {/* Milestones */}
-      {tab === 'milestones' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-          {acceptedBid && acceptedMs.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Title</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Completed</th>
-                  <th className="py-2 pr-4">Paid</th>
-                  <th className="py-2 pr-4">Tx</th>
-                </tr>
-              </thead>
-              <tbody>
-                {acceptedMs.map((m, idx) => {
-                  const paid = !!m.paymentTxHash;
-                  const completedRow = paid || !!m.completed;
-                  return (
-                    <tr key={idx} className="border-t">
-                      <td className="py-2 pr-4">M{idx+1}</td>
-                      <td className="py-2 pr-4">{m.name || '—'}</td>
-                      <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
-                      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-sm text-gray-500">
-              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
-            </p>
-          )}
-        </section>
-      )}
+      {tab === 'milestones' && <Milestones acceptedBid={acceptedBid} acceptedMs={acceptedMs} />}
 
       {/* Files */}
       {tab === 'files' && (
@@ -869,6 +817,191 @@ export default function ProjectDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ===== Subcomponents ===== */
+
+function Tabs({
+  tab, setTab, bidsCount, msLabel, filesCount,
+}: {
+  tab: TabKey;
+  setTab: (t: TabKey) => void;
+  bidsCount: number;
+  msLabel: string;
+  filesCount: number;
+}) {
+  return (
+    <div className="border-b">
+      <div className="flex gap-2">
+        <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
+        <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
+        <TabBtn id="bids" label={`Bids (${bidsCount})`} tab={tab} setTab={setTab} />
+        <TabBtn id="milestones" label={`Milestones${msLabel}`} tab={tab} setTab={setTab} />
+        <TabBtn id="files" label={`Files (${filesCount})`} tab={tab} setTab={setTab} />
+      </div>
+    </div>
+  );
+}
+
+function Overview({
+  project, timeline, msCompleted, msPaid, msTotal, bids,
+}: any) {
+  return (
+    <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-2 border rounded p-4">
+        <h3 className="font-semibold mb-3">Project Description</h3>
+        <p className="text-gray-700">{project.summary || '—'}</p>
+
+        <div className="mt-6">
+          <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
+          <Progress value={msTotal ? Math.round((msCompleted / msTotal) * 100) : 0} />
+          <p className="text-xs text-gray-600 mt-1">
+            {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
+          </p>
+        </div>
+
+        <div className="mt-6">
+          <h4 className="font-semibold mb-2">Latest activity</h4>
+          {timeline.length ? (
+            <ul className="text-sm space-y-1">
+              {timeline.slice(-5).reverse().map((e: any, i: number) => (
+                <li key={i}>
+                  <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-500">No activity yet.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="border rounded p-4">
+        <h3 className="font-semibold mb-3">Bids snapshot</h3>
+        {bids.length ? (
+          <ul className="space-y-2 text-sm">
+            {bids.slice(0,5).map((b: any) => (
+              <li key={b.bidId} className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium">{b.vendorName}</div>
+                  <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                </div>
+                <span className={classNames(
+                  'px-2 py-1 rounded text-xs',
+                  b.status === 'approved'
+                    ? 'bg-green-100 text-green-800'
+                    : b.status === 'rejected'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                )}>
+                  {b.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+      </div>
+    </section>
+  );
+}
+
+function Timeline({ timeline }: any) {
+  return (
+    <section className="border rounded p-4">
+      <h3 className="font-semibold mb-3">Activity Timeline</h3>
+      {timeline.length ? (
+        <ol className="relative border-l pl-4">
+          {timeline.map((e: any, i: number) => (
+            <li key={i} className="mb-4">
+              <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
+              <div className="text-sm">
+                <div className="font-medium">{e.label}</div>
+                <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="text-sm text-gray-500">No activity yet.</p>}
+    </section>
+  );
+}
+
+function Bids({ bids }: any) {
+  return (
+    <section className="border rounded p-4 overflow-x-auto">
+      <h3 className="font-semibold mb-3">All Bids</h3>
+      {bids.length ? (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-600">
+              <th className="py-2 pr-4">Vendor</th>
+              <th className="py-2 pr-4">Amount</th>
+              <th className="py-2 pr-4">Days</th>
+              <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Submitted</th>
+              <th className="py-2 pr-4">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bids.map((b: any) => (
+              <tr key={b.bidId} className="border-t">
+                <td className="py-2 pr-4">{b.vendorName}</td>
+                <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
+                <td className="py-2 pr-4">{b.days}</td>
+                <td className="py-2 pr-4">{b.status}</td>
+                <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
+                <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+    </section>
+  );
+}
+
+function Milestones({ acceptedBid, acceptedMs }: any) {
+  return (
+    <section className="border rounded p-4 overflow-x-auto">
+      <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+      {acceptedBid && acceptedMs.length ? (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-600">
+              <th className="py-2 pr-4">#</th>
+              <th className="py-2 pr-4">Title</th>
+              <th className="py-2 pr-4">Amount</th>
+              <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Completed</th>
+              <th className="py-2 pr-4">Paid</th>
+              <th className="py-2 pr-4">Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {acceptedMs.map((m: any, idx: number) => {
+              const paid = !!m.paymentTxHash;
+              const completedRow = paid || !!m.completed;
+              return (
+                <tr key={idx} className="border-t">
+                  <td className="py-2 pr-4">M{idx+1}</td>
+                  <td className="py-2 pr-4">{m.name || '—'}</td>
+                  <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
+                  <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                  <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                  <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                  <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-sm text-gray-500">
+          {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+        </p>
+      )}
+    </section>
   );
 }
 
