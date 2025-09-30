@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
+// --- helpers (paste immediately after imports) ---
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -16,22 +17,57 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
-
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
-
-function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
+export function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   if (typeof a === 'object') return a as any;
   return null;
 }
+
+export type Milestone = {
+  name?: string;
+  amount?: number;
+  dueDate?: string;
+  completed?: boolean;
+  completionDate?: string | null;
+  paymentTxHash?: string | null;
+  paymentDate?: string | null;
+  proof?: string;
+  files?: any[];
+};
+export function parseMilestones(raw: unknown): Milestone[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as Milestone[];
+  try {
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? (arr as Milestone[]) : [];
+  } catch {
+    return [];
+  }
+}
+export function parseDocs(raw: unknown): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
+  }
+  return [];
+}
+export function fmt(dt?: string | null) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
+}
+export function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
+}
+// --- end helpers ---
 
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
