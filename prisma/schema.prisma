@@ -22,6 +22,7 @@ model Proof {
   note           String?
   createdAt      DateTime   @default(now())
   createdBy      String?
+
   files          ProofFile[]
 
   @@index([proposalId, milestoneIndex])

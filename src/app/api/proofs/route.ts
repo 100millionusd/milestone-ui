@@ -5,11 +5,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-// dynamic import prisma; if it fails, return a helpful JSON instead of a 500 black box
+// dynamic import prisma; if it fails, we return a helpful JSON
 let prisma: any = null;
 let prismaImportError: string | null = null;
 try {
-  const mod = await import('../../../lib/prisma'); // relative to /src/app/api/proofs/route.ts
+  const mod = await import('../../../lib/prisma'); // ← relative to this file
   prisma = (mod as any).prisma;
 } catch (e: any) {
   prismaImportError = String(e?.message || e);
@@ -39,15 +39,14 @@ export async function GET(req: Request) {
     return NextResponse.json({
       error: 'prisma_import_failed',
       message: prismaImportError || 'unknown import error',
-      hints: [
-        'Ensure src/lib/prisma.ts exists and exports `prisma`.',
-        'Ensure @prisma/client is installed and `npx prisma generate` ran.',
-        'Netlify: add [functions].included_files for node_modules/.prisma and @prisma/client in netlify.toml',
-      ],
       env: {
         has_DATABASE_URL: !!process.env.DATABASE_URL,
         DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
       },
+      hints: [
+        'Ensure src/lib/prisma.ts exists and exports `prisma`.',
+        'Ensure @prisma/client is installed and `npx prisma generate` ran.',
+      ]
     }, { status: 500 });
   }
 
@@ -76,6 +75,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'bad_request', details: 'milestoneIndex must be a number' }, { status: 400 });
     }
 
+    // IMPORTANT: prisma schema MUST have model Proof/ProofFile, or prisma.proof is undefined
     const proofs = await prisma.proof.findMany({
       where: { proposalId, ...(hasMi ? { milestoneIndex: mi! } : {}) },
       orderBy: [{ milestoneIndex: 'asc' }, { createdAt: 'asc' }],
@@ -97,9 +97,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (err: any) {
-    return NextResponse.json({
-      error: 'db_error',
-      message: String(err?.message || err),
-    }, { status: 500 });
+    return NextResponse.json({ error: 'db_error', message: String(err?.message || err) }, { status: 500 });
   }
 }
