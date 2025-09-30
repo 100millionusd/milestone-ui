@@ -2,24 +2,33 @@
 'use client';
 
 import React, { useState } from 'react';
-// ✅ Add submitProof; keep your existing imports
-import { submitProof, completeMilestone, payMilestone, type Bid, type Milestone } from '@/lib/api';
+import {
+  submitProof,
+  completeMilestone,
+  payMilestone,
+  type Bid,
+  type Milestone,
+} from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Optional: if parent can pass it. Otherwise we'll derive from bid or URL */
+  /** Optional: parent can pass proposalId; if not, we’ll derive it */
   proposalId?: number;
 }
 
-const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
+const MilestonePayments: React.FC<MilestonePaymentsProps> = ({
+  bid,
+  onUpdate,
+  proposalId,
+}) => {
   const [completingIndex, setCompletingIndex] = useState<number | null>(null);
-  const [proof, setProof] = useState(''); // legacy text proof
+  const [proof, setProof] = useState(''); // optional text proof (legacy)
   const [paymentResult, setPaymentResult] = useState<any>(null);
 
-  // Try to robustly get proposalId without breaking parents
+  // Best-effort proposalId detection without breaking parents
   const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
     const fromBid =
@@ -35,59 +44,80 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     return undefined;
   };
 
+  const extractUrls = (s: string) =>
+    Array.from((s || '').matchAll(/https?:\/\/\S+/g)).map((m) =>
+      m[0].replace(/[)\]]+$/, '') // trim stray ) or ] from pasted links
+    );
+
+  const toFileObjs = (arr: any[]) =>
+    (arr || [])
+      .map((f: any, i: number) => {
+        const url = (
+          typeof f === 'string'
+            ? f
+            : f?.url || f?.gatewayUrl || f?.href || f?.src || ''
+        ).trim();
+        if (!/^https?:\/\//i.test(url)) return null;
+        return {
+          url,
+          name:
+            (typeof f === 'string'
+              ? url.split('/').pop()
+              : f?.name || f?.filename || url.split('/').pop()) ||
+            `attachment-${i + 1}`,
+          cid: f?.cid ?? undefined,
+          path: f?.path ?? undefined,
+        };
+      })
+      .filter(Boolean) as Array<{
+      url: string;
+      name?: string;
+      cid?: string;
+      path?: string;
+    }>;
+
   const handleCompleteMilestone = async (index: number) => {
     try {
       setCompletingIndex(index);
 
       const pid = deriveProposalId();
-      // Pull the milestone the vendor is completing
+
+      // Current milestone object (if present)
       const ms: any = Array.isArray(bid.milestones) ? bid.milestones[index] : undefined;
 
-      // Attempt to find files the vendor just uploaded for THIS milestone.
-      // Accept a few common shapes:
-      //   - ms.files: [{ url, name }] or [string fullUrl]
-      //   - ms.proofFiles / ms.proofs: same idea
-      const rawFiles =
+      // Gather files from common shapes: files / proofFiles / proofs / attachments / images
+      const rawFilesCandidate =
         (ms?.files as any[]) ??
         (ms?.proofFiles as any[]) ??
         (ms?.proofs as any[]) ??
+        (ms?.attachments as any[]) ??
+        (ms?.images as any[]) ??
         [];
 
-      const files = (Array.isArray(rawFiles) ? rawFiles : [])
-        .map((f: any) => {
-          const url = (typeof f === 'string'
-            ? f
-            : (f?.url || f?.gatewayUrl || f?.href || '')
-          ).trim();
-          if (!/^https?:\/\//i.test(url)) return null; // skip bad/placeholder
-          return {
-            url,
-            name:
-              (typeof f === 'string'
-                ? url.split('/').pop()
-                : f?.name || url.split('/').pop()) || 'file',
-          };
-        })
-        .filter(Boolean) as { url: string; name?: string }[];
+      const filesFromUploads = toFileObjs(Array.isArray(rawFilesCandidate) ? rawFilesCandidate : []);
 
-      // ✅ Preferred path: if we have real file URLs, save them to /api/proofs (auto-shows in Files tab)
-      if (files.length > 0 && Number.isFinite(pid)) {
+      // If user typed links in the proof textarea, capture them too
+      const filesFromText = toFileObjs(extractUrls(proof).map((u) => ({ url: u })));
+
+      const files = filesFromUploads.length ? filesFromUploads : filesFromText;
+
+      // 1) Keep your legacy flow so nothing breaks:
+      await completeMilestone(bid.bidId, index, proof || (ms?.proof ?? ''));
+
+      // 2) Also persist into /api/proofs so Files/Admin tabs update automatically
+      if (Number.isFinite(pid)) {
         await submitProof({
           bidId: bid.bidId,
           proposalId: Number(pid),
-          milestoneIndex: index, // ZERO-BASED (M1=0, M2=1, …)
-          note: 'vendor proof',
-          files,
+          milestoneIndex: index, // ZERO-BASED (M1=0, M2=1, M3=2, …)
+          note: proof || ms?.proof || 'vendor proof',
+          files, // may be [] if just text
         });
-      } else {
-        // 🔁 Fallback: keep your legacy text proof path so nothing breaks
-        await completeMilestone(bid.bidId, index, proof || (ms?.proof ?? ''));
       }
 
       setProof('');
       alert('Proof submitted successfully! Admin will review and release payment.');
-
-      onUpdate(); // Refresh the data
+      onUpdate(); // Refresh caller’s data
     } catch (error) {
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to submit proof');
@@ -113,11 +143,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   const totalAmount = bid.milestones.reduce((sum, m) => sum + m.amount, 0);
   const completedAmount = bid.milestones
-    .filter(m => m.completed)
+    .filter((m) => m.completed)
     .reduce((sum, m) => sum + m.amount, 0);
-
   const paidAmount = bid.milestones
-    .filter(m => m.paymentTxHash)
+    .filter((m) => m.paymentTxHash)
     .reduce((sum, m) => sum + m.amount, 0);
 
   return (
@@ -134,21 +163,23 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           <p className="text-sm text-green-600">Completed Work</p>
           <p className="text-2xl font-bold">${completedAmount.toLocaleString()}</p>
           <p className="text-sm">
-            {bid.milestones.filter(m => m.completed).length}/{bid.milestones.length} milestones
+            {bid.milestones.filter((m) => m.completed).length}/{bid.milestones.length} milestones
           </p>
         </div>
         <div className="bg-purple-50 p-4 rounded border">
           <p className="text-sm text-purple-600">Amount Paid</p>
           <p className="text-2xl font-bold">${paidAmount.toLocaleString()}</p>
           <p className="text-sm">
-            {bid.milestones.filter(m => m.paymentTxHash).length} payments
+            {bid.milestones.filter((m) => m.paymentTxHash).length} payments
           </p>
         </div>
       </div>
 
       <div className="mb-4 p-3 bg-gray-50 rounded">
         <p className="font-medium text-gray-600">Vendor Wallet Address</p>
-        <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
+        <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">
+          {bid.walletAddress}
+        </p>
         <p className="text-xs text-gray-500 mt-1">
           Payments are sent to this {bid.preferredStablecoin} address
         </p>
@@ -171,7 +202,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
               <div>
                 <p className="font-medium">{milestone.name}</p>
                 <p className="text-sm text-gray-600">
-                  {milestone.dueDate ? `Due: ${new Date(milestone.dueDate).toLocaleDateString()}` : 'No due date'}
+                  {milestone.dueDate
+                    ? `Due: ${new Date(milestone.dueDate).toLocaleDateString()}`
+                    : 'No due date'}
                 </p>
               </div>
               <div className="text-right">
@@ -237,7 +270,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     <span className="font-medium">Proof:</span> {milestone.proof}
                   </p>
                 )}
-                <p className="text-sm text-yellow-700 mt-1">Waiting for payment processing...</p>
+                <p className="text-sm text-yellow-700 mt-1">
+                  Waiting for payment processing...
+                </p>
                 {/* Admin can release payment */}
                 <button
                   onClick={() => handleReleasePayment(index)}
@@ -250,10 +285,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
             ) : (
               <div className="mt-3">
                 <label className="block text-sm font-medium mb-1">
-                  Proof of Completion (Required for payment)
+                  Proof of Completion (files or links; text optional)
                 </label>
                 <textarea
-                  placeholder="Enter proof details (optional if you uploaded files)"
+                  placeholder="Paste details or links (IPFS URLs, docs, etc.). If you uploaded files in this milestone, we’ll attach them automatically."
                   value={proof}
                   onChange={(e) => setProof(e.target.value)}
                   className="w-full p-2 border rounded text-sm mb-2"
@@ -261,14 +296,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 />
                 <button
                   onClick={() => handleCompleteMilestone(index)}
-                  disabled={completingIndex === index /* allow submit even if no text, we may have files */}
+                  disabled={completingIndex === index}
                   className="bg-green-600 text-white px-4 py-2 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
                   {completingIndex === index ? 'Submitting Proof...' : 'Submit Proof'}
                 </button>
                 <p className="text-xs text-gray-500 mt-1">
                   If you uploaded images/files for this milestone, they’ll be attached automatically.
-                  Text proof is optional.
                 </p>
               </div>
             )}
