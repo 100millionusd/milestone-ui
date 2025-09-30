@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
+import MilestonePayments from '@/components/MilestonePayments';
 
 // ---------------- Consts ----------------
 const PINATA_GATEWAY =
@@ -604,47 +605,74 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Milestones */}
-      {tab === 'milestones' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-          {acceptedBid && acceptedMilestones.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Title</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Completed</th>
-                  <th className="py-2 pr-4">Paid</th>
-                  <th className="py-2 pr-4">Tx</th>
+{tab === 'milestones' && (
+  <>
+    <section className="border rounded p-4 overflow-x-auto">
+      <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+      {acceptedBid && acceptedMilestones.length ? (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-600">
+              <th className="py-2 pr-4">#</th>
+              <th className="py-2 pr-4">Title</th>
+              <th className="py-2 pr-4">Amount</th>
+              <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Completed</th>
+              <th className="py-2 pr-4">Paid</th>
+              <th className="py-2 pr-4">Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {acceptedMilestones.map((m, idx) => {
+              const paid = !!m.paymentTxHash;
+              const completedRow = paid || !!m.completed;
+              return (
+                <tr key={idx} className="border-t">
+                  <td className="py-2 pr-4">M{idx + 1}</td>
+                  <td className="py-2 pr-4">{m.name || '—'}</td>
+                  <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
+                  <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                  <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                  <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                  <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {acceptedMilestones.map((m, idx) => {
-                  const paid = !!m.paymentTxHash;
-                  const completedRow = paid || !!m.completed;
-                  return (
-                    <tr key={idx} className="border-t">
-                      <td className="py-2 pr-4">M{idx + 1}</td>
-                      <td className="py-2 pr-4">{m.name || '—'}</td>
-                      <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
-                      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-sm text-gray-500">
-              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
-            </p>
-          )}
-        </section>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-sm text-gray-500">
+          {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+        </p>
       )}
+    </section>
+
+    {/* NEW: vendor proof submit + admin release actions, right under the table */}
+    {acceptedBid && (
+      <section className="border rounded p-4 mt-4">
+        <h3 className="font-semibold mb-3">Milestone Proofs & Payments</h3>
+        <MilestonePayments
+          bid={acceptedBid}
+          proposalId={projectIdNum}
+          onUpdate={async () => {
+            // refresh Files + project/bids after proof submit or payment
+            await refreshProofs();
+            try {
+              const [p, b] = await Promise.all([
+                getProposal(projectIdNum),
+                getBids(projectIdNum),
+              ]);
+              setProject(p);
+              setBids(b);
+            } catch (e) {
+              console.error('refresh after submit:', e);
+            }
+          }}
+        />
+      </section>
+    )}
+  </>
+)}
 
       {/* Files */}
       {tab === 'files' && (
