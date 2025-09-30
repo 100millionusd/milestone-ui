@@ -181,7 +181,7 @@ function hrefForDoc(doc: any): string | null {
   return null;
 }
 
-/* ------------------------ Milestone file collection ------------------------ */
+/* ------------------------ Milestone & Bid file collectors ------------------------ */
 
 const BASE_CID_KEYS = [
   'proofCid', 'proof_cid', 'proofCID',
@@ -266,6 +266,38 @@ function collectMilestoneFiles(bid: any) {
       if (prHref) out.push({ scope, doc: { ...pr, name: pickName(pr, prHref) } });
     }
   });
+
+  return out;
+}
+
+// NEW: scan bid-level “proof-ish” places so plain CID links get included
+const BID_PROOF_KEYS = [
+  'proofs', 'proofUrls', 'proof', 'images', 'files', 'attachments', 'uploads', 'evidence', 'links', 'media'
+];
+function collectBidLevelFiles(bid: any) {
+  const out: Array<{ scope: string; doc: any }> = [];
+  const scope = `Bid #${bid?.bidId} — ${bid?.vendorName || 'Vendor'} (Proof)`;
+
+  // 1) Known keys first
+  for (const key of BID_PROOF_KEYS) {
+    const v = bid?.[key];
+    if (!v) continue;
+    const candidates = gatherFileCandidates(v);
+    for (const c of candidates) {
+      const doc = normalizeDoc(c);
+      const href = doc && hrefForDoc(doc);
+      if (href) out.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
+    }
+  }
+
+  // 2) Gentle fallback: scan top-level strings for http/ipfs refs (avoid noise)
+  for (const [k, v] of Object.entries(bid || {})) {
+    if (typeof v === 'string' && (isHttpUrl(v) || parseIpfsLike(v))) {
+      const doc = normalizeDoc(v);
+      const href = doc && hrefForDoc(doc);
+      if (href) out.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
+    }
+  }
 
   return out;
 }
@@ -371,7 +403,7 @@ export default function ProjectDetailPage() {
 
   /* ---------- helpers used in render (no hooks below this line!) ---------- */
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // ← declared ONCE
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -451,7 +483,7 @@ export default function ProjectDetailPage() {
               {typeof analysis.confidence === 'number' && (
                 <>
                   <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
                 </>
               )}
             </div>
@@ -469,23 +501,6 @@ export default function ProjectDetailPage() {
                 <ul className="list-disc list-inside text-sm text-gray-700">
                   {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
                 </ul>
-              </div>
-            )}
-            {typeof analysis.pdfUsed === 'boolean' && (
-              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
-                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
-                {analysis.pdfDebug?.url && (
-                  <div>
-                    File:{' '}
-                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                      {analysis.pdfDebug.name || 'open'}
-                    </a>
-                  </div>
-                )}
-                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
-                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
-                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
-                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
               </div>
             )}
           </>
@@ -513,6 +528,7 @@ export default function ProjectDetailPage() {
   if (!project) return <div className="p-6">Project not found</div>;
 
   // Derived values
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
@@ -550,21 +566,41 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Files roll-up = Project docs + Bid docs + Milestone files
+  // Files roll-up = Project docs + Bid docs + Milestone files + Bid-level proofs
   const projectDocs = parseDocs(project?.docs);
-  const allFiles: Array<{ scope: string; doc: any }> = [
-    ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
-    ...bids.flatMap((b) => {
-      const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
-      return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-    }),
-    ...bids.flatMap((b) => collectMilestoneFiles(b)),
-  ];
+
+  // helper: dedupe by final href
+  const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
+  const dedupeByHref = <T,>(rows: Array<{ scope: string; doc: any }>): Array<{ scope: string; doc: any }> => {
+    const seen = new Set<string>();
+    const out: Array<{ scope: string; doc: any }> = [];
+    for (const r of rows) {
+      const h = asHref(r.doc);
+      if (!h) continue;
+      if (seen.has(h)) continue;
+      seen.add(h);
+      out.push(r);
+    }
+    return out;
+  };
+
+  const filesProject = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
+  const filesBidDocs = bids.flatMap((b) => {
+    const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+  const filesMilestones = bids.flatMap((b) => collectMilestoneFiles(b));
+  const filesBidLevel = bids.flatMap((b) => collectBidLevelFiles(b));
+
+  const allFiles = dedupeByHref([
+    ...filesProject,
+    ...filesBidDocs,
+    ...filesMilestones,
+    ...filesBidLevel, // ← this is what pulls your two image CIDs in
+  ]);
 
   if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles
-      .map(({ doc }) => hrefForDoc(normalizeDoc(doc)))
-      .filter(Boolean);
+    (window as any).__FILES = allFiles.map(({ doc }) => hrefForDoc(normalizeDoc(doc))).filter(Boolean);
   }
 
   return (
@@ -836,6 +872,7 @@ function Progress({ value }: { value: number }) {
   );
 }
 
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
