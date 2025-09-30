@@ -585,11 +585,26 @@ export async function getVendorBids(): Promise<Bid[]> {
   }
 }
 
-export function completeMilestone(bidId: number, milestoneIndex: number, proof: string) {
-  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+// allow JSON (legacy) OR FormData (with files) without changing your server
+export function completeMilestone(
+  bidId: number,
+  milestoneIndex: number,
+  proofOrForm?: string | FormData
+) {
+  const isFD = typeof FormData !== 'undefined' && proofOrForm instanceof FormData;
+  const body = isFD
+    ? (() => {
+        const fd = proofOrForm as FormData;
+        if (!fd.has('milestoneIndex')) fd.append('milestoneIndex', String(milestoneIndex));
+        return fd;
+      })()
+    : JSON.stringify({ milestoneIndex, proof: (proofOrForm as string) ?? '' });
+
   return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/complete-milestone`, {
-    method: "POST",
-    body: JSON.stringify({ milestoneIndex, proof }),
+    method: 'POST',
+    // IMPORTANT: don’t set Content-Type when sending FormData
+    headers: isFD ? undefined : { 'Content-Type': 'application/json' },
+    body,
   });
 }
 
