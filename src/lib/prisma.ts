@@ -9,5 +9,4 @@ export const prisma =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-// In dev, keep a single instance across HMR
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;

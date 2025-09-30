@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-// Safe dynamic import so we can return a helpful error if prisma isn't bundled
+// dynamic import prisma; if it fails, return a helpful JSON instead of a 500 black box
 let prisma: any = null;
 let prismaImportError: string | null = null;
 try {
@@ -28,38 +28,29 @@ function maskDbUrl(url?: string) {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const pidRaw = url.searchParams.get('proposalId');
+  const proposalId = Number(pidRaw);
   const diag = url.searchParams.get('diag') === '1';
 
-  // validate input
-  const proposalId = Number(pidRaw);
   if (!pidRaw || !Number.isFinite(proposalId)) {
-    return NextResponse.json(
-      { error: 'bad_request', details: 'proposalId is required and must be a number' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'bad_request', details: 'proposalId is required and must be a number' }, { status: 400 });
   }
 
-  // prisma import failed? tell us why instead of 500
   if (!prisma) {
-    return NextResponse.json(
-      {
-        error: 'prisma_import_failed',
-        message: prismaImportError || 'unknown import error',
-        hints: [
-          'Ensure src/lib/prisma.ts exists and exports `prisma`.',
-          'Ensure @prisma/client is installed and `npx prisma generate` ran.',
-          'Netlify: add postinstall "prisma generate" and include node_modules/.prisma in netlify.toml functions.included_files.'
-        ],
-        env: {
-          has_DATABASE_URL: !!process.env.DATABASE_URL,
-          DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
-        },
+    return NextResponse.json({
+      error: 'prisma_import_failed',
+      message: prismaImportError || 'unknown import error',
+      hints: [
+        'Ensure src/lib/prisma.ts exists and exports `prisma`.',
+        'Ensure @prisma/client is installed and `npx prisma generate` ran.',
+        'Netlify: add [functions].included_files for node_modules/.prisma and @prisma/client in netlify.toml',
+      ],
+      env: {
+        has_DATABASE_URL: !!process.env.DATABASE_URL,
+        DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
       },
-      { status: 500 }
-    );
+    }, { status: 500 });
   }
 
-  // optional diagnostics
   if (diag) {
     let ping: any = null, pingErr: string | null = null, version: any = null;
     try { version = (await import('@prisma/client')).Prisma?.prismaVersion; } catch {}
@@ -70,19 +61,13 @@ export async function GET(req: Request) {
       env: {
         has_DATABASE_URL: !!process.env.DATABASE_URL,
         DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
-        PRISMA_CLIENT_ENGINE_TYPE: process.env.PRISMA_CLIENT_ENGINE_TYPE || undefined,
       },
       prismaVersion: version,
       pingResult: ping,
       pingError: pingErr,
-      notes: [
-        'If pingError exists, the DB URL/SSL/pooler is the issue.',
-        'Use Railway pooled URL with sslmode=require.',
-      ],
-    }, { headers: { 'cache-control': 'no-store' }});
+    }, { headers: { 'cache-control': 'no-store' } });
   }
 
-  // normal path
   try {
     const miRaw = url.searchParams.get('milestoneIndex');
     const hasMi = miRaw !== null && miRaw !== '';
@@ -112,19 +97,9 @@ export async function GET(req: Request) {
 
     return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (err: any) {
-    return NextResponse.json(
-      {
-        error: 'db_error',
-        message: String(err?.message || err),
-        stack: String(err?.stack || '').slice(0, 400),
-        tips: [
-          'prisma/schema.prisma: generator engineType="library"; then run `npx prisma generate`',
-          'netlify.toml: include node_modules/.prisma/** and node_modules/@prisma/client/** under [functions].included_files',
-          'Use Railway pooled DATABASE_URL with sslmode=require',
-          'Ensure `postinstall: prisma generate` runs on CI',
-        ],
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: 'db_error',
+      message: String(err?.message || err),
+    }, { status: 500 });
   }
 }
