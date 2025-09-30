@@ -1,10 +1,9 @@
-// src/components/MilestonePayments.tsx
 'use client';
 
 import React, { useState } from 'react';
 import {
-  submitProof,
-  completeMilestone,
+  submitProof,             // stores file URLs in /api/proofs so Files tab shows them
+  completeMilestone,       // your existing backend endpoint (now can send FormData)
   payMilestone,
   type Bid,
   type Milestone,
@@ -15,18 +14,16 @@ import PaymentVerification from './PaymentVerification';
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Optional: parent can pass it; we’ll also derive from bid/URL */
-  proposalId?: number;
+  proposalId?: number; // optional, we’ll derive if missing
 }
 
 type SelectedFilesMap = Record<number, File[]>;
 
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
-  const [proofText, setProofText] = useState<string>(''); // legacy text proof (optional)
+  const [proofText, setProofText] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<SelectedFilesMap>({});
 
-  // Robust proposalId derivation
   const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
     const fromBid =
@@ -42,95 +39,61 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     return undefined;
   };
 
-  // Upload currently selected files for a milestone to Pinata via our server route
-  const uploadSelected = async (index: number) => {
-    const files = selectedFiles[index];
-    if (!files || files.length === 0) return [] as { url: string; name?: string }[];
+  // Normalize a bunch of possible response shapes from your backend
+  function extractUploadedFiles(json: any): Array<{ url: string; name?: string }> {
+    const candidates: any[] = []
+      .concat(json?.files ?? [])
+      .concat(json?.proof?.files ?? [])
+      .concat(json?.proofFiles ?? [])
+      .concat(json?.data?.files ?? []);
+    const out: Array<{ url: string; name?: string }> = [];
 
-    const fd = new FormData();
-    for (const f of files) fd.append('files', f, f.name);
-
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
+    for (const f of candidates) {
+      if (!f) continue;
+      const cid = f.cid || f.IpfsHash || f.hash;
+      const url =
+        (f.url && String(f.url)) ||
+        (cid ? `https://${(process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY || 'gateway.pinata.cloud'}/ipfs/${cid}` : undefined);
+      if (!url) continue;
+      out.push({ url, name: f.name || url.split('/').pop() || 'file' });
     }
-
-    const data = await res.json();
-    const uploaded = Array.isArray(data?.files) ? data.files : [];
-    // Normalize to { url, name }
-    return uploaded
-      .map((u: any) => {
-        const url = (u?.url || '').trim();
-        if (!/^https?:\/\//i.test(url)) return null;
-        return { url, name: u?.name || (url.split('/').pop() || 'file') };
-      })
-      .filter(Boolean) as { url: string; name?: string }[];
-  };
+    return out;
+  }
 
   const handleCompleteMilestone = async (index: number) => {
     try {
       setBusyIndex(index);
-
       const pid = deriveProposalId();
-      const ms: any = Array.isArray(bid.milestones) ? bid.milestones[index] : undefined;
 
-      // 1) Upload any *newly selected* files to Pinata
-      const newlyUploaded = await uploadSelected(index);
+      // Build FormData if user selected files; otherwise fall back to JSON
+      const files = selectedFiles[index];
+      if (files && files.length > 0) {
+        const fd = new FormData();
+        fd.append('milestoneIndex', String(index));
+        if (proofText) fd.append('proof', proofText);
+        for (const f of files) fd.append('files', f, f.name);
 
-      // 2) Also capture any *already-present* URLs on the milestone object (if your UI prefilled them)
-      const rawFiles =
-        (ms?.files as any[]) ??
-        (ms?.proofFiles as any[]) ??
-        (ms?.proofs as any[]) ??
-        (ms?.attachments as any[]) ??
-        (ms?.images as any[]) ??
-        [];
+        // 1) Send files to your existing backend (no server.js change)
+        const resp = await completeMilestone(bid.bidId, index, fd);
+        // 2) Parse any file info backend returns (CIDs or URLs)
+        const uploaded = extractUploadedFiles(resp) || [];
 
-      const existingUrls = (Array.isArray(rawFiles) ? rawFiles : [])
-        .map((f: any) => {
-          const url = (typeof f === 'string'
-            ? f
-            : (f?.url || f?.gatewayUrl || f?.href || '')
-          ).trim();
-          if (!/^https?:\/\//i.test(url)) return null;
-          return {
-            url,
-            name:
-              (typeof f === 'string'
-                ? url.split('/').pop()
-                : f?.name || url.split('/').pop()) || 'file',
-          };
-        })
-        .filter(Boolean) as { url: string; name?: string }[];
-
-      // 3) Merge & dedupe
-      const filesMap = new Map<string, { url: string; name?: string }>();
-      for (const f of [...existingUrls, ...newlyUploaded]) {
-        if (!filesMap.has(f.url)) filesMap.set(f.url, f);
-      }
-      const files = Array.from(filesMap.values());
-
-      // 4) Preferred path: if we have files + proposalId, persist them (auto-appear in Files tab)
-      if (files.length > 0 && Number.isFinite(pid)) {
-        await submitProof({
-          bidId: bid.bidId,
-          proposalId: Number(pid),
-          milestoneIndex: index, // ZERO-BASED: M1=0, M2=1, …
-          note: 'vendor proof',
-          files,
-        });
+        // 3) Persist to /api/proofs so the Files tab updates automatically
+        if (uploaded.length > 0 && Number.isFinite(pid)) {
+          await submitProof({
+            bidId: bid.bidId,
+            proposalId: Number(pid),
+            milestoneIndex: index, // ZERO-BASED (M1=0, M2=1, …)
+            note: 'vendor proof',
+            files: uploaded,
+          });
+        }
       } else {
-        // Fallback to legacy text proof so nothing breaks
-        await completeMilestone(bid.bidId, index, proofText || (ms?.proof ?? ''));
+        // No files selected: keep your legacy “text proof” path
+        await completeMilestone(bid.bidId, index, proofText || '');
       }
 
-      // Reset per-milestone selection and text
+      // Reset UI
       setSelectedFiles((m) => {
         const next = { ...m };
         delete next[index];
@@ -138,7 +101,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       });
       setProofText('');
 
-      // Refresh outer data
       onUpdate();
       alert('Proof submitted!');
     } catch (err: any) {
@@ -243,7 +205,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* When unpaid & not completed → allow uploads + text + submit */}
+              {/* Uncompleted → allow selecting files + optional text, then submit */}
               {!isCompleted && (
                 <div className="mt-3 space-y-2">
                   <label className="block text-sm font-medium">
@@ -259,8 +221,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     }}
                     className="block w-full text-sm"
                   />
-
-                  {/* show selected filenames */}
                   {!!selectedFiles[index]?.length && (
                     <ul className="text-xs text-gray-600 list-disc ml-4">
                       {selectedFiles[index].map((f, i) => (
@@ -269,9 +229,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     </ul>
                   )}
 
-                  <label className="block text-sm font-medium">
-                    Optional text proof (link, notes)
-                  </label>
+                  <label className="block text-sm font-medium">Optional text proof</label>
                   <textarea
                     placeholder="Notes or links (optional)"
                     value={proofText}
@@ -289,7 +247,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </button>
 
                   <p className="text-xs text-gray-500">
-                    Files will upload to Pinata and appear automatically on the project’s Files tab.
+                    Files go to your existing backend (Pinata) and appear automatically on the project Files tab.
                   </p>
                 </div>
               )}
@@ -318,7 +276,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               )}
 
-              {/* Paid → show receipt + chain info */}
+              {/* Paid → receipt */}
               {isPaid && (
                 <div className="mt-2">
                   <div className="p-2 bg-white rounded border">
