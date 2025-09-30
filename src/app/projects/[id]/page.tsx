@@ -6,21 +6,15 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-/* ===== Constants ===== */
-const GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  'https://gateway.pinata.cloud/ipfs';
-
+const GATEWAY = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 const API_BASE =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
   (process.env.NEXT_PUBLIC_API_BASE_URL
     ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
-    : '/api/proofs'); // ✅ fallback to Next API route
+    : '/api/proofs'); // fallback to Next API route
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
-/* ===== Helpers (kept in one place and ABOVE all usages) ===== */
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -31,20 +25,24 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
+
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
+
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
 
-export type Milestone = {
+type Milestone = {
   name?: string;
   amount?: number;
   dueDate?: string;
@@ -53,20 +51,20 @@ export type Milestone = {
   paymentTxHash?: string | null;
   paymentDate?: string | null;
   proof?: string;
-  proofCid?: string;
-  folderCid?: string;
-  files?: any[] | string;
-  attachments?: any;
-  images?: any;
-  docs?: any;
-  [k: string]: any;
+  files?: Array<{ url?: string; cid?: string; name?: string } | string>;
 };
+
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as Milestone[];
-  try { const arr = JSON.parse(String(raw)); return Array.isArray(arr) ? (arr as Milestone[]) : []; }
-  catch { return []; }
+  try {
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? (arr as Milestone[]) : [];
+  } catch {
+    return [];
+  }
 }
+
 function parseDocs(raw: unknown): any[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -75,183 +73,17 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
+
 function fmt(dt?: string | null) {
   if (!dt) return '';
   const d = new Date(dt);
   return isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
+
 function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
 
-/* ----- IPFS/url utils ----- */
-const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
-const IPFS_URI_RE = /^ipfs:\/\/(?:ipfs\/)?([^\/?#]+)(\/[^?#]*)?/i;
-const HTTP_IPFS_RE = /^https?:\/\/[^\/]+\/ipfs\/([^\/?#]+)(\/[^?#]*)?/i;
-const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
-
-function isHttpUrl(s: string): boolean {
-  try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; }
-  catch { return false; }
-}
-function encodeIpfsPath(path: string): string {
-  if (!path) return '';
-  const clean = path.replace(/^\/*/, '');
-  if (!clean) return '';
-  return '/' + clean.split('/').map(seg => encodeURIComponent(seg)).join('/');
-}
-function parseIpfsLike(s: string): { cid: string; path: string } | null {
-  let m = s.match(IPFS_URI_RE);
-  if (m) { const cid = m[1]; const path = m[2] || ''; return CID_ONLY_RE.test(cid) ? { cid, path } : null; }
-  m = s.match(HTTP_IPFS_RE);
-  if (m) { const cid = m[1]; const path = m[2] || ''; return CID_ONLY_RE.test(cid) ? { cid, path } : null; }
-  if (CID_ONLY_RE.test(s)) return { cid: s, path: '' };
-  return null;
-}
-function pickName(doc: any, fallbackHref?: string): string {
-  if (!doc) return fallbackHref?.split('/').pop() || 'file';
-  if (typeof doc === 'string') return doc.split('/').pop() || doc;
-  return (
-    doc.name || doc.filename || doc.fileName || doc.file ||
-    (typeof doc.path === 'string' ? doc.path.split('/').pop() : '') ||
-    (fallbackHref ? fallbackHref.split('/').pop() : '') ||
-    'file'
-  );
-}
-function normalizeDoc(raw: any) {
-  if (!raw) return null;
-
-  if (typeof raw === 'string') {
-    const s = raw.trim();
-    if (isHttpUrl(s)) {
-      const m = s.match(HTTP_IPFS_RE);
-      if (m && CID_ONLY_RE.test(m[1])) return { cid: m[1], ipfsPath: m[2] || '', name: pickName(null, s) };
-      return { url: s, name: pickName(null, s) };
-    }
-    const ref = parseIpfsLike(s);
-    if (ref) {
-      const baseName = ref.path ? decodeURIComponent(ref.path.split('/').pop() || '') : '';
-      return { cid: ref.cid, ipfsPath: ref.path, name: baseName || `${ref.cid.slice(0, 8)}…` };
-    }
-    return { name: s };
-  }
-
-  const doc: any = { ...raw };
-  const urlLike = doc.url || doc.gatewayUrl || doc.ipfsUrl || doc.href;
-
-  if (typeof urlLike === 'string') {
-    const s = urlLike.trim();
-    if (isHttpUrl(s)) {
-      const m = s.match(HTTP_IPFS_RE);
-      if (m && CID_ONLY_RE.test(m[1])) return { cid: m[1], ipfsPath: m[2] || '', name: doc.name || pickName(null, s) };
-      return { url: s, name: doc.name || pickName(null, s) };
-    }
-    const ref = parseIpfsLike(s);
-    if (ref) return { cid: ref.cid, ipfsPath: ref.path || '', name: doc.name || pickName(null, s) };
-  }
-
-  if (typeof doc.path === 'string' && !doc.ipfsPath) doc.ipfsPath = doc.path;
-
-  if (typeof doc.cid === 'string') {
-    const ref = parseIpfsLike(`ipfs://${doc.cid}${doc.ipfsPath || ''}`);
-    if (ref) return { ...doc, cid: ref.cid, ipfsPath: ref.path || '', name: pickName(doc) };
-  }
-
-  if (doc.name || doc.filename || doc.fileName || doc.file || doc.path) return { name: pickName(doc) };
-
-  return null;
-}
-function hrefForDoc(doc: any): string | null {
-  if (!doc) return null;
-  if (doc.cid && CID_ONLY_RE.test(doc.cid)) {
-    const suffix = encodeIpfsPath(doc.ipfsPath || '');
-    return `${GATEWAY}/${encodeURIComponent(doc.cid)}${suffix}`;
-  }
-  if (doc.url && isHttpUrl(doc.url)) return doc.url;
-  return null;
-}
-
-/* ----- Collectors for milestone/bid files ----- */
-const BASE_CID_KEYS = ['proofCid','folderCid','imagesCid','filesCid','uploadsCid','rootCid','cid','proof','proof_cid'];
-function gatherFileCandidates(obj: any, depth = 0): any[] {
-  const out: any[] = [];
-  if (!obj || depth > 3) return out;
-  if (typeof obj === 'string') return [obj];
-  if (Array.isArray(obj)) return obj.flatMap(v => gatherFileCandidates(v, depth + 1));
-  if (typeof obj === 'object') return Object.values(obj).flatMap(v => gatherFileCandidates(v, depth + 1));
-  return out;
-}
-function findBaseCidRef(m: any): { cid: string; path: string } | null {
-  for (const key of BASE_CID_KEYS) {
-    const v = m?.[key];
-    if (typeof v === 'string') {
-      const ref = parseIpfsLike(v);
-      if (ref) return { cid: ref.cid, path: ref.path || '' };
-      if (CID_ONLY_RE.test(v)) return { cid: v, path: '' };
-    }
-  }
-  return null;
-}
-function collectMilestoneFiles(bid: any) {
-  const arr = parseMilestones(bid?.milestones);
-  const out: Array<{ scope: string; doc: any }> = [];
-  arr.forEach((m, idx) => {
-    const scope = `Milestone M${idx + 1}${m?.name ? ` — ${m.name}` : ''}`;
-    const baseRef = findBaseCidRef(m);
-    const candidates = gatherFileCandidates(m);
-
-    for (const c of candidates) {
-      const doc = normalizeDoc(c);
-      const direct = doc && hrefForDoc(doc);
-      if (direct) { out.push({ scope, doc: { ...doc, name: pickName(doc, direct) } }); continue; }
-      const maybeName =
-        typeof c === 'string'
-          ? c
-          : (c && (c as any).path) || (c as any)?.filename || (c as any)?.fileName || (c as any)?.file || (c as any)?.name;
-      if (maybeName && baseRef) {
-        const stitchedDoc = {
-          cid: baseRef.cid,
-          ipfsPath: String(maybeName).startsWith('/') ? String(maybeName) : `/${String(maybeName)}`,
-          name: pickName({ name: String(maybeName) }),
-        };
-        const stitchedHref = hrefForDoc(stitchedDoc);
-        if (stitchedHref) out.push({ scope, doc: stitchedDoc });
-      }
-    }
-
-    if (typeof m.proof === 'string') {
-      const pr = normalizeDoc(m.proof);
-      const prHref = pr && hrefForDoc(pr);
-      if (prHref) out.push({ scope, doc: { ...pr, name: pickName(pr, prHref) } });
-    }
-  });
-  return out;
-}
-const BID_PROOF_KEYS = ['proofs','proofUrls','proof','images','files','attachments','uploads','evidence','links','media'];
-function collectBidLevelFiles(bid: any) {
-  const out: Array<{ scope: string; doc: any }> = [];
-  const scope = `Bid #${bid?.bidId} — ${bid?.vendorName || 'Vendor'} (Proof)`;
-  for (const key of BID_PROOF_KEYS) {
-    const v = bid?.[key];
-    if (!v) continue;
-    const candidates = gatherFileCandidates(v);
-    for (const c of candidates) {
-      const doc = normalizeDoc(c);
-      const href = doc && hrefForDoc(doc);
-      if (href) out.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
-    }
-  }
-  for (const [, v] of Object.entries(bid || {})) {
-    if (typeof v === 'string' && (isHttpUrl(v) || parseIpfsLike(v))) {
-      const doc = normalizeDoc(v);
-      const href = doc && hrefForDoc(doc);
-      if (href) out.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
-    }
-  }
-  return out;
-}
-
-/* ===== Component ===== */
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
@@ -269,33 +101,38 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // 🔁 Small helper to refresh proofs on demand
+  // helper: fetch proofs
   async function refreshProofs() {
+    if (!Number.isFinite(projectIdNum)) return;
     try {
       const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
       const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
       if (!r.ok) return;
       const body = await r.json();
       if (Array.isArray(body)) setProofs(body);
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
 
-  // Initial fetch
+  // Initial fetch (project + bids + proofs)
   useEffect(() => {
     let active = true;
     if (!Number.isFinite(projectIdNum)) return;
     (async () => {
       try {
-        const [projectData, bidsData] = await Promise.all([
+        const [projectData, bidsData, proofsData] = await Promise.all([
           getProposal(projectIdNum),
           getBids(projectIdNum),
+          fetch(`${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}`, {
+            credentials: 'include',
+            cache: 'no-store',
+          }).then(r => (r.ok ? r.json() : [])).catch(() => []),
         ]);
         if (!active) return;
         setProject(projectData);
         setBids(bidsData);
-
-        // proofs on first load
-        await refreshProofs();
+        setProofs(Array.isArray(proofsData) ? proofsData : []);
       } catch (e) {
         console.error('Error fetching project:', e);
       } finally {
@@ -310,13 +147,12 @@ export default function ProjectDetailPage() {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Optional: expose to window for quick console inspection
-  useEffect(() => { (window as any).__BIDS = bids; (window as any).__PROOFS = proofs; }, [bids, proofs]);
-
-  // Minimal poll (only while any bid analysis is pending)
+  // Poll bids while analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
+    let stopped = false;
     const start = Date.now();
+
     const needsMore = (rows: any[]) =>
       rows.some((row) => {
         const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
@@ -326,6 +162,7 @@ export default function ProjectDetailPage() {
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
+        if (stopped) return;
         setBids(next);
         if (Date.now() - start < 90_000 && needsMore(next)) {
           pollTimer.current = setTimeout(tick, 1500);
@@ -333,8 +170,11 @@ export default function ProjectDetailPage() {
           clearPoll();
         }
       } catch {
-        if (Date.now() - start < 90_000) pollTimer.current = setTimeout(tick, 2000);
-        else clearPoll();
+        if (Date.now() - start < 90_000) {
+          pollTimer.current = setTimeout(tick, 2000);
+        } else {
+          clearPoll();
+        }
       }
     };
 
@@ -342,15 +182,30 @@ export default function ProjectDetailPage() {
       clearPoll();
       pollTimer.current = setTimeout(tick, 1500);
     }
-    return clearPoll;
+
+    const onFocus = () => {
+      if (needsMore(bids)) {
+        clearPoll();
+        pollTimer.current = setTimeout(tick, 0);
+      }
+    };
+    window.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      stopped = true;
+      clearPoll();
+      window.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [projectIdNum, bids]);
 
-  // 🔁 Auto-refresh proofs when Files tab is opened
+  // Refresh proofs when opening Files tab
   useEffect(() => {
     if (tab === 'files') refreshProofs();
   }, [tab, projectIdNum]);
 
-  // 🔁 Refresh proofs when the window regains focus while Files tab is open
+  // Also refresh proofs on focus while in Files tab
   useEffect(() => {
     const onFocus = () => { if (tab === 'files') refreshProofs(); };
     window.addEventListener('focus', onFocus);
@@ -361,11 +216,7 @@ export default function ProjectDetailPage() {
     };
   }, [tab, projectIdNum]);
 
-  /* ---- EARLY RETURNS ---- */
-  if (loading) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found</div>;
-
-  /* ---- Derived values ---- */
+  // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
@@ -384,64 +235,122 @@ export default function ProjectDetailPage() {
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
-  /* ---- Files aggregation ---- */
   const projectDocs = parseDocs(project?.docs);
 
-  // From /api/proofs result (if available)
-  const filesFromProofRecords = (items: any[]) => {
-    const rows: Array<{ scope: string; doc: any }> = [];
-    for (const p of items || []) {
-      const mi = Number.isFinite(p.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
-      const scope = typeof mi === 'number' ? `Milestone M${mi + 1} (Proofs)` : 'Proofs';
-      const bag = []
-        .concat(p.files || [])
-        .concat(p.urls || [])
-        .concat(p.cids || []);
-      for (const raw of bag) {
-        const doc = normalizeDoc(raw);
-        const href = doc && hrefForDoc(doc);
-        if (href) rows.push({ scope, doc: { ...doc, name: pickName(doc, href) } });
-      }
+  const renderAttachment = (doc: any, idx: number) => {
+    if (!doc) return null;
+    const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
+    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+
+    if (isImage) {
+      return (
+        <button
+          key={idx}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+          title={doc.name || 'image'}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+        </button>
+      );
     }
-    return rows;
+
+    return (
+      <div key={idx} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate" title={doc.name}>{doc.name}</p>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+      </div>
+    );
   };
 
-  // dedupe by href
-  const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
-  const dedupeByHref = (rows: Array<{ scope: string; doc: any }>) => {
-    const seen = new Set<string>();
-    const out: Array<{ scope: string; doc: any }> = [];
-    for (const r of rows) {
-      const h = asHref(r.doc);
-      if (!h || seen.has(h)) continue;
-      seen.add(h);
-      out.push(r);
-    }
-    return out;
+  const renderAnalysis = (raw: any) => {
+    const analysis = coerceAnalysis(raw);
+    const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
+
+    if (isPending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    if (!analysis) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
+
+    const isV2 = analysis.summary || analysis.fit || analysis.risks || analysis.confidence || analysis.milestoneNotes;
+    const isV1 = analysis.verdict || analysis.reasoning || analysis.suggestions;
+
+    return (
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+        {isV2 && (
+          <>
+            {analysis.summary && <p className="text-sm mb-1">{analysis.summary}</p>}
+            <div className="text-sm">
+              {analysis.fit && (<><span className="font-medium">Fit:</span> {String(analysis.fit)} </>)}
+              {typeof analysis.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(analysis.confidence * 100)}%
+                </>
+              )}
+            </div>
+            {Array.isArray(analysis.risks) && analysis.risks.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Risks</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(analysis.milestoneNotes) && analysis.milestoneNotes.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Milestone Notes</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {analysis.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {typeof analysis.pdfUsed === 'boolean' && (
+              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+                <div>PDF parsed: {analysis.pdfUsed ? 'Yes' : 'No'}</div>
+                {analysis.pdfDebug?.url && (
+                  <div>
+                    File:{' '}
+                    <a href={analysis.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                      {analysis.pdfDebug.name || 'open'}
+                    </a>
+                  </div>
+                )}
+                {analysis.pdfDebug?.bytes !== undefined && <div>Bytes: {analysis.pdfDebug.bytes}</div>}
+                {analysis.pdfDebug?.first5 && <div>First bytes: {analysis.pdfDebug.first5}</div>}
+                {analysis.pdfDebug?.reason && <div>Reason: {analysis.pdfDebug.reason}</div>}
+                {analysis.pdfDebug?.error && <div className="text-rose-600">Error: {analysis.pdfDebug.error}</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        {isV1 && (
+          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+            {analysis.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {analysis.verdict}</p>)}
+            {analysis.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {analysis.reasoning}</p>)}
+            {Array.isArray(analysis.suggestions) && analysis.suggestions.length > 0 && (
+              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                {analysis.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
+      </div>
+    );
   };
 
-  const filesProject = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
-  const filesBidDocs = bids.flatMap((b) => {
-    const ds = (parseDocs(b.docs) || []).concat(b.doc ? [b.doc] : []);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-  });
-  const filesMilestones = bids.flatMap((b) => collectMilestoneFiles(b));
-  const filesBidLevel = bids.flatMap((b) => collectBidLevelFiles(b));
-  const filesFromProofs = filesFromProofRecords(proofs);
+  // ---- EARLY RETURNS (no hooks below) ----
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
 
-  const allFiles = dedupeByHref([
-    ...filesProject,
-    ...filesBidDocs,
-    ...filesMilestones,
-    ...filesBidLevel,
-    ...filesFromProofs,
-  ]);
-
-  /* ---- Stats & timeline ---- */
+  // Derived values
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
-
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
     for (const b of bids) {
@@ -459,6 +368,7 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
+  // Build Timeline (synthesized)
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -474,7 +384,58 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  /* ---- UI ---- */
+  // Convert proofs → file cards
+  function filesFromProofRecords(items: any[]) {
+    const rows: Array<{ scope: string; doc: any }> = [];
+    for (const p of items || []) {
+      const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
+      const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
+      const list = []
+        .concat(p.files || [])
+        .concat(p.urls || [])
+        .concat(p.cids || []);
+
+      for (const raw of list) {
+        const url =
+          (typeof raw === 'string' ? raw : raw?.url) ||
+          (raw?.cid ? `${GATEWAY}/${raw.cid}` : undefined);
+        if (!url) continue;
+        const name =
+          (typeof raw === 'object' && raw?.name) ||
+          (typeof raw === 'string' ? (raw.split('/').pop() || 'file') : '') ||
+          'file';
+        rows.push({ scope, doc: { url, name } });
+      }
+    }
+    return rows;
+  }
+
+  // project docs
+  const projectFiles = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
+
+  // bid docs
+  const bidFiles = bids.flatMap((b) => {
+    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+
+  // proofs (from API)
+  const proofFiles = filesFromProofRecords(proofs);
+
+  // All files for Files tab
+  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+
+  // (Optional) expose for browser debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__FILES = allFiles.map((x: any) => ({
+        scope: x.scope,
+        href: x.doc?.url || (x.doc?.cid ? `${GATEWAY}/${x.doc.cid}` : null),
+        name: x.doc?.name || null,
+      }));
+    }
+  }, [projectIdNum, proofs, bids, project]);
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -524,7 +485,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Overview */}
+      {/* Tab content */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -583,7 +544,6 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Timeline */}
       {tab === 'timeline' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Activity Timeline</h3>
@@ -603,7 +563,6 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Bids */}
       {tab === 'bids' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">All Bids</h3>
@@ -636,7 +595,6 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Milestones */}
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
@@ -662,7 +620,9 @@ export default function ProjectDetailPage() {
                       <td className="py-2 pr-4">M{idx+1}</td>
                       <td className="py-2 pr-4">{m.name || '—'}</td>
                       <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                      <td className="py-2 pr-4">
+                        {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
+                      </td>
                       <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                       <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                       <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0,10)}…` : '—'}</td>
@@ -679,50 +639,17 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {allFiles.map((f, i) => {
-                const doc = normalizeDoc(f.doc);
-                const href = hrefForDoc(doc);
-                const name = pickName(doc, href || undefined);
-                const isImage = !!href && (IMG_EXT_RE.test(name) || /\/ipfs\/[A-Za-z0-9]/.test(href));
-                return (
-                  <div key={i}>
-                    <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                    {href ? (
-                      isImage ? (
-                        <div className="p-2 rounded border bg-white">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={href}
-                            alt={name}
-                            className="w-full h-32 object-cover rounded mb-1 cursor-zoom-in"
-                            onClick={() => setLightbox(href)}
-                          />
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="truncate" title={name}>{name}</span>
-                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-                          <p className="truncate" title={name}>{name}</p>
-                          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-                        </div>
-                      )
-                    ) : (
-                      <div className="p-2 rounded border bg-gray-50 text-xs text-gray-500">
-                        <p className="truncate">{name}</p>
-                        <p className="italic">No file link</p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {allFiles.map((f, i) => (
+                <div key={i}>
+                  <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
+                  {renderAttachment(f.doc, i)}
+                </div>
+              ))}
             </div>
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
@@ -758,7 +685,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-/* ===== UI bits ===== */
+// Simple progress bar (Tailwind)
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
@@ -766,6 +693,7 @@ function Progress({ value }: { value: number }) {
     </div>
   );
 }
+
 function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
   const active = tab === id;
   return (
