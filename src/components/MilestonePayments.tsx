@@ -4,12 +4,12 @@
 import React, { useState } from 'react';
 import {
   submitProof,
-  uploadProofFiles,   // ✅ new helper
   completeMilestone,
   payMilestone,
   type Bid,
   type Milestone,
 } from '@/lib/api';
+import { uploadProofFiles } from '@/lib/proofUpload';  // ✅ correct source
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
