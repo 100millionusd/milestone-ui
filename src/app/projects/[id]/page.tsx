@@ -11,7 +11,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
   (process.env.NEXT_PUBLIC_API_BASE_URL
     ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
-    : '/api/proofs'); // fallback to Next API route
+    : '/api/proofs');
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -35,9 +35,7 @@ type AnalysisV1 = {
 
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') {
-    try { return JSON.parse(a); } catch { return null; }
-  }
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
   if (typeof a === 'object') return a as any;
   return null;
 }
@@ -87,9 +85,12 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 export default function ProjectDetailPage() {
+  // --------- Plain values (no hooks) ----------
   const params = useParams();
-  const projectIdNum = Number((params as any)?.id);
+  const projectIdStr = (params as any)?.id;
+  const projectIdNum = Number(projectIdStr);
 
+  // --------- State hooks (always same order) ----------
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [proofs, setProofs] = useState<any[]>([]);
@@ -101,20 +102,7 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // helper: fetch proofs
-  async function refreshProofs() {
-    if (!Number.isFinite(projectIdNum)) return;
-    try {
-      const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
-      if (!r.ok) return;
-      const body = await r.json();
-      if (Array.isArray(body)) setProofs(body);
-    } catch {
-      // ignore
-    }
-  }
-
+  // --------- Effects (never conditional on render path) ----------
   // Initial fetch (project + bids + proofs)
   useEffect(() => {
     let active = true;
@@ -202,21 +190,26 @@ export default function ProjectDetailPage() {
 
   // Refresh proofs when opening Files tab
   useEffect(() => {
-    if (tab === 'files') refreshProofs();
+    let abort = false;
+    async function refresh() {
+      if (!Number.isFinite(projectIdNum)) return;
+      try {
+        const url = `${API_BASE}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+        const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+        if (!r.ok) return;
+        const body = await r.json();
+        if (!abort && Array.isArray(body)) setProofs(body);
+      } catch {}
+    }
+    if (tab === 'files') refresh();
+    return () => { abort = true; };
   }, [tab, projectIdNum]);
 
-  // Also refresh proofs on focus while in Files tab
-  useEffect(() => {
-    const onFocus = () => { if (tab === 'files') refreshProofs(); };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
-  }, [tab, projectIdNum]);
+  // --------- EARLY RETURNS (no hooks below) ----------
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
 
-  // ---- helpers used in render (no hooks below this line!) ----
+  // --------- Pure computations ----------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMs = parseMilestones(acceptedBid?.milestones);
 
@@ -237,7 +230,7 @@ export default function ProjectDetailPage() {
 
   const projectDocs = parseDocs(project?.docs);
 
-  const renderAttachment = (doc: any, idx: number) => {
+  function renderAttachment(doc: any, idx: number) {
     if (!doc) return null;
     const href = doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
     const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
@@ -262,9 +255,9 @@ export default function ProjectDetailPage() {
         <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
       </div>
     );
-  };
+  }
 
-  const renderAnalysis = (raw: any) => {
+  function renderAnalysis(raw: any) {
     const analysis = coerceAnalysis(raw);
     const isPending = !analysis || (analysis.status && analysis.status !== 'ready' && analysis.status !== 'error');
 
@@ -341,16 +334,13 @@ export default function ProjectDetailPage() {
         {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
       </div>
     );
-  };
-
-  // ---- EARLY RETURNS (no hooks below) ----
-  if (loading) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found</div>;
+  }
 
   // Derived values
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
+
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
     for (const b of bids) {
@@ -368,7 +358,7 @@ export default function ProjectDetailPage() {
     return valid[0] ? valid[0].toLocaleString() : '—';
   })();
 
-  // Build Timeline (synthesized)
+  // Timeline
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
@@ -384,7 +374,13 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Convert proofs → file cards
+  // Files: project + bids + proofs
+  const projectFiles = (parseDocs(project?.docs) || []).map((d) => ({ scope: 'Project', doc: d }));
+  const bidFiles = bids.flatMap((b) => {
+    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+
   function filesFromProofRecords(items: any[]) {
     const rows: Array<{ scope: string; doc: any }> = [];
     for (const p of items || []) {
@@ -394,7 +390,6 @@ export default function ProjectDetailPage() {
         .concat(p.files || [])
         .concat(p.urls || [])
         .concat(p.cids || []);
-
       for (const raw of list) {
         const url =
           (typeof raw === 'string' ? raw : raw?.url) ||
@@ -409,23 +404,11 @@ export default function ProjectDetailPage() {
     }
     return rows;
   }
-
-  // project docs
-  const projectFiles = (projectDocs || []).map((d) => ({ scope: 'Project', doc: d }));
-
-  // bid docs
-  const bidFiles = bids.flatMap((b) => {
-    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-  });
-
-  // proofs (from API)
   const proofFiles = filesFromProofRecords(proofs);
 
-  // All files for Files tab
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-  // (Optional) expose for browser debugging
+  // (optional) expose for quick browser check
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).__FILES = allFiles.map((x: any) => ({
@@ -436,6 +419,7 @@ export default function ProjectDetailPage() {
     }
   }, [projectIdNum, proofs, bids, project]);
 
+  // --------- Render ----------
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -485,7 +469,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Tab content */}
+      {/* Overview */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -544,6 +528,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Timeline */}
       {tab === 'timeline' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Activity Timeline</h3>
@@ -563,6 +548,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Bids */}
       {tab === 'bids' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">All Bids</h3>
@@ -595,6 +581,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Milestones */}
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
@@ -639,6 +626,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+      {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Files</h3>
@@ -685,7 +673,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-// Simple progress bar (Tailwind)
+// Simple progress bar
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
