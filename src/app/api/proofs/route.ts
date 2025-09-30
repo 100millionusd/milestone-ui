@@ -1,177 +1,118 @@
 // src/app/api/proofs/route.ts
-export const runtime = 'nodejs';
-export const revalidate = 0;
-export const dynamic = 'force-dynamic';
-
 import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma'; // your prisma client
 
-// Load prisma (relative path avoids tsconfig alias issues)
-let prisma: any = null;
-let prismaImportError: string | null = null;
-try {
-  const mod = await import('../../../lib/prisma');
-  prisma = (mod as any).prisma;
-} catch (e: any) {
-  prismaImportError = String(e?.message || e);
+// Helpers for gateway normalization (keep your existing ones if you already have)
+const GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${process.env.NEXT_PUBLIC_PINATA_GATEWAY.replace(/^https?:\/\//,'').replace(/\/+$/,'')}/ipfs`
+    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
+        ? process.env.NEXT_PUBLIC_IPFS_GATEWAY.replace(/\/+$/,'')
+        : 'https://gateway.pinata.cloud/ipfs');
+
+function normalizeFiles(input: any[]): { url?: string|null; cid?: string|null; name?: string|null; path?: string|null }[] {
+  return (Array.isArray(input) ? input : []).map((f: any) => {
+    if (typeof f === 'string') {
+      // allow raw url or raw CID
+      const isCid = /^[A-Za-z0-9]+$/.test(f) && !/^https?:\/\//i.test(f);
+      return isCid ? { cid: f, url: `${GATEWAY}/${f}`, name: f } : { url: f, name: decodeURIComponent(f.split('/').pop() || 'file') };
+    }
+    const cid = f?.cid || null;
+    const url = f?.url || (cid ? `${GATEWAY}/${cid}` : null);
+    const name = f?.name ?? (url ? decodeURIComponent(url.split('/').pop() || 'file') : cid || null);
+    const path = f?.path || null;
+    return { url, cid, name, path };
+  });
 }
 
-function maskDbUrl(url?: string) {
-  if (!url) return undefined;
-  try {
-    const u = new URL(url);
-    const host = u.hostname;
-    const db = (u.pathname || '').replace(/^\//, '');
-    return `${u.protocol}//${host}/${db}?sslmode=${u.searchParams.get('sslmode') || ''}`;
-  } catch { return 'unparseable'; }
-}
-
+// GET (you already have something like this)
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const pidRaw = url.searchParams.get('proposalId');
-  const proposalId = Number(pidRaw);
-  const diag = url.searchParams.get('diag') === '1';
-
-  if (!pidRaw || !Number.isFinite(proposalId)) {
-    return NextResponse.json(
-      { error: 'bad_request', details: 'proposalId is required and must be a number' },
-      { status: 400 }
-    );
-  }
-
-  if (!prisma) {
-    return NextResponse.json({
-      error: 'prisma_import_failed',
-      message: prismaImportError || 'unknown import error',
-      env: {
-        has_DATABASE_URL: !!process.env.DATABASE_URL,
-        DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
-      },
-      hints: [
-        'Ensure src/lib/prisma.ts exists and exports `prisma`.',
-        'Ensure @prisma/client is installed and `npx prisma generate` ran.',
-      ],
-    }, { status: 500 });
-  }
-
-  if (diag) {
-    let ping: any = null, pingErr: string | null = null, version: any = null;
-    try { version = (await import('@prisma/client')).Prisma?.prismaVersion; } catch {}
-    try { ping = await prisma.$queryRaw`SELECT 1::int AS x`; } catch (e: any) { pingErr = String(e?.message || e); }
-    return NextResponse.json({
-      ok: true,
-      node: process.versions.node,
-      env: {
-        has_DATABASE_URL: !!process.env.DATABASE_URL,
-        DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
-      },
-      prismaVersion: version,
-      pingResult: ping,
-      pingError: pingErr,
-    }, { headers: { 'cache-control': 'no-store' } });
-  }
-
   try {
-    const miRaw = url.searchParams.get('milestoneIndex');
-    const hasMi = miRaw !== null && miRaw !== '';
-    const mi = hasMi ? Number(miRaw) : null;
-    if (hasMi && !Number.isFinite(mi)) {
-      return NextResponse.json(
-        { error: 'bad_request', details: 'milestoneIndex must be a number' },
-        { status: 400 }
-      );
+    const { searchParams } = new URL(req.url);
+    const proposalId = Number(searchParams.get('proposalId'));
+    if (!Number.isFinite(proposalId)) {
+      return NextResponse.json({ error: 'bad_request', details: 'proposalId is required and must be a number' }, { status: 400 });
     }
 
-    const proofs = await prisma.proof.findMany({
-      where: { proposalId, ...(hasMi ? { milestoneIndex: mi! } : {}) },
+    const rows = await prisma.proof.findMany({
+      where: { proposalId },
       orderBy: [{ milestoneIndex: 'asc' }, { createdAt: 'asc' }],
       include: { files: true },
     });
 
-    const payload = proofs.map((p: any) => ({
+    const out = rows.map(p => ({
       proposalId: p.proposalId,
-      bidId: p.bidId ?? undefined,
-      milestoneIndex: p.milestoneIndex ?? undefined,
-      note: p.note ?? undefined,
-      files: (p.files || []).map((f: any) => ({
-        url: f.url ?? undefined,
-        cid: f.cid ?? undefined,
-        name: f.name ?? undefined,
-        path: f.path ?? undefined,
+      milestoneIndex: p.milestoneIndex,
+      note: p.note || undefined,
+      files: (p.files || []).map(f => ({
+        url: f.url ?? (f.cid ? `${GATEWAY}/${f.cid}` : undefined),
+        cid: f.cid || undefined,
+        name: f.name || undefined,
       })),
     }));
-
-    return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } });
-  } catch (err: any) {
-    return NextResponse.json({ error: 'db_error', message: String(err?.message || err) }, { status: 500 });
+    return NextResponse.json(out);
+  } catch (e: any) {
+    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
   }
 }
 
+// ✅ POST that actually saves to DB
 export async function POST(req: Request) {
-  if (!prisma) {
-    return NextResponse.json({
-      error: 'prisma_import_failed',
-      message: prismaImportError || 'unknown import error',
-      env: {
-        has_DATABASE_URL: !!process.env.DATABASE_URL,
-        DATABASE_URL_masked: maskDbUrl(process.env.DATABASE_URL),
-      },
-    }, { status: 500 });
-  }
-
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const proposalId = Number(body.proposalId);
+    const milestoneIndex = Number(body.milestoneIndex);
+    const note = typeof body.note === 'string' ? body.note : null;
+    const filesInput = Array.isArray(body.files) ? body.files : [];
 
-    const proposalId = Number(body?.proposalId);
-    const milestoneIndex = Number(body?.milestoneIndex); // zero-based (M1=0, M2=1)
-    const bidId = body?.bidId != null ? Number(body.bidId) : null;
-    const note = typeof body?.note === 'string' ? body.note : null;
-    const createdBy = typeof body?.createdBy === 'string' ? body.createdBy : 'vendor';
-
-    if (!Number.isFinite(proposalId)) {
-      return NextResponse.json({ error: 'bad_request', details: 'proposalId (number) is required' }, { status: 400 });
-    }
-    if (!Number.isFinite(milestoneIndex)) {
-      return NextResponse.json({ error: 'bad_request', details: 'milestoneIndex (number) is required' }, { status: 400 });
+    if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
+      return NextResponse.json({ error: 'bad_request', details: 'proposalId and milestoneIndex (>=0) are required' }, { status: 400 });
     }
 
-    const filesInput = Array.isArray(body?.files) ? body.files : [];
-    const filesCreate = filesInput
-      .filter((f: any) => f && (f.url || f.cid || f.name || f.path))
-      .map((f: any) => ({
-        url:  typeof f.url  === 'string' ? f.url  : null,
-        cid:  typeof f.cid  === 'string' ? f.cid  : null,
-        name: typeof f.name === 'string' ? f.name : null,
-        path: typeof f.path === 'string' ? f.path : null,
-      }));
+    const files = normalizeFiles(filesInput);
 
-    const created = await prisma.proof.create({
-      data: {
-        proposalId,
-        milestoneIndex,
-        bidId: Number.isFinite(bidId as any) ? bidId : null,
-        note,
-        createdBy,
-        files: filesCreate.length ? { create: filesCreate } : undefined,
-      },
+    // Upsert by (proposalId, milestoneIndex). If you don’t have a unique constraint,
+    // you can do a findFirst+create or create a new record each time.
+    // Here we’ll create if not exists, else append files.
+    const existing = await prisma.proof.findFirst({
+      where: { proposalId, milestoneIndex },
       include: { files: true },
     });
 
-    // Normalize response shape to match GET
-    const payload = {
-      proposalId: created.proposalId,
-      bidId: created.bidId ?? undefined,
-      milestoneIndex: created.milestoneIndex ?? undefined,
-      note: created.note ?? undefined,
-      files: (created.files || []).map((f: any) => ({
-        url: f.url ?? undefined,
-        cid: f.cid ?? undefined,
-        name: f.name ?? undefined,
-        path: f.path ?? undefined,
-      })),
-    };
+    let saved;
+    if (!existing) {
+      saved = await prisma.proof.create({
+        data: {
+          proposalId,
+          milestoneIndex,
+          note,
+          files: { create: files },
+        },
+        include: { files: true },
+      });
+    } else {
+      // append files; update note if provided
+      saved = await prisma.proof.update({
+        where: { id: existing.id },
+        data: {
+          note: note ?? existing.note,
+          files: { create: files },
+        },
+        include: { files: true },
+      });
+    }
 
-    return NextResponse.json(payload, { status: 201, headers: { 'cache-control': 'no-store' } });
-  } catch (err: any) {
-    return NextResponse.json({ error: 'db_error', message: String(err?.message || err) }, { status: 500 });
+    return NextResponse.json({
+      proposalId: saved.proposalId,
+      milestoneIndex: saved.milestoneIndex,
+      note: saved.note || undefined,
+      files: (saved.files || []).map(f => ({
+        url: f.url ?? (f.cid ? `${GATEWAY}/${f.cid}` : undefined),
+        cid: f.cid || undefined,
+        name: f.name || undefined,
+      })),
+    }, { status: 201 });
+  } catch (e: any) {
+    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
   }
 }
