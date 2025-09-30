@@ -1,36 +1,30 @@
+// src/app/api/proofs/route.ts
+export const runtime = 'nodejs';         // ensure Node runtime (not Edge) on Netlify
+export const revalidate = 0;             // no ISR
+export const dynamic = 'force-dynamic';  // always dynamic
+
 import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-type ProofFile = { url?: string; cid?: string; name?: string; path?: string };
-type ProofRecord = {
-  proposalId: number;
-  bidId?: number | null;
-  milestoneIndex?: number | null; // 0-based
-  files: ProofFile[];
-  note?: string | null;
-};
+type FileInput = { url?: string; cid?: string; name?: string; path?: string } | string;
 
-// 🔧 QUICK BOOTSTRAP: put sample rows here so it works today.
-// Replace with DB code in Step 3.
-const BOOTSTRAP: Record<number, ProofRecord[]> = {
-  110: [
-    {
-      proposalId: 110,
-      milestoneIndex: 0,
-      files: [
-        {
-          url: 'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmXPxvvQSy19QTzNvoPtZc1P7SdCqEuMuNkBs9y4A94n6L',
-          name: 'image (10).jpg',
-        },
-        {
-          url: 'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmRqJGEmMdTjRNxyqWfj7TxymGkM8zNuKthdo4aa5ydgz9',
-          name: 'image (11).jpg',
-        },
-      ],
-      note: 'M1 proof upload',
-    },
-  ],
-};
+function normalizeFileInput(x: FileInput) {
+  if (typeof x === 'string') {
+    // If it's a bare string, try to guess if it's a URL/CID and keep as url
+    return { url: x };
+  }
+  const o = x || {};
+  return {
+    url: o.url ?? undefined,
+    cid: o.cid ?? undefined,
+    name: o.name ?? undefined,
+    path: o.path ?? undefined,
+  };
+}
 
+/** GET /api/proofs?proposalId=110[&milestoneIndex=0]
+ *  Returns: Array<{ proposalId, bidId?, milestoneIndex?, note?, files: {url?,cid?,name?,path?}[] }>
+ */
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -43,25 +37,129 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'proposalId must be a number' }, { status: 400 });
     }
 
-    // Optional: filter by milestoneIndex if provided
     const miRaw = url.searchParams.get('milestoneIndex');
-    const mi = miRaw === null ? null : Number(miRaw);
-    const hasMi = miRaw !== null && Number.isFinite(mi);
+    const hasMi = miRaw !== null && miRaw !== '';
+    const mi = hasMi ? Number(miRaw) : null;
+    if (hasMi && !Number.isFinite(mi)) {
+      return NextResponse.json({ error: 'milestoneIndex must be a number' }, { status: 400 });
+    }
 
-    // TODO (optional): check auth/role here using cookies/headers if needed.
+    // TODO (optional): auth/role gating here
 
-    const rows = (BOOTSTRAP[proposalId] || []).filter(r =>
-      hasMi ? r.milestoneIndex === mi : true
-    );
+    const proofs = await prisma.proof.findMany({
+      where: { proposalId, ...(hasMi ? { milestoneIndex: mi! } : {}) },
+      orderBy: [{ milestoneIndex: 'asc' }, { createdAt: 'asc' }],
+      include: { files: true },
+    });
 
-    // Always return an array (UI expects it)
-    return NextResponse.json(rows, { headers: { 'cache-control': 'no-store' } });
+    // Normalize to frontend shape
+    const payload = proofs.map((p) => ({
+      proposalId: p.proposalId,
+      bidId: p.bidId ?? undefined,
+      milestoneIndex: p.milestoneIndex ?? undefined,
+      note: p.note ?? undefined,
+      files: p.files.map((f) => ({
+        url: f.url ?? undefined,
+        cid: f.cid ?? undefined,
+        name: f.name ?? undefined,
+        path: f.path ?? undefined,
+      })),
+    }));
+
+    return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (err: any) {
+    console.error('GET /api/proofs error:', err);
     return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
   }
 }
 
-// Optional: reject other verbs
-export function POST() {
+/** POST /api/proofs
+ *  Body:
+ *  {
+ *    proposalId: number,
+ *    bidId?: number,
+ *    milestoneIndex?: number,   // 0-based
+ *    note?: string,
+ *    createdBy?: string,        // wallet/user id
+ *    files: Array<{url?, cid?, name?, path?} | string>
+ *  }
+ *  Returns: created Proof with files
+ */
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const proposalId = Number(body?.proposalId);
+    if (!Number.isFinite(proposalId)) {
+      return NextResponse.json({ error: 'proposalId required (number)' }, { status: 400 });
+    }
+
+    const bidId = body?.bidId == null ? null : Number(body.bidId);
+    if (body?.bidId != null && !Number.isFinite(bidId)) {
+      return NextResponse.json({ error: 'bidId must be a number if provided' }, { status: 400 });
+    }
+
+    const milestoneIndex =
+      body?.milestoneIndex == null ? null : Number(body.milestoneIndex);
+    if (body?.milestoneIndex != null && !Number.isFinite(milestoneIndex)) {
+      return NextResponse.json({ error: 'milestoneIndex must be a number if provided' }, { status: 400 });
+    }
+
+    const filesIn = Array.isArray(body?.files) ? body.files as FileInput[] : [];
+    if (filesIn.length === 0) {
+      return NextResponse.json({ error: 'files[] required' }, { status: 400 });
+    }
+
+    const filesData = filesIn.map(normalizeFileInput).map((f) => ({
+      url: f.url ?? null,
+      cid: f.cid ?? null,
+      name: f.name ?? null,
+      path: f.path ?? null,
+    }));
+
+    const created = await prisma.proof.create({
+      data: {
+        proposalId,
+        bidId: bidId,
+        milestoneIndex: milestoneIndex,
+        note: body?.note ?? null,
+        createdBy: body?.createdBy ?? null,
+        files: { create: filesData },
+      },
+      include: { files: true },
+    });
+
+    // Respond in the same normalized shape as GET (optional)
+    const payload = {
+      proposalId: created.proposalId,
+      bidId: created.bidId ?? undefined,
+      milestoneIndex: created.milestoneIndex ?? undefined,
+      note: created.note ?? undefined,
+      files: created.files.map((f) => ({
+        url: f.url ?? undefined,
+        cid: f.cid ?? undefined,
+        name: f.name ?? undefined,
+        path: f.path ?? undefined,
+      })),
+    };
+
+    return NextResponse.json(payload, { status: 201 });
+  } catch (err: any) {
+    console.error('POST /api/proofs error:', err);
+    return NextResponse.json({ error: err?.message || 'server_error' }, { status: 500 });
+  }
+}
+
+/** Optional hard block for other verbs */
+export function PUT() {
   return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
+}
+export function PATCH() {
+  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
+}
+export function DELETE() {
+  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
+}
+export function OPTIONS() {
+  // same-origin; no special CORS needed, but respond cleanly
+  return NextResponse.json({}, { status: 204 });
 }

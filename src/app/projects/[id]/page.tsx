@@ -19,89 +19,6 @@ const API_BASE =
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
-/** >>>>>>>>>>>>>> TEMP emergency override: make the two image CIDs appear for project 110 now. REMOVE once backend proofs are wired. */
-const MANUAL_PROOF_CIDS: Record<number, string[]> = {
-  110: [
-    'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmXPxvvQSy19QTzNvoPtZc1P7SdCqEuMuNkBs9y4A94n6L',
-    'https://sapphire-given-snake-741.mypinata.cloud/ipfs/QmRqJGEmMdTjRNxyqWfj7TxymGkM8zNuKthdo4aa5ydgz9',
-  ],
-};
-/** <<<<<<<<<<<<<< TEMP emergency override */
-
-type AnalysisV2 = {
-  status?: 'ready' | 'error' | string;
-  summary?: string;
-  fit?: 'low' | 'medium' | 'high';
-  risks?: string[];
-  milestoneNotes?: string[];
-  confidence?: number;
-  pdfUsed?: boolean;
-  pdfDebug?: any;
-};
-type AnalysisV1 = {
-  verdict?: string;
-  reasoning?: string;
-  suggestions?: string[];
-  status?: 'ready' | 'error' | string;
-};
-function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
-  if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
-  return a;
-}
-
-type Milestone = {
-  name?: string;
-  amount?: number;
-  dueDate?: string;
-  completed?: boolean;
-  completionDate?: string | null;
-  paymentTxHash?: string | null;
-  paymentDate?: string | null;
-  proof?: string;
-  proofCid?: string;
-  folderCid?: string;
-  cid?: string;
-  files?: any[] | string;
-  attachments?: any;
-  images?: any;
-  docs?: any;
-  [k: string]: any;
-};
-type ProofRecord = {
-  proposalId?: number;
-  bidId?: number;
-  milestoneIndex?: number;
-  files?: Array<{ url?: string; cid?: string; name?: string; path?: string } | string>;
-  urls?: string[];
-  cids?: string[];
-  note?: string;
-  [k: string]: any;
-};
-
-function parseMilestones(raw: unknown): Milestone[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw as Milestone[];
-  try { const arr = JSON.parse(String(raw)); return Array.isArray(arr) ? (arr as Milestone[]) : []; }
-  catch { return []; }
-}
-function parseDocs(raw: unknown): any[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
-    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
-  }
-  return [];
-}
-function fmt(dt?: string | null) {
-  if (!dt) return '';
-  const d = new Date(dt);
-  return isNaN(d.getTime()) ? '' : d.toLocaleString();
-}
-function classNames(...xs: (string | false | null | undefined)[]) {
-  return xs.filter(Boolean).join(' ');
-}
-
 /* ------------------------- Robust IPFS/URL helpers ------------------------- */
 
 const CID_ONLY_RE = /^(Qm[1-9A-Za-z]{44,}|bafy[1-9A-Za-z]{20,})$/i;
@@ -489,14 +406,6 @@ export default function ProjectDetailPage() {
     return rows;
   };
 
-  // TEMP manual fallback for project 110 (your two image CIDs)
-  const filesManual = (MANUAL_PROOF_CIDS[projectIdNum] || []).map((url) => ({
-    scope: 'Milestone M1 (Proofs — manual)',
-    doc: { url, name: url.split('/').pop() || 'image' },
-  }));
-
-  const projectDocs = parseDocs(project?.docs);
-
   // helpers for dedupe
   const asHref = (d: any) => hrefForDoc(normalizeDoc(d));
   const dedupeByHref = (rows: Array<{ scope: string; doc: any }>) => {
@@ -522,13 +431,12 @@ export default function ProjectDetailPage() {
   const filesFromProofs = filesFromProofRecords(proofs);
 
   const allFiles = dedupeByHref([
-    ...filesProject,
-    ...filesBidDocs,
-    ...filesMilestones,
-    ...filesBidLevel,
-    ...filesFromProofs,
-    ...filesManual, // << ensure your two images show now
-  ]);
+  ...filesProject,
+  ...filesBidDocs,
+  ...filesMilestones,
+  ...filesBidLevel,
+  ...filesFromProofs,
+]);
 
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles.map(({ doc }) => hrefForDoc(normalizeDoc(doc))).filter(Boolean);
