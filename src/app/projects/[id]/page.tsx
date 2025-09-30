@@ -7,21 +7,17 @@ import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 
-// ---------------- Consts ----------------
+/** ----------------------------- Config ----------------------------- */
 const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  (process as any)?.env?.NEXT_PUBLIC_PINATA_GATEWAY ||
+  (process as any)?.env?.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://gateway.pinata.cloud/ipfs';
-
-const PROOFS_ENDPOINT =
-  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
-  (process.env.NEXT_PUBLIC_API_BASE_URL
-    ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
-    : '/api/proofs');
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
-// ---------------- Types -----------------
+/** -------------------------- Helper Types -------------------------- */
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin';
+
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -49,35 +45,25 @@ type Milestone = {
   paymentTxHash?: string | null;
   paymentDate?: string | null;
   proof?: string;
-  files?: Array<{ url?: string; cid?: string; name?: string } | string>;
 };
 
-type ProofFile = { url?: string; cid?: string; name?: string } | string;
-type ProofRecord = {
+type ProofRow = {
   proposalId: number;
-  milestoneIndex?: number; // zero-based
-  note?: string;
-  files?: ProofFile[];
-  urls?: string[];
-  cids?: string[];
+  milestoneIndex: number; // zero-based
+  note?: string | null;
+  files?: Array<{ url?: string | null; cid?: string | null; name?: string | null; path?: string | null }> | null;
 };
 
-type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin';
-
-// -------------- Helpers (no hooks here) --------------
-function classNames(...xs: (string | false | null | undefined)[]) {
-  return xs.filter(Boolean).join(' ');
-}
-
-function fmt(dt?: string | null) {
-  if (!dt) return '';
-  const d = new Date(dt);
-  return isNaN(d.getTime()) ? '' : d.toLocaleString();
-}
-
+/** --------------------------- Pure Helpers ------------------------- */
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try {
+      return JSON.parse(a);
+    } catch {
+      return null;
+    }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
@@ -97,121 +83,144 @@ function parseDocs(raw: unknown): any[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
-    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
   }
   return [];
 }
 
-function filesFromProofRecords(items: ProofRecord[]) {
-  const rows: Array<{ scope: string; doc: any }> = [];
-  for (const p of items || []) {
-    const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
-    const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
-    const list: ProofFile[] = []
-      .concat(p.files || [])
-      .concat((p.urls || []) as ProofFile[])
-      .concat((p.cids || []) as ProofFile[]);
-    for (const raw of list) {
-      const url =
-        (typeof raw === 'string' ? raw : raw?.url) ||
-        (typeof raw === 'object' && raw?.cid ? `${PINATA_GATEWAY}/${raw.cid}` : undefined);
-      if (!url) continue;
-      const name =
-        (typeof raw === 'object' && raw?.name) ||
-        (typeof raw === 'string' ? decodeURIComponent((raw.split('/').pop() || '').trim() || 'file') : 'file') ||
-        'file';
-      rows.push({ scope, doc: { url, name } });
-    }
-  }
-  return rows;
+function fmt(dt?: string | null) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
-// -------------- Component ----------------
-export default function ProjectDetailPage() {
-  // ---- route param (plain) ----
-  const params = useParams();
-  const projectIdParam = (params as any)?.id;
-  const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
+function cx(...xs: Array<string | false | null | undefined>) {
+  return xs.filter(Boolean).join(' ');
+}
 
-  // ---- hooks (fixed order; nothing conditional) ----
+const normalizeRole = (role: unknown): 'admin' | 'vendor' | 'guest' => {
+  const r = String(role ?? '').toLowerCase();
+  if (r.includes('admin')) return 'admin';
+  if (r.includes('vendor')) return 'vendor';
+  return 'guest';
+};
+
+const isAdminUser = (u: any): boolean => {
+  if (!u) return false;
+  if (u.isAdmin === true) return true;
+  if (typeof u.role === 'string' && u.role.toLowerCase().includes('admin')) return true;
+  if (typeof u.roleName === 'string' && u.roleName.toLowerCase().includes('admin')) return true;
+  if (u.roleId === 1) return true;
+  return false;
+};
+
+function buildHrefFromDoc(doc: any): string {
+  const url = doc?.url;
+  const cid = doc?.cid;
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) return url;
+  if (typeof cid === 'string' && cid) return `${PINATA_GATEWAY}/${cid}`;
+  return '#';
+}
+
+function isImageLikeName(nameOrUrl: string | undefined): boolean {
+  if (!nameOrUrl) return false;
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(nameOrUrl);
+}
+
+/** ----------------------------- Page ------------------------------- */
+export default function ProjectDetailPage() {
+  const params = useParams();
+  const projectIdNum = Number((params as any)?.id);
+
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
-  const [proofs, setProofs] = useState<ProofRecord[]>([]);
-  const [loadingProject, setLoadingProject] = useState(true);
-  const [loadingProofs, setLoadingProofs] = useState(true);
-  const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
+  const [proofs, setProofs] = useState<ProofRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [me, setMe] = useState<{ address?: string; role?: 'admin' | 'vendor' | 'guest' } | any>({ role: 'guest' });
   const [tab, setTab] = useState<TabKey>('overview');
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
-
-  // Initial fetch: project + bids
-  useEffect(() => {
-    let alive = true;
-    async function run() {
-      if (!Number.isFinite(projectIdNum)) return;
-      try {
-        const [p, b] = await Promise.all([ getProposal(projectIdNum), getBids(projectIdNum) ]);
-        if (!alive) return;
-        setProject(p);
-        setBids(b);
-        setErrorMsg(null);
-      } catch (e: any) {
-        if (!alive) return;
-        setErrorMsg(e?.message || 'Failed to load project');
-      } finally {
-        if (alive) setLoadingProject(false);
-      }
-    }
-    run();
-    return () => { alive = false; };
-  }, [projectIdNum]);
-
-  // Auth (for Admin tab & Edit btn)
-  useEffect(() => {
-    getAuthRole().then(setMe).catch(() => {});
-  }, []);
-
-  // Fetch proofs
-  const refreshProofs = async () => {
-    if (!Number.isFinite(projectIdNum)) return;
-    setLoadingProofs(true);
-    try {
-      const url = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
-      if (!r.ok) throw new Error(`Proofs HTTP ${r.status}`);
-      const body = await r.json();
-      setProofs(Array.isArray(body) ? (body as ProofRecord[]) : []);
-    } catch (e: any) {
-      console.warn('/proofs load failed:', e?.message || e);
-      setProofs([]);
-    } finally {
-      setLoadingProofs(false);
+  const clearPoll = () => {
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current);
+      pollTimer.current = null;
     }
   };
 
+  /** -------------------------- Initial fetch -------------------------- */
   useEffect(() => {
     let alive = true;
+    if (!Number.isFinite(projectIdNum)) return;
     (async () => {
-      if (!Number.isFinite(projectIdNum)) return;
-      try { await refreshProofs(); } catch {}
-      if (!alive) return;
+      try {
+        const [projectData, bidsData] = await Promise.all([
+          getProposal(projectIdNum),
+          getBids(projectIdNum),
+        ]);
+        if (!alive) return;
+        setProject(projectData);
+        setBids(bidsData);
+      } catch (e) {
+        console.error('Error fetching project/bids:', e);
+      } finally {
+        if (alive) setLoading(false);
+      }
     })();
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      alive = false;
+    };
   }, [projectIdNum]);
 
-  // Refresh proofs when opening Files tab
+  /** --------------------------- Auth (role) --------------------------- */
   useEffect(() => {
-    if (tab === 'files') { refreshProofs(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+    (async () => {
+      try {
+        const u = await getAuthRole();
+        const asAdmin = isAdminUser(u);
+        const normalized = { ...u, role: asAdmin ? 'admin' : normalizeRole(u?.role) };
+        setMe(normalized);
+        if (typeof window !== 'undefined') (window as any).__ME = { raw: u, normalized };
+      } catch {
+        // guest
+      }
+    })();
+  }, []);
 
-  // Poll bids while AI analysis runs
+  /** ----------------------- Fetch proofs for project ------------------ */
+  useEffect(() => {
+    let alive = true;
+    if (!Number.isFinite(projectIdNum)) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/proofs?proposalId=${encodeURIComponent(String(projectIdNum))}`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`proofs ${res.status}`);
+        const data = (await res.json()) as ProofRow[];
+        if (!alive) return;
+        setProofs(Array.isArray(data) ? data : []);
+        if (typeof window !== 'undefined') (window as any).__PROOFS = data;
+      } catch (e) {
+        console.warn('/api/proofs failed', e);
+        if (alive) setProofs([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [projectIdNum]);
+
+  /** -------- Poll bids while analyses run (no conditional hooks) ------ */
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
+    let stopped = false;
     const start = Date.now();
 
     const needsMore = (rows: any[]) =>
@@ -223,6 +232,7 @@ export default function ProjectDetailPage() {
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
+        if (stopped) return;
         setBids(next);
         if (Date.now() - start < 90_000 && needsMore(next)) {
           pollTimer.current = setTimeout(tick, 1500);
@@ -249,45 +259,44 @@ export default function ProjectDetailPage() {
         pollTimer.current = setTimeout(tick, 0);
       }
     };
+
     window.addEventListener('visibilitychange', onFocus);
     window.addEventListener('focus', onFocus);
     return () => {
+      stopped = true;
       clearPoll();
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
   }, [projectIdNum, bids]);
 
-  // Expose files for console debug
-  useEffect(() => {
-    if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
-  }, [proofs]);
+  /** ---------------------- Derived values (variables) ------------------ */
+  if (loading) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found</div>;
 
-  // -------- Early returns ----------
-  if (loadingProject) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
-
-  // -------- Derived -----------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
-  const projectDocs = parseDocs(project?.docs) || [];
+  const acceptedMs = parseMilestones(acceptedBid?.milestones);
+
+  const isProjectCompleted = (proj: any): boolean => {
+    if (!proj) return false;
+    if (proj.status === 'completed') return true;
+    if (!acceptedBid) return false;
+    if (acceptedMs.length === 0) return false;
+    return acceptedMs.every((m) => m?.completed === true || !!m?.paymentTxHash);
+  };
+  const completed = isProjectCompleted(project);
 
   const canEdit =
-    me?.role === 'admin' ||
+    isAdminUser(me) ||
     (!!project?.ownerWallet &&
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
-  const isCompleted = (() => {
-    if (project.status === 'completed') return true;
-    if (!acceptedBid) return false;
-    if (acceptedMilestones.length === 0) return false;
-    return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
-  })();
+  const projectDocs = parseDocs(project?.docs);
 
-  const msTotal = acceptedMilestones.length;
-  const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
+  const msTotal = acceptedMs.length;
+  const msCompleted = acceptedMs.filter((m) => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMs.filter((m) => m?.paymentTxHash).length;
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
@@ -309,139 +318,62 @@ export default function ProjectDetailPage() {
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
-  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  if (project.updatedAt && project.updatedAt !== project.createdAt)
+    timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
   for (const b of bids) {
-    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
-    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    if (b.createdAt)
+      timeline.push({
+        at: b.createdAt,
+        type: 'bid_submitted',
+        label: `Bid submitted by ${b.vendorName}`,
+        meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}`,
+      });
+    if (b.status === 'approved' && b.updatedAt)
+      timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
     const arr = parseMilestones(b.milestones);
     arr.forEach((m, idx) => {
-      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined });
+      if (m.completionDate)
+        timeline.push({
+          at: m.completionDate,
+          type: 'milestone_completed',
+          label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})`,
+        });
+      if (m.paymentDate)
+        timeline.push({
+          at: m.paymentDate,
+          type: 'milestone_paid',
+          label: `Milestone ${idx + 1} paid`,
+          meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined,
+        });
     });
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Files (Project + Bid + Proofs)
-  const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
-  const bidFiles = bids.flatMap((b) => {
-    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-  });
-  const proofFiles = filesFromProofRecords(proofs);
-  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+  // From proofs API (per milestone)
+  const proofFiles = proofs.flatMap((p) =>
+    (p.files || []).map((f) => ({
+      scope: `Milestone ${p.milestoneIndex + 1} proof`,
+      doc: { url: f?.url ?? (f?.cid ? `${PINATA_GATEWAY}/${f.cid}` : null), name: f?.name || f?.path || undefined },
+    })),
+  );
+
+  // Compose all files: Project docs + Bid docs + Proofs
+  const allFiles =
+    [
+      ...(projectDocs || []).map((d) => ({ scope: 'Project', doc: d })),
+      ...bids.flatMap((b) => {
+        const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+        return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+      }),
+      ...proofFiles,
+    ].filter((f) => !!buildHrefFromDoc(f.doc) && buildHrefFromDoc(f.doc) !== '#') || [];
 
   if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles.map((x) => ({
-      scope: x.scope,
-      href: x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null),
-      name: x.doc?.name || null,
-    }));
+    (window as any).__BIDS = bids;
+    (window as any).__FILES = allFiles.map((f) => ({ scope: f.scope, href: buildHrefFromDoc(f.doc) }));
   }
 
-  // -------------- small render helpers (no hooks) --------------
-  function renderAttachment(doc: any, key: number) {
-    if (!doc) return null;
-    const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
-    if (isImage) {
-      return (
-        <button
-          key={key}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-          title={doc.name || 'image'}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-        </button>
-      );
-    }
-    return (
-      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate" title={doc.name}>{doc.name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-      </div>
-    );
-  }
-
-  function renderAnalysis(raw: any) {
-    const a = coerceAnalysis(raw);
-    const pending = !a || (a.status && a.status !== 'ready' && a.status !== 'error');
-    if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
-    if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-    const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
-    const isV1 = a.verdict || a.reasoning || a.suggestions;
-
-    return (
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
-
-        {isV2 && (
-          <>
-            {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
-            <div className="text-sm">
-              {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
-              {typeof a.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
-                </>
-              )}
-            </div>
-            {!!a.risks?.length && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Risks</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                </ul>
-              </div>
-            )}
-            {!!a.milestoneNotes?.length && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Milestone Notes</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                </ul>
-              </div>
-            )}
-            {typeof a.pdfUsed === 'boolean' && (
-              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
-                <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
-                {a.pdfDebug?.url && (
-                  <div>
-                    File:{' '}
-                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                      {a.pdfDebug.name || 'open'}
-                    </a>
-                  </div>
-                )}
-                {a.pdfDebug?.bytes !== undefined && <div>Bytes: {a.pdfDebug.bytes}</div>}
-                {a.pdfDebug?.first5 && <div>First bytes: {a.pdfDebug.first5}</div>}
-                {a.pdfDebug?.reason && <div>Reason: {a.pdfDebug.reason}</div>}
-                {a.pdfDebug?.error && <div className="text-rose-600">Error: {a.pdfDebug.error}</div>}
-              </div>
-            )}
-          </>
-        )}
-
-        {isV1 && (
-          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
-            {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
-            {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
-            {!!a.suggestions?.length && (
-              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
-      </div>
-    );
-  }
-
-  // ----------------- Render -----------------
+  /** ------------------------------ Render ----------------------------- */
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -454,26 +386,32 @@ export default function ProjectDetailPage() {
                 Edit
               </Link>
             )}
-            <span className={classNames(
-              'px-2 py-0.5 text-xs font-medium rounded-full',
-              isCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-            )}>
-              {isCompleted ? 'Completed' : 'Active'}
+            <span
+              className={cx(
+                'px-2 py-0.5 text-xs font-medium rounded-full',
+                completed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800',
+              )}
+            >
+              {completed ? 'Completed' : 'Active'}
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
           <div className="flex flex-wrap gap-4 mt-2 text-sm">
-            <span>Budget: <b>{currency.format(Number(project.amountUSD || 0))}</b></span>
-            <span>Last activity: <b>{lastActivity}</b></span>
-            {acceptedBid && (<span>Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b></span>)}
+            <span>
+              Budget: <b>{currency.format(Number(project.amountUSD || 0))}</b>
+            </span>
+            <span>
+              Last activity: <b>{lastActivity}</b>
+            </span>
+            {acceptedBid && (
+              <span>
+                Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b>
+              </span>
+            )}
           </div>
         </div>
-
-        {!isCompleted && (
-          <Link
-            href={`/bids/new?proposalId=${projectIdNum}`}
-            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-          >
+        {!completed && (
+          <Link href={`/bids/new?proposalId=${projectIdNum}`} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">
             Submit Bid
           </Link>
         )}
@@ -487,7 +425,7 @@ export default function ProjectDetailPage() {
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
           <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
-          {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
+          {isAdminUser(me) && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
         </div>
       </div>
 
@@ -510,11 +448,14 @@ export default function ProjectDetailPage() {
               <h4 className="font-semibold mb-2">Latest activity</h4>
               {timeline.length ? (
                 <ul className="text-sm space-y-1">
-                  {timeline.slice(-5).reverse().map((e, i) => (
-                    <li key={i}>
-                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
-                    </li>
-                  ))}
+                  {timeline
+                    .slice(-5)
+                    .reverse()
+                    .map((e, i) => (
+                      <li key={i}>
+                        <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
+                      </li>
+                    ))}
                 </ul>
               ) : (
                 <p className="text-sm text-gray-500">No activity yet.</p>
@@ -532,20 +473,24 @@ export default function ProjectDetailPage() {
                       <div className="font-medium">{b.vendorName}</div>
                       <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
                     </div>
-                    <span className={classNames(
-                      'px-2 py-1 rounded text-xs',
-                      b.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : b.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    )}>
+                    <span
+                      className={cx(
+                        'px-2 py-1 rounded text-xs',
+                        b.status === 'approved'
+                          ? 'bg-green-100 text-green-800'
+                          : b.status === 'rejected'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800',
+                      )}
+                    >
                       {b.status}
                     </span>
                   </li>
                 ))}
               </ul>
-            ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+            ) : (
+              <p className="text-sm text-gray-500">No bids yet.</p>
+            )}
           </div>
         </section>
       )}
@@ -561,12 +506,16 @@ export default function ProjectDetailPage() {
                   <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
                   <div className="text-sm">
                     <div className="font-medium">{e.label}</div>
-                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+                    <div className="opacity-70">
+                      {fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}
+                    </div>
                   </div>
                 </li>
               ))}
             </ol>
-          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
+          ) : (
+            <p className="text-sm text-gray-500">No activity yet.</p>
+          )}
         </section>
       )}
 
@@ -599,7 +548,9 @@ export default function ProjectDetailPage() {
                 ))}
               </tbody>
             </table>
-          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+          ) : (
+            <p className="text-sm text-gray-500">No bids yet.</p>
+          )}
         </section>
       )}
 
@@ -607,7 +558,7 @@ export default function ProjectDetailPage() {
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-          {acceptedBid && acceptedMilestones.length ? (
+          {acceptedBid && acceptedMs.length ? (
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-600">
@@ -621,7 +572,7 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {acceptedMilestones.map((m, idx) => {
+                {acceptedMs.map((m, idx) => {
                   const paid = !!m.paymentTxHash;
                   const completedRow = paid || !!m.completed;
                   return (
@@ -639,9 +590,7 @@ export default function ProjectDetailPage() {
               </tbody>
             </table>
           ) : (
-            <p className="text-sm text-gray-500">
-              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
-            </p>
+            <p className="text-sm text-gray-500">{acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}</p>
           )}
         </section>
       )}
@@ -649,24 +598,15 @@ export default function ProjectDetailPage() {
       {/* Files */}
       {tab === 'files' && (
         <section className="border rounded p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">Files</h3>
-            <button
-              onClick={refreshProofs}
-              disabled={loadingProofs}
-              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
-              title="Refresh milestone proofs"
-            >
-              {loadingProofs ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-
+          <h3 className="font-semibold mb-3">Files</h3>
           {allFiles.length ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {allFiles.map((f, i) => (
-                <div key={i}>
-                  <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                  {renderAttachment(f.doc, i)}
+                <div key={`${f.scope}-${i}`} className="border rounded p-2">
+                  <div className="text-xs text-gray-600 mb-1 truncate" title={f.scope}>
+                    {f.scope}
+                  </div>
+                  {renderAttachment(f.doc, i, setLightbox)}
                 </div>
               ))}
             </div>
@@ -676,31 +616,24 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* Admin (only for admins) */}
-      {tab === 'admin' && me.role === 'admin' && (
+      {/* Admin */}
+      {tab === 'admin' && isAdminUser(me) && (
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
-          <p className="text-sm text-gray-600 mb-3">
-            Review vendor proofs per milestone, approve or reject, and refresh the list after actions.
-          </p>
-          <div className="mb-4">
-            <button
-              onClick={refreshProofs}
-              disabled={loadingProofs}
-              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
-            >
-              {loadingProofs ? 'Refreshing…' : 'Refresh Proofs'}
-            </button>
-          </div>
-          {/* Your existing Admin UI component */}
+          <p className="text-sm text-gray-600 mb-4">Review vendor proofs per milestone, approve/reject, then refresh.</p>
+          {/* Adjust props based on your AdminProofs component signature */}
           <AdminProofs proposalId={projectIdNum} />
         </section>
       )}
 
+      {/* Back link */}
       <div className="pt-2">
-        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+        <Link href="/projects" className="text-blue-600 hover:underline">
+          ← Back to Projects
+        </Link>
       </div>
 
+      {/* Lightbox */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
@@ -713,10 +646,7 @@ export default function ProjectDetailPage() {
             className="max-h-full max-w-full rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
-          <button
-            className="absolute top-4 right-4 text-white text-2xl"
-            onClick={() => setLightbox(null)}
-          >
+          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>
             ✕
           </button>
         </div>
@@ -725,7 +655,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-// ---------------- UI bits ----------------
+/** ------------------------- Small components ------------------------ */
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
@@ -739,13 +669,51 @@ function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: Ta
   return (
     <button
       onClick={() => setTab(id)}
-      className={classNames(
-        'px-3 py-2 text-sm -mb-px border-b-2',
-        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black'
-      )}
+      className={cx('px-3 py-2 text-sm -mb-px border-b-2', active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black')}
       aria-pressed={active}
     >
       {label}
     </button>
+  );
+}
+
+function renderAttachment(doc: any, idx: number, setLightbox: (url: string | null) => void) {
+  if (!doc) return null;
+  const href = buildHrefFromDoc(doc);
+  const label = doc?.name || doc?.path || href;
+  const isImage = isImageLikeName(doc?.name) || isImageLikeName(href);
+
+  if (isImage) {
+    return (
+      <div className="group">
+        <button
+          onClick={() => setLightbox(href)}
+          className="relative overflow-hidden rounded border block w-full"
+          title={label}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={href} alt={label} className="h-28 w-full object-cover group-hover:scale-105 transition" />
+        </button>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="truncate text-xs" title={label}>
+            {label}
+          </span>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+            Open
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+      <p className="truncate" title={label}>
+        {label}
+      </p>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+        Open
+      </a>
+    </div>
   );
 }
