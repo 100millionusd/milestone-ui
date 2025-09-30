@@ -44,7 +44,7 @@ type Milestone = {
   completionDate?: string | null;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
-  proof?: string;         // ipfs://CID[/path] or https://…/ipfs/CID[/path] or CID
+  proof?: string;
   proofCid?: string;
   folderCid?: string;
   cid?: string;
@@ -135,7 +135,7 @@ function normalizeDoc(raw: any) {
 
   const doc: any = { ...raw };
 
-  // IMPORTANT: URL/CID might be inside "name"
+  // URL/CID might be inside "name"
   if (typeof doc.name === 'string') {
     const n = doc.name.trim();
     if (isHttpUrl(n)) {
@@ -185,36 +185,15 @@ function hrefForDoc(doc: any): string | null {
 const FILE_KEYS = ['files', 'attachments', 'images', 'docs', 'proofs', 'uploads', 'items', 'paths'];
 const SINGLE_FILE_KEYS = ['file', 'filename', 'fileName', 'href', 'url', 'path', 'name'];
 
-function toArray(x: any): any[] {
-  if (!x) return [];
-  if (Array.isArray(x)) return x;
-  if (typeof x === 'string') {
-    try { const v = JSON.parse(x); return Array.isArray(v) ? v : [x]; } catch { return [x]; }
-  }
-  return [x];
-}
-
-/** Recursively pull anything that looks like a file-ish value */
 function gatherFileCandidates(obj: any, depth = 0): any[] {
   const out: any[] = [];
   if (!obj || depth > 3) return out;
 
-  if (typeof obj === 'string') {
-    out.push(obj);
-    return out;
-  }
-  if (Array.isArray(obj)) {
-    for (const v of obj) out.push(...gatherFileCandidates(v, depth + 1));
-    return out;
-  }
+  if (typeof obj === 'string') { out.push(obj); return out; }
+  if (Array.isArray(obj)) { for (const v of obj) out.push(...gatherFileCandidates(v, depth + 1)); return out; }
   if (typeof obj === 'object') {
-    for (const [k, v] of Object.entries(obj)) {
-      if (FILE_KEYS.includes(k) || SINGLE_FILE_KEYS.includes(k)) {
-        out.push(...gatherFileCandidates(v, depth + 1));
-      } else {
-        // still look into unknown keys (in case they hold nested file objects)
-        out.push(...gatherFileCandidates(v, depth + 1));
-      }
+    for (const [, v] of Object.entries(obj)) {
+      out.push(...gatherFileCandidates(v, depth + 1));
     }
     return out;
   }
@@ -236,7 +215,6 @@ function collectMilestoneFiles(bid: any) {
       (typeof m.cid === 'string' && { cid: m.cid, path: '' }) ||
       null;
 
-    // Recursively gather candidates from the milestone object
     const candidates = gatherFileCandidates(m);
 
     for (const c of candidates) {
@@ -247,7 +225,7 @@ function collectMilestoneFiles(bid: any) {
         continue;
       }
 
-      // If not a direct link, try stitching a bare filename against a base CID
+      // Stitch a bare filename against a base CID
       const maybeName =
         typeof c === 'string'
           ? c
@@ -262,12 +240,11 @@ function collectMilestoneFiles(bid: any) {
         const stitchedHref = hrefForDoc(stitchedDoc);
         if (stitchedHref) {
           out.push({ scope, doc: stitchedDoc });
-          continue;
         }
       }
     }
 
-    // Show the proof reference itself (often a folder or a single file)
+    // Also show the proof reference itself (often folder/single file)
     if (typeof m.proof === 'string') {
       const pr = normalizeDoc(m.proof);
       const prHref = pr && hrefForDoc(pr);
@@ -383,7 +360,7 @@ export default function ProjectDetailPage() {
 
   // ---- helpers used in render (no hooks below this line!) ----
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones); // declared ONCE here
+  const acceptedMs = parseMilestones(acceptedBid?.milestones); // ← DECLARED ONCE ONLY
 
   const isProjectCompleted = (proj: any) => {
     if (!proj) return false;
@@ -523,7 +500,7 @@ export default function ProjectDetailPage() {
   if (loading) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found</div>;
 
-  // Derived values (reuse acceptedMs defined above)
+  // Derived values (use acceptedMs defined above)
   const msTotal = acceptedMs.length;
   const msCompleted = acceptedMs.filter(m => m?.completed || m?.paymentTxHash).length;
   const msPaid = acceptedMs.filter(m => m?.paymentTxHash).length;
