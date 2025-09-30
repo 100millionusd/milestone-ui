@@ -193,6 +193,20 @@ function isAuthError(e: any) {
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
 
+// add near other helpers
+export async function uploadProofFiles(files: File[]): Promise<Array<{ cid: string; url: string; name: string }>> {
+  if (!files || files.length === 0) return [];
+  const fd = new FormData();
+  for (const f of files) fd.append('file', f, (f as any).name || 'upload');
+  const res = await fetch('/api/proofs/upload', { method: 'POST', body: fd, credentials: 'include' });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`upload failed: ${res.status} ${txt || res.statusText}`);
+  }
+  const json = await res.json();
+  return Array.isArray(json?.uploads) ? json.uploads : [];
+}
+
   // Bust caches on GETs
   let fullPath = path;
   if (method === "GET") {

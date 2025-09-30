@@ -1,136 +1,110 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { completeMilestone, payMilestone, type Bid, type Milestone } from '@/lib/api';
+import React, { useState } from 'react';
+import {
+  submitProof,
+  uploadProofFiles,   // ✅ new helper
+  completeMilestone,
+  payMilestone,
+  type Bid,
+  type Milestone,
+} from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Optional: parent can pass proposalId; otherwise we’ll derive it */
-  proposalId?: number;
+  proposalId?: number; // optional; we’ll derive if not given
 }
 
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
-  const [busyIndex, setBusyIndex] = useState<number | null>(null);
-  const [proofText, setProofText] = useState<string>(''); // legacy text proof (still supported)
+  const [completingIndex, setCompletingIndex] = useState<number | null>(null);
+  const [proof, setProof] = useState(''); // legacy text proof
   const [paymentResult, setPaymentResult] = useState<any>(null);
-  const [filesByIndex, setFilesByIndex] = useState<Record<number, File[]>>({});
 
-  // ---- helpers ----
-  const derivedProposalId = useMemo(() => {
+  // Keep selected files per milestone index
+  const [pendingFiles, setPendingFiles] = useState<Record<number, File[]>>({});
+
+  const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
-    const fromBid =
-      (bid as any)?.proposalId ??
-      (bid as any)?.proposalID ??
-      (bid as any)?.proposal_id;
+    const fromBid = (bid as any)?.proposalId ?? (bid as any)?.proposalID ?? (bid as any)?.proposal_id;
     if (Number.isFinite(fromBid)) return Number(fromBid);
-    // try from URL /projects/[id]
     if (typeof window !== 'undefined') {
-      const parts = window.location.pathname.split('/').filter(Boolean);
-      const lastNum = Number(parts[parts.length - 1]);
-      if (Number.isFinite(lastNum)) return lastNum;
+      const parts = location.pathname.split('/').filter(Boolean);
+      const maybe = Number(parts[parts.length - 1]);
+      if (Number.isFinite(maybe)) return maybe;
     }
     return undefined;
-  }, [proposalId, bid]);
-
-  const handleFilePick = (msIndex: number, list: FileList | null) => {
-    const arr = list ? Array.from(list) : [];
-    setFilesByIndex((m) => ({ ...m, [msIndex]: arr }));
   };
 
-  // POST /api/proofs/upload (multipart) — uploads to Pinata AND writes a DB "proof" row in one go
-  async function uploadProofFiles(params: {
-    proposalId: number;
-    bidId: number;
-    milestoneIndex: number; // ZERO-BASED
-    note: string;
-    files: File[];
-  }) {
-    const fd = new FormData();
-    fd.append('proposalId', String(params.proposalId));
-    fd.append('bidId', String(params.bidId));
-    fd.append('milestoneIndex', String(params.milestoneIndex));
-    fd.append('note', params.note || 'vendor proof');
-    // Field name "files" — our API accepts both "files" and "file"
-    for (const f of params.files) fd.append('files', f, f.name);
+  const handleFileChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setPendingFiles((m) => ({ ...m, [index]: files }));
+  };
 
-    const res = await fetch('/api/proofs/upload', {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      let msg = '';
-      try { msg = await res.text(); } catch {}
-      throw new Error(`Upload failed (${res.status}): ${msg || res.statusText}`);
-    }
-    return res.json();
-  }
-
-  const handleSubmitProof = async (index: number) => {
+  const handleCompleteMilestone = async (index: number) => {
     try {
-      setBusyIndex(index);
+      setCompletingIndex(index);
 
-      const pid = derivedProposalId;
-      const selectedFiles = filesByIndex[index] || [];
-
-      if (pid && selectedFiles.length > 0) {
-        // ✅ New path: upload files → Pinata; also create DB proof row automatically
-        await uploadProofFiles({
-          proposalId: pid,
-          bidId: bid.bidId,
-          milestoneIndex: index, // ZERO-BASED (M1=0, M2=1, …)
-          note: proofText || 'vendor proof',
-          files: selectedFiles,
-        });
-
-        // Keep old flow too so nothing else breaks: mark milestone completed with a small note
-        await completeMilestone(bid.bidId, index, proofText || '(files uploaded)');
-
-        // clear selected files for this milestone
-        setFilesByIndex((m) => ({ ...m, [index]: [] }));
-      } else {
-        // 🔁 Legacy fallback (no files picked): just send text proof like before
-        await completeMilestone(bid.bidId, index, proofText);
+      const pid = deriveProposalId();
+      if (!Number.isFinite(pid)) {
+        throw new Error('Missing proposalId; cannot attach proof files');
       }
 
-      setProofText('');
-      alert('Proof submitted! Admin can now review and release payment.');
+      const files = pendingFiles[index] || [];
+
+      // 1) If vendor selected files, upload them to Pinata via our API
+      let uploaded: Array<{ cid: string; url: string; name: string }> = [];
+      if (files.length > 0) {
+        uploaded = await uploadProofFiles(files);
+      }
+
+      // 2) Save proof record so Project/Files can show the assets automatically
+      //    (always send note + files; files array may be empty if user submitted only text)
+      await submitProof({
+        bidId: bid.bidId,
+        proposalId: Number(pid),
+        milestoneIndex: index, // ZERO-BASED (M1=0)
+        note: proof || '',
+        files: uploaded.map(u => ({ url: u.url, name: u.name })),
+      });
+
+      // 3) Keep legacy path so your existing backend status stays in sync
+      await completeMilestone(bid.bidId, index, proof || '');
+
+      // done
+      setProof('');
+      setPendingFiles((m) => ({ ...m, [index]: [] }));
+      alert('Proof submitted! Files are saved and will appear under Project → Files.');
       onUpdate();
-    } catch (err: any) {
-      console.error(err);
-      alert(err?.message || 'Failed to submit proof');
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Failed to submit proof');
     } finally {
-      setBusyIndex(null);
+      setCompletingIndex(null);
     }
   };
 
   const handleReleasePayment = async (index: number) => {
     try {
-      setBusyIndex(index);
+      setCompletingIndex(index);
       const result = await payMilestone(bid.bidId, index);
       setPaymentResult(result);
-      alert('Payment released!');
+      alert('Payment released successfully!');
       onUpdate();
-    } catch (err: any) {
-      console.error(err);
-      alert(err?.message || 'Failed to release payment');
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Failed to release payment');
     } finally {
-      setBusyIndex(null);
+      setCompletingIndex(null);
     }
   };
 
-  // ---- computed ----
-  const totalAmount = bid.milestones.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
-  const completedAmount = bid.milestones
-    .filter((m) => m.completed)
-    .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
-  const paidAmount = bid.milestones
-    .filter((m) => m.paymentTxHash)
-    .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+  const totalAmount = bid.milestones.reduce((sum, m) => sum + m.amount, 0);
+  const completedAmount = bid.milestones.filter(m => m.completed).reduce((s, m) => s + m.amount, 0);
+  const paidAmount = bid.milestones.filter(m => m.paymentTxHash).reduce((s, m) => s + m.amount, 0);
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm border">
@@ -146,23 +120,21 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           <p className="text-sm text-green-600">Completed Work</p>
           <p className="text-2xl font-bold">${completedAmount.toLocaleString()}</p>
           <p className="text-sm">
-            {bid.milestones.filter((m) => m.completed).length}/{bid.milestones.length} milestones
+            {bid.milestones.filter(m => m.completed).length}/{bid.milestones.length} milestones
           </p>
         </div>
         <div className="bg-purple-50 p-4 rounded border">
           <p className="text-sm text-purple-600">Amount Paid</p>
           <p className="text-2xl font-bold">${paidAmount.toLocaleString()}</p>
           <p className="text-sm">
-            {bid.milestones.filter((m) => m.paymentTxHash).length} payments
+            {bid.milestones.filter(m => m.paymentTxHash).length} payments
           </p>
         </div>
       </div>
 
       <div className="mb-4 p-3 bg-gray-50 rounded">
         <p className="font-medium text-gray-600">Vendor Wallet Address</p>
-        <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">
-          {bid.walletAddress}
-        </p>
+        <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
         <p className="text-xs text-gray-500 mt-1">
           Payments are sent to this {bid.preferredStablecoin} address
         </p>
@@ -171,7 +143,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       <div className="space-y-4">
         <h4 className="font-semibold">Payment Milestones:</h4>
         {bid.milestones.map((milestone: Milestone, index: number) => {
-          const selected = filesByIndex[index] || [];
+          const files = pendingFiles[index] || [];
           return (
             <div
               key={index}
@@ -187,14 +159,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 <div>
                   <p className="font-medium">{milestone.name}</p>
                   <p className="text-sm text-gray-600">
-                    {milestone.dueDate
-                      ? `Due: ${new Date(milestone.dueDate).toLocaleDateString()}`
-                      : 'No due date'}
+                    {milestone.dueDate ? `Due: ${new Date(milestone.dueDate).toLocaleDateString()}` : 'No due date'}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold text-green-600">
-                    ${Number(milestone.amount || 0).toLocaleString()}
+                    ${milestone.amount.toLocaleString()}
                   </p>
                   <span
                     className={`px-2 py-1 rounded text-xs ${
@@ -213,6 +183,27 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </span>
                 </div>
               </div>
+
+              {/* ✅ New: file picker for this milestone */}
+              {!milestone.completed && (
+                <div className="mt-2">
+                  <label className="block text-sm font-medium mb-1">
+                    Attach proof files (images/PDFs)
+                  </label>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf"
+                    onChange={(e) => handleFileChange(index, e)}
+                    className="block w-full text-sm"
+                  />
+                  {files.length > 0 && (
+                    <ul className="mt-1 text-xs text-gray-600 list-disc pl-5">
+                      {files.map((f, i) => <li key={i}>{(f as any).name}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
 
               {milestone.paymentTxHash ? (
                 <div className="mt-2">
@@ -233,11 +224,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                       </p>
                     )}
                   </div>
-
                   <PaymentVerification
                     transactionHash={milestone.paymentTxHash}
                     currency={bid.preferredStablecoin}
-                    amount={Number(milestone.amount || 0)}
+                    amount={milestone.amount}
                     toAddress={bid.walletAddress}
                   />
                 </div>
@@ -255,60 +245,35 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     </p>
                   )}
                   <p className="text-sm text-yellow-700 mt-1">Waiting for payment processing...</p>
-
-                  {/* Admin releases payment */}
                   <button
                     onClick={() => handleReleasePayment(index)}
-                    disabled={busyIndex === index}
+                    disabled={completingIndex === index}
                     className="bg-green-600 text-white px-3 py-1 rounded text-sm mt-2 disabled:bg-gray-400"
                   >
-                    {busyIndex === index ? 'Processing...' : 'Release Payment'}
+                    {completingIndex === index ? 'Processing...' : 'Release Payment'}
                   </button>
                 </div>
               ) : (
-                <div className="mt-3 space-y-3">
-                  {/* NEW: file input for proof (images / pdf) */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Attach proof files (images / PDFs)
-                    </label>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,application/pdf"
-                      onChange={(e) => handleFilePick(index, e.target.files)}
-                      className="block w-full text-sm"
-                    />
-                    {selected.length > 0 && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        {selected.length} file{selected.length > 1 ? 's' : ''} selected
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Legacy text proof (still works; optional when files are attached) */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Proof (text) — optional if you attached files
-                    </label>
-                    <textarea
-                      placeholder="Enter proof details (optional if you uploaded files)"
-                      value={proofText}
-                      onChange={(e) => setProofText(e.target.value)}
-                      className="w-full p-2 border rounded text-sm"
-                      rows={3}
-                    />
-                  </div>
-
+                <div className="mt-3">
+                  <label className="block text-sm font-medium mb-1">
+                    Proof notes (optional)
+                  </label>
+                  <textarea
+                    placeholder="Add any text note (optional; files are preferred)"
+                    value={proof}
+                    onChange={(e) => setProof(e.target.value)}
+                    className="w-full p-2 border rounded text-sm mb-2"
+                    rows={3}
+                  />
                   <button
-                    onClick={() => handleSubmitProof(index)}
-                    disabled={busyIndex === index}
+                    onClick={() => handleCompleteMilestone(index)}
+                    disabled={completingIndex === index}
                     className="bg-green-600 text-white px-4 py-2 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"
                   >
-                    {busyIndex === index ? 'Submitting…' : 'Submit Proof'}
+                    {completingIndex === index ? 'Submitting Proof...' : 'Submit Proof'}
                   </button>
-                  <p className="text-xs text-gray-500">
-                    Files are uploaded to Pinata and saved to the project automatically.
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected files will be uploaded to Pinata and attached automatically.
                   </p>
                 </div>
               )}
@@ -323,8 +288,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         <div className="mt-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
           <p className="font-semibold">✅ Project Completed and Fully Paid!</p>
           <p>
-            All milestones have been completed and paid. Total: ${totalAmount.toLocaleString()}{' '}
-            {bid.preferredStablecoin}
+            All milestones have been completed and paid. Total: ${totalAmount.toLocaleString()} {bid.preferredStablecoin}
           </p>
         </div>
       )}
