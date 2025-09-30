@@ -1,14 +1,23 @@
+# netlify.toml — Next.js + Prisma (serverless) clean config
+
 [build]
-  publish = ".next"
   command = "npm run build"
+  publish = ".next"
 
+# Use the official Next.js plugin so SSR, /api/* and routing work
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Bundle Prisma engines into serverless functions
 [functions]
-  directory = ".next/server"
+  included_files = [
+    "node_modules/.prisma/**",
+    "node_modules/@prisma/client/**"
+  ]
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
+# Optional but recommended: set Node version (18+)
 [build.environment]
   NODE_VERSION = "18"
+
+# ⚠️ DO NOT add a catch-all redirect to /index.html for Next.js apps.
+# It breaks /api/* and SSR/ISR routes. The Next plugin handles routing.
