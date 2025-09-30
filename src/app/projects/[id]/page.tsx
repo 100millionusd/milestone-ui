@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
-import AdminProofs from '@/components/AdminProofs';
 
 // ---------------- Consts ----------------
 const PINATA_GATEWAY =
@@ -55,14 +54,14 @@ type Milestone = {
 type ProofFile = { url?: string; cid?: string; name?: string } | string;
 type ProofRecord = {
   proposalId: number;
-  milestoneIndex?: number; // zero-based
+  milestoneIndex?: number; // zero-based in DB/API
   note?: string;
   files?: ProofFile[];
   urls?: string[];
   cids?: string[];
 };
 
-type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin';
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
 // -------------- Helpers (no hooks here) --------------
 function classNames(...xs: (string | false | null | undefined)[]) {
@@ -77,7 +76,9 @@ function fmt(dt?: string | null) {
 
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try { return JSON.parse(a); } catch { return null; }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
@@ -128,7 +129,7 @@ function filesFromProofRecords(items: ProofRecord[]) {
 
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
-  // ---- route param (plain) ----
+  // ---- plain values (no hooks) ----
   const params = useParams();
   const projectIdParam = (params as any)?.id;
   const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
@@ -153,7 +154,10 @@ export default function ProjectDetailPage() {
     async function run() {
       if (!Number.isFinite(projectIdNum)) return;
       try {
-        const [p, b] = await Promise.all([ getProposal(projectIdNum), getBids(projectIdNum) ]);
+        const [p, b] = await Promise.all([
+          getProposal(projectIdNum),
+          getBids(projectIdNum),
+        ]);
         if (!alive) return;
         setProject(p);
         setBids(b);
@@ -169,12 +173,12 @@ export default function ProjectDetailPage() {
     return () => { alive = false; };
   }, [projectIdNum]);
 
-  // Auth (for Admin tab & Edit btn)
+  // Auth (for Edit gating)
   useEffect(() => {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Fetch proofs
+  // Fetch proofs (separate so page still loads even if proofs API hiccups)
   const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
@@ -203,15 +207,16 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
-  // Refresh proofs when opening Files tab
+  // Re-pull proofs when user opens Files tab (so new uploads appear)
   useEffect(() => {
     if (tab === 'files') { refreshProofs(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Poll bids while AI analysis runs
+  // Poll bids while AI analysis runs (fixed hook; no conditional creation)
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
+    let stopped = false;
     const start = Date.now();
 
     const needsMore = (rows: any[]) =>
@@ -223,6 +228,7 @@ export default function ProjectDetailPage() {
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
+        if (stopped) return;
         setBids(next);
         if (Date.now() - start < 90_000 && needsMore(next)) {
           pollTimer.current = setTimeout(tick, 1500);
@@ -251,6 +257,7 @@ export default function ProjectDetailPage() {
     };
     window.addEventListener('visibilitychange', onFocus);
     window.addEventListener('focus', onFocus);
+
     return () => {
       clearPoll();
       window.removeEventListener('visibilitychange', onFocus);
@@ -258,16 +265,18 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // Expose files for console debug
+  // Expose for quick console checks (debug only; harmless)
   useEffect(() => {
-    if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
+    if (typeof window !== 'undefined') {
+      (window as any).__PROOFS = proofs;
+    }
   }, [proofs]);
 
-  // -------- Early returns ----------
+  // -------- Early returns (after all hooks) ----------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
 
-  // -------- Derived -----------
+  // -------- Derived (no hooks) -----------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
   const projectDocs = parseDocs(project?.docs) || [];
@@ -330,6 +339,7 @@ export default function ProjectDetailPage() {
   const proofFiles = filesFromProofRecords(proofs);
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
+  // Quick console debugging for you
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles.map((x) => ({
       scope: x.scope,
@@ -465,10 +475,11 @@ export default function ProjectDetailPage() {
           <div className="flex flex-wrap gap-4 mt-2 text-sm">
             <span>Budget: <b>{currency.format(Number(project.amountUSD || 0))}</b></span>
             <span>Last activity: <b>{lastActivity}</b></span>
-            {acceptedBid && (<span>Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b></span>)}
+            {acceptedBid && (
+              <span>Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b></span>
+            )}
           </div>
         </div>
-
         {!isCompleted && (
           <Link
             href={`/bids/new?proposalId=${projectIdNum}`}
@@ -487,7 +498,6 @@ export default function ProjectDetailPage() {
           <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
           <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
-          {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
         </div>
       </div>
 
@@ -673,27 +683,6 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-sm text-gray-500">No files yet.</p>
           )}
-        </section>
-      )}
-
-      {/* Admin (only for admins) */}
-      {tab === 'admin' && me.role === 'admin' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
-          <p className="text-sm text-gray-600 mb-3">
-            Review vendor proofs per milestone, approve or reject, and refresh the list after actions.
-          </p>
-          <div className="mb-4">
-            <button
-              onClick={refreshProofs}
-              disabled={loadingProofs}
-              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
-            >
-              {loadingProofs ? 'Refreshing…' : 'Refresh Proofs'}
-            </button>
-          </div>
-          {/* Your existing Admin UI component */}
-          <AdminProofs proposalId={projectIdNum} />
         </section>
       )}
 
