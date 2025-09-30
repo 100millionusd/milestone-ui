@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 
-// ---- Constants ---------------------------------------------------------------
+// ---------------- Consts ----------------
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
@@ -20,7 +20,7 @@ const PROOFS_ENDPOINT =
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
-// ---- Types -------------------------------------------------------------------
+// ---------------- Types -----------------
 type AnalysisV2 = {
   status?: 'ready' | 'error' | string;
   summary?: string;
@@ -54,7 +54,7 @@ type Milestone = {
 type ProofFile = { url?: string; cid?: string; name?: string } | string;
 type ProofRecord = {
   proposalId: number;
-  milestoneIndex?: number;
+  milestoneIndex?: number; // zero-based in DB/API
   note?: string;
   files?: ProofFile[];
   urls?: string[];
@@ -63,7 +63,7 @@ type ProofRecord = {
 
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files';
 
-// ---- Helpers -----------------------------------------------------------------
+// -------------- Helpers (no hooks here) --------------
 function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
@@ -103,13 +103,38 @@ function parseDocs(raw: unknown): any[] {
   return [];
 }
 
-// ---- Component ---------------------------------------------------------------
-export default function ProjectDetailPage() {
-  // Plain values
-  const params = useParams();
-  const projectIdNum = Number((params as any)?.id);
+function filesFromProofRecords(items: ProofRecord[]) {
+  const rows: Array<{ scope: string; doc: any }> = [];
+  for (const p of items || []) {
+    const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
+    const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
+    const list: ProofFile[] = []
+      .concat(p.files || [])
+      .concat((p.urls || []) as ProofFile[])
+      .concat((p.cids || []) as ProofFile[]);
+    for (const raw of list) {
+      const url =
+        (typeof raw === 'string' ? raw : raw?.url) ||
+        (typeof raw === 'object' && raw?.cid ? `${PINATA_GATEWAY}/${raw.cid}` : undefined);
+      if (!url) continue;
+      const name =
+        (typeof raw === 'object' && raw?.name) ||
+        (typeof raw === 'string' ? decodeURIComponent((raw.split('/').pop() || '').trim() || 'file') : 'file') ||
+        'file';
+      rows.push({ scope, doc: { url, name } });
+    }
+  }
+  return rows;
+}
 
-  // State hooks (fixed order)
+// -------------- Component ----------------
+export default function ProjectDetailPage() {
+  // ---- plain values (no hooks) ----
+  const params = useParams();
+  const projectIdParam = (params as any)?.id;
+  const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
+
+  // ---- hooks (fixed order; nothing conditional) ----
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [proofs, setProofs] = useState<ProofRecord[]>([]);
@@ -148,8 +173,13 @@ export default function ProjectDetailPage() {
     return () => { alive = false; };
   }, [projectIdNum]);
 
+  // Auth (for Edit gating)
+  useEffect(() => {
+    getAuthRole().then(setMe).catch(() => {});
+  }, []);
+
   // Fetch proofs (separate so page still loads even if proofs API hiccups)
-  async function refreshProofs() {
+  const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
     try {
@@ -159,37 +189,31 @@ export default function ProjectDetailPage() {
       const body = await r.json();
       setProofs(Array.isArray(body) ? (body as ProofRecord[]) : []);
     } catch (e: any) {
-      // non-fatal
       console.warn('/proofs load failed:', e?.message || e);
       setProofs([]);
     } finally {
       setLoadingProofs(false);
     }
-  }
+  };
 
   useEffect(() => {
     let alive = true;
     (async () => {
       if (!Number.isFinite(projectIdNum)) return;
-      try {
-        await refreshProofs();
-      } catch { /* handled in refreshProofs */ }
+      try { await refreshProofs(); } catch {}
       if (!alive) return;
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
   // Re-pull proofs when user opens Files tab (so new uploads appear)
   useEffect(() => {
-    if (tab === 'files') refreshProofs();
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (tab === 'files') { refreshProofs(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
-  // Auth (for Edit gating)
-  useEffect(() => {
-    getAuthRole().then(setMe).catch(() => {});
-  }, []);
-
-  // Poll bids while AI analysis runs
+  // Poll bids while AI analysis runs (fixed hook; no conditional creation)
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     let stopped = false;
@@ -235,38 +259,44 @@ export default function ProjectDetailPage() {
     window.addEventListener('focus', onFocus);
 
     return () => {
-      stopped = true;
       clearPoll();
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
   }, [projectIdNum, bids]);
 
-  // ---- Early returns only AFTER all hooks -----------------------------------
+  // Expose for quick console checks (debug only; harmless)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__PROOFS = proofs;
+    }
+  }, [proofs]);
+
+  // -------- Early returns (after all hooks) ----------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
 
-  // ---- Derived data ----------------------------------------------------------
+  // -------- Derived (no hooks) -----------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
-  const acceptedMs = parseMilestones(acceptedBid?.milestones);
-
+  const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
   const projectDocs = parseDocs(project?.docs) || [];
+
   const canEdit =
     me?.role === 'admin' ||
     (!!project?.ownerWallet &&
       !!me?.address &&
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
-  const isProjectCompleted = (() => {
+  const isCompleted = (() => {
     if (project.status === 'completed') return true;
     if (!acceptedBid) return false;
-    if (acceptedMs.length === 0) return false;
-    return acceptedMs.every((m) => m?.completed === true || !!m?.paymentTxHash);
+    if (acceptedMilestones.length === 0) return false;
+    return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
   })();
 
-  const msTotal = acceptedMs.length;
-  const msCompleted = acceptedMs.filter((m) => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMs.filter((m) => m?.paymentTxHash).length;
+  const msTotal = acceptedMilestones.length;
+  const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
@@ -300,52 +330,25 @@ export default function ProjectDetailPage() {
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
-  // Build Files (Project + Bid + Proofs)
+  // Files (Project + Bid + Proofs)
   const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
   const bidFiles = bids.flatMap((b) => {
     const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
     return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
   });
-
-  function filesFromProofRecords(items: ProofRecord[]) {
-    const rows: Array<{ scope: string; doc: any }> = [];
-    for (const p of items || []) {
-      const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
-      const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
-      const list: ProofFile[] = []
-        .concat(p.files || [])
-        .concat((p.urls || []) as ProofFile[])
-        .concat((p.cids || []) as ProofFile[]);
-      for (const raw of list) {
-        const url =
-          (typeof raw === 'string' ? raw : raw?.url) ||
-          (typeof raw === 'object' && raw?.cid ? `${PINATA_GATEWAY}/${raw.cid}` : undefined);
-        if (!url) continue;
-        const name =
-          (typeof raw === 'object' && raw?.name) ||
-          (typeof raw === 'string' ? decodeURIComponent(raw.split('/').pop() || 'file') : 'file') ||
-          'file';
-        rows.push({ scope, doc: { url, name } });
-      }
-    }
-    return rows;
-  }
   const proofFiles = filesFromProofRecords(proofs);
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-  // Expose for quick console checks
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      (window as any).__FILES = allFiles.map((x) => ({
-        scope: x.scope,
-        href: x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null),
-        name: x.doc?.name || null,
-      }));
-      (window as any).__PROOFS = proofs;
-    }
-  }, [allFiles, proofs]);
+  // Quick console debugging for you
+  if (typeof window !== 'undefined') {
+    (window as any).__FILES = allFiles.map((x) => ({
+      scope: x.scope,
+      href: x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null),
+      name: x.doc?.name || null,
+    }));
+  }
 
-  // ---- Small render helpers ---------------------------------------------------
+  // -------------- small render helpers (no hooks) --------------
   function renderAttachment(doc: any, key: number) {
     if (!doc) return null;
     const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
@@ -448,7 +451,7 @@ export default function ProjectDetailPage() {
     );
   }
 
-  // ---- Render ----------------------------------------------------------------
+  // ----------------- Render -----------------
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -463,9 +466,9 @@ export default function ProjectDetailPage() {
             )}
             <span className={classNames(
               'px-2 py-0.5 text-xs font-medium rounded-full',
-              isProjectCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+              isCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
             )}>
-              {isProjectCompleted ? 'Completed' : 'Active'}
+              {isCompleted ? 'Completed' : 'Active'}
             </span>
           </div>
           <p className="text-gray-600">{project.orgName}</p>
@@ -477,7 +480,7 @@ export default function ProjectDetailPage() {
             )}
           </div>
         </div>
-        {!isProjectCompleted && (
+        {!isCompleted && (
           <Link
             href={`/bids/new?proposalId=${projectIdNum}`}
             className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
@@ -614,7 +617,7 @@ export default function ProjectDetailPage() {
       {tab === 'milestones' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-          {acceptedBid && acceptedMs.length ? (
+          {acceptedBid && acceptedMilestones.length ? (
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-600">
@@ -628,7 +631,7 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {acceptedMs.map((m, idx) => {
+                {acceptedMilestones.map((m, idx) => {
                   const paid = !!m.paymentTxHash;
                   const completedRow = paid || !!m.completed;
                   return (
@@ -711,7 +714,7 @@ export default function ProjectDetailPage() {
   );
 }
 
-// ---- Small UI bits -----------------------------------------------------------
+// ---------------- UI bits ----------------
 function Progress({ value }: { value: number }) {
   return (
     <div className="h-2 bg-gray-200 rounded">
