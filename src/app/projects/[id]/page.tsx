@@ -119,7 +119,7 @@ function filesFromProofRecords(items: ProofRecord[]) {
     /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^https?:\/\//, '')}`;
 
   const rows: Array<{ scope: string; doc: any }> = [];
-  for (const p of items || []) {
+  for (const p of (items || [])) {
     const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
     const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
 
@@ -151,6 +151,26 @@ function filesFromProofRecords(items: ProofRecord[]) {
     }
   }
   return rows;
+}
+
+// ----------- NEW: image/filename helpers -----------
+function withFilename(url: string, name?: string) {
+  if (!url) return url;
+  if (!name) return url;
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//, '')}`);
+    // only add ?filename when path is exactly /ipfs/<cid> and there is no existing query
+    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
+      u.search = `?filename=${encodeURIComponent(name)}`;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isImageName(n?: string) {
+  return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
 // -------------- Component ----------------
@@ -237,23 +257,23 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
- // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
-useEffect(() => {
-  const onAnyProofUpdate = (ev: any) => {
-    const pid = Number(ev?.detail?.proposalId);
-    // If no detail provided: refresh anyway. If provided: only refresh when it matches this project.
-    if (!Number.isFinite(pid) || pid === projectIdNum) {
-      refreshProofs();
-    }
-  };
-  window.addEventListener('proofs:updated', onAnyProofUpdate);
-  window.addEventListener('proofs:changed', onAnyProofUpdate); // backward-compat
-  return () => {
-    window.removeEventListener('proofs:updated', onAnyProofUpdate);
-    window.removeEventListener('proofs:changed', onAnyProofUpdate);
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [projectIdNum]);
+  // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
+  useEffect(() => {
+    const onAnyProofUpdate = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      // If no detail provided: refresh anyway. If provided: only refresh when it matches this project.
+      if (!Number.isFinite(pid) || pid === projectIdNum) {
+        refreshProofs();
+      }
+    };
+    window.addEventListener('proofs:updated', onAnyProofUpdate);
+    window.addEventListener('proofs:changed', onAnyProofUpdate); // backward-compat
+    return () => {
+      window.removeEventListener('proofs:updated', onAnyProofUpdate);
+      window.removeEventListener('proofs:changed', onAnyProofUpdate);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectIdNum]);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
@@ -377,42 +397,60 @@ useEffect(() => {
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
   if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles.map((x) => ({
-      scope: x.scope,
-      href: x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null),
-      name: x.doc?.name || null,
-    }));
+    (window as any).__FILES = allFiles.map((x) => {
+      const rawHref = x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null);
+      const name = x.doc?.name || null;
+      return {
+        scope: x.scope,
+        href: rawHref ? withFilename(rawHref, name || undefined) : null,
+        name,
+      };
+    });
   }
 
   // -------------- small render helpers (no hooks) --------------
   function renderAttachment(doc: any, key: number) {
-  if (!doc) return null;
-  const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
+    if (!doc) return null;
 
-  // Detect image **by URL**, not only by name
-  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
+    const rawUrl = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '');
+    if (!rawUrl) return null;
 
-  if (isImage) {
+    const nameFromUrl = decodeURIComponent((rawUrl.split('/').pop() || '').trim());
+    const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+
+    // ensure IPFS URLs carry a filename so content-type/preview behaves nicely
+    const displayUrl = withFilename(rawUrl, name);
+
+    // detect images by NAME (preferred) or fallback to the URL
+    const looksImage = isImageName(name) || isImageName(displayUrl);
+
+    if (looksImage) {
+      return (
+        <button
+          key={key}
+          onClick={() => setLightbox(displayUrl)}
+          className="group relative overflow-hidden rounded border"
+          title={name}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={displayUrl}
+            alt={name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+          />
+        </button>
+      );
+    }
+
+    // non-image: show as an "Open" link
+    const href = displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`;
     return (
-      <button
-        key={key}
-        onClick={() => setLightbox(href)}
-        className="group relative overflow-hidden rounded border"
-        title={doc.name || 'image'}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-      </button>
+      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate" title={name}>{name}</p>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+      </div>
     );
   }
-
-  return (
-    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-      <p className="truncate" title={doc.name}>{doc.name}</p>
-      <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-    </div>
-  );
-}
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
@@ -655,70 +693,70 @@ useEffect(() => {
 
       {/* Milestones */}
       {tab === 'milestones' && (
-  <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">
-      Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
-    </h3>
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">
+            Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+          </h3>
 
-    {acceptedMilestones.length ? (
-      <>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-2 pr-4">#</th>
-                <th className="py-2 pr-4">Title</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Completed</th>
-                <th className="py-2 pr-4">Paid</th>
-                <th className="py-2 pr-4">Tx</th>
-              </tr>
-            </thead>
-            <tbody>
-              {acceptedMilestones.map((m, idx) => {
-                const paid = !!m.paymentTxHash;
-                const completedRow = paid || !!m.completed;
-                return (
-                  <tr key={idx} className="border-t">
-                    <td className="py-2 pr-4">M{idx + 1}</td>
-                    <td className="py-2 pr-4">{m.name || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {m.amount ? currency.format(Number(m.amount)) : '—'}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
-                    </td>
-                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                    <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          {acceptedMilestones.length ? (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-600">
+                      <th className="py-2 pr-4">#</th>
+                      <th className="py-2 pr-4">Title</th>
+                      <th className="py-2 pr-4">Amount</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4">Completed</th>
+                      <th className="py-2 pr-4">Paid</th>
+                      <th className="py-2 pr-4">Tx</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acceptedMilestones.map((m, idx) => {
+                      const paid = !!m.paymentTxHash;
+                      const completedRow = paid || !!m.completed;
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 pr-4">M{idx + 1}</td>
+                          <td className="py-2 pr-4">{m.name || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
+                          </td>
+                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                          <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-        {/* ✅ Render the proof submission widget here */}
-        {(acceptedBid || (bids && bids[0])) && (
-          <div className="mt-6">
-            <MilestonePayments
-              bid={acceptedBid || bids[0]}      // show the widget even if the bid isn’t approved yet
-              onUpdate={refreshProofs}
-              proposalId={projectIdNum}         // ← REQUIRED so /api/proofs writes to the correct project
-            />
-          </div>
-        )}
-      </>
-    ) : (
-      <p className="text-sm text-gray-500">
-        No milestones defined yet.
-      </p>
-    )}
-  </section>
-)}
+              {/* ✅ Render the proof submission widget here */}
+              {(acceptedBid || (bids && bids[0])) && (
+                <div className="mt-6">
+                  <MilestonePayments
+                    bid={acceptedBid || bids[0]}      // show the widget even if the bid isn’t approved yet
+                    onUpdate={refreshProofs}
+                    proposalId={projectIdNum}         // ← REQUIRED so /api/proofs writes to the correct project
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-500">
+              No milestones defined yet.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Files */}
       {tab === 'files' && (
