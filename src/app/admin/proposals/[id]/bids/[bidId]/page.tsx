@@ -110,7 +110,7 @@ export default function AdminBidDetailPage() {
         <MilestonePayments
   bid={bid}
   onUpdate={loadBid}
-  proposalId={Number((bid as any)?.proposalId ?? (bid as any)?.proposalID ?? (bid as any)?.proposal_id)}
+  proposalId={Number((params as any)?.id)}   // ← this is the proposal (project) id
 />
       </div>
     </div>
