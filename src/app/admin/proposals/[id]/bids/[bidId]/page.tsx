@@ -107,7 +107,11 @@ export default function AdminBidDetailPage() {
 
       <div className="mt-6">
         <h2 className="text-xl font-semibold mb-4">Milestones</h2>
-        <MilestonePayments bid={bid} onUpdate={loadBid} />
+        <MilestonePayments
+  bid={bid}
+  onUpdate={loadBid}
+  proposalId={Number((bid as any)?.proposalId ?? (bid as any)?.proposalID ?? (bid as any)?.proposal_id)}
+/>
       </div>
     </div>
   );
