@@ -653,10 +653,6 @@ export function rejectMilestoneProof(
   );
 }
 
-// Keep a named alias so any `import { rejectProof }` still works
-export { rejectMilestoneProof as rejectProof };
-
-
 /** ✅ NEW: Admin — list all vendors (server must expose GET /admin/vendors) */
 export async function getAdminVendors(): Promise<VendorSummary[]> {
   try {
@@ -848,19 +844,6 @@ export async function approveProof(proofId: number, note?: string): Promise<Proo
   if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
   const p = await apiFetch(
     `/proofs/${encodeURIComponent(String(proofId))}/approve`,
-    {
-      method: "POST",
-      body: JSON.stringify(note ? { note } : {}),
-    }
-  );
-  return toProof(p);
-}
-
-/** Reject a proof (admin-only) */
-export async function rejectMilestoneProof(proofId: number, note?: string): Promise<Proof> {
-  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
-  const p = await apiFetch(
-    `/proofs/${encodeURIComponent(String(proofId))}/reject`,
     {
       method: "POST",
       body: JSON.stringify(note ? { note } : {}),
