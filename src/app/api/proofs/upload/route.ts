@@ -30,9 +30,22 @@ function pinataHeaders(): Record<string, string> {
   throw new Error('Missing Pinata credentials (PINATA_JWT or PINATA_API_KEY + PINATA_SECRET_API_KEY)');
 }
 
-async function pinOneFileToPinata(file: File): Promise<{ cid: string; url: string; name: string }> {
+type FileLike = {
+  name?: string;
+  type?: string;
+  size?: number;
+  // Node/undici File/Blob exposes arrayBuffer()
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
+function isFileLike(v: any): v is FileLike {
+  return v && typeof v === 'object' && typeof v.arrayBuffer === 'function';
+}
+
+async function pinOneFileToPinata(file: FileLike): Promise<{ cid: string; url: string; name: string }> {
   const fd = new FormData();
-  fd.append('file', file, file.name || 'file'); // Pinata expects 'file' (singular)
+  // The undici FormData accepts web File/Blob-like values. We avoid referencing the global File class.
+  fd.append('file', file as any, (file as any).name || 'file'); // Pinata expects 'file' (singular)
 
   const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
     method: 'POST',
@@ -49,15 +62,15 @@ async function pinOneFileToPinata(file: File): Promise<{ cid: string; url: strin
   const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
   if (!cid) throw new Error(`Pinata response missing CID: ${text}`);
 
-  return { cid, url: `${gatewayBase()}/${cid}`, name: file.name || 'file' };
+  return { cid, url: `${gatewayBase()}/${cid}`, name: (file as any).name || 'file' };
 }
 
 // POST-only: Accept multipart/form-data with field name EXACTLY "files" (multiple)
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
-
-    const files = form.getAll('files').filter((v): v is File => v instanceof File);
+    const raw = form.getAll('files');
+    const files = raw.filter(isFileLike);
     if (files.length === 0) {
       return NextResponse.json(
         { ok: false, error: 'no_files', message: 'Attach one or more files using field name "files"' },
