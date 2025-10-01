@@ -36,7 +36,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const setFiles = (i: number, files: FileList | null) =>
     setFilesByIndex(prev => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
-  const deriveProposalId = () => {
+  /** Robust proposal id resolver: prop → bid → /projects/:id → last path segment */
+  const resolveProposalId = (): number | undefined => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
     const fromBid =
       (bid as any)?.proposalId ??
@@ -44,6 +45,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       (bid as any)?.proposal_id;
     if (Number.isFinite(fromBid)) return Number(fromBid);
     if (typeof window !== 'undefined') {
+      const m = location.pathname.match(/\/projects\/(\d+)(?:\/|$)/);
+      if (m && Number.isFinite(Number(m[1]))) return Number(m[1]);
       const parts = location.pathname.split('/').filter(Boolean);
       const last = Number(parts[parts.length - 1]);
       if (Number.isFinite(last)) return last;
@@ -53,68 +56,73 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
-  const pid = deriveProposalId();
-  if (!Number.isFinite(pid)) {
-    alert('Cannot determine proposalId.');
-    return;
-  }
-
-  const note = (textByIndex[index] || '').trim();
-
-  try {
-    setBusyIndex(index);
-
-    // Gather files from local input
-    const localFiles: File[] = filesByIndex[index] || [];
-
-    // 1) Upload to Pinata via Next upload route
-    const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
-
-    // 2) Map uploaded → filesToSave (full URL, name, cid)
-    const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
-
-    // 3) Save to /api/proofs so Files tab updates
-    await saveProofFilesToDb({
-      proposalId: Number(pid),
-      milestoneIndex: index,  // ZERO-BASED
-      files: filesToSave,
-      note: note || 'vendor proof',
-    });
-
-    // 4) Notify page to refresh immediately (send both event names + proposalId)
-    if (typeof window !== 'undefined') {
-      const detail = { proposalId: Number(pid) };
-      window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-      window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+    const pid = resolveProposalId();
+    if (!Number.isFinite(pid)) {
+      console.error('[proofs] Cannot determine proposalId (no prop, no bid, no URL match)');
+      alert('Cannot determine proposalId.');
+      return;
     }
 
-    // 5) Mark milestone completed (legacy text-proof still supported)
-    await completeMilestone(bid.bidId, index, note || 'vendor submitted');
+    const note = (textByIndex[index] || '').trim();
 
-    // 6) Optional: backend proofs for legacy readers
-    await submitProof({
-      bidId: bid.bidId,
-      milestoneIndex: index,
-      description: note || 'vendor proof',
-      files: filesToSave.map(f => ({
-        name: f.name || (f.url.split('/').pop() || 'file'),
-        url: f.url,
-      })),
-    }).catch(() => {});
+    try {
+      setBusyIndex(index);
+      console.debug('[proofs] handleSubmitProof fired', { proposalId: Number(pid), index });
 
-    // clear local inputs
-    setText(index, '');
-    setFiles(index, null);
+      // 0) Gather files from local input
+      const localFiles: File[] = filesByIndex[index] || [];
 
-    alert('Proof submitted. Files saved and milestone marked completed.');
-    onUpdate();
-  } catch (e: any) {
-    console.error(e);
-    alert(e?.message || 'Failed to submit proof');
-  } finally {
-    setBusyIndex(null);
+      // 1) Upload to Pinata via Next upload route (only if user selected files)
+      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
+      console.debug('[proofs] uploaded →', uploaded);
+
+      // 2) Map uploaded → filesToSave (full URL, name, cid)
+      const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
+
+      // 3) ALWAYS save to /api/proofs so Files tab updates (even if no files selected)
+      console.debug('[proofs] saving', { proposalId: Number(pid), milestoneIndex: index, filesCount: filesToSave.length });
+      await saveProofFilesToDb({
+        proposalId: Number(pid),
+        milestoneIndex: index,  // ZERO-BASED
+        files: filesToSave,
+        note: note || 'vendor proof',
+      });
+      console.debug('[proofs] save OK');
+
+      // 4) Notify page to refresh immediately (send both event names + proposalId)
+      if (typeof window !== 'undefined') {
+        const detail = { proposalId: Number(pid) };
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+        console.debug('[proofs] events dispatched', detail);
+      }
+
+      // 5) Mark milestone completed (legacy text-proof still supported)
+      await completeMilestone(bid.bidId, index, note || 'vendor submitted').catch(() => {});
+      // 6) Optional: legacy /proofs table for other backends
+      await submitProof({
+        bidId: bid.bidId,
+        milestoneIndex: index,
+        description: note || 'vendor proof',
+        files: filesToSave.map(f => ({
+          name: f.name || (f.url.split('/').pop() || 'file'),
+          url: f.url,
+        })),
+      }).catch(() => {});
+
+      // clear local inputs
+      setText(index, '');
+      setFiles(index, null);
+
+      alert('Proof submitted. Files saved and milestone marked completed.');
+      onUpdate();
+    } catch (e: any) {
+      console.error('[proofs] submit failed', e);
+      alert(e?.message || 'Failed to submit proof');
+    } finally {
+      setBusyIndex(null);
+    }
   }
-}
 
   async function handleReleasePayment(index: number) {
     try {

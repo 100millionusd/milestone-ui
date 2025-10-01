@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
+import MilestonePayments from '@/components/MilestonePayments';
 
 // ---------------- Consts ----------------
 // Pinata gateway base
