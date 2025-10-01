@@ -214,7 +214,7 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
+ // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
 useEffect(() => {
   const onAnyProofUpdate = (ev: any) => {
     const pid = Number(ev?.detail?.proposalId);
