@@ -60,55 +60,38 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
 
     const note = (textByIndex[index] || '').trim();
-    const ms: any = Array.isArray(bid.milestones) ? bid.milestones[index] : undefined;
 
     try {
       setBusyIndex(index);
 
-      // 0) Gather files from local input
+      // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // Also allow any pre-existing URLs on milestone (strings or {url})
-      const presetUrls: Array<{ url: string; name?: string }> = [];
-      const raw = ([] as any[]).concat(ms?.files || [], ms?.proofFiles || [], ms?.proofs || []);
-      for (const f of raw) {
-        if (typeof f === 'string') {
-          presetUrls.push({ url: f, name: decodeURIComponent((f.split('/').pop() || '').trim()) });
-        } else if (f && typeof f === 'object' && f.url) {
-          presetUrls.push({ url: String(f.url), name: f.name ? String(f.name) : undefined });
-        }
+      // === EXACT SPEC SUBMIT FLOW (no guessing) ===
+      // 1) Upload to Pinata via Next upload route
+      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
+
+      // 2) Map uploaded → filesToSave (full URL, name, cid)
+      const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
+
+      // 3) Save to /api/proofs so Files tab updates
+      await saveProofFilesToDb({
+        proposalId: Number(pid),
+        milestoneIndex: index,  // ZERO-BASED
+        files: filesToSave,
+        note: note || 'vendor proof',
+      });
+
+      // 4) Notify page to refresh immediately
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('proofs:updated'));
       }
 
-      // 1) If user picked any File objects, upload them to Pinata via Next route
-      let uploaded: Array<{ cid: string; url: string; name: string }> = [];
-      if (localFiles.length) {
-        uploaded = await uploadProofFiles(localFiles);
-      }
-
-      // 2) Build the list we’ll persist to DB (what the Files tab reads)
-      const filesToSave: Array<{ url: string; name?: string; cid?: string }> = [
-        ...presetUrls,
-        ...uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid })),
-      ];
-
-      // 3) Save proof files to /api/proofs so they appear automatically on project page
-      if (filesToSave.length) {
-        await saveProofFilesToDb({
-          proposalId: Number(pid),
-          milestoneIndex: index,  // ZERO-BASED
-          files: filesToSave,
-          note: note || 'vendor proof',
-        });
-        // nudge the project page to refresh its Files tab
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('proofs:updated'));
-        }
-      }
-
-      // 4) Keep legacy path (mark milestone completed with text proof)
+      // 5) Mark milestone completed (legacy text-proof still supported)
       await completeMilestone(bid.bidId, index, note || 'vendor submitted');
 
-      // 5) Optional: call your /proofs endpoint with the same file list (back-compat)
+      // 6) (Optional) also hit backend proofs if it reads that table too
+      //    Safe to keep; remove if not needed.
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,

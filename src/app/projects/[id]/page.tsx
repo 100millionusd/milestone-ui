@@ -214,16 +214,12 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // 🔔 Listen for vendor-side "proofs:changed" events to live-refresh the Files tab
+  // 🔔 Listen for vendor-side events to live-refresh the Files tab
+  // FIX: match the emitter ('proofs:updated'), no detail required
   useEffect(() => {
-    const onProofsChanged = (ev: any) => {
-      const pid = Number(ev?.detail?.proposalId);
-      if (Number.isFinite(pid) && pid === projectIdNum) {
-        refreshProofs();
-      }
-    };
-    window.addEventListener('proofs:changed', onProofsChanged);
-    return () => window.removeEventListener('proofs:changed', onProofsChanged);
+    const onU = () => refreshProofs();
+    window.addEventListener('proofs:updated', onU);
+    return () => window.removeEventListener('proofs:updated', onU);
   }, [projectIdNum]);
 
   // Poll bids while AI analysis runs

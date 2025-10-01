@@ -58,7 +58,7 @@ export async function GET(req: Request) {
         name: f.name || undefined,
       })),
     }));
-    return NextResponse.json(out);
+    return NextResponse.json(out, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
   }
