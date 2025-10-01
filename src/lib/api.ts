@@ -629,7 +629,7 @@ export function sendTokens(params: {
   return payMilestone(params.bidId, params.milestoneIndex);
 }
 
-// Reject a milestone’s proof (admin)
+// Reject a milestone’s proof (admin) — keep only this one
 export function rejectMilestoneProof(
   bidId: number,
   milestoneIndex: number,
@@ -640,7 +640,7 @@ export function rejectMilestoneProof(
     throw new Error("Invalid milestone index");
   }
 
-  // Backend route you added: POST /bids/:bidId/milestones/:idx/reject
+  // Backend: POST /bids/:bidId/milestones/:idx/reject
   return apiFetch(
     `/bids/${encodeURIComponent(String(bidId))}/milestones/${encodeURIComponent(
       String(milestoneIndex)
@@ -653,6 +653,7 @@ export function rejectMilestoneProof(
   );
 }
 
+// Keep a named alias so any `import { rejectProof }` stays working
 export { rejectMilestoneProof as rejectProof };
 
 /** ✅ NEW: Admin — list all vendors (server must expose GET /admin/vendors) */
