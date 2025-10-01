@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids, getAuthRole } from '@/lib/api';
+import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 
@@ -222,22 +222,81 @@ export default function ProjectDetailPage() {
   }, []);
 
   // Fetch proofs (always from local /api/proofs unless explicitly overridden)
-  const refreshProofs = async () => {
-    if (!Number.isFinite(projectIdNum)) return;
-    setLoadingProofs(true);
-    try {
-      const url = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
-      if (!r.ok) throw new Error(`Proofs HTTP ${r.status}`);
-      const body = await r.json();
-      setProofs(Array.isArray(body) ? (body as ProofRecord[]) : []);
-    } catch (e: any) {
-      console.warn('/proofs load failed:', e?.message || e);
-      setProofs([]);
-    } finally {
-      setLoadingProofs(false);
+  // Fetch proofs from BOTH sources and merge so Files tab matches Admin
+const refreshProofs = async () => {
+  if (!Number.isFinite(projectIdNum)) return;
+  setLoadingProofs(true);
+
+  try {
+    // 1) Local DB: /api/proofs?proposalId=...
+    const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+    const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : []))
+      .catch(() => []);
+
+    // 2) External API (same source Admin tab uses): get proofs for the accepted bid
+    //    If no accepted bid yet, we’ll still try the first bid as a fallback so vendors can see their uploads.
+    const accepted = (bids || []).find(b => b.status === 'approved') || (bids || [])[0] || null;
+
+    const adminReq = accepted
+      ? getProofs(Number(accepted.bidId))
+          .then(rows => {
+            // Normalize to the local ProofRecord shape the Files tab expects
+            return (Array.isArray(rows) ? rows : []).map((p: any) => ({
+              proposalId: projectIdNum,
+              milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
+              note: p?.description || p?.title || '',
+              files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
+                url: f?.url || '',
+                name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
+              })) : [],
+            }));
+          })
+          .catch(() => [])
+      : Promise.resolve([]);
+
+    const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
+
+    // 3) Merge + de-dupe by milestone+url
+    const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
+    const seen = new Set<string>();
+    const merged: any[] = [];
+
+    function pushRecord(r: any) {
+      // split into 1-file entries for simpler de-dupe
+      const files = Array.isArray(r.files) ? r.files : [];
+      for (const f of files) {
+        const k = key(r, f);
+        if (!f?.url || seen.has(k)) continue;
+        seen.add(k);
+        merged.push({
+          proposalId: projectIdNum,
+          milestoneIndex: Number(r.milestoneIndex),
+          note: r.note || '',
+          files: [{ url: String(f.url), name: String(f.name || 'file') }],
+        });
+      }
     }
-  };
+
+    (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
+    (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
+
+    // Group back by milestoneIndex to keep your Files tab logic happy
+    const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
+    for (const r of merged) {
+      const ms = Number(r.milestoneIndex);
+      if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
+      byMs.get(ms)!.files.push(...r.files);
+    }
+
+    setProofs(Array.from(byMs.values()));
+  } catch (e) {
+    console.warn('refreshProofs failed:', e);
+    setProofs([]);
+  } finally {
+    setLoadingProofs(false);
+  }
+};
 
   // Load proofs once on mount
   useEffect(() => {
