@@ -653,6 +653,8 @@ export function rejectMilestoneProof(
   );
 }
 
+export { rejectMilestoneProof as rejectProof };
+
 /** ✅ NEW: Admin — list all vendors (server must expose GET /admin/vendors) */
 export async function getAdminVendors(): Promise<VendorSummary[]> {
   try {
