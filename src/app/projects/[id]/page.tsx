@@ -210,6 +210,19 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  useEffect(() => {
+  const onProofsChanged = (ev: any) => {
+    const pid = Number(ev?.detail?.proposalId);
+    if (Number.isFinite(pid) && pid === projectIdNum) {
+      // call the existing refresher
+      refreshProofs();
+    }
+  };
+  window.addEventListener('proofs:changed', onProofsChanged);
+  return () => window.removeEventListener('proofs:changed', onProofsChanged);
+}, [projectIdNum]);
+
+
   // Poll bids while AI analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
