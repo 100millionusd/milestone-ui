@@ -949,6 +949,70 @@ export async function uploadFileToIPFS(file: File) {
   return result;
 }
 
+// ========= Proof uploads (Pinata via our Next API) =========
+// 1) Upload <input type="file"> files to /api/proofs/upload
+//    Returns: [{ cid, url, name }]
+export async function uploadProofFiles(
+  files: File[]
+): Promise<Array<{ cid: string; url: string; name: string }>> {
+  if (!files || files.length === 0) return [];
+
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name);
+
+  // IMPORTANT: relative fetch → hits Next /api, NOT your external API_BASE
+  const res = await fetch(`/api/proofs/upload`, {
+    method: 'POST',
+    body: fd,
+    // include cookies if your route is auth-protected
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    let msg = `Upload HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json().catch(() => ({}));
+  const list = Array.isArray(json?.uploads) ? json.uploads : [];
+  // Normalize: make sure each has cid, url, name
+  return list.map((u: any) => ({
+    cid: String(u?.cid || ''),
+    url: String(u?.url || ''),
+    name: String(u?.name || (String(u?.url || '').split('/').pop() || 'file')),
+  }));
+}
+
+// 2) Save the uploaded file URLs into your proofs table via /api/proofs
+//    (this is what makes them appear in the Project “Files” tab automatically)
+export async function saveProofFilesToDb(params: {
+  proposalId: number;
+  milestoneIndex: number; // ZERO-BASED (M1=0, M2=1, …)
+  files: Array<{ url: string; name?: string; cid?: string }>;
+  note?: string;
+}) {
+  const res = await fetch(`/api/proofs`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      proposalId: Number(params.proposalId),
+      milestoneIndex: Number(params.milestoneIndex),
+      note: params.note ?? null,
+      files: params.files,
+    }),
+  });
+
+  if (!res.ok) {
+    let msg = `Proof save HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  return await res.json(); // the saved proof row (normalized by the API route)
+}
+
 // ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
@@ -1012,6 +1076,10 @@ export default {
   analyzeProof,
   getProofs,
   archiveProof,
+
+  // proofs uploads via Next API
+  uploadProofFiles,
+  saveProofFilesToDb,
 
   // chat
   chatProof,
