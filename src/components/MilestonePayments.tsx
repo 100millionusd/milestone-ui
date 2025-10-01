@@ -15,40 +15,30 @@ import PaymentVerification from './PaymentVerification';
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Optional: parent can pass if known; we'll also derive from bid or URL */
   proposalId?: number;
 }
 
-/** Local helper: upload files to /api/proofs/upload → Pinata, return [{cid,url,name}] */
+// Upload to our API (which forwards to Pinata). Returns [{cid,url,name}]
 async function uploadProofFilesLocal(files: File[]) {
   if (!files || files.length === 0) return [];
   const fd = new FormData();
-  for (const f of files) fd.append('file', f, f.name); // NOTE: field name MUST be "file"
-  const r = await fetch('/api/proofs/upload', {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
-  });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`Upload HTTP ${r.status} ${txt}`);
-  }
-  const json = await r.json().catch(() => ({}));
-  if (!json?.ok || !Array.isArray(json?.uploads)) {
-    throw new Error('Upload failed: bad response shape');
-  }
-  // [{ cid, url, name }]
+  // Field name MUST be "file" and you append once per file:
+  for (const f of files) fd.append('file', f, f.name);
+  const r = await fetch('/api/proofs/upload', { method: 'POST', body: fd, credentials: 'include' });
+  const txt = await r.text().catch(() => '');
+  if (!r.ok) throw new Error(`Upload HTTP ${r.status}: ${txt || 'failed'}`);
+  let json: any = {};
+  try { json = JSON.parse(txt); } catch {}
+  if (!json?.ok || !Array.isArray(json?.uploads)) throw new Error('Upload failed: bad response');
   return json.uploads as Array<{ cid: string; url: string; name: string }>;
 }
 
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
   const [completingIndex, setCompletingIndex] = useState<number | null>(null);
-  const [proofText, setProofText] = useState(''); // legacy text
+  const [proofText, setProofText] = useState('');
   const [filesPerMilestone, setFilesPerMilestone] = useState<Record<number, File[]>>({});
-
   const [paymentResult, setPaymentResult] = useState<any>(null);
 
-  // Derive proposalId safely
   const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
     const fromBid =
@@ -74,19 +64,16 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       setCompletingIndex(index);
 
       const pid = deriveProposalId();
-      if (!Number.isFinite(pid)) {
-        throw new Error('Cannot determine proposalId');
-      }
+      if (!Number.isFinite(pid)) throw new Error('Cannot determine proposalId');
 
-      // 1) Upload any selected files for THIS milestone → Pinata
+      // 1) Upload any selected files to Pinata via our API
       const selected = filesPerMilestone[index] || [];
       let uploaded: Array<{ cid: string; url: string; name: string }> = [];
       if (selected.length > 0) {
         uploaded = await uploadProofFilesLocal(selected);
       }
 
-      // 2) Save proof record (so the Files tab shows them)
-      //    If no files were picked, but text contains an ipfs URL/CID, we still save it.
+      // 2) Persist proof record so Files tab shows them
       const filesPayload =
         uploaded.length > 0
           ? uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }))
@@ -95,22 +82,26 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       await submitProof({
         bidId: bid.bidId,
         proposalId: Number(pid),
-        milestoneIndex: index,            // ZERO-BASED: M1=0, M2=1, …
+        milestoneIndex: index,          // ZERO-BASED
         note: 'vendor proof',
         files: filesPayload,
       });
 
-      // 3) Keep your legacy flow so nothing else breaks (mark completed with optional text)
+      // 3) Keep legacy path so nothing else breaks
       await completeMilestone(bid.bidId, index, proofText || '');
 
-      // 4) Clear inputs & refresh
+      // 4) Clear UI and notify project page to refresh proofs
       setProofText('');
       setFilesPerMilestone(prev => ({ ...prev, [index]: [] }));
-      alert('Proof submitted. Files saved & milestone marked completed.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail: { proposalId: Number(pid) } }));
+      }
+      alert('Proof submitted. Files uploaded & saved.');
+
       onUpdate();
-    } catch (error: any) {
-      console.error(error);
-      alert(error?.message || 'Failed to submit proof');
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Failed to submit proof');
     } finally {
       setCompletingIndex(null);
     }
@@ -123,9 +114,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       setPaymentResult(result);
       alert('Payment released successfully!');
       onUpdate();
-    } catch (error: any) {
-      console.error(error);
-      alert(error?.message || 'Failed to release payment');
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Failed to release payment');
     } finally {
       setCompletingIndex(null);
     }
@@ -164,9 +155,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       <div className="mb-4 p-3 bg-gray-50 rounded">
         <p className="font-medium text-gray-600">Vendor Wallet Address</p>
         <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
-        <p className="text-xs text-gray-500 mt-1">
-          Payments are sent to this {bid.preferredStablecoin} address
-        </p>
+        <p className="text-xs text-gray-500 mt-1">Payments are sent to this {bid.preferredStablecoin} address</p>
       </div>
 
       <div className="space-y-4">
@@ -216,8 +205,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 <div className="mt-2">
                   <div className="p-2 bg-white rounded border">
                     <p className="text-sm text-green-600">
-                      ✅ Paid
-                      {milestone.paymentDate ? ` on ${new Date(milestone.paymentDate).toLocaleDateString()}` : ''}
+                      ✅ Paid{milestone.paymentDate ? ` on ${new Date(milestone.paymentDate).toLocaleDateString()}` : ''}
                     </p>
                     <p className="text-sm mt-1">
                       <span className="font-medium">TX Hash:</span>{' '}
@@ -240,9 +228,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 <div className="mt-2 p-2 bg-yellow-50 rounded border">
                   <p className="text-sm text-yellow-700">
                     ✅ Completed
-                    {milestone.completionDate
-                      ? ` on ${new Date(milestone.completionDate).toLocaleDateString()}`
-                      : ''}
+                    {milestone.completionDate ? ` on ${new Date(milestone.completionDate).toLocaleDateString()}` : ''}
                   </p>
                   {milestone.proof && (
                     <p className="text-sm mt-1">
@@ -260,10 +246,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               ) : (
                 <div className="mt-3 space-y-2">
-                  {/* NEW: file picker (images & pdfs). These are what get uploaded to Pinata */}
                   <div>
                     <label className="block text-sm font-medium mb-1">
-                      Attach proof files (images/PDF). These will be uploaded to IPFS automatically.
+                      Attach proof files (images/PDF). They will be uploaded to IPFS (Pinata).
                     </label>
                     <input
                       type="file"
@@ -279,11 +264,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     )}
                   </div>
 
-                  {/* Optional legacy text field */}
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Proof notes (optional)
-                    </label>
+                    <label className="block text-sm font-medium mb-1">Proof notes (optional)</label>
                     <textarea
                       placeholder="Notes (optional)"
                       value={proofText}
@@ -302,7 +284,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </button>
 
                   <p className="text-xs text-gray-500">
-                    On submit: files are uploaded to Pinata, saved into the project proofs, and the milestone is marked completed.
+                    On submit: files are uploaded to Pinata, saved into project proofs, and the milestone is marked completed.
                   </p>
                 </div>
               )}
@@ -311,15 +293,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })}
       </div>
 
-      {/* Manual Payment Processor */}
       <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
 
       {paidAmount === totalAmount && (
         <div className="mt-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
           <p className="font-semibold">✅ Project Completed and Fully Paid!</p>
-          <p>
-            All milestones have been completed and paid. Total: ${totalAmount.toLocaleString()} {bid.preferredStablecoin}
-          </p>
+          <p>All milestones have been completed and paid. Total: ${totalAmount.toLocaleString()} {bid.preferredStablecoin}</p>
         </div>
       )}
     </div>
