@@ -19,19 +19,40 @@ function gatewayBase(): string {
 type InFile = { url?: string; cid?: string; name?: string; path?: string } | string;
 
 function normalizeFiles(input: InFile[]): { url?: string|null; cid?: string|null; name?: string|null; path?: string|null }[] {
-  return (Array.isArray(input) ? input : []).map((f: InFile) => {
+  const gw = gatewayBase();
+
+  const isCid = (s: string) => /^[A-Za-z0-9]+$/.test(s) && !/^https?:\/\//i.test(s);
+  const bad = (s: string) => s.includes('<gw>') || s.includes('<CID') || s.includes('>');
+
+  const fixProtocol = (s: string) =>
+    /^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//, '')}`;
+
+  const out: Array<{ url?: string|null; cid?: string|null; name?: string|null; path?: string|null }> = [];
+
+  for (const f of (Array.isArray(input) ? input : [])) {
     if (typeof f === 'string') {
-      const isCid = /^[A-Za-z0-9]+$/.test(f) && !/^https?:\/\//i.test(f);
-      return isCid
-        ? { cid: f, url: `${gatewayBase()}/${f}`, name: f, path: null }
-        : { url: f, cid: null, name: decodeURIComponent(f.split('/').pop() || 'file'), path: null };
+      if (bad(f)) continue;
+      if (isCid(f)) {
+        out.push({ cid: f, url: `${gw}/${f}`, name: f, path: null });
+      } else {
+        const url = fixProtocol(f);
+        out.push({ url, cid: null, name: decodeURIComponent(url.split('/').pop() || 'file'), path: null });
+      }
+    } else if (f && typeof f === 'object') {
+      const cid = f.cid || null;
+      let url = f.url || (cid ? `${gw}/${cid}` : null);
+      if (url) {
+        if (bad(url)) continue;
+        url = fixProtocol(url);
+      }
+      const name = f.name ?? (url ? decodeURIComponent(url.split('/').pop() || 'file') : cid || null);
+      const path = (f as any).path || null;
+      out.push({ url, cid, name, path });
     }
-    const cid = f?.cid || null;
-    const url = f?.url || (cid ? `${gatewayBase()}/${cid}` : null);
-    const name = f?.name ?? (url ? decodeURIComponent(url.split('/').pop() || 'file') : cid || null);
-    const path = (f as any)?.path || null;
-    return { url, cid, name, path };
-  });
+  }
+
+  // keep only entries with a usable url or cid
+  return out.filter(x => x.url || x.cid);
 }
 
 export async function GET(req: Request) {

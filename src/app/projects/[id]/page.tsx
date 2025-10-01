@@ -107,23 +107,45 @@ function parseDocs(raw: unknown): any[] {
 }
 
 function filesFromProofRecords(items: ProofRecord[]) {
+  const isBad = (u?: string) =>
+    !u ||
+    u.includes('<gw>') ||
+    u.includes('<CID') ||
+    u.includes('>') ||
+    /^\s*$/.test(u);
+
+  const fixProtocol = (u: string) =>
+    /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^https?:\/\//, '')}`;
+
   const rows: Array<{ scope: string; doc: any }> = [];
   for (const p of items || []) {
     const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
     const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
+
     const list: ProofFile[] = []
       .concat(p.files || [])
       .concat((p.urls || []) as ProofFile[])
       .concat((p.cids || []) as ProofFile[]);
+
     for (const raw of list) {
-      const url =
-        (typeof raw === 'string' ? raw : (raw as any)?.url) ||
-        ((typeof raw === 'object' && (raw as any)?.cid) ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
-      if (!url) continue;
-      const name =
-        (typeof raw === 'object' && (raw as any)?.name) ||
-        (typeof raw === 'string' ? decodeURIComponent((raw.split('/').pop() || '').trim() || 'file') : 'file') ||
-        'file';
+      let url: string | undefined;
+
+      if (typeof raw === 'string') {
+        url = raw;
+      } else if (raw && typeof raw === 'object') {
+        url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
+      }
+
+      if (!url || isBad(url)) continue;
+      url = fixProtocol(url);
+
+      const nameFromUrl = decodeURIComponent((url.split('/').pop() || '').trim());
+      const explicitName =
+        typeof raw === 'object' && raw && (raw as any).name
+          ? String((raw as any).name)
+          : undefined;
+
+      const name = explicitName && explicitName.toLowerCase() !== 'file' ? explicitName : nameFromUrl || 'file';
       rows.push({ scope, doc: { url, name } });
     }
   }
@@ -363,29 +385,33 @@ useEffect(() => {
 
   // -------------- small render helpers (no hooks) --------------
   function renderAttachment(doc: any, key: number) {
-    if (!doc) return null;
-    const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
-    if (isImage) {
-      return (
-        <button
-          key={key}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-          title={doc.name || 'image'}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-        </button>
-      );
-    }
+  if (!doc) return null;
+  const href = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '#');
+
+  // Detect image **by URL**, not only by name
+  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
+
+  if (isImage) {
     return (
-      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate" title={doc.name}>{doc.name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-      </div>
+      <button
+        key={key}
+        onClick={() => setLightbox(href)}
+        className="group relative overflow-hidden rounded border"
+        title={doc.name || 'image'}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={href} alt={doc.name || 'image'} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+      </button>
     );
   }
+
+  return (
+    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+      <p className="truncate" title={doc.name}>{doc.name}</p>
+      <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
+    </div>
+  );
+}
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
