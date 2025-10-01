@@ -619,6 +619,16 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
+// keep older imports working by aliasing to payMilestone
+export function sendTokens(params: {
+  bidId: number;
+  milestoneIndex: number;
+  token?: string;               // accepted but unused by current API
+  amount?: number | string;     // accepted but unused by current API
+}) {
+  return payMilestone(params.bidId, params.milestoneIndex);
+}
+
 // Reject a milestone’s proof (admin)
 export function rejectMilestoneProof(
   bidId: number,
@@ -833,6 +843,32 @@ export async function archiveProof(proofId: number): Promise<Proof> {
   return toProof(p);
 }
 
+/** Approve a proof (admin-only) */
+export async function approveProof(proofId: number, note?: string): Promise<Proof> {
+  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
+  const p = await apiFetch(
+    `/proofs/${encodeURIComponent(String(proofId))}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify(note ? { note } : {}),
+    }
+  );
+  return toProof(p);
+}
+
+/** Reject a proof (admin-only) */
+export async function rejectMilestoneProof(proofId: number, note?: string): Promise<Proof> {
+  if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
+  const p = await apiFetch(
+    `/proofs/${encodeURIComponent(String(proofId))}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(note ? { note } : {}),
+    }
+  );
+  return toProof(p);
+}
+
 export async function getProofs(bidId?: number): Promise<Proof[]> {
   if (Number.isFinite(bidId as number)) {
     // vendor-safe (server should allow admin OR bid owner)
@@ -960,11 +996,10 @@ export async function uploadProofFiles(
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
 
-  // IMPORTANT: relative fetch → hits Next /api, NOT your external API_BASE
+  // IMPORTANT: relative fetch → hits Next /api route, not your external API_BASE
   const res = await fetch(`/api/proofs/upload`, {
     method: 'POST',
     body: fd,
-    // include cookies if your route is auth-protected
     credentials: 'include',
   });
 
@@ -976,7 +1011,6 @@ export async function uploadProofFiles(
 
   const json = await res.json().catch(() => ({}));
   const list = Array.isArray(json?.uploads) ? json.uploads : [];
-  // Normalize: make sure each has cid, url, name
   return list.map((u: any) => ({
     cid: String(u?.cid || ''),
     url: String(u?.url || ''),
@@ -1010,7 +1044,7 @@ export async function saveProofFilesToDb(params: {
     throw new Error(msg);
   }
 
-  return await res.json(); // the saved proof row (normalized by the API route)
+  return await res.json();
 }
 
 // ---- Health ----
@@ -1077,13 +1111,13 @@ export default {
   getProofs,
   archiveProof,
 
-  // proofs uploads via Next API
-  uploadProofFiles,
-  saveProofFilesToDb,
-
   // chat
   chatProof,
   chatProofOnce,
+
+  // proofs uploads via Next API
+  uploadProofFiles,
+  saveProofFilesToDb,
 
   // ipfs & misc
   uploadJsonToIPFS,
