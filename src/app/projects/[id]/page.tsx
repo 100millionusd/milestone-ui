@@ -655,46 +655,60 @@ useEffect(() => {
 
       {/* Milestones */}
       {tab === 'milestones' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-          {acceptedBid && acceptedMilestones.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Title</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Completed</th>
-                  <th className="py-2 pr-4">Paid</th>
-                  <th className="py-2 pr-4">Tx</th>
-                </tr>
-              </thead>
-              <tbody>
-                {acceptedMilestones.map((m, idx) => {
-                  const paid = !!m.paymentTxHash;
-                  const completedRow = paid || !!m.completed;
-                  return (
-                    <tr key={idx} className="border-t">
-                      <td className="py-2 pr-4">M{idx + 1}</td>
-                      <td className="py-2 pr-4">{m.name || '—'}</td>
-                      <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
-                      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-sm text-gray-500">
-              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
-            </p>
-          )}
-        </section>
-      )}
+  <section className="border rounded p-4">
+    <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+
+    {acceptedBid && acceptedMilestones.length ? (
+      <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2 pr-4">#</th>
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Amount</th>
+                <th className="py-2 pr-4">Status</th>
+                <th className="py-2 pr-4">Completed</th>
+                <th className="py-2 pr-4">Paid</th>
+                <th className="py-2 pr-4">Tx</th>
+              </tr>
+            </thead>
+            <tbody>
+              {acceptedMilestones.map((m, idx) => {
+                const paid = !!m.paymentTxHash;
+                const completedRow = paid || !!m.completed;
+                return (
+                  <tr key={idx} className="border-t">
+                    <td className="py-2 pr-4">M{idx + 1}</td>
+                    <td className="py-2 pr-4">{m.name || '—'}</td>
+                    <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
+                    <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                    <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                    <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ✅ Submit Proof widget that actually creates DB rows */}
+        <div className="mt-6">
+          <MilestonePayments
+            bid={acceptedBid}
+            onUpdate={refreshProofs}
+            proposalId={projectIdNum}   // ← required for /api/proofs POST
+          />
+        </div>
+      </>
+    ) : (
+      <p className="text-sm text-gray-500">
+        {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+      </p>
+    )}
+  </section>
+)}
 
       {/* Files */}
       {tab === 'files' && (
