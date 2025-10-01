@@ -10,7 +10,9 @@ import AdminProofs from '@/components/AdminProofs';
 // Pinata gateway base
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
+        .replace(/^https?:\/\//, '')
+        .replace(/\/+$/, '')}/ipfs`
     : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
         ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
         : 'https://gateway.pinata.cloud/ipfs');
