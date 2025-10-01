@@ -82,16 +82,17 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         note: note || 'vendor proof',
       });
 
-      // 4) Notify page to refresh immediately
+      // 4) Notify page to refresh immediately (send both event names + proposalId)
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('proofs:updated'));
+        const detail = { proposalId: Number(pid) };
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
       }
 
       // 5) Mark milestone completed (legacy text-proof still supported)
       await completeMilestone(bid.bidId, index, note || 'vendor submitted');
 
       // 6) (Optional) also hit backend proofs if it reads that table too
-      //    Safe to keep; remove if not needed.
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,

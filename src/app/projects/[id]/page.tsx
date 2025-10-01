@@ -214,13 +214,23 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // 🔔 Listen for vendor-side events to live-refresh the Files tab
-  // FIX: match the emitter ('proofs:updated'), no detail required
-  useEffect(() => {
-    const onU = () => refreshProofs();
-    window.addEventListener('proofs:updated', onU);
-    return () => window.removeEventListener('proofs:updated', onU);
-  }, [projectIdNum]);
+  // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
+useEffect(() => {
+  const onAnyProofUpdate = (ev: any) => {
+    const pid = Number(ev?.detail?.proposalId);
+    // If no detail provided: refresh anyway. If provided: only refresh when it matches this project.
+    if (!Number.isFinite(pid) || pid === projectIdNum) {
+      refreshProofs();
+    }
+  };
+  window.addEventListener('proofs:updated', onAnyProofUpdate);
+  window.addEventListener('proofs:changed', onAnyProofUpdate); // backward-compat
+  return () => {
+    window.removeEventListener('proofs:updated', onAnyProofUpdate);
+    window.removeEventListener('proofs:changed', onAnyProofUpdate);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [projectIdNum]);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
