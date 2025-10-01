@@ -1,4 +1,3 @@
-// src/app/projects/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -6,19 +5,21 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
-import MilestonePayments from '@/components/MilestonePayments';
 
 // ---------------- Consts ----------------
+// Pinata gateway base
 const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  'https://gateway.pinata.cloud/ipfs';
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
+    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
+        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
+        : 'https://gateway.pinata.cloud/ipfs');
 
+// ⚠️ Proofs endpoint: force local API unless you explicitly override with NEXT_PUBLIC_PROOFS_ENDPOINT
 const PROOFS_ENDPOINT =
-  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT ||
-  (process.env.NEXT_PUBLIC_API_BASE_URL
-    ? `${process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '')}/proofs`
-    : '/api/proofs');
+  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT && process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.trim() !== ''
+    ? process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.replace(/\/+$/, '')
+    : '/api/proofs';
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -114,11 +115,11 @@ function filesFromProofRecords(items: ProofRecord[]) {
       .concat((p.cids || []) as ProofFile[]);
     for (const raw of list) {
       const url =
-        (typeof raw === 'string' ? raw : raw?.url) ||
-        (typeof raw === 'object' && raw?.cid ? `${PINATA_GATEWAY}/${raw.cid}` : undefined);
+        (typeof raw === 'string' ? raw : (raw as any)?.url) ||
+        ((typeof raw === 'object' && (raw as any)?.cid) ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
       if (!url) continue;
       const name =
-        (typeof raw === 'object' && raw?.name) ||
+        (typeof raw === 'object' && (raw as any)?.name) ||
         (typeof raw === 'string' ? decodeURIComponent((raw.split('/').pop() || '').trim() || 'file') : 'file') ||
         'file';
       rows.push({ scope, doc: { url, name } });
@@ -175,7 +176,7 @@ export default function ProjectDetailPage() {
     getAuthRole().then(setMe).catch(() => {});
   }, []);
 
-  // Fetch proofs
+  // Fetch proofs (always from local /api/proofs unless explicitly overridden)
   const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
@@ -193,6 +194,7 @@ export default function ProjectDetailPage() {
     }
   };
 
+  // Load proofs once on mount
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -210,18 +212,17 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // 🔔 Listen for vendor-side "proofs:changed" events to live-refresh the Files tab
   useEffect(() => {
-  const onProofsChanged = (ev: any) => {
-    const pid = Number(ev?.detail?.proposalId);
-    if (Number.isFinite(pid) && pid === projectIdNum) {
-      // call the existing refresher
-      refreshProofs();
-    }
-  };
-  window.addEventListener('proofs:changed', onProofsChanged);
-  return () => window.removeEventListener('proofs:changed', onProofsChanged);
-}, [projectIdNum]);
-
+    const onProofsChanged = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      if (Number.isFinite(pid) && pid === projectIdNum) {
+        refreshProofs();
+      }
+    };
+    window.addEventListener('proofs:changed', onProofsChanged);
+    return () => window.removeEventListener('proofs:changed', onProofsChanged);
+  }, [projectIdNum]);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
@@ -272,7 +273,7 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, bids]);
 
-  // Expose files for console debug
+  // Expose for console debug
   useEffect(() => {
     if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
   }, [proofs]);
@@ -618,74 +619,47 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Milestones */}
-{tab === 'milestones' && (
-  <>
-    <section className="border rounded p-4 overflow-x-auto">
-      <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
-      {acceptedBid && acceptedMilestones.length ? (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-gray-600">
-              <th className="py-2 pr-4">#</th>
-              <th className="py-2 pr-4">Title</th>
-              <th className="py-2 pr-4">Amount</th>
-              <th className="py-2 pr-4">Status</th>
-              <th className="py-2 pr-4">Completed</th>
-              <th className="py-2 pr-4">Paid</th>
-              <th className="py-2 pr-4">Tx</th>
-            </tr>
-          </thead>
-          <tbody>
-            {acceptedMilestones.map((m, idx) => {
-              const paid = !!m.paymentTxHash;
-              const completedRow = paid || !!m.completed;
-              return (
-                <tr key={idx} className="border-t">
-                  <td className="py-2 pr-4">M{idx + 1}</td>
-                  <td className="py-2 pr-4">{m.name || '—'}</td>
-                  <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                  <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
-                  <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                  <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                  <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
+      {tab === 'milestones' && (
+        <section className="border rounded p-4 overflow-x-auto">
+          <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+          {acceptedBid && acceptedMilestones.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600">
+                  <th className="py-2 pr-4">#</th>
+                  <th className="py-2 pr-4">Title</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Completed</th>
+                  <th className="py-2 pr-4">Paid</th>
+                  <th className="py-2 pr-4">Tx</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      ) : (
-        <p className="text-sm text-gray-500">
-          {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
-        </p>
+              </thead>
+              <tbody>
+                {acceptedMilestones.map((m, idx) => {
+                  const paid = !!m.paymentTxHash;
+                  const completedRow = paid || !!m.completed;
+                  return (
+                    <tr key={idx} className="border-t">
+                      <td className="py-2 pr-4">M{idx + 1}</td>
+                      <td className="py-2 pr-4">{m.name || '—'}</td>
+                      <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
+                      <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                      <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-sm text-gray-500">
+              {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+            </p>
+          )}
+        </section>
       )}
-    </section>
-
-    {/* NEW: vendor proof submit + admin release actions, right under the table */}
-    {acceptedBid && (
-      <section className="border rounded p-4 mt-4">
-        <h3 className="font-semibold mb-3">Milestone Proofs & Payments</h3>
-        <MilestonePayments
-          bid={acceptedBid}
-          proposalId={projectIdNum}
-          onUpdate={async () => {
-            // refresh Files + project/bids after proof submit or payment
-            await refreshProofs();
-            try {
-              const [p, b] = await Promise.all([
-                getProposal(projectIdNum),
-                getBids(projectIdNum),
-              ]);
-              setProject(p);
-              setBids(b);
-            } catch (e) {
-              console.error('refresh after submit:', e);
-            }
-          }}
-        />
-      </section>
-    )}
-  </>
-)}
 
       {/* Files */}
       {tab === 'files' && (
@@ -733,7 +707,6 @@ export default function ProjectDetailPage() {
               {loadingProofs ? 'Refreshing…' : 'Refresh Proofs'}
             </button>
           </div>
-          {/* Your existing Admin UI component */}
           <AdminProofs proposalId={projectIdNum} />
         </section>
       )}
