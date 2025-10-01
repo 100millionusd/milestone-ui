@@ -1006,11 +1006,14 @@ export async function uploadProofFiles(
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
 //    (this is what makes them appear in the Project “Files” tab automatically)
+// 2) Save the uploaded file URLs into your proofs table via /api/proofs
+//    (this is what makes them appear in the Project “Files” tab automatically)
 export async function saveProofFilesToDb(params: {
   proposalId: number;
   milestoneIndex: number; // ZERO-BASED (M1=0, M2=1, …)
   files: Array<{ url: string; name?: string; cid?: string }>;
   note?: string;
+  replaceExisting?: boolean;       // ← optional: set true to wipe old files for this milestone
 }) {
   const res = await fetch(`/api/proofs`, {
     method: 'POST',
@@ -1021,6 +1024,7 @@ export async function saveProofFilesToDb(params: {
       milestoneIndex: Number(params.milestoneIndex),
       note: params.note ?? null,
       files: params.files,
+      mode: params.replaceExisting ? 'replace' : 'append',  // ← new
     }),
   });
 
