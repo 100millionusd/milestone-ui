@@ -224,16 +224,16 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const r = await fetch(fullUrl, {
-    cache: "no-store",
-    mode: "cors",
-    redirect: "follow",
-    credentials: "include", // send auth cookie
-    headers,
-    ...options,
-  }).catch((e) => {
-    throw new Error(e?.message || "Failed to fetch");
-  });
+ const r = await fetch(fullUrl, {
+  ...options, // allow caller overrides EXCEPT headers
+  cache: "no-store",
+  mode: "cors",
+  redirect: "follow",
+  credentials: "include", // send auth cookie
+  headers, // our merged headers MUST come last
+}).catch((e) => {
+  throw new Error(e?.message || "Failed to fetch");
+});
 
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
