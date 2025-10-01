@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import {
   getProofs,
-  approveProof,
-  rejectProof,
+  approveProof,            // needs proofId
+  rejectProof,             // works with bidId + milestoneIndex (legacy)
   analyzeProof,
   chatProof,
+  adminCompleteMilestone,  // fallback when proofId is missing
   type Proof,
 } from '@/lib/api';
 
@@ -41,7 +42,11 @@ export default function AdminProofs() {
 
       <div className="grid gap-6">
         {proofs.map((proof) => (
-          <ProofCard key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`} proof={proof} onRefresh={loadProofs} />
+          <ProofCard
+            key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
+            proof={proof}
+            onRefresh={loadProofs}
+          />
         ))}
 
         {proofs.length === 0 && (
@@ -59,8 +64,10 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
   const [chat, setChat] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const canAnalyze = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
+  const hasProofId = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
+  const canAnalyze = hasProofId;
 
   async function onRun() {
     if (!canAnalyze) return;
@@ -88,14 +95,35 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
     }
   }
 
+  // ✅ FIX: Approve using proofId; fallback to milestone-complete if legacy/absent
   async function handleApprove() {
-    await approveProof(proof.bidId, proof.milestoneIndex);
-    await onRefresh();
+    setBusy(true);
+    try {
+      if (hasProofId) {
+        await approveProof(proof.proofId!);
+      } else {
+        // Legacy row without proofId → mark milestone completed as a pragmatic fallback
+        await adminCompleteMilestone(proof.bidId, proof.milestoneIndex, 'Approved by admin (legacy row)');
+      }
+      await onRefresh();
+    } catch (e: any) {
+      alert(e?.message || 'Approve failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleReject() {
-    await rejectProof(proof.bidId, proof.milestoneIndex);
-    await onRefresh();
+    setBusy(true);
+    try {
+      // rejectProof maps to rejectMilestoneProof(bidId, milestoneIndex)
+      await rejectProof(proof.bidId, proof.milestoneIndex);
+      await onRefresh();
+    } catch (e: any) {
+      alert(e?.message || 'Reject failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   const statusChip =
@@ -206,17 +234,25 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         <div className="ml-auto flex gap-2">
           <button
             onClick={handleApprove}
-            disabled={proof.status === 'approved'}
+            disabled={proof.status === 'approved' || busy}
+            title={
+              proof.status === 'approved'
+                ? 'Already approved'
+                : hasProofId
+                ? 'Approve proof'
+                : 'No proofId (legacy). Will mark milestone complete.'
+            }
             className="px-3 py-1 text-sm bg-emerald-600 text-white rounded disabled:bg-gray-300"
           >
-            Approve
+            {busy ? 'Working…' : 'Approve'}
           </button>
           <button
             onClick={handleReject}
-            disabled={proof.status === 'rejected'}
+            disabled={proof.status === 'rejected' || busy}
+            title={proof.status === 'rejected' ? 'Already rejected' : 'Reject proof / milestone'}
             className="px-3 py-1 text-sm bg-rose-600 text-white rounded disabled:bg-gray-300"
           >
-            Reject
+            {busy ? 'Working…' : 'Reject'}
           </button>
         </div>
       </div>
