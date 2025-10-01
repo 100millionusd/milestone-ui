@@ -1,17 +1,16 @@
-// src/components/AdminProofs.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import {
   getProofs,
-  approveProof,   // expects proofId
-  rejectProof,    // expects (bidId, milestoneIndex)
+  approveProof,
+  rejectProof,
   analyzeProof,
   chatProof,
   type Proof,
 } from '@/lib/api';
 
-export default function AdminProofs({ bidIds }: { bidIds?: number[] }) {
+export default function AdminProofs() {
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,13 +19,8 @@ export default function AdminProofs({ bidIds }: { bidIds?: number[] }) {
     try {
       setLoading(true);
       setError(null);
-      // ✅ Load the SAME backend proofs used by /admin/proofs
-      const data = await getProofs(); // admin list from backend
-      // If we got bidIds from the project page, filter to those bids only
-      const filtered = Array.isArray(bidIds) && bidIds.length
-        ? data.filter(p => bidIds.includes(Number(p.bidId)))
-        : data;
-      setProofs(filtered);
+      const data = await getProofs(); // admin list
+      setProofs(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load proofs');
     } finally {
@@ -34,20 +28,20 @@ export default function AdminProofs({ bidIds }: { bidIds?: number[] }) {
     }
   }
 
-  useEffect(() => { loadProofs(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    loadProofs();
+  }, []);
 
   if (loading) return <div className="p-6">Loading proofs...</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;
 
   return (
-    <div className="max-w-6xl mx-auto p-0">
+    <div className="max-w-6xl mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-6">Admin — Proofs</h1>
+
       <div className="grid gap-6">
         {proofs.map((proof) => (
-          <ProofCard
-            key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
-            proof={proof}
-            onRefresh={loadProofs}
-          />
+          <ProofCard key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`} proof={proof} onRefresh={loadProofs} />
         ))}
 
         {proofs.length === 0 && (
@@ -94,17 +88,11 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
     }
   }
 
-  // ✅ Approve must use proofId (backend route: /proofs/:id/approve)
   async function handleApprove() {
-    if (!proof.proofId) {
-      alert('Missing proofId on this item.');
-      return;
-    }
-    await approveProof(proof.proofId);
+    await approveProof(proof.bidId, proof.milestoneIndex);
     await onRefresh();
   }
 
-  // ✅ Reject uses bid+milestone (backend route: /bids/:bidId/milestones/:idx/reject)
   async function handleReject() {
     await rejectProof(proof.bidId, proof.milestoneIndex);
     await onRefresh();
@@ -133,15 +121,26 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
 
       <p className="text-gray-700 mb-3 whitespace-pre-wrap">{proof.description || 'No description'}</p>
 
-      {!!proof.files?.length && (
+      {/* Attachments */}
+      {proof.files?.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
           {proof.files.map((file, i) => {
             const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name || file.url);
             if (isImage) {
               return (
-                <a key={i} href={file.url} target="_blank" rel="noopener noreferrer" className="group relative overflow-hidden rounded border">
+                <a
+                  key={i}
+                  href={file.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group relative overflow-hidden rounded border"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={file.url} alt={file.name} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                  <img
+                    src={file.url}
+                    alt={file.name}
+                    className="h-32 w-full object-cover group-hover:scale-105 transition"
+                  />
                   <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
                     {file.name}
                   </div>
@@ -151,7 +150,12 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
             return (
               <div key={i} className="p-3 rounded border bg-gray-50">
                 <p className="truncate text-sm">{file.name}</p>
-                <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                <a
+                  href={file.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline"
+                >
                   Open
                 </a>
               </div>
@@ -160,6 +164,17 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         </div>
       )}
 
+      {/* Existing AI analysis (if any) */}
+      {proof.aiAnalysis && (
+        <div className="mb-4 p-3 rounded border bg-slate-50">
+          <div className="text-xs text-slate-700 whitespace-pre-wrap">
+            <strong>AI Summary:</strong>{' '}
+            {typeof proof.aiAnalysis.summary === 'string' ? proof.aiAnalysis.summary : JSON.stringify(proof.aiAnalysis, null, 2)}
+          </div>
+        </div>
+      )}
+
+      {/* Prompt + actions */}
       <div className="mb-3">
         <textarea
           className="w-full border rounded p-2 text-sm"
@@ -175,6 +190,7 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
           onClick={onRun}
           disabled={!canAnalyze || running}
           className="px-3 py-1 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
+          title={canAnalyze ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
         >
           {running ? 'Running…' : 'Run Agent 2'}
         </button>
@@ -182,6 +198,7 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
           onClick={onChat}
           disabled={!canAnalyze || streaming}
           className="px-3 py-1 rounded bg-indigo-600 text-white text-xs disabled:opacity-50"
+          title={canAnalyze ? 'Stream a one-off chat answer' : 'Proof ID missing'}
         >
           {streaming ? 'Asking…' : 'Ask Agent 2 (Chat)'}
         </button>
@@ -204,9 +221,10 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         </div>
       </div>
 
+      {/* Chat stream output */}
       {chat && (
         <div className="rounded border bg-white p-3">
-          <div className="text-xs text-slate-700 whitespace-pre-wrap break-words font-mono">{chat}</div>
+          <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
         </div>
       )}
     </div>
