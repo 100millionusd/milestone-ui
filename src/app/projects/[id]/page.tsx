@@ -656,9 +656,11 @@ useEffect(() => {
       {/* Milestones */}
       {tab === 'milestones' && (
   <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}</h3>
+    <h3 className="font-semibold mb-3">
+      Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+    </h3>
 
-    {acceptedBid && acceptedMilestones.length ? (
+    {acceptedMilestones.length ? (
       <>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -681,11 +683,17 @@ useEffect(() => {
                   <tr key={idx} className="border-t">
                     <td className="py-2 pr-4">M{idx + 1}</td>
                     <td className="py-2 pr-4">{m.name || '—'}</td>
-                    <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                    <td className="py-2 pr-4">{paid ? 'paid' : completedRow ? 'completed' : 'pending'}</td>
+                    <td className="py-2 pr-4">
+                      {m.amount ? currency.format(Number(m.amount)) : '—'}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
+                    </td>
                     <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                     <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                    <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
+                    <td className="py-2 pr-4">
+                      {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                    </td>
                   </tr>
                 );
               })}
@@ -693,18 +701,20 @@ useEffect(() => {
           </table>
         </div>
 
-        {/* ✅ Submit Proof widget that actually creates DB rows */}
-        <div className="mt-6">
-          <MilestonePayments
-            bid={acceptedBid}
-            onUpdate={refreshProofs}
-            proposalId={projectIdNum}   // ← required for /api/proofs POST
-          />
-        </div>
+        {/* ✅ Render the proof submission widget here */}
+        {(acceptedBid || (bids && bids[0])) && (
+          <div className="mt-6">
+            <MilestonePayments
+              bid={acceptedBid || bids[0]}      // show the widget even if the bid isn’t approved yet
+              onUpdate={refreshProofs}
+              proposalId={projectIdNum}         // ← REQUIRED so /api/proofs writes to the correct project
+            />
+          </div>
+        )}
       </>
     ) : (
       <p className="text-sm text-gray-500">
-        {acceptedBid ? 'No milestones defined for the accepted bid.' : 'No accepted bid yet.'}
+        No milestones defined yet.
       </p>
     )}
   </section>
