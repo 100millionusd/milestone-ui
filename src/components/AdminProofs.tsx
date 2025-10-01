@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import {
   getProofs,
-  approveProof,            // needs proofId
-  rejectProof,             // works with bidId + milestoneIndex (legacy)
+  approveProof,               // expects (proofId: number, note?)
+  rejectProof,                // legacy reject by (bidId, milestoneIndex)
   analyzeProof,
   chatProof,
-  adminCompleteMilestone,  // fallback when proofId is missing
+  adminCompleteMilestone,     // fallback approve for legacy rows
   type Proof,
 } from '@/lib/api';
 
@@ -67,10 +67,9 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
   const [busy, setBusy] = useState(false);
 
   const hasProofId = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
-  const canAnalyze = hasProofId;
 
   async function onRun() {
-    if (!canAnalyze) return;
+    if (!hasProofId) return;
     setRunning(true);
     try {
       await analyzeProof(proof.proofId!, prompt);
@@ -81,13 +80,20 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
   }
 
   async function onChat() {
-    if (!canAnalyze) return;
+    if (!hasProofId) return;
     setChat('');
     setStreaming(true);
     try {
       await chatProof(
         proof.proofId!,
-        [{ role: 'user', content: prompt || 'Explain this proof and the attached file(s). What evidence is strong? Any gaps?' }],
+        [
+          {
+            role: 'user',
+            content:
+              prompt ||
+              'Explain this proof and the attached file(s). What evidence is strong? Any gaps?',
+          },
+        ],
         (t) => setChat((prev) => prev + t),
       );
     } finally {
@@ -95,15 +101,23 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
     }
   }
 
-  // ✅ FIX: Approve using proofId; fallback to milestone-complete if legacy/absent
   async function handleApprove() {
     setBusy(true);
     try {
       if (hasProofId) {
+        // ✅ Normal path (works on /admin/proofs/)
         await approveProof(proof.proofId!);
       } else {
-        // Legacy row without proofId → mark milestone completed as a pragmatic fallback
-        await adminCompleteMilestone(proof.bidId, proof.milestoneIndex, 'Approved by admin (legacy row)');
+        // ✅ Fallback: legacy/derived row (project page Admin tab)
+        await adminCompleteMilestone(
+          proof.bidId,
+          proof.milestoneIndex,
+          'Approved by admin (legacy row without proofId)',
+        );
+      }
+      // Notify project page Files listener (your code refreshes on no-detail too)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('proofs:updated'));
       }
       await onRefresh();
     } catch (e: any) {
@@ -116,8 +130,10 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
   async function handleReject() {
     setBusy(true);
     try {
-      // rejectProof maps to rejectMilestoneProof(bidId, milestoneIndex)
       await rejectProof(proof.bidId, proof.milestoneIndex);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('proofs:updated'));
+      }
       await onRefresh();
     } catch (e: any) {
       alert(e?.message || 'Reject failed');
@@ -147,7 +163,9 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
       </div>
 
-      <p className="text-gray-700 mb-3 whitespace-pre-wrap">{proof.description || 'No description'}</p>
+      <p className="text-gray-700 mb-3 whitespace-pre-wrap">
+        {proof.description || 'No description'}
+      </p>
 
       {/* Attachments */}
       {proof.files?.length > 0 && (
@@ -197,7 +215,9 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         <div className="mb-4 p-3 rounded border bg-slate-50">
           <div className="text-xs text-slate-700 whitespace-pre-wrap">
             <strong>AI Summary:</strong>{' '}
-            {typeof proof.aiAnalysis.summary === 'string' ? proof.aiAnalysis.summary : JSON.stringify(proof.aiAnalysis, null, 2)}
+            {typeof proof.aiAnalysis.summary === 'string'
+              ? proof.aiAnalysis.summary
+              : JSON.stringify(proof.aiAnalysis, null, 2)}
           </div>
         </div>
       )}
@@ -216,17 +236,17 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           onClick={onRun}
-          disabled={!canAnalyze || running}
+          disabled={!hasProofId || running}
           className="px-3 py-1 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
+          title={hasProofId ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
         >
           {running ? 'Running…' : 'Run Agent 2'}
         </button>
         <button
           onClick={onChat}
-          disabled={!canAnalyze || streaming}
+          disabled={!hasProofId || streaming}
           className="px-3 py-1 rounded bg-indigo-600 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Stream a one-off chat answer' : 'Proof ID missing'}
+          title={hasProofId ? 'Stream a one-off chat answer' : 'Proof ID missing'}
         >
           {streaming ? 'Asking…' : 'Ask Agent 2 (Chat)'}
         </button>
@@ -234,22 +254,14 @@ function ProofCard({ proof, onRefresh }: { proof: Proof; onRefresh: () => void }
         <div className="ml-auto flex gap-2">
           <button
             onClick={handleApprove}
-            disabled={proof.status === 'approved' || busy}
-            title={
-              proof.status === 'approved'
-                ? 'Already approved'
-                : hasProofId
-                ? 'Approve proof'
-                : 'No proofId (legacy). Will mark milestone complete.'
-            }
+            disabled={busy || proof.status === 'approved'}
             className="px-3 py-1 text-sm bg-emerald-600 text-white rounded disabled:bg-gray-300"
           >
             {busy ? 'Working…' : 'Approve'}
           </button>
           <button
             onClick={handleReject}
-            disabled={proof.status === 'rejected' || busy}
-            title={proof.status === 'rejected' ? 'Already rejected' : 'Reject proof / milestone'}
+            disabled={busy || proof.status === 'rejected'}
             className="px-3 py-1 text-sm bg-rose-600 text-white rounded disabled:bg-gray-300"
           >
             {busy ? 'Working…' : 'Reject'}
