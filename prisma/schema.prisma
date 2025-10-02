@@ -42,3 +42,21 @@ model ProofFile {
 
   @@index([proofId])
 }
+
+/**
+ * ✅ New: Dispute / Change Request records
+ * Does not modify existing Proof/ProofFile logic.
+ */
+model ProofChangeRequest {
+  id             Int       @id @default(autoincrement())
+  proposalId     Int
+  milestoneIndex Int
+  comment        String?
+  checklist      Json?     // e.g. ["Add site photos","Upload receipts"]
+  status         String    @default("open") // "open" | "resolved"
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  @@index([proposalId, milestoneIndex])
+  @@index([proposalId])
+}

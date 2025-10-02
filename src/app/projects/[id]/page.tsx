@@ -847,10 +847,14 @@ const refreshProofs = async () => {
         </section>
       )}
 
-     {/* Admin (only for admins) */}
+ {/* Admin (only for admins) */}
 {tab === 'admin' && me.role === 'admin' && (
   <section className="border rounded p-4">
-    <AdminProofs />
+    <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
+    <AdminProofs
+      bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+      proposalId={projectIdNum}   // ← enables “Request Changes” button
+    />
   </section>
 )}
       <div className="pt-2">

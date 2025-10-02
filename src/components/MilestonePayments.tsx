@@ -1,7 +1,7 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   completeMilestone,
   payMilestone,
@@ -17,57 +17,68 @@ import PaymentVerification from './PaymentVerification';
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Strongly recommended: pass the project (proposal) id explicitly */
+  /** Optional: if parent doesn’t pass it we’ll derive from bid or URL */
   proposalId?: number;
 }
 
-type FilesMap = Record<number, File[]>;
-type TextMap  = Record<number, string>;
+type FilesMap = Record<number, File[]>;     // per-milestone selected files
+type TextMap  = Record<number, string>;     // per-milestone notes
+
+// 🔶 CHANGE REQUESTS: local type
+type ChangeRequest = {
+  id: number;
+  proposalId: number;
+  milestoneIndex: number;
+  comment?: string | null;
+  checklist?: string[] | null;
+  status: 'open' | 'resolved';
+  createdAt: string;
+  resolvedAt?: string | null;
+};
 
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
 
+  // 🔶 CHANGE REQUESTS: state + loader
+  const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([]);
+  function deriveProposalId() {
+    if (Number.isFinite(proposalId as number)) return Number(proposalId);
+    const fromBid =
+      (bid as any)?.proposalId ??
+      (bid as any)?.proposalID ??
+      (bid as any)?.proposal_id;
+    if (Number.isFinite(fromBid)) return Number(fromBid);
+    if (typeof window !== 'undefined') {
+      const parts = location.pathname.split('/').filter(Boolean);
+      const last = Number(parts[parts.length - 1]);
+      if (Number.isFinite(last)) return last;
+    }
+    return undefined;
+  }
+  async function loadChangeReqs(pid: number) {
+    try {
+      const r = await fetch(`/api/proofs/change-requests?proposalId=${pid}`, { credentials:'include', cache:'no-store' });
+      if (!r.ok) { setChangeReqs([]); return; }
+      const rows = await r.json();
+      setChangeReqs(Array.isArray(rows) ? rows : []);
+    } catch { setChangeReqs([]); }
+  }
+  useEffect(() => {
+    const pid = deriveProposalId();
+    if (Number.isFinite(pid)) loadChangeReqs(Number(pid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // -------- helpers --------
   const setText = (i: number, v: string) =>
     setTextByIndex(prev => ({ ...prev, [i]: v }));
 
   const setFiles = (i: number, files: FileList | null) =>
     setFilesByIndex(prev => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
-  /** Robust proposalId resolver */
-  const deriveProposalId = () => {
-    // 1) explicit prop wins
-    if (Number.isFinite(proposalId as number)) return Number(proposalId);
-
-    // 2) from bid object (should always be present if API returns it)
-    const fromBid =
-      (bid as any)?.proposalId ??
-      (bid as any)?.proposalID ??
-      (bid as any)?.proposal_id;
-    if (Number.isFinite(fromBid)) return Number(fromBid);
-
-    // 3) from URL path: prefer /projects/<id> or /proposals/<id>, not the last segment
-    if (typeof window !== 'undefined') {
-      const parts = location.pathname.split('/').filter(Boolean);
-
-      // try /projects/<id>
-      let i = parts.indexOf('projects');
-      if (i >= 0 && Number.isFinite(Number(parts[i + 1]))) {
-        return Number(parts[i + 1]);
-      }
-
-      // try /proposals/<id> (including /admin/proposals/<id>/bids/<bidId>)
-      i = parts.indexOf('proposals');
-      if (i >= 0 && Number.isFinite(Number(parts[i + 1]))) {
-        return Number(parts[i + 1]);
-      }
-    }
-
-    return undefined;
-  };
-
-  /** Submit proof for a milestone (uploads → DB → legacy → complete) */
+  // -------- actions --------
   async function handleSubmitProof(index: number) {
     const pid = deriveProposalId();
     if (!Number.isFinite(pid)) {
@@ -81,70 +92,49 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
 
-      // Gather local files from input
+      // 0) Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // Upload selected files to Pinata
-      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
-
-      // Include any preset URLs that might already be attached to the milestone
+      // Allow pre-set URLs on milestone (if present)
       const presetUrls: Array<{ url: string; name?: string }> = [];
-      const rawList: any[] = []
-        .concat(ms?.files || [])
-        .concat(ms?.proofFiles || [])
-        .concat(ms?.proofs || []);
-
-      for (const f of rawList) {
+      const raw = ([] as any[]).concat(ms?.files || [], ms?.proofFiles || [], ms?.proofs || []);
+      for (const f of raw) {
         if (typeof f === 'string') {
-          const url = f.trim();
-          if (url && !/[<>]/.test(url)) {
-            presetUrls.push({ url, name: decodeURIComponent((url.split('/').pop() || '').trim()) });
-          }
+          presetUrls.push({ url: f, name: decodeURIComponent((f.split('/').pop() || '').trim()) });
         } else if (f && typeof f === 'object' && f.url) {
-          const url = String(f.url);
-          if (url && !/[<>]/.test(url)) {
-            presetUrls.push({ url, name: f.name ? String(f.name) : undefined });
-          }
+          presetUrls.push({ url: String(f.url), name: f.name ? String(f.name) : undefined });
         }
       }
 
-      // Build + de-duplicate the list for DB
-      const byKey = new Map<string, { url: string; name?: string; cid?: string }>();
-      for (const u of uploaded) {
-        const k = (u.url || '').toLowerCase();
-        if (k) byKey.set(k, { url: u.url, name: u.name, cid: u.cid });
-      }
-      for (const p of presetUrls) {
-        const k = (p.url || '').toLowerCase();
-        if (k && !byKey.has(k)) byKey.set(k, { url: p.url, name: p.name });
-      }
-      const filesToSave = Array.from(byKey.values());
+      // 1) Upload File objects to Pinata via Next route
+      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
 
-      // Save files to local /api/proofs DB (this drives the Files tab)
+      // 2) Build DB payload
+      const filesToSave: Array<{ url: string; name?: string; cid?: string }> = [
+        ...presetUrls,
+        ...uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid })),
+      ];
+
+      // 3) Save to /api/proofs so Files tab updates
       if (filesToSave.length) {
-        const payload = {
+        await saveProofFilesToDb({
           proposalId: Number(pid),
-          milestoneIndex: index, // ZERO-BASED
+          milestoneIndex: index,  // ZERO-BASED
           files: filesToSave,
           note: note || 'vendor proof',
-        };
-        const res = await saveProofFilesToDb(payload);
-        // Debug
-        console.log('[proofs] saved to DB', res);
-        // Let any open project page refresh immediately
+        });
+        // nudge the project page to refresh its Files tab
         if (typeof window !== 'undefined') {
           const detail = { proposalId: Number(pid) };
           window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-          window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // legacy
+          window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
         }
-      } else {
-        console.log('[proofs] no files to save to DB for milestone', index);
       }
 
-      // Mark milestone completed (legacy)
+      // 4) Keep legacy path (mark milestone completed with text proof)
       await completeMilestone(bid.bidId, index, note || 'vendor submitted');
 
-      // Also call the legacy /proofs endpoint so Admin tab shows them
+      // 5) Optional: legacy submitProof (for old readers)
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,
@@ -153,9 +143,18 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           name: f.name || (f.url.split('/').pop() || 'file'),
           url: f.url,
         })),
-      }).catch(() => { /* ignore if server rejects duplicate schema */ });
+      }).catch(() => {});
 
-      // Clear local state
+      // 🔶 CHANGE REQUESTS: auto-resolve any open requests for this milestone
+      try {
+        const open = changeReqs.filter(cr => cr.milestoneIndex === index && cr.status === 'open');
+        await Promise.all(open.map(cr =>
+          fetch(`/api/proofs/change-requests/${cr.id}/resolve`, { method:'POST', credentials:'include' })
+        ));
+        if (Number.isFinite(pid)) await loadChangeReqs(Number(pid));
+      } catch {}
+
+      // clear local inputs
       setText(index, '');
       setFiles(index, null);
 
@@ -235,6 +234,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           const isPaid = !!m.paymentTxHash;
           const isDone = !!m.completed || isPaid;
 
+          const openReq = changeReqs.find(cr => cr.milestoneIndex === i && cr.status === 'open');
+
           return (
             <div
               key={i}
@@ -266,6 +267,19 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </span>
                 </div>
               </div>
+
+              {/* 🔶 CHANGE REQUESTS: show banner if any */}
+              {openReq && (
+                <div className="mt-3 p-3 rounded border border-amber-300 bg-amber-50 text-sm">
+                  <div className="font-medium mb-1">Changes requested by admin</div>
+                  {openReq.comment && <div className="mb-1">{openReq.comment}</div>}
+                  {Array.isArray(openReq.checklist) && openReq.checklist.length > 0 && (
+                    <ul className="list-disc list-inside">
+                      {openReq.checklist.map((item, idx) => <li key={idx}>{item}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
 
               {/* Paid → show verification / details */}
               {isPaid && (
@@ -332,7 +346,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                         {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
                       </button>
                       <p className="text-[11px] text-gray-500 mt-1">
-                        Files are uploaded to Pinata and saved to the project automatically.
+                        If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
                       </p>
                     </>
                   )}
