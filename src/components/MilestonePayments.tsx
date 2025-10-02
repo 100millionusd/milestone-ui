@@ -1,7 +1,7 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   completeMilestone,
   payMilestone,
@@ -24,26 +24,19 @@ interface MilestonePaymentsProps {
 type FilesMap = Record<number, File[]>;     // per-milestone selected files
 type TextMap  = Record<number, string>;     // per-milestone notes
 
-// 🔶 CHANGE REQUESTS: local type
-type ChangeRequest = {
-  id: number;
-  proposalId: number;
-  milestoneIndex: number;
-  comment?: string | null;
-  checklist?: string[] | null;
-  status: 'open' | 'resolved';
-  createdAt: string;
-  resolvedAt?: string | null;
-};
-
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
 
-  // 🔶 CHANGE REQUESTS: state + loader
-  const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([]);
-  function deriveProposalId() {
+  // -------- helpers --------
+  const setText = (i: number, v: string) =>
+    setTextByIndex(prev => ({ ...prev, [i]: v }));
+
+  const setFiles = (i: number, files: FileList | null) =>
+    setFilesByIndex(prev => ({ ...prev, [i]: files ? Array.from(files) : [] }));
+
+  const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
     const fromBid =
       (bid as any)?.proposalId ??
@@ -56,27 +49,37 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       if (Number.isFinite(last)) return last;
     }
     return undefined;
-  }
-  async function loadChangeReqs(pid: number) {
+  };
+
+  /**
+   * Detect if there’s an open change request for this proposal/milestone.
+   * If the route isn’t available, returns false (keeps legacy behavior).
+   */
+  async function hasOpenChangeRequest(proposalId: number, milestoneIndex: number) {
     try {
-      const r = await fetch(`/api/proofs/change-requests?proposalId=${pid}`, { credentials:'include', cache:'no-store' });
-      if (!r.ok) { setChangeReqs([]); return; }
-      const rows = await r.json();
-      setChangeReqs(Array.isArray(rows) ? rows : []);
-    } catch { setChangeReqs([]); }
+      const q = new URLSearchParams({
+        proposalId: String(proposalId),
+        milestoneIndex: String(milestoneIndex),
+        status: 'open',
+      });
+      const r = await fetch(`/api/proofs/change-requests?${q.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!r.ok) return false;
+      const list = await r.json().catch(() => []);
+      const openStates = new Set(['open', 'needs_changes', 'in_review', 'response_submitted']);
+      return Array.isArray(list) && list.some((cr: any) => {
+        const samePid = Number(cr?.proposalId) === Number(proposalId);
+        const sameMs  = Number(cr?.milestoneIndex) === Number(milestoneIndex);
+        const st = String(cr?.status || '').toLowerCase();
+        return samePid && sameMs && openStates.has(st);
+      });
+    } catch {
+      // If the endpoint doesn’t exist yet, keep old behavior
+      return false;
+    }
   }
-  useEffect(() => {
-    const pid = deriveProposalId();
-    if (Number.isFinite(pid)) loadChangeReqs(Number(pid));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // -------- helpers --------
-  const setText = (i: number, v: string) =>
-    setTextByIndex(prev => ({ ...prev, [i]: v }));
-
-  const setFiles = (i: number, files: FileList | null) =>
-    setFilesByIndex(prev => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
@@ -87,54 +90,43 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
 
     const note = (textByIndex[index] || '').trim();
-    const ms: any = Array.isArray(bid.milestones) ? bid.milestones[index] : undefined;
 
     try {
       setBusyIndex(index);
 
-      // 0) Gather files from local input
+      // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // Allow pre-set URLs on milestone (if present)
-      const presetUrls: Array<{ url: string; name?: string }> = [];
-      const raw = ([] as any[]).concat(ms?.files || [], ms?.proofFiles || [], ms?.proofs || []);
-      for (const f of raw) {
-        if (typeof f === 'string') {
-          presetUrls.push({ url: f, name: decodeURIComponent((f.split('/').pop() || '').trim()) });
-        } else if (f && typeof f === 'object' && f.url) {
-          presetUrls.push({ url: String(f.url), name: f.name ? String(f.name) : undefined });
-        }
-      }
-
-      // 1) Upload File objects to Pinata via Next route
+      // 1) Upload to Pinata via Next upload route
       const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
 
-      // 2) Build DB payload
-      const filesToSave: Array<{ url: string; name?: string; cid?: string }> = [
-        ...presetUrls,
-        ...uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid })),
-      ];
+      // 2) Map uploaded → filesToSave (full URL, name, cid)
+      const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
 
       // 3) Save to /api/proofs so Files tab updates
-      if (filesToSave.length) {
-        await saveProofFilesToDb({
-          proposalId: Number(pid),
-          milestoneIndex: index,  // ZERO-BASED
-          files: filesToSave,
-          note: note || 'vendor proof',
-        });
-        // nudge the project page to refresh its Files tab
-        if (typeof window !== 'undefined') {
-          const detail = { proposalId: Number(pid) };
-          window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-          window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
-        }
+      await saveProofFilesToDb({
+        proposalId: Number(pid),
+        milestoneIndex: index,  // ZERO-BASED
+        files: filesToSave,
+        note: note || 'vendor proof',
+      });
+
+      // 4) Notify page to refresh immediately (send both event names + proposalId)
+      if (typeof window !== 'undefined') {
+        const detail = { proposalId: Number(pid) };
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
       }
 
-      // 4) Keep legacy path (mark milestone completed with text proof)
-      await completeMilestone(bid.bidId, index, note || 'vendor submitted');
+      // 5) Only auto-complete if there is NO open change request for this milestone
+      const inDispute = await hasOpenChangeRequest(Number(pid), index);
+      if (!inDispute) {
+        await completeMilestone(bid.bidId, index, note || 'vendor submitted');
+      } else {
+        console.debug('[proof] Open change request detected → NOT auto-completing milestone');
+      }
 
-      // 5) Optional: legacy submitProof (for old readers)
+      // 6) Optional: backend proofs for legacy readers
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,
@@ -143,22 +135,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           name: f.name || (f.url.split('/').pop() || 'file'),
           url: f.url,
         })),
-      }).catch(() => {});
-
-      // 🔶 CHANGE REQUESTS: auto-resolve any open requests for this milestone
-      try {
-        const open = changeReqs.filter(cr => cr.milestoneIndex === index && cr.status === 'open');
-        await Promise.all(open.map(cr =>
-          fetch(`/api/proofs/change-requests/${cr.id}/resolve`, { method:'POST', credentials:'include' })
-        ));
-        if (Number.isFinite(pid)) await loadChangeReqs(Number(pid));
-      } catch {}
+      }).catch(() => { /* ignore if server rejects duplicate schema */ });
 
       // clear local inputs
       setText(index, '');
       setFiles(index, null);
 
-      alert('Proof submitted. Files saved and milestone marked completed.');
+      alert('Proof submitted. Files saved' + (inDispute ? ' (awaiting admin review)' : ' and milestone marked completed.'));
       onUpdate();
     } catch (e: any) {
       console.error(e);
@@ -234,8 +217,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           const isPaid = !!m.paymentTxHash;
           const isDone = !!m.completed || isPaid;
 
-          const openReq = changeReqs.find(cr => cr.milestoneIndex === i && cr.status === 'open');
-
           return (
             <div
               key={i}
@@ -267,19 +248,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </span>
                 </div>
               </div>
-
-              {/* 🔶 CHANGE REQUESTS: show banner if any */}
-              {openReq && (
-                <div className="mt-3 p-3 rounded border border-amber-300 bg-amber-50 text-sm">
-                  <div className="font-medium mb-1">Changes requested by admin</div>
-                  {openReq.comment && <div className="mb-1">{openReq.comment}</div>}
-                  {Array.isArray(openReq.checklist) && openReq.checklist.length > 0 && (
-                    <ul className="list-disc list-inside">
-                      {openReq.checklist.map((item, idx) => <li key={idx}>{item}</li>)}
-                    </ul>
-                  )}
-                </div>
-              )}
 
               {/* Paid → show verification / details */}
               {isPaid && (
