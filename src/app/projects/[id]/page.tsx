@@ -108,6 +108,30 @@ function parseDocs(raw: unknown): any[] {
   return [];
 }
 
+// 🔧 IPFS/Gateway normalizer — paste this directly under parseDocs()
+function normalizeIpfsUrl(input?: string, cid?: string) {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // ensure no trailing slash
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
+  if (!input) return '';
+  let u = String(input).trim();
+
+  // Bare CID (optionally with ?query)
+  const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
+
+  // ipfs:// and leading ipfs/ segments → strip
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  // If not absolute http(s), prefix gateway
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+
+  // Collapse any repeated /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  return u;
+}
+
 function filesFromProofRecords(items: ProofRecord[]) {
   const isBad = (u?: string) =>
     !u ||
@@ -457,16 +481,19 @@ const refreshProofs = async () => {
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
   if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles.map((x) => {
-      const rawHref = x.doc?.url || (x.doc?.cid ? `${PINATA_GATEWAY}/${x.doc.cid}` : null);
-      const name = x.doc?.name || null;
-      return {
-        scope: x.scope,
-        href: rawHref ? withFilename(rawHref, name || undefined) : null,
-        name,
-      };
-    });
-  }
+  (window as any).__FILES = allFiles.map((x) => {
+    const name = x.doc?.name || null;
+
+    // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+    const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
+
+    return {
+      scope: x.scope,
+      href: normalized ? withFilename(normalized, name || undefined) : null,
+      name,
+    };
+  });
+}
 
   // -------------- small render helpers (no hooks) --------------
   function renderAttachment(doc: any, key: number) {

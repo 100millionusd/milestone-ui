@@ -26,29 +26,44 @@ function isImg(s?: string) {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(x);
 }
 
-/** Build a safe https URL for any combination of {url, cid} */
+// Build a safe https URL for any combination of {url, cid},
+// and collapse any accidental /ipfs/ipfs/ duplication.
 function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // e.g. https://<host>/ipfs
   if (!file) return '';
-  const cid = (file as any)?.cid?.toString().trim();
-  let u = (file as any)?.url?.toString().trim();
 
-  // If we have a CID and either no url or a non-http url, use gateway
-  if (cid && (!u || !/^https?:\/\//i.test(u))) {
-    return `${PINATA_GATEWAY}/${cid}`;
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
+
+  // If there is no usable url but we have a CID → use gateway + CID
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    return `${GW}/${rawCid}`;
   }
 
-  // If url is just a CID (no protocol/host), expand it
-  if (u && /^[A-Za-z0-9]{46,}$/.test(u) && !/^https?:\/\//i.test(u)) {
-    return `${PINATA_GATEWAY}/${u}`;
+  if (!rawUrl) return '';
+
+  let u = rawUrl;
+
+  // 1) Handle a bare CID (optionally with query, e.g. "?filename=...").
+  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (cidOnly) {
+    return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
   }
 
-  if (!u) return '';
+  // 2) Strip ipfs:// scheme and ALL leading "ipfs/" segments (1 or more), plus leading slashes.
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, ''); // <-- remove ipfs/ ipfs/ ... at the start
 
-  // Normalize ipfs:// and /ipfs/ forms
-  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/*ipfs\//i, '');
-  if (!/^https?:\/\//i.test(u)) u = `${PINATA_GATEWAY}/${u}`;
-  // De-dupe /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/ipfs\//g, '/ipfs/');
+  // 3) If it’s not http(s) after stripping, prefix our gateway.
+  if (!/^https?:\/\//i.test(u)) {
+    u = `${GW}/${u}`;
+  }
+
+  // 4) Collapse ANY repeated "/ipfs/ipfs/" that may still exist anywhere in the URL.
+  //    e.g. https://host/ipfs/ipfs/Qm... → https://host/ipfs/Qm...
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+
   return u;
 }
 
