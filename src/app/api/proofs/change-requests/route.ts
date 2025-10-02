@@ -7,80 +7,69 @@ export const dynamic = 'force-dynamic';
 
 const prisma = new PrismaClient();
 
-/**
- * GET /api/proofs/change-requests?proposalId=123&include=responses
- * - returns change requests for a proposal
- * - when include=responses, it attaches vendor replies by reading Proof rows for the same proposal/milestones
- */
+function gatewayBase(): string {
+  const gw = process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
+    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
+        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
+        : 'https://gateway.pinata.cloud/ipfs');
+  return gw;
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const proposalId = Number(searchParams.get('proposalId'));
-    const include = String(searchParams.get('include') || '').toLowerCase();
+    const includeResponses = (searchParams.get('include') || '').toLowerCase().includes('responses');
 
     if (!Number.isFinite(proposalId)) {
-      return NextResponse.json(
-        { error: 'bad_request', details: 'proposalId required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'bad_request', details: 'proposalId required' }, { status: 400 });
     }
 
-    // Admin requests (keep your existing behavior: open requests first)
+    // Load all requests for the project
     const requests = await prisma.proofChangeRequest.findMany({
-      where: { proposalId, status: 'open' },
+      where: { proposalId },
       orderBy: [{ createdAt: 'desc' }],
     });
 
-    // Only join replies if explicitly asked
-    if (include !== 'responses') {
+    if (!includeResponses || requests.length === 0) {
       return NextResponse.json(requests);
     }
 
-    // Pull all Proof rows for this proposal so we can attach vendor replies
-    const proofs = await prisma.proof.findMany({
-      where: { proposalId },
-      orderBy: [{ createdAt: 'asc' }],
-      include: { files: true },
-    });
+    // For each request, pull ALL Proof rows for same milestone created at/after the request
+    // (i.e., every vendor reply, with files)
+    const out = [];
+    for (const r of requests) {
+      const proofs = await prisma.proof.findMany({
+        where: {
+          proposalId,
+          milestoneIndex: r.milestoneIndex,
+          createdAt: { gte: r.createdAt },
+        },
+        orderBy: [{ createdAt: 'asc' }],
+        include: { files: true },
+      });
 
-    // Group proofs by milestoneIndex
-    const byMilestone = new Map<number, any[]>();
-    for (const p of proofs) {
-      const mi = typeof p.milestoneIndex === 'number' ? p.milestoneIndex : null;
-      if (mi === null) continue;
-
-      const arr = byMilestone.get(mi) || [];
-      arr.push({
+      const responses = proofs.map((p) => ({
         id: p.id,
-        milestoneIndex: mi,
-        note: p.note || null,
         createdAt: p.createdAt,
-        files: (p.files || []).map(f => ({
-          url: f.url ?? (f.cid ? (process.env.NEXT_PUBLIC_PINATA_GATEWAY
-            ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/${f.cid}`
-            : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
-                ? `${String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')}/${f.cid}`
-                : `https://gateway.pinata.cloud/ipfs/${f.cid}`))
-            : undefined),
+        note: p.note || '',
+        files: (p.files || []).map((f: any) => ({
+          url: f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined),
           cid: f.cid || undefined,
           name: f.name || undefined,
         })),
-      });
-      byMilestone.set(mi, arr);
-    }
+      }));
 
-    // Attach replies for matching milestoneIndex
-    const out = requests.map(r => ({
-      ...r,
-      responses: byMilestone.get(r.milestoneIndex) || [],
-    }));
+      out.push({
+        ...r,
+        responses,
+      });
+    }
 
     return NextResponse.json(out);
   } catch (e: any) {
-    return NextResponse.json(
-      { error: 'db_error', message: String(e?.message || e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
   }
 }
 
@@ -97,10 +86,7 @@ export async function POST(req: Request) {
           : []);
 
     if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
-      return NextResponse.json(
-        { error: 'bad_request', details: 'proposalId & milestoneIndex (>=0) required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'bad_request', details: 'proposalId & milestoneIndex (>=0) required' }, { status: 400 });
     }
 
     const row = await prisma.proofChangeRequest.create({
@@ -109,9 +95,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json(row, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: 'db_error', message: String(e?.message || e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
   }
 }
