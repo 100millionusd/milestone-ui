@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
+import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 
 // ---------------- Consts ----------------
 // Pinata gateway base
@@ -851,12 +852,19 @@ const refreshProofs = async () => {
 {tab === 'admin' && me.role === 'admin' && (
   <section className="border rounded p-4">
     <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
+
     <AdminProofs
       bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
-      proposalId={projectIdNum}   // ← enables “Request Changes” button
+      proposalId={projectIdNum}   // enables “Request Changes”
     />
+
+    {/* New: full change-request thread with all vendor replies */}
+    <div className="mt-6">
+      <ChangeRequestsPanel proposalId={projectIdNum} />
+    </div>
   </section>
 )}
+
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
       </div>

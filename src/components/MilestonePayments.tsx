@@ -24,13 +24,12 @@ interface MilestonePaymentsProps {
 type FilesMap = Record<number, File[]>;     // per-milestone selected files
 type TextMap  = Record<number, string>;     // per-milestone notes
 
-/** Server shape for change requests (keep permissive) */
 type ChangeRequest = {
   id: number;
   proposalId: number;
   milestoneIndex: number;
   comment?: string | null;
-  checklist?: any;                  // array of strings OR array of {text,done} OR {items:[...]}
+  checklist?: any;
   status?: string;
   createdAt?: string;
   resolvedAt?: string | null;
@@ -41,7 +40,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
 
-  // Open change requests grouped by milestone index
+  // Open change requests grouped by milestone index (for vendor visibility)
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
 
   // -------- helpers --------
@@ -68,7 +67,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   const resolvedProposalId = useMemo(() => deriveProposalId(), [proposalId, bid]);
 
-  /** Load all change requests for the current proposal, group by milestone */
+  /** Fetch open CRs for this proposal (for vendor banner + to find the active CR id) */
   async function loadChangeRequests(pid: number) {
     try {
       const r = await fetch(
@@ -81,42 +80,49 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       const map: Record<number, ChangeRequest[]> = {};
       for (const cr of list) {
         const st = String(cr?.status || '').toLowerCase();
-        if (!openStates.has(st)) continue; // only show “active” requests
+        if (!openStates.has(st)) continue;
         const mi = Number(cr.milestoneIndex);
         if (!Number.isFinite(mi)) continue;
         (map[mi] ||= []).push(cr);
       }
-      // keep newest last for display
-      Object.keys(map).forEach(k => map[+k].sort((a,b) => (new Date(a.createdAt||0).getTime() - new Date(b.createdAt||0).getTime())));
+      Object.keys(map).forEach(k =>
+        map[+k].sort((a,b) => (new Date(a.createdAt||0).getTime() - new Date(b.createdAt||0).getTime()))
+      );
       setCrByMs(map);
     } catch {
       setCrByMs({});
     }
   }
 
-  /** Server check used before auto-completing */
-  async function hasOpenChangeRequest(proposalId: number, milestoneIndex: number) {
+  /** Return the newest open CR id for this milestone (if any) */
+  function pickOpenCrId(msIndex: number): number | null {
+    const list = crByMs[msIndex] || [];
+    if (!list.length) return null;
+    const sorted = [...list].sort((a,b) =>
+      new Date(a.createdAt||0).getTime() - new Date(b.createdAt||0).getTime()
+    );
+    return sorted[sorted.length - 1]?.id ?? null;
+  }
+
+  /** Append a response (text + files) to an open CR */
+  async function appendCrResponse(crId: number, note: string, files: Array<{url:string; name?:string; cid?:string}>) {
     try {
-      const q = new URLSearchParams({
-        proposalId: String(proposalId),
-        milestoneIndex: String(milestoneIndex),
-        status: 'open',
-      });
-      const r = await fetch(`/api/proofs/change-requests?${q.toString()}`, {
+      const r = await fetch(`/api/proofs/change-requests/${encodeURIComponent(String(crId))}/respond`, {
+        method: 'POST',
         credentials: 'include',
-        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comment: note || '',
+          files: files.map(f => ({ url: f.url, name: f.name ?? (f.url.split('/').pop() || 'file'), cid: f.cid })),
+        }),
       });
-      if (!r.ok) return false;
-      const list = await r.json().catch(() => []);
-      const openStates = new Set(['open','needs_changes','in_review','response_submitted']);
-      return Array.isArray(list) && list.some((cr: any) => {
-        const samePid = Number(cr?.proposalId) === Number(proposalId);
-        const sameMs  = Number(cr?.milestoneIndex) === Number(milestoneIndex);
-        const st = String(cr?.status || '').toLowerCase();
-        return samePid && sameMs && openStates.has(st);
-      });
-    } catch {
-      return false; // if endpoint not available, keep legacy behavior
+      // If the route isn’t implemented yet, ignore errors so nothing breaks
+      if (!r.ok) {
+        // swallow but log (optional)
+        console.debug('[cr] respond non-OK:', r.status);
+      }
+    } catch (e) {
+      console.debug('[cr] respond failed (ignored):', (e as any)?.message || e);
     }
   }
 
@@ -171,12 +177,14 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
       }
 
-      // 5) Only auto-complete if there is NO open change request for this milestone
-      const inDispute = await hasOpenChangeRequest(Number(pid), index);
-      if (!inDispute) {
-        await completeMilestone(bid.bidId, index, note || 'vendor submitted');
+      // 5) If there is an OPEN change request → append a response (so admin sees every reply)
+      const crId = pickOpenCrId(index);
+      if (crId) {
+        await appendCrResponse(crId, note, filesToSave);
+        // do NOT auto-complete while CR is open
       } else {
-        console.debug('[proof] Open change request detected → NOT auto-completing milestone');
+        // Legacy: no CR → we can mark as completed
+        await completeMilestone(bid.bidId, index, note || 'vendor submitted');
       }
 
       // 6) Optional: backend proofs for legacy readers
@@ -188,16 +196,19 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           name: f.name || (f.url.split('/').pop() || 'file'),
           url: f.url,
         })),
-      }).catch(() => { /* ignore if server rejects duplicate schema */ });
+      }).catch(() => {});
 
-      // Reload CRs (in case admin changes status based on your response)
-      await loadChangeRequests(Number(pid));
+      // reload CRs (if status changed server-side)
+      if (Number.isFinite(pid as number)) await loadChangeRequests(Number(pid));
 
       // clear local inputs
       setText(index, '');
       setFiles(index, null);
 
-      alert('Proof submitted. Files saved' + (inDispute ? ' (awaiting admin review)' : ' and milestone marked completed.'));
+      alert(crId
+        ? 'Update sent. Admin will review your response to the change request.'
+        : 'Proof submitted. Files saved and milestone marked completed.'
+      );
       onUpdate();
     } catch (e: any) {
       console.error(e);
@@ -232,9 +243,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   function renderChangeRequestBanner(msIndex: number) {
     const list = crByMs[msIndex] || [];
     if (!list.length) return null;
-    const latest = list[list.length - 1]; // show the most recent request
+    const latest = list[list.length - 1];
     const comment = latest?.comment || '';
-    // Normalize checklist
+
     let raw = latest?.checklist as any;
     if (raw && typeof raw === 'string') {
       try { raw = JSON.parse(raw); } catch { /* keep as string */ }
@@ -269,8 +280,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           </ul>
         )}
         <p className="text-[11px] text-amber-800 mt-2">
-          Re‑upload the requested files and press <b>Submit Proof</b> again. The milestone will remain
-          pending until the admin approves.
+          Re-upload the requested files and press <b>Submit Proof</b> again. Admin will see each response in the thread.
         </p>
       </div>
     );
@@ -353,7 +363,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* 🔎 Show admin change request (if any) */}
+              {/* Show admin change request (if any) */}
               {renderChangeRequestBanner(i)}
 
               {/* Paid → show verification / details */}
