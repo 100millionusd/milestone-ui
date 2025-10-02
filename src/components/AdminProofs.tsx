@@ -1,378 +1,495 @@
-// src/components/AdminProofs.tsx
+// src/components/MilestonePayments.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  getProofs,
-  approveProof,           // POST /proofs/:proofId/approve
-  rejectProof,            // POST /bids/:bidId/milestones/:idx/reject
-  analyzeProof,           // POST /proofs/:proofId/analyze
-  chatProof,              // POST /proofs/:proofId/chat  (SSE)
-  adminCompleteMilestone, // POST /bids/:bidId/complete-milestone (fallback approve)
-  type Proof,
+  // DO NOT import completeMilestone here; we no longer auto-complete on vendor submit.
+  payMilestone,
+  submitProof,          // still send a "proof" row to your backend (status=pending)
+  uploadProofFiles,     // POST /api/proofs/upload → Pinata
+  saveProofFilesToDb,   // POST /api/proofs → persists for Files tab
+  type Bid,
+  type Milestone,
 } from '@/lib/api';
+import ManualPaymentProcessor from './ManualPaymentProcessor';
+import PaymentVerification from './PaymentVerification';
 
-type Props = {
-  /** Optional: restrict to these bid IDs (used on Project page Admin tab) */
-  bidIds?: number[];
-  /** Optional: when provided, enables the “Request Changes” UI (we need the project id to save the request) */
-  proposalId?: number;
-  /** Optional: show header block; keep true for /admin/proofs page, false if embedding */
-  showHeader?: boolean;
-};
-
-export default function AdminProofs({ bidIds, proposalId, showHeader = true }: Props) {
-  const [proofs, setProofs] = useState<Proof[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  async function loadProofs() {
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Admin list from backend
-      const data = await getProofs(); // returns ALL proofs (admin)
-      // If embedding on a project, filter to that project's bidIds if provided
-      const filtered = Array.isArray(bidIds) && bidIds.length
-        ? data.filter(p => bidIds.includes(Number(p.bidId)))
-        : data;
-
-      setProofs(filtered);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load proofs');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { loadProofs(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { loadProofs(); }, [JSON.stringify(bidIds)]); // refetch if the bid set changes
-
-  if (loading) return <div className="p-6">Loading proofs...</div>;
-  if (error)   return <div className="p-6 text-rose-600">{error}</div>;
-
-  return (
-    <div className={showHeader ? 'max-w-6xl mx-auto p-6' : ''}>
-      {showHeader && <h1 className="text-2xl font-bold mb-6">Admin — Proofs</h1>}
-
-      <div className="grid gap-6">
-        {proofs.map((proof) => (
-          <ProofCard
-            key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
-            proof={proof}
-            onRefresh={loadProofs}
-            proposalId={proposalId}
-          />
-        ))}
-
-        {proofs.length === 0 && (
-          <div className="text-gray-500 text-center py-10 border rounded bg-white">
-            No proofs submitted yet.
-          </div>
-        )}
-      </div>
-    </div>
-  );
+interface MilestonePaymentsProps {
+  bid: Bid;
+  onUpdate: () => void;
+  /** REQUIRED so we can:
+   *  - save proof files into project (/api/proofs)
+   *  - load / reply to change requests for this project
+   */
+  proposalId: number;
 }
 
-function ProofCard({
-  proof,
-  onRefresh,
-  proposalId,
-}: {
-  proof: Proof;
-  onRefresh: () => void;
-  proposalId?: number;
-}) {
-  const [prompt, setPrompt] = useState('');
-  const [chat, setChat] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [savingReq, setSavingReq] = useState(false);
-  const [showRequestBox, setShowRequestBox] = useState(false);
-  const [requestComment, setRequestComment] = useState('');
-  const [requestChecklist, setRequestChecklist] = useState(''); // one item per line
+type FilesMap = Record<number, File[]>;     // per-milestone selected files
+type TextMap  = Record<number, string>;     // per-milestone notes
 
-  const canAnalyze = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
+// Change-requests API types used locally
+type CRFile = { url: string; name?: string; cid?: string };
+type CRResponse = {
+  id: number;
+  requestId: number;
+  createdAt: string;
+  comment?: string | null;
+  files?: CRFile[];
+};
+type ChangeRequest = {
+  id: number;
+  proposalId: number;
+  milestoneIndex: number;
+  status: 'open' | 'resolved' | 'closed';
+  comment?: string | null;
+  checklist?: string[];
+  createdAt: string;
+  responses?: CRResponse[];
+};
 
-  async function onRun() {
-    if (!canAnalyze) return;
-    setRunning(true);
+const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
+  const [busyIndex, setBusyIndex] = useState<number | null>(null);
+  const [textByIndex, setTextByIndex] = useState<TextMap>({});
+  const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
+
+  // change-requests state
+  const [crs, setCrs] = useState<ChangeRequest[]>([]);
+  const [crLoading, setCrLoading] = useState(false);
+  const [replyText, setReplyText] = useState<Record<number, string>>({});
+  const [replyFiles, setReplyFiles] = useState<Record<number, File[]>>({});
+  const setReplyTextFor = (rid: number, v: string) =>
+    setReplyText(prev => ({ ...prev, [rid]: v }));
+  const setReplyFilesFor = (rid: number, list: FileList | null) =>
+    setReplyFiles(prev => ({ ...prev, [rid]: list ? Array.from(list) : [] }));
+
+  // -------- helpers --------
+  const setText = (i: number, v: string) =>
+    setTextByIndex(prev => ({ ...prev, [i]: v }));
+
+  const setFiles = (i: number, files: FileList | null) =>
+    setFilesByIndex(prev => ({ ...prev, [i]: files ? Array.from(files) : [] }));
+
+  // -------- change-requests fetch --------
+  async function loadChangeRequests() {
+    if (!Number.isFinite(proposalId)) return;
+    setCrLoading(true);
     try {
-      await analyzeProof(proof.proofId!, prompt);
-      await onRefresh();
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  async function onChat() {
-    if (!canAnalyze) return;
-    setChat('');
-    setStreaming(true);
-    try {
-      await chatProof(
-        proof.proofId!,
-        [{ role: 'user', content: (prompt || 'Explain this proof and the attached file(s). What evidence is strong? Any gaps?') }],
-        (t) => setChat((prev) => prev + t),
-      );
-    } finally {
-      setStreaming(false);
-    }
-  }
-
-  // Robust approve: try /proofs/:id/approve; if that 404/400s, fall back to adminCompleteMilestone.
-  async function handleApprove() {
-    try {
-      if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
-        await approveProof(proof.proofId);
-      } else {
-        // No proofId in record → go straight to fallback
-        await adminCompleteMilestone(proof.bidId, proof.milestoneIndex);
-      }
+      const url = `/api/proofs/change-requests?proposalId=${encodeURIComponent(
+        proposalId
+      )}&include=responses&status=open&_=${Date.now()}`;
+      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      const list = (await r.json()) as ChangeRequest[] | { error?: string };
+      if (Array.isArray(list)) setCrs(list);
+      else setCrs([]);
     } catch {
-      // Fallback path if first call failed (e.g., 404)
-      await adminCompleteMilestone(proof.bidId, proof.milestoneIndex);
+      setCrs([]);
+    } finally {
+      setCrLoading(false);
     }
-    await onRefresh();
   }
 
-  async function handleReject() {
-    await rejectProof(proof.bidId, proof.milestoneIndex);
-    await onRefresh();
-  }
-
-  async function handleRequestChanges() {
-    if (!Number.isFinite(proposalId as number)) {
-      alert('Cannot request changes: proposalId missing on this page.');
-      return;
+  useEffect(() => {
+    loadChangeRequests().catch(() => {});
+    const onPing = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      if (!Number.isFinite(pid) || pid === proposalId) loadChangeRequests();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('proofs:updated', onPing);
+      window.addEventListener('proofs:changed', onPing);
+      return () => {
+        window.removeEventListener('proofs:updated', onPing);
+        window.removeEventListener('proofs:changed', onPing);
+      };
     }
-    setSavingReq(true);
+  }, [proposalId]);
+
+  // -------- vendor replies to a change-request --------
+  async function handleSendReply(requestId: number) {
     try {
-      const checklist = requestChecklist
-        .split('\n')
-        .map(s => s.trim())
-        .filter(Boolean);
+      setBusyIndex(-requestId); // show busy on this reply form
+      const comment = (replyText[requestId] || '').trim();
+      const localFiles = replyFiles[requestId] || [];
 
-      const res = await fetch('/api/proofs/change-requests', {
+      // 1) Upload files to Pinata (optional)
+      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
+      const replyFilesPayload: CRFile[] = uploaded.map(u => ({
+        url: u.url, name: u.name, cid: u.cid
+      }));
+
+      // 2) Save this reply to the change-requests thread
+      const res = await fetch('/api/proofs/change-requests/responses', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          proposalId: Number(proposalId),
-          milestoneIndex: Number(proof.milestoneIndex),
-          comment: requestComment || 'Please revise this proof.',
-          checklist,
-          status: 'open',
+          requestId,
+          comment,
+          files: replyFilesPayload,
         }),
       });
-
       if (!res.ok) {
         const msg = await res.text().catch(() => `HTTP ${res.status}`);
         throw new Error(msg);
       }
 
-      setRequestComment('');
-      setRequestChecklist('');
-      setShowRequestBox(false);
-      // Let the page know something changed (Files/threads panels may refresh)
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('proofs:updated', { detail: { proposalId: Number(proposalId) } }));
+      // 3) (Optional, but helpful) also persist reply files to Files tab
+      if (replyFilesPayload.length) {
+        await saveProofFilesToDb({
+          proposalId,
+          // attach to the same milestone as the request:
+          milestoneIndex: crs.find(c => c.id === requestId)?.milestoneIndex ?? 0,
+          files: replyFilesPayload.map(f => ({ url: f.url, name: f.name, cid: f.cid })),
+          note: comment || 'vendor change-request reply',
+        }).catch(() => {});
       }
-      alert('Change request sent.');
+
+      // 4) Clear local state and refresh thread
+      setReplyTextFor(requestId, '');
+      setReplyFilesFor(requestId, null as any);
+      await loadChangeRequests();
+      // nudge any project page listeners
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail: { proposalId } }));
+      }
+      alert('Reply sent.');
     } catch (e: any) {
-      console.error('Change request failed:', e);
-      alert(e?.message || 'Failed to create change request');
+      console.error('Reply failed:', e);
+      alert(e?.message || 'Failed to send reply');
     } finally {
-      setSavingReq(false);
+      setBusyIndex(null);
     }
   }
 
-  const statusChip =
-    proof.status === 'approved'
-      ? 'bg-green-100 text-green-700'
-      : proof.status === 'rejected'
-      ? 'bg-red-100 text-red-700'
-      : 'bg-yellow-100 text-yellow-700';
+  // -------- vendor submits initial proof (NO auto-complete anymore) --------
+  async function handleSubmitProof(index: number) {
+    const note = (textByIndex[index] || '').trim();
 
+    try {
+      setBusyIndex(index);
+
+      // Gather files from local input
+      const localFiles: File[] = filesByIndex[index] || [];
+
+      // 1) Upload to Pinata via Next upload route
+      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
+
+      // 2) Map uploaded → filesToSave (full URL, name, cid)
+      const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
+
+      // 3) Save to /api/proofs so Files tab updates
+      await saveProofFilesToDb({
+        proposalId: Number(proposalId),
+        milestoneIndex: index,  // ZERO-BASED
+        files: filesToSave,
+        note: note || 'vendor proof',
+      });
+
+      // 4) Notify page to refresh immediately
+      if (typeof window !== 'undefined') {
+        const detail = { proposalId: Number(proposalId) };
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+      }
+
+      // 5) DO NOT auto-complete milestone anymore.
+      //    Admin must approve; we only log a proof row for the admin view.
+      await submitProof({
+        bidId: bid.bidId,
+        milestoneIndex: index,
+        description: note || 'vendor proof',
+        files: filesToSave.map(f => ({
+          name: f.name || (f.url.split('/').pop() || 'file'),
+          url: f.url,
+        })),
+      }).catch(() => {});
+
+      // clear local inputs
+      setText(index, '');
+      setFiles(index, null);
+
+      alert('Proof submitted. Awaiting admin review.');
+      onUpdate();
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || 'Failed to submit proof');
+    } finally {
+      setBusyIndex(null);
+    }
+  }
+
+  async function handleReleasePayment(index: number) {
+    try {
+      setBusyIndex(index);
+      await payMilestone(bid.bidId, index);
+      alert('Payment released.');
+      onUpdate();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to release payment');
+    } finally {
+      setBusyIndex(null);
+    }
+  }
+
+  // -------- computed --------
+  const totals = useMemo(() => {
+    const total = bid.milestones.reduce((s, m) => s + (Number(m.amount) || 0), 0);
+    const completed = bid.milestones.filter(m => m.completed).reduce((s, m) => s + (Number(m.amount) || 0), 0);
+    const paid = bid.milestones.filter(m => m.paymentTxHash).reduce((s, m) => s + (Number(m.amount) || 0), 0);
+    return { total, completed, paid };
+  }, [bid.milestones]);
+
+  // -------- render --------
   return (
-    <div className="bg-white rounded-lg shadow border p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold mb-1">
-            {proof.title || `Proof for Milestone ${Number(proof.milestoneIndex) + 1}`}
-          </h2>
-          <p className="text-sm text-gray-600 mb-2">
-            Vendor: <span className="font-medium">{proof.vendorName || '—'}</span>
-            {' · '}Bid #{proof.bidId}
-            {' · '}Milestone #{Number(proof.milestoneIndex) + 1}
+    <div className="bg-white p-6 rounded-lg shadow-sm border">
+      <h3 className="text-lg font-semibold mb-4">💰 Milestone Payments</h3>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-blue-50 p-4 rounded border">
+          <p className="text-sm text-blue-600">Total Contract Value</p>
+          <p className="text-2xl font-bold">${totals.total.toLocaleString()}</p>
+          <p className="text-sm">{bid.preferredStablecoin}</p>
+        </div>
+        <div className="bg-green-50 p-4 rounded border">
+          <p className="text-sm text-green-600">Completed Work</p>
+          <p className="text-2xl font-bold">${totals.completed.toLocaleString()}</p>
+          <p className="text-sm">
+            {bid.milestones.filter(m => m.completed).length}/{bid.milestones.length} milestones
           </p>
         </div>
-        <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
-      </div>
-
-      <p className="text-gray-700 mb-3 whitespace-pre-wrap">{proof.description || 'No description'}</p>
-
-      {/* Attachments */}
-      {Array.isArray(proof.files) && proof.files.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-          {proof.files.map((file, i) => {
-            const href = file.url || '#';
-            const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test((file.name || href || '').toLowerCase());
-            if (isImage) {
-              return (
-                <a
-                  key={i}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative overflow-hidden rounded border"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={href} alt={file.name || 'image'} className="h-32 w-full object-cover group-hover:scale-105 transition" />
-                  <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                    {file.name || 'image'}
-                  </div>
-                </a>
-              );
-            }
-            return (
-              <div key={i} className="p-3 rounded border bg-gray-50">
-                <p className="truncate text-sm">{file.name || href}</p>
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  Open
-                </a>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Existing AI analysis (if any) */}
-      {proof.aiAnalysis && (
-        <div className="mb-4 p-3 rounded border bg-slate-50">
-          <div className="text-xs text-slate-700 whitespace-pre-wrap">
-            <strong>AI Summary:</strong>{' '}
-            {typeof (proof as any).aiAnalysis?.summary === 'string'
-              ? (proof as any).aiAnalysis.summary
-              : JSON.stringify(proof.aiAnalysis, null, 2)}
-          </div>
-        </div>
-      )}
-
-      {/* Prompt + actions */}
-      <div className="mb-3">
-        <textarea
-          className="w-full border rounded p-2 text-sm"
-          rows={3}
-          placeholder="Ask Agent 2 about this proof (it will consider the PDF/text and images)."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <button
-          onClick={onRun}
-          disabled={!canAnalyze || running}
-          className="px-3 py-1 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
-        >
-          {running ? 'Running…' : 'Run Agent 2'}
-        </button>
-
-        <button
-          onClick={onChat}
-          disabled={!canAnalyze || streaming}
-          className="px-3 py-1 rounded bg-indigo-600 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Stream a one-off chat answer' : 'Proof ID missing'}
-        >
-          {streaming ? 'Asking…' : 'Ask Agent 2 (Chat)'}
-        </button>
-
-        <div className="ml-auto flex gap-2">
-          <button
-            onClick={handleApprove}
-            disabled={proof.status === 'approved'}
-            className="px-3 py-1 text-sm bg-emerald-600 text-white rounded disabled:bg-gray-300"
-            title="Approve this milestone/proof"
-          >
-            Approve
-          </button>
-          <button
-            onClick={handleReject}
-            disabled={proof.status === 'rejected'}
-            className="px-3 py-1 text-sm bg-rose-600 text-white rounded disabled:bg-gray-300"
-            title="Reject this milestone/proof"
-          >
-            Reject
-          </button>
+        <div className="bg-purple-50 p-4 rounded border">
+          <p className="text-sm text-purple-600">Amount Paid</p>
+          <p className="text-2xl font-bold">${totals.paid.toLocaleString()}</p>
+          <p className="text-sm">
+            {bid.milestones.filter(m => m.paymentTxHash).length} payments
+          </p>
         </div>
       </div>
 
-      {/* Request changes (only shown when we have proposalId, e.g., on Project page Admin tab) */}
-      {Number.isFinite(proposalId as number) && (
-        <div className="mt-3 border-t pt-3">
-          {!showRequestBox ? (
-            <button
-              onClick={() => setShowRequestBox(true)}
-              className="text-xs px-2 py-1 rounded bg-amber-600 text-white"
-              title="Ask the vendor to revise or add files"
+      {/* Wallet */}
+      <div className="mb-4 p-3 bg-gray-50 rounded">
+        <p className="font-medium text-gray-600">Vendor Wallet Address</p>
+        <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
+        <p className="text-xs text-gray-500 mt-1">
+          Payments are sent to this {bid.preferredStablecoin} address.
+        </p>
+      </div>
+
+      {/* Milestones list */}
+      <div className="space-y-4">
+        <h4 className="font-semibold">Payment Milestones</h4>
+
+        {bid.milestones.map((m: Milestone, i: number) => {
+          const isPaid = !!m.paymentTxHash;
+          const isDone = !!m.completed || isPaid;
+
+          // Change-requests for this milestone
+          const openForThis = crs.filter(c => c.milestoneIndex === i && c.status === 'open');
+
+          return (
+            <div
+              key={i}
+              className={`border rounded p-4 ${
+                isPaid ? 'bg-green-50 border-green-200'
+                : isDone ? 'bg-yellow-50 border-yellow-200'
+                : 'bg-gray-50'
+              }`}
             >
-              Request Changes
-            </button>
-          ) : (
-            <div className="rounded border p-3 bg-amber-50">
-              <label className="text-xs font-medium">Comment</label>
-              <textarea
-                className="w-full border rounded p-2 text-sm mb-2"
-                rows={3}
-                placeholder="Tell the vendor what to fix or add…"
-                value={requestComment}
-                onChange={(e) => setRequestComment(e.target.value)}
-              />
-
-              <label className="text-xs font-medium">Checklist (one per line)</label>
-              <textarea
-                className="w-full border rounded p-2 text-sm"
-                rows={3}
-                placeholder={'Add items like:\n- Add site photos\n- Include signed acceptance form\n- Attach updated invoice'}
-                value={requestChecklist}
-                onChange={(e) => setRequestChecklist(e.target.value)}
-              />
-
-              <div className="mt-2 flex gap-2">
-                <button
-                  onClick={handleRequestChanges}
-                  disabled={savingReq}
-                  className="px-3 py-1 rounded bg-amber-700 text-white text-xs disabled:opacity-50"
-                >
-                  {savingReq ? 'Sending…' : 'Send Request'}
-                </button>
-                <button
-                  onClick={() => setShowRequestBox(false)}
-                  className="px-3 py-1 rounded bg-gray-200 text-gray-800 text-xs"
-                >
-                  Cancel
-                </button>
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+                  {m.dueDate && (
+                    <div className="text-xs text-gray-600">
+                      Due: {new Date(m.dueDate).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold text-green-700">
+                    ${Number(m.amount || 0).toLocaleString()}
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
+                    isPaid ? 'bg-green-100 text-green-800'
+                    : isDone ? 'bg-yellow-100 text-yellow-800'
+                    : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {isPaid ? 'Paid' : isDone ? 'Completed (Unpaid)' : 'Pending'}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Chat stream output */}
-      {chat && (
-        <div className="rounded border bg-white p-3">
-          <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
-        </div>
-      )}
+              {/* Paid → verification */}
+              {isPaid && (
+                <div className="mt-3 space-y-2">
+                  <div className="p-2 bg-white rounded border text-sm">
+                    <div className="text-green-700">
+                      ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+                    </div>
+                    {m.paymentTxHash && (
+                      <div className="mt-1">
+                        <span className="font-medium">TX Hash: </span>
+                        <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
+                      </div>
+                    )}
+                    {m.proof && (
+                      <div className="mt-1">
+                        <span className="font-medium">Proof: </span>{m.proof}
+                      </div>
+                    )}
+                  </div>
+
+                  <PaymentVerification
+                    transactionHash={m.paymentTxHash as string}
+                    currency={bid.preferredStablecoin}
+                    amount={Number(m.amount || 0)}
+                    toAddress={bid.walletAddress}
+                  />
+                </div>
+              )}
+
+              {/* Not paid → allow proof submission / payment release */}
+              {!isPaid && (
+                <div className="mt-3">
+                  {!isDone && (
+                    <>
+                      <label className="block text-sm font-medium mb-1">
+                        Proof of completion (text optional)
+                      </label>
+                      <textarea
+                        value={textByIndex[i] || ''}
+                        onChange={e => setText(i, e.target.value)}
+                        rows={3}
+                        className="w-full p-2 border rounded text-sm mb-2"
+                        placeholder="Notes (optional, files will be attached automatically)"
+                      />
+                      <div className="flex items-center gap-3 mb-2">
+                        <input
+                          type="file"
+                          multiple
+                          onChange={e => setFiles(i, e.target.files)}
+                          className="text-sm"
+                        />
+                        {!!(filesByIndex[i]?.length) && (
+                          <span className="text-xs text-gray-600">
+                            {filesByIndex[i].length} file(s) selected
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleSubmitProof(i)}
+                        disabled={busyIndex === i}
+                        className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+                      >
+                        {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+                      </button>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Your proof goes to admin review. It won’t auto-complete the milestone anymore.
+                      </p>
+                    </>
+                  )}
+
+                  {isDone && !isPaid && (
+                    <div className="mt-3">
+                      <button
+                        onClick={() => handleReleasePayment(i)}
+                        disabled={busyIndex === i}
+                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+                      >
+                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ---------- Vendor replies to change-requests (if any open) ---------- */}
+              {openForThis.length > 0 && (
+                <div className="mt-4 rounded border bg-white p-3">
+                  <div className="font-semibold text-sm mb-2">
+                    Admin requested changes ({openForThis.length})
+                    {crLoading && <span className="ml-2 text-xs text-gray-500">refreshing…</span>}
+                  </div>
+                  <div className="space-y-4">
+                    {openForThis.map((req) => (
+                      <div key={req.id} className="rounded border p-2 bg-amber-50">
+                        <div className="text-sm">
+                          {req.comment ? <div><b>Admin:</b> {req.comment}</div> : null}
+                          {!!req.checklist?.length && (
+                            <ul className="list-disc list-inside text-xs mt-1">
+                              {req.checklist.map((c, ci) => <li key={ci}>{c}</li>)}
+                            </ul>
+                          )}
+                        </div>
+
+                        {/* prior replies */}
+                        {!!req.responses?.length && (
+                          <div className="mt-2 space-y-1">
+                            {req.responses.map(r => (
+                              <div key={r.id} className="text-xs bg-white rounded border p-2">
+                                <div className="opacity-70">{new Date(r.createdAt).toLocaleString()}</div>
+                                {r.comment && <div className="mt-1 whitespace-pre-wrap">{r.comment}</div>}
+                                {!!r.files?.length && (
+                                  <div className="mt-1 grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    {r.files.map((f, fi) => (
+                                      <a key={fi} href={f.url} target="_blank" className="text-blue-600 underline truncate">
+                                        {f.name || f.url.split('/').pop()}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* reply form */}
+                        <div className="mt-3">
+                          <label className="block text-xs font-medium">Your reply</label>
+                          <textarea
+                            className="w-full border rounded p-2 text-sm"
+                            rows={3}
+                            placeholder="Add details or clarifications…"
+                            value={replyText[req.id] || ''}
+                            onChange={e => setReplyTextFor(req.id, e.target.value)}
+                          />
+                          <div className="flex items-center gap-3 mt-2">
+                            <input
+                              type="file"
+                              multiple
+                              onChange={e => setReplyFilesFor(req.id, e.target.files)}
+                              className="text-sm"
+                            />
+                            {!!(replyFiles[req.id]?.length) && (
+                              <span className="text-xs text-gray-600">
+                                {replyFiles[req.id].length} file(s)
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleSendReply(req.id)}
+                            disabled={busyIndex === -req.id}
+                            className="mt-2 bg-amber-700 text-white px-3 py-1 rounded text-sm disabled:opacity-60"
+                          >
+                            {busyIndex === -req.id ? 'Sending…' : 'Send Reply'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Manual Payment Processor (unchanged) */}
+      <div className="mt-6">
+        <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
+      </div>
     </div>
   );
-}
+};
+
+export default MilestonePayments;
