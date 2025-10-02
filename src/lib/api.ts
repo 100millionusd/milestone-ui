@@ -893,9 +893,16 @@ async function streamSSE(res: Response, onToken: (t: string) => void) {
     for (const frame of frames) {
       // server writes "data: <content>"
       const line = frame.startsWith("data: ") ? frame.slice(6) : frame;
-      const data = line.trim();
-      if (!data) continue;
-      if (data === "[DONE]") return;
+
+      // ✅ preserve whitespace exactly as sent (no .trim())
+      const data = line;
+
+      // still recognize the terminator even if padded with spaces/newlines
+      if (data.trim() === "[DONE]") return;
+
+      // allow whitespace-only tokens (models often stream " " as a token)
+      if (data === "") continue;
+
       onToken(data);
     }
   }
