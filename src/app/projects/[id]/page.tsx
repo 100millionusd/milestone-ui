@@ -9,15 +9,23 @@ import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 
 // ---------------- Consts ----------------
-// Pinata gateway base
-const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '')}/ipfs`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
-        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
-        : 'https://gateway.pinata.cloud/ipfs');
+// Pinata gateway base — sanitize so we end with exactly one "/ipfs"
+const PINATA_GATEWAY = (() => {
+  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
+  if (raw1) {
+    const host = raw1
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .replace(/(?:\/ipfs)+$/i, ''); // strip any trailing /ipfs
+    return `https://${host}/ipfs`;
+  }
+
+  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, '');   // strip any trailing /ipfs
+  return `${base}/ipfs`;
+})();
 
 // ⚠️ Proofs endpoint: force local API unless you explicitly override with NEXT_PUBLIC_PROOFS_ENDPOINT
 const PROOFS_ENDPOINT =
@@ -545,16 +553,6 @@ const refreshProofs = async () => {
     </div>
   );
 }
-
-    // non-image: show as an "Open" link
-    const href = displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`;
-    return (
-      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-        <p className="truncate" title={name}>{name}</p>
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open</a>
-      </div>
-    );
-  }
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
