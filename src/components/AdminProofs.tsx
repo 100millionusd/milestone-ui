@@ -376,4 +376,3 @@ function ProofCard({
     </div>
   );
 }
-
