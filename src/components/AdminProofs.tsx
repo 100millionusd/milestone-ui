@@ -174,13 +174,22 @@ function ProofCard({
 
   async function handleApprove() {
   try {
+    // Prefer the modern endpoint if we have a real proofId
     if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
-      // Correct: approve by proofId
-      await approveProof(proof.proofId);
+      try {
+        await approveProof(proof.proofId);
+      } catch (e: any) {
+        // If the server doesn't have /proofs/:id/approve (404/400), fall back
+        const msg = String(e?.message || '').toLowerCase();
+        const is404or400 = msg.includes('404') || msg.includes('400');
+        if (!is404or400) throw e;
+        await adminCompleteMilestone(proof.bidId, proof.milestoneIndex);
+      }
     } else {
-      // Fallback: mark milestone complete (legacy flow)
+      // Legacy path: no proofId available → complete milestone
       await adminCompleteMilestone(proof.bidId, proof.milestoneIndex);
     }
+
     await onRefresh();
   } catch (e: any) {
     console.error('Approve failed:', e);
