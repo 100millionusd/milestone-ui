@@ -249,27 +249,52 @@ function ProofCard({
   }
 
   // APPROVE — primary: /proofs/:proofId/approve; fallback: adminCompleteMilestone
-  async function handleApprove() {
-    setErr(null);
-    setBusyApprove(true);
-    try {
-      if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
-        // Debug IDs (helps if a 404 appears)
+async function handleApprove() {
+  setErr(null);
+  setBusyApprove(true);
+  try {
+    if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
+      try {
         console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
         await approveProof(proof.proofId);
-      } else if (Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex)) {
-        console.debug('[approve-fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
-        await adminCompleteMilestone(Number(proof.bidId), Number(proof.milestoneIndex), 'Approved by admin');
-      } else {
-        throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
+      } catch (e: any) {
+        const msg = String(e?.message || '');
+        const shouldFallback =
+          /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg);
+
+        if (
+          shouldFallback &&
+          Number.isFinite(proof.bidId) &&
+          Number.isFinite(proof.milestoneIndex)
+        ) {
+          console.debug('[approve→fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
+          await adminCompleteMilestone(
+            Number(proof.bidId),
+            Number(proof.milestoneIndex),
+            'Approved by admin'
+          );
+        } else {
+          throw e; // real error → surface it
+        }
       }
-      await onRefresh();
-    } catch (e: any) {
-      setErr(e?.message || 'Approve failed');
-    } finally {
-      setBusyApprove(false);
+    } else if (Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex)) {
+      console.debug('[approve-fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
+      await adminCompleteMilestone(
+        Number(proof.bidId),
+        Number(proof.milestoneIndex),
+        'Approved by admin'
+      );
+    } else {
+      throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
     }
+
+    await onRefresh();
+  } catch (e: any) {
+    setErr(e?.message || 'Approve failed');
+  } finally {
+    setBusyApprove(false);
   }
+}
 
   // REJECT — the legacy route that already worked for you
   async function handleReject() {
