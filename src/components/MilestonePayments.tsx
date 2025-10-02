@@ -1,7 +1,7 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   completeMilestone,
   payMilestone,
@@ -24,10 +24,25 @@ interface MilestonePaymentsProps {
 type FilesMap = Record<number, File[]>;     // per-milestone selected files
 type TextMap  = Record<number, string>;     // per-milestone notes
 
+/** Server shape for change requests (keep permissive) */
+type ChangeRequest = {
+  id: number;
+  proposalId: number;
+  milestoneIndex: number;
+  comment?: string | null;
+  checklist?: any;                  // array of strings OR array of {text,done} OR {items:[...]}
+  status?: string;
+  createdAt?: string;
+  resolvedAt?: string | null;
+};
+
 const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, proposalId }) => {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
+
+  // Open change requests grouped by milestone index
+  const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
 
   // -------- helpers --------
   const setText = (i: number, v: string) =>
@@ -51,10 +66,35 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     return undefined;
   };
 
-  /**
-   * Detect if there’s an open change request for this proposal/milestone.
-   * If the route isn’t available, returns false (keeps legacy behavior).
-   */
+  const resolvedProposalId = useMemo(() => deriveProposalId(), [proposalId, bid]);
+
+  /** Load all change requests for the current proposal, group by milestone */
+  async function loadChangeRequests(pid: number) {
+    try {
+      const r = await fetch(
+        `/api/proofs/change-requests?proposalId=${encodeURIComponent(String(pid))}`,
+        { credentials: 'include', cache: 'no-store' }
+      );
+      if (!r.ok) { setCrByMs({}); return; }
+      const list: ChangeRequest[] = await r.json().catch(() => []);
+      const openStates = new Set(['open','needs_changes','in_review','response_submitted']);
+      const map: Record<number, ChangeRequest[]> = {};
+      for (const cr of list) {
+        const st = String(cr?.status || '').toLowerCase();
+        if (!openStates.has(st)) continue; // only show “active” requests
+        const mi = Number(cr.milestoneIndex);
+        if (!Number.isFinite(mi)) continue;
+        (map[mi] ||= []).push(cr);
+      }
+      // keep newest last for display
+      Object.keys(map).forEach(k => map[+k].sort((a,b) => (new Date(a.createdAt||0).getTime() - new Date(b.createdAt||0).getTime())));
+      setCrByMs(map);
+    } catch {
+      setCrByMs({});
+    }
+  }
+
+  /** Server check used before auto-completing */
   async function hasOpenChangeRequest(proposalId: number, milestoneIndex: number) {
     try {
       const q = new URLSearchParams({
@@ -68,7 +108,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       });
       if (!r.ok) return false;
       const list = await r.json().catch(() => []);
-      const openStates = new Set(['open', 'needs_changes', 'in_review', 'response_submitted']);
+      const openStates = new Set(['open','needs_changes','in_review','response_submitted']);
       return Array.isArray(list) && list.some((cr: any) => {
         const samePid = Number(cr?.proposalId) === Number(proposalId);
         const sameMs  = Number(cr?.milestoneIndex) === Number(milestoneIndex);
@@ -76,15 +116,28 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         return samePid && sameMs && openStates.has(st);
       });
     } catch {
-      // If the endpoint doesn’t exist yet, keep old behavior
-      return false;
+      return false; // if endpoint not available, keep legacy behavior
     }
   }
 
+  // Load CRs on mount + refresh on proofs events
+  useEffect(() => {
+    const pid = Number(resolvedProposalId);
+    if (!Number.isFinite(pid)) return;
+    loadChangeRequests(pid);
+    const onAnyProofUpdate = () => loadChangeRequests(pid);
+    window.addEventListener('proofs:updated', onAnyProofUpdate);
+    window.addEventListener('proofs:changed', onAnyProofUpdate);
+    return () => {
+      window.removeEventListener('proofs:updated', onAnyProofUpdate);
+      window.removeEventListener('proofs:changed', onAnyProofUpdate);
+    };
+  }, [resolvedProposalId]);
+
   // -------- actions --------
   async function handleSubmitProof(index: number) {
-    const pid = deriveProposalId();
-    if (!Number.isFinite(pid)) {
+    const pid = resolvedProposalId;
+    if (!Number.isFinite(pid as number)) {
       alert('Cannot determine proposalId.');
       return;
     }
@@ -137,6 +190,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })),
       }).catch(() => { /* ignore if server rejects duplicate schema */ });
 
+      // Reload CRs (in case admin changes status based on your response)
+      await loadChangeRequests(Number(pid));
+
       // clear local inputs
       setText(index, '');
       setFiles(index, null);
@@ -171,6 +227,54 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     const paid = bid.milestones.filter(m => m.paymentTxHash).reduce((s, m) => s + (Number(m.amount) || 0), 0);
     return { total, completed, paid };
   }, [bid.milestones]);
+
+  // -------- UI helpers --------
+  function renderChangeRequestBanner(msIndex: number) {
+    const list = crByMs[msIndex] || [];
+    if (!list.length) return null;
+    const latest = list[list.length - 1]; // show the most recent request
+    const comment = latest?.comment || '';
+    // Normalize checklist
+    let raw = latest?.checklist as any;
+    if (raw && typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch { /* keep as string */ }
+    }
+    const itemsArr =
+      Array.isArray(raw) ? raw :
+      Array.isArray(raw?.items) ? raw.items :
+      [];
+    const items = (itemsArr as any[]).map(x =>
+      typeof x === 'string'
+        ? { text: x, done: false }
+        : { text: String(x?.text ?? x?.title ?? ''), done: !!(x?.done ?? x?.checked) }
+    ).filter(it => it.text);
+
+    return (
+      <div className="mt-3 border rounded bg-amber-50 p-3">
+        <div className="text-sm font-semibold text-amber-900">
+          ⚠️ Changes requested by admin
+        </div>
+        {comment && (
+          <p className="text-sm text-amber-900 mt-1 whitespace-pre-wrap">
+            {comment}
+          </p>
+        )}
+        {!!items.length && (
+          <ul className="mt-2 list-disc list-inside text-sm text-amber-900">
+            {items.map((it, i) => (
+              <li key={i} className={it.done ? 'line-through opacity-70' : ''}>
+                {it.text}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[11px] text-amber-800 mt-2">
+          Re‑upload the requested files and press <b>Submit Proof</b> again. The milestone will remain
+          pending until the admin approves.
+        </p>
+      </div>
+    );
+  }
 
   // -------- render --------
   return (
@@ -248,6 +352,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </span>
                 </div>
               </div>
+
+              {/* 🔎 Show admin change request (if any) */}
+              {renderChangeRequestBanner(i)}
 
               {/* Paid → show verification / details */}
               {isPaid && (
