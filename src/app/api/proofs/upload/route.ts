@@ -3,87 +3,115 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // allow long uploads
 
-// Build the public gateway base (NEXT_PUBLIC_PINATA_GATEWAY host-only → /ipfs; else Pinata default)
+const PINATA_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+
 function gatewayBase(): string {
-  const gw = process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
-        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
-        : 'https://gateway.pinata.cloud/ipfs');
-  return gw;
+  const envGw =
+    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY;
+
+  // host-only → ensure single /ipfs suffix
+  let base = envGw
+    ? `https://${String(envGw).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+    : 'https://gateway.pinata.cloud';
+
+  base = base.replace(/\/+$/, '');
+  if (!/\/ipfs$/i.test(base)) base += '/ipfs';
+  return base;
 }
 
-// Use server env PINATA_JWT exactly as provided (must include "Bearer ")
 function pinataHeaders(): Record<string, string> {
-  const jwt = process.env.PINATA_JWT; // expected: "Bearer <token>"
-  const apiKey = process.env.PINATA_API_KEY;
-  const apiSecret = process.env.PINATA_SECRET_API_KEY;
-
-  if (jwt) return { Authorization: jwt }; // do NOT prepend "Bearer " again
-  if (apiKey && apiSecret) {
-    return {
-      pinata_api_key: apiKey,
-      pinata_secret_api_key: apiSecret,
-    };
+  const jwt = process.env.PINATA_JWT?.trim();
+  if (jwt) {
+    // accept raw token or "Bearer <token>"
+    const val = /^Bearer\s+/i.test(jwt) ? jwt : `Bearer ${jwt}`;
+    return { Authorization: val };
   }
-  throw new Error('Missing Pinata credentials (PINATA_JWT or PINATA_API_KEY + PINATA_SECRET_API_KEY)');
+  const key = process.env.PINATA_API_KEY;
+  const secret = process.env.PINATA_SECRET_API_KEY;
+  if (key && secret) {
+    return { pinata_api_key: key, pinata_secret_api_key: secret };
+  }
+  throw new Error('Missing Pinata credentials');
 }
 
-type FileLike = {
-  name?: string;
-  type?: string;
-  size?: number;
-  // Node/undici File/Blob exposes arrayBuffer()
-  arrayBuffer: () => Promise<ArrayBuffer>;
-};
+type FileLike = Blob & { name?: string };
 
-function isFileLike(v: any): v is FileLike {
-  return v && typeof v === 'object' && typeof v.arrayBuffer === 'function';
+function toArray<T>(x: T | T[] | null): T[] {
+  if (!x) return [];
+  return Array.isArray(x) ? x : [x];
 }
 
-async function pinOneFileToPinata(file: FileLike): Promise<{ cid: string; url: string; name: string }> {
+async function pinOne(file: FileLike, metadata?: any) {
   const fd = new FormData();
-  // The undici FormData accepts web File/Blob-like values. We avoid referencing the global File class.
-  fd.append('file', file as any, (file as any).name || 'file'); // Pinata expects 'file' (singular)
+  fd.append('file', file as any, (file as any).name || 'file');
+  if (metadata) fd.append('pinataMetadata', JSON.stringify(metadata));
 
-  const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-    method: 'POST',
-    headers: pinataHeaders(),
-    body: fd,                    // don’t set Content-Type manually (boundary required)
-    cache: 'no-store',
-  });
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 110_000);
 
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Pinata ${res.status}: ${text}`);
+  try {
+    const res = await fetch(PINATA_ENDPOINT, {
+      method: 'POST',
+      headers: pinataHeaders(),
+      body: fd as any, // undici sets boundary
+      signal: controller.signal,
+      cache: 'no-store',
+    });
 
-  let json: any = {};
-  try { json = JSON.parse(text); } catch {}
-  const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
-  if (!cid) throw new Error(`Pinata response missing CID: ${text}`);
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Pinata ${res.status}: ${text.slice(0, 500)}`);
 
-  return { cid, url: `${gatewayBase()}/${cid}`, name: (file as any).name || 'file' };
+    let json: any = {};
+    try { json = JSON.parse(text); } catch {}
+    const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
+    if (!cid) throw new Error('Pinata response missing CID');
+
+    const name = (file as any).name || 'file';
+    const url = `${gatewayBase()}/${cid}?filename=${encodeURIComponent(name)}`;
+    return { cid, url, name };
+  } finally {
+    clearTimeout(t);
+  }
 }
 
-// POST-only: Accept multipart/form-data with field name EXACTLY "files" (multiple)
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
-    const raw = form.getAll('files');
-    const files = raw.filter(isFileLike);
-    if (files.length === 0) {
+
+    // accept BOTH field names: "file" and "files"
+    const candidates: FileLike[] = [
+      ...toArray(form.get('file') as any),
+      ...(form.getAll('file') as any[]),
+      ...(form.getAll('files') as any[]),
+    ].filter(Boolean);
+
+    if (!candidates.length) {
       return NextResponse.json(
-        { ok: false, error: 'no_files', message: 'Attach one or more files using field name "files"' },
+        { ok: false, error: 'no_files', message: 'Send files as "file" or "files".' },
         { status: 400 }
       );
     }
 
-    const uploads = [];
-    for (const f of files) uploads.push(await pinOneFileToPinata(f));
+    const proposalId = form.get('proposalId')?.toString() || '';
+    const milestoneIndex = form.get('milestoneIndex')?.toString() || '';
 
-    // Return exact shape required by spec
-    return NextResponse.json({ ok: true, uploads }, { status: 200 });
+    const uploads = [];
+    for (const f of candidates) {
+      const meta = {
+        name: (f as any).name || 'file',
+        keyvalues: { proposalId, milestoneIndex },
+      };
+      uploads.push(await pinOne(f, meta));
+    }
+
+    // return both keys for client compatibility
+    return NextResponse.json({ ok: true, uploads, files: uploads }, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: 'upload_failed', message: String(e?.message || e) }, { status: 500 });
+    const msg = String(e?.message || e);
+    const status = /AbortError/i.test(msg) ? 504 : 500;
+    return NextResponse.json({ ok: false, error: 'upload_failed', message: msg }, { status });
   }
 }

@@ -6,13 +6,57 @@ import {
   completeMilestone,
   payMilestone,
   submitProof,
-  uploadProofFiles,    // POST /api/proofs/upload → Pinata
   saveProofFilesToDb,  // POST /api/proofs → persists for Files tab
   type Bid,
   type Milestone,
 } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
+
+// ---- upload helpers (shrink big images, retry on 504) ----
+async function shrinkImageIfNeeded(file: File): Promise<File> {
+  if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
+
+  const bitmap = await createImageBitmap(file);
+  const maxSide = 2000;
+  let { width, height } = bitmap;
+  if (width > height && width > maxSide) {
+    height = Math.round((height / width) * maxSide);
+    width = maxSide;
+  } else if (height > maxSide) {
+    width = Math.round((width / height) * maxSide);
+    height = maxSide;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  const blob: Blob = await new Promise((resolve) =>
+    canvas.toBlob(resolve as any, 'image/jpeg', 0.85),
+  );
+  return new File([blob!], (file.name || 'image').replace(/\.(png|webp)$/i, '') + '.jpg', {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  });
+}
+
+async function postWithRetry(url: string, fd: FormData): Promise<any> {
+  const go = async () => {
+    const r = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
+    if (!r.ok) throw new Error(`Upload HTTP ${r.status}`);
+    return r.json();
+  };
+  try {
+    return await go();
+  } catch (e: any) {
+    if (!/504/.test(String(e?.message))) throw e;
+    await new Promise((r) => setTimeout(r, 1500));
+    return await go();
+  }
+}
 
 interface MilestonePaymentsProps {
   bid: Bid;
@@ -156,8 +200,24 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // 1) Upload to Pinata via Next upload route
-      const uploaded = localFiles.length ? await uploadProofFiles(localFiles) : [];
+      // 1) Upload to Pinata via Next upload route (sequential, shrink + retry)
+const uploaded: Array<{ name: string; cid: string; url: string }> = [];
+for (const original of localFiles) {
+  const file = await shrinkImageIfNeeded(original);
+
+  const fd = new FormData();
+  // IMPORTANT: the field name must be exactly "files" (plural)
+  fd.append('files', file, file.name || 'file');
+
+  const json = await postWithRetry('/api/proofs/upload', fd);
+  // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
+  if (json?.uploads?.length) {
+    uploaded.push(...json.uploads);
+  } else if (json?.cid && json?.url) {
+    // defensive fallback if handler ever returns single file
+    uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
+  }
+}
 
       // 2) Map uploaded → filesToSave (full URL, name, cid)
       const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
