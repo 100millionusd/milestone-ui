@@ -855,9 +855,11 @@ const refreshProofs = async () => {
 
     {/* Existing proofs list (approve/reject) */}
     <AdminProofs
-      bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
-      proposalId={projectIdNum}
-    />
+  bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+  proposalId={projectIdNum}
+  bids={bids}
+  onRefresh={refreshProofs}
+/>
 
     {/* 👇 Full change-request conversation thread (admin ↔ vendor) */}
     <div className="mt-6">

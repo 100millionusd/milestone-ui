@@ -12,7 +12,46 @@ import {
   type Proof,
 } from '@/lib/api';
 
-// ---------- helpers ----------
+// ---------- Gateway + helpers ----------
+const PINATA_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
+        .replace(/^https?:\/\//, '')
+        .replace(/\/+$/, '')}/ipfs`
+    : 'https://gateway.pinata.cloud/ipfs';
+
+function isImg(s?: string) {
+  if (!s) return false;
+  const x = s.toLowerCase();
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(x);
+}
+
+/** Build a safe https URL for any combination of {url, cid} */
+function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
+  if (!file) return '';
+  const cid = (file as any)?.cid?.toString().trim();
+  let u = (file as any)?.url?.toString().trim();
+
+  // If we have a CID and either no url or a non-http url, use gateway
+  if (cid && (!u || !/^https?:\/\//i.test(u))) {
+    return `${PINATA_GATEWAY}/${cid}`;
+  }
+
+  // If url is just a CID (no protocol/host), expand it
+  if (u && /^[A-Za-z0-9]{46,}$/.test(u) && !/^https?:\/\//i.test(u)) {
+    return `${PINATA_GATEWAY}/${u}`;
+  }
+
+  if (!u) return '';
+
+  // Normalize ipfs:// and /ipfs/ forms
+  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/*ipfs\//i, '');
+  if (!/^https?:\/\//i.test(u)) u = `${PINATA_GATEWAY}/${u}`;
+  // De-dupe /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/ipfs\//g, '/ipfs/');
+  return u;
+}
+
 function toMilestones(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
@@ -21,28 +60,24 @@ function toMilestones(raw: any): any[] {
   return [];
 }
 
-function isImg(urlOrName?: string) {
-  if (!urlOrName) return false;
-  const s = urlOrName.toLowerCase();
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(s);
-}
-
 // ---------- types ----------
 type Props = {
-  /** Optional: when rendered on project page, pass to show only that project’s proofs */
+  /** When rendered on project page, pass this project’s bid ids to filter by bidId */
+  bidIds?: number[];
+  /** Also pass proposalId to enable "Request Changes" API calls */
   proposalId?: number;
-  /** Optional: pass bids from the page so we can show milestone names */
+  /** Optional: pass bids so we can show milestone names */
   bids?: any[];
   /** Optional: parent refresher (e.g., to refresh Files tab) */
   onRefresh?: () => void;
 };
 
-export default function AdminProofs({ proposalId, bids = [], onRefresh }: Props) {
+export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefresh }: Props) {
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // “Request Changes” form state
+  // “Request Changes” UI state (inline composer)
   const [crOpenFor, setCrOpenFor] = useState<number | null>(null);
   const [crComment, setCrComment] = useState('');
   const [crChecklist, setCrChecklist] = useState('');
@@ -51,23 +86,22 @@ export default function AdminProofs({ proposalId, bids = [], onRefresh }: Props)
     try {
       setLoading(true);
       setError(null);
-      const list = await getProofs(); // admin list
+      const list = await getProofs(); // admin list from your Railway API
+
       let filtered = list;
 
-      if (Number.isFinite(proposalId as number)) {
+      // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
+      if (Array.isArray(bidIds) && bidIds.length) {
+        const set = new Set(bidIds.map((x) => Number(x)));
+        filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
+      } else if (Number.isFinite(proposalId as number)) {
+        // Secondary filter: try proposalId if your backend supplies it
         const idNum = Number(proposalId);
         filtered = list.filter((p: any) => {
-          const candidates = [
-            p?.proposalId,
-            p?.proposal_id,
-            p?.proposalID,
-          ];
+          const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
           return candidates.some((v) => Number(v) === idNum);
         });
-
-        // Safety: if backend rows don’t carry proposalId, don’t show empty
         if (!filtered.length) {
-          // eslint-disable-next-line no-console
           console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
           filtered = list;
         }
@@ -84,14 +118,16 @@ export default function AdminProofs({ proposalId, bids = [], onRefresh }: Props)
   useEffect(() => {
     loadProofs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proposalId]);
+  }, [JSON.stringify(bidIds), proposalId]);
 
   const refreshAll = async () => {
     await loadProofs();
     try {
       onRefresh?.();
-      if (typeof window !== 'undefined' && Number.isFinite(proposalId as number)) {
-        const detail = { proposalId: Number(proposalId) };
+      if (typeof window !== 'undefined' && (bidIds.length || Number.isFinite(proposalId as number))) {
+        const detail = Number.isFinite(proposalId as number)
+          ? { proposalId: Number(proposalId) }
+          : undefined;
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
         window.dispatchEvent(new CustomEvent('proofs:changed', { detail }));
       }
@@ -203,8 +239,11 @@ function ProofCard({
     setBusyApprove(true);
     try {
       if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
+        // Debug IDs (helps if a 404 appears)
+        console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
         await approveProof(proof.proofId);
       } else if (Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex)) {
+        console.debug('[approve-fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
         await adminCompleteMilestone(Number(proof.bidId), Number(proof.milestoneIndex), 'Approved by admin');
       } else {
         throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
@@ -217,7 +256,7 @@ function ProofCard({
     }
   }
 
-  // REJECT — legacy route that already worked for you
+  // REJECT — the legacy route that already worked for you
   async function handleReject() {
     setErr(null);
     setBusyReject(true);
@@ -293,33 +332,34 @@ function ProofCard({
       {Array.isArray(proof.files) && proof.files.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
           {proof.files.map((file, i) => {
-            const imgish = isImg(file.url || file.name);
+            const href = toGatewayUrl(file);
+            const imgish = isImg(href) || isImg(file.name);
             if (imgish) {
               return (
                 <a
                   key={i}
-                  href={file.url}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="group relative overflow-hidden rounded border"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={file.url}
+                    src={href}
                     alt={file.name}
                     className="h-32 w-full object-cover group-hover:scale-105 transition"
                   />
                   <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                    {file.name}
+                    {file.name || href.split('/').pop()}
                   </div>
                 </a>
               );
             }
             return (
               <div key={i} className="p-3 rounded border bg-gray-50">
-                <p className="truncate text-sm">{file.name}</p>
+                <p className="truncate text-sm">{file.name || href.split('/').pop()}</p>
                 <a
-                  href={file.url}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-blue-600 hover:underline"
