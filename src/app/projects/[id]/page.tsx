@@ -847,26 +847,12 @@ const refreshProofs = async () => {
         </section>
       )}
 
-      {/* Admin (only for admins) */}
-      {tab === 'admin' && me.role === 'admin' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
-          <p className="text-sm text-gray-600 mb-3">
-            Review vendor proofs per milestone, approve or reject, and refresh the list after actions.
-          </p>
-          <div className="mb-4">
-            <button
-              onClick={refreshProofs}
-              disabled={loadingProofs}
-              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
-            >
-              {loadingProofs ? 'Refreshing…' : 'Refresh Proofs'}
-            </button>
-          </div>
-          <AdminProofs proposalId={projectIdNum} />
-        </section>
-      )}
-
+     {/* Admin (only for admins) */}
+{tab === 'admin' && me.role === 'admin' && (
+  <section className="border rounded p-4">
+    <AdminProofs />
+  </section>
+)}
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
       </div>
