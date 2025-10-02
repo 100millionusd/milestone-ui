@@ -495,39 +495,56 @@ const refreshProofs = async () => {
   });
 }
 
-  // -------------- small render helpers (no hooks) --------------
   function renderAttachment(doc: any, key: number) {
-    if (!doc) return null;
+  if (!doc) return null;
 
-    const rawUrl = doc.url || (doc.cid ? `${PINATA_GATEWAY}/${doc.cid}` : '');
-    if (!rawUrl) return null;
+  // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+  const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+  if (!baseUrl) return null;
 
-    const nameFromUrl = decodeURIComponent((rawUrl.split('/').pop() || '').trim());
-    const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+  // filename for preview + nicer downloads
+  const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
+  const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
 
-    // ensure IPFS URLs carry a filename so content-type/preview behaves nicely
-    const displayUrl = withFilename(rawUrl, name);
+  // only adds ?filename= when safe; keeps URL clean
+  const href = withFilename(baseUrl, name);
 
-    // detect images by NAME (preferred) or fallback to the URL
-    const looksImage = isImageName(name) || isImageName(displayUrl);
+  // detect image by name OR final href
+  const looksImage = isImageName(name) || isImageName(href);
 
-    if (looksImage) {
-      return (
-        <button
-          key={key}
-          onClick={() => setLightbox(displayUrl)}
-          className="group relative overflow-hidden rounded border"
-          title={name}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={displayUrl}
-            alt={name}
-            className="h-24 w-24 object-cover group-hover:scale-105 transition"
-          />
-        </button>
-      );
-    }
+  if (looksImage) {
+    return (
+      <button
+        key={key}
+        onClick={() => setLightbox(href)}
+        className="group relative overflow-hidden rounded border"
+        title={name}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={href}
+          alt={name}
+          className="h-24 w-24 object-cover group-hover:scale-105 transition"
+        />
+      </button>
+    );
+  }
+
+  // non-image: show as an "Open" link
+  return (
+    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+      <p className="truncate" title={name}>{name}</p>
+      <a
+        href={href.startsWith('http') ? href : `https://${href}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:underline"
+      >
+        Open
+      </a>
+    </div>
+  );
+}
 
     // non-image: show as an "Open" link
     const href = displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`;
