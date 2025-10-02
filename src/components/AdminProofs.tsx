@@ -22,8 +22,8 @@ const PINATA_GATEWAY =
 
 function isImg(s?: string) {
   if (!s) return false;
-  const x = s.toLowerCase();
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(x);
+  // treat “…jpg?filename=foo.jpg” and “…png#anchor” as images too
+  return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
 // Build a safe https URL for any combination of {url, cid},
