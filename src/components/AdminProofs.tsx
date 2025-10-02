@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import {
   getProofs,
-  approveProof,
+  approveProof,              // prefers proofId
   rejectProof,
   analyzeProof,
   chatProof,
+  adminCompleteMilestone,    // fallback when no proofId
   type Proof,
 } from '@/lib/api';
 
@@ -172,9 +173,20 @@ function ProofCard({
   }
 
   async function handleApprove() {
-    await approveProof(proof.bidId, proof.milestoneIndex);
+  try {
+    if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
+      // Correct: approve by proofId
+      await approveProof(proof.proofId);
+    } else {
+      // Fallback: mark milestone complete (legacy flow)
+      await adminCompleteMilestone(proof.bidId, proof.milestoneIndex);
+    }
     await onRefresh();
+  } catch (e: any) {
+    console.error('Approve failed:', e);
+    alert(e?.message || 'Failed to approve proof');
   }
+}
 
   async function handleReject() {
     await rejectProof(proof.bidId, proof.milestoneIndex);
