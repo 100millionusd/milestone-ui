@@ -853,12 +853,13 @@ const refreshProofs = async () => {
   <section className="border rounded p-4">
     <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
 
+    {/* Existing proofs list (approve/reject) */}
     <AdminProofs
       bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
-      proposalId={projectIdNum}   // enables “Request Changes”
+      proposalId={projectIdNum}
     />
 
-    {/* New: full change-request thread with all vendor replies */}
+    {/* 👇 Full change-request conversation thread (admin ↔ vendor) */}
     <div className="mt-6">
       <ChangeRequestsPanel proposalId={projectIdNum} />
     </div>
