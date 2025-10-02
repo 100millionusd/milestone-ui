@@ -6,6 +6,64 @@ export const dynamic = 'force-dynamic';
 
 const prisma = new PrismaClient();
 
+// --- Gateway + normalizer ----------------------------------------------------
+const PINATA_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
+        .replace(/^https?:\/\//, '')
+        .replace(/\/+$/, '')}/ipfs`
+    : 'https://gateway.pinata.cloud/ipfs';
+
+function normalizeIpfsUrl(input?: string, cid?: string): string {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
+  if (!input) return '';
+  let u = String(input).trim();
+
+  // bare CID (optionally with ?query)
+  const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
+
+  // ipfs://, leading slashes, repeated ipfs/ segments
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  return u;
+}
+
+type InFile = { url?: string; cid?: string; name?: string } | string;
+
+function sanitizeFiles(files: any): Array<{ name: string; url: string; cid?: string }> {
+  if (!Array.isArray(files)) return [];
+  const out: Array<{ name: string; url: string; cid?: string }> = [];
+
+  for (const f of files as InFile[]) {
+    let name = 'file';
+    let cid = '';
+    let rawUrl = '';
+
+    if (typeof f === 'string') {
+      rawUrl = f;
+    } else if (f && typeof f === 'object') {
+      name   = f.name ? String(f.name) : 'file';
+      cid    = f.cid ? String(f.cid).trim() : '';
+      rawUrl = f.url ? String(f.url).trim() : '';
+    }
+
+    // Always prefer a gateway URL derived from CID when present.
+    const url = normalizeIpfsUrl(rawUrl, cid);
+    if (!url) continue;
+
+    out.push({ name, url, cid: cid || undefined });
+  }
+
+  return out;
+}
+// -----------------------------------------------------------------------------
+
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
     const id = Number(ctx?.params?.id);
@@ -18,7 +76,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
     const body = await req.json().catch(() => ({}));
     const comment = typeof body.comment === 'string' ? body.comment : '';
-    const files = Array.isArray(body.files) ? body.files : [];
+    const filesSanitized = sanitizeFiles(body.files);
 
     // Ensure request exists
     const cr = await prisma.proofChangeRequest.findUnique({ where: { id } });
@@ -29,32 +87,28 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       );
     }
 
-    // Try to write response with files JSON (handle both possible column names),
-    // then fall back to comment-only if schema doesn't have a JSON files column.
+    // Try to write with filesJson, fall back to files, then to comment-only.
     let saved: any;
     try {
-      // Attempt with filesJson
       saved = await (prisma as any).proofChangeResponse.create({
         data: {
           requestId: id,
           comment,
-          filesJson: files,         // <-- if your model has filesJson JSON column
+          filesJson: filesSanitized, // JSON column variant A
           createdBy: 'vendor',
         },
       });
     } catch {
       try {
-        // Attempt with files
         saved = await (prisma as any).proofChangeResponse.create({
           data: {
             requestId: id,
             comment,
-            files,                  // <-- if your model has files JSON column
+            files: filesSanitized,    // JSON column variant B
             createdBy: 'vendor',
           },
         });
       } catch {
-        // Final fallback: comment only
         saved = await prisma.proofChangeResponse.create({
           data: {
             requestId: id,
@@ -65,7 +119,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       }
     }
 
-    // Do NOT auto-approve here. Keep request open until admin approves/requests again.
+    // Do NOT auto-approve; keep request open until admin acts.
     return NextResponse.json({ ok: true, response: saved }, { status: 201 });
   } catch (e: any) {
     return NextResponse.json(
