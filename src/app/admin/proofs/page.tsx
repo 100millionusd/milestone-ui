@@ -58,6 +58,12 @@ export default function AdminProofsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+  const h = () => loadProofs();
+  window.addEventListener('milestones:updated', h);
+  return () => window.removeEventListener('milestones:updated', h);
+}, []);
+
   async function loadProofs() {
     setLoading(true);
     setError(null);
@@ -76,37 +82,37 @@ export default function AdminProofsPage() {
   }
 
   async function hydrateArchiveStatuses(allBids: any[]) {
-    // Avoid re-fetching already-known keys
-    const tasks: Array<Promise<void>> = [];
-    const nextMap: Record<string, ArchiveInfo> = { ...archMap };
+  const tasks: Array<Promise<void>> = [];
+  const nextMap: Record<string, ArchiveInfo> = { ...archMap };
 
-    for (const bid of allBids || []) {
-      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-      for (let i = 0; i < ms.length; i++) {
-        const key = mkKey(bid.bidId, i);
-        if (nextMap[key] !== undefined) continue; // already known
-        tasks.push(
-          (async () => {
-            try {
-              const j = await getMilestoneArchive(bid.bidId, i); // { archived, archivedAt, archiveReason }
-              nextMap[key] = {
-                archived: !!(j?.archived),
-                archivedAt: j?.archivedAt ?? null,
-                archiveReason: j?.archiveReason ?? null,
-              };
-            } catch {
-              // treat as not archived if 404 or any error
-              nextMap[key] = { archived: false };
-            }
-          })()
-        );
-      }
-    }
-    if (tasks.length) {
-      await Promise.all(tasks);
-      setArchMap(nextMap);
+  for (const bid of allBids || []) {
+    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    for (let i = 0; i < ms.length; i++) {
+      const key = mkKey(bid.bidId, i);
+      if (nextMap[key] !== undefined) continue;
+      tasks.push(
+        (async () => {
+          try {
+            // Supports both: { ok, milestone: {...} } and { archived, ... }
+            const j = await getMilestoneArchive(bid.bidId, i);
+            const mi = j?.milestone ?? j;
+            nextMap[key] = {
+              archived: !!mi?.archived,
+              archivedAt: mi?.archivedAt ?? null,
+              archiveReason: mi?.archiveReason ?? null,
+            };
+          } catch {
+            nextMap[key] = { archived: false };
+          }
+        })()
+      );
     }
   }
+  if (tasks.length) {
+    await Promise.all(tasks);
+    setArchMap(nextMap);
+  }
+}
 
   // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {

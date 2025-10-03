@@ -29,6 +29,11 @@ export interface Milestone {
   proof?: string;
   paymentTxHash?: string | null;
   paymentDate?: string | null;
+
+  // NEW — keep archive state coming from server
+  archived?: boolean;
+  archivedAt?: string | null;
+  archiveReason?: string | null;
 }
 
 export interface Bid {
@@ -348,6 +353,7 @@ function toMilestones(raw: any): Milestone[] {
       arr = [];
     }
   }
+
   return arr.map((m: any) => ({
     name: m?.name ?? "",
     amount: Number(m?.amount ?? 0),
@@ -357,6 +363,11 @@ function toMilestones(raw: any): Milestone[] {
     proof: m?.proof ?? "",
     paymentTxHash: m?.paymentTxHash ?? null,
     paymentDate: m?.paymentDate ?? null,
+
+    // NEW — do not drop archive flags
+    archived: (m?.archived ?? m?.archived_flag ?? false) ? true : false,
+    archivedAt: m?.archivedAt ?? m?.archived_at ?? null,
+    archiveReason: m?.archiveReason ?? m?.archive_reason ?? null,
   }));
 }
 
@@ -1044,37 +1055,45 @@ export async function saveProofFilesToDb(params: {
   return await res.json();
 }
 
-// ---- Milestone archive (Next API) ----
-// Uses your Next routes at /api/milestones/:bidId/:milestoneIndex/archive
-
 export async function archiveMilestone(bidId: number, milestoneIndex: number, reason?: string) {
-  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: reason ?? '' }),
-  });
+  const res = await fetch(
+    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? "" }),
+      cache: "no-store",
+    }
+  );
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
   return j;
 }
 
 export async function getMilestoneArchive(bidId: number, milestoneIndex: number) {
-  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
-    method: 'GET',
-    credentials: 'include',
-    cache: 'no-store',
-  });
+  const res = await fetch(
+    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
+    {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  return j;
+  return j; // { ok, milestone: { archived, archivedAt, archiveReason } }
 }
 
 export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
-  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
+  const res = await fetch(
+    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
+    {
+      method: "DELETE",
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
   return j;
