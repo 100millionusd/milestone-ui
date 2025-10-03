@@ -15,15 +15,15 @@ datasource db {
 }
 
 model Proof {
-  id             Int        @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   proposalId     Int
   bidId          Int?
   milestoneIndex Int?
   note           String?
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime @default(now())
   createdBy      String?
 
-  files          ProofFile[]
+  files ProofFile[]
 
   @@index([proposalId, milestoneIndex])
   @@index([proposalId])
@@ -38,25 +38,59 @@ model ProofFile {
   path      String?
   createdAt DateTime @default(now())
 
-  proof     Proof    @relation(fields: [proofId], references: [id], onDelete: Cascade)
+  proof Proof @relation(fields: [proofId], references: [id], onDelete: Cascade)
 
   @@index([proofId])
 }
 
 /**
- * ✅ New: Dispute / Change Request records
- * Does not modify existing Proof/ProofFile logic.
+ * ✅ Dispute / Change Request records
+ * (Admin ↔ Vendor change-requests thread)
  */
 model ProofChangeRequest {
   id             Int       @id @default(autoincrement())
   proposalId     Int
   milestoneIndex Int
   comment        String?
-  checklist      Json?     // e.g. ["Add site photos","Upload receipts"]
+  checklist      Json? // e.g. ["Add site photos","Upload receipts"]
   status         String    @default("open") // "open" | "resolved"
   createdAt      DateTime  @default(now())
   resolvedAt     DateTime?
 
+  // ⬇ back-relation for responses (fixes P1012)
+  responses ProofChangeResponse[] @relation("CRtoResponses")
+
   @@index([proposalId, milestoneIndex])
   @@index([proposalId])
+}
+
+model ProofChangeResponse {
+  id        Int      @id @default(autoincrement())
+  requestId Int
+  comment   String?
+  filesJson Json? // optional JSON payload for attached files [{url,name,cid}]
+  createdAt DateTime @default(now())
+  createdBy String? // 'vendor' | 'admin'
+
+  // ⬇ forward relation paired with ProofChangeRequest.responses
+  request ProofChangeRequest @relation("CRtoResponses", fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+}
+
+/**
+ * ✅ Milestone archive metadata for admin workflow
+ * (used by /api/milestones/.../archive routes)
+ */
+model Milestone {
+  id             Int @id @default(autoincrement())
+  bidId          Int
+  milestoneIndex Int
+
+  archived      Boolean   @default(false)
+  archivedAt    DateTime?
+  archivedBy    Int?
+  archiveReason String?
+
+  @@unique([bidId, milestoneIndex], name: "bidId_milestoneIndex")
 }
