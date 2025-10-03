@@ -7,7 +7,7 @@ import {
   payMilestone,
   completeMilestone,
   rejectMilestoneProof,
-  // 👇 NEW: server-archive API helpers (must exist in your lib/api)
+  // NEW: server-backed archive helpers (must exist in '@/lib/api')
   getMilestoneArchive,
   archiveMilestone,
   unarchiveMilestone,
@@ -21,10 +21,20 @@ const TABS = [
   { key: 'ready-to-pay', label: 'Ready to Pay' },     // completed, not yet paid
   { key: 'paid', label: 'Paid' },                     // paymentTxHash present
   { key: 'no-proof', label: 'No Proof' },             // no proof and not completed
+  { key: 'archived', label: 'Archived' },             // NEW: Archived items (server)
 ] as const;
 type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
+
+// key helper
+const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
+
+type ArchiveInfo = {
+  archived: boolean;
+  archivedAt?: string | null;
+  archiveReason?: string | null;
+};
 
 export default function AdminProofsPage() {
   const [loading, setLoading] = useState(true);
@@ -36,14 +46,12 @@ export default function AdminProofsPage() {
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
   const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
-  // NEW: tabs + search
+  // Tabs + search
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
-  // 👇 NEW: track archive state per (bidId, milestoneIndex)
-  const archKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
-  const [archivedMap, setArchivedMap] = useState<Record<string, boolean>>({});
-  const [archiving, setArchiving] = useState<string | null>(null);
+  // NEW: server archive state map
+  const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   useEffect(() => {
     loadProofs();
@@ -53,30 +61,11 @@ export default function AdminProofsPage() {
     setLoading(true);
     setError(null);
     try {
-      // Keep ALL bids; we filter per tab in the UI.
-      const allBids = await getBids();
-      setBids(Array.isArray(allBids) ? allBids : []);
-
-      // 👇 NEW: prefetch archive flags (best-effort, non-blocking)
-      // only for milestones currently visible under the default "all" tab to avoid a storm
-      try {
-        const fetches: Array<Promise<void>> = [];
-        (Array.isArray(allBids) ? allBids : []).forEach((bid: any) => {
-          const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-          ms.forEach((_m: any, idx: number) => {
-            const key = archKey(bid.bidId, idx);
-            if (archivedMap[key] !== undefined) return;
-            fetches.push(
-              getMilestoneArchive(bid.bidId, idx)
-                .then((j: any) => {
-                  setArchivedMap(prev => ({ ...prev, [key]: !!j?.archived }));
-                })
-                .catch(() => {}) // ignore—button will still work
-            );
-          });
-        });
-        await Promise.race([Promise.allSettled(fetches), new Promise(r => setTimeout(r, 800))]);
-      } catch {}
+      const allBids = await getBids(); // keep all, filter in UI
+      const rows = Array.isArray(allBids) ? allBids : [];
+      setBids(rows);
+      // Fetch archive status for all milestones we see
+      await hydrateArchiveStatuses(rows);
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
@@ -85,10 +74,42 @@ export default function AdminProofsPage() {
     }
   }
 
+  async function hydrateArchiveStatuses(allBids: any[]) {
+    // Avoid re-fetching already-known keys
+    const tasks: Array<Promise<void>> = [];
+    const nextMap: Record<string, ArchiveInfo> = { ...archMap };
+
+    for (const bid of allBids || []) {
+      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+      for (let i = 0; i < ms.length; i++) {
+        const key = mkKey(bid.bidId, i);
+        if (nextMap[key] !== undefined) continue; // already known
+        tasks.push(
+          (async () => {
+            try {
+              const j = await getMilestoneArchive(bid.bidId, i); // should return { archived, archivedAt, archiveReason } or similar
+              nextMap[key] = {
+                archived: !!(j?.archived),
+                archivedAt: j?.archivedAt ?? null,
+                archiveReason: j?.archiveReason ?? null,
+              };
+            } catch {
+              // treat as not archived if 404 or any error
+              nextMap[key] = { archived: false };
+            }
+          })()
+        );
+      }
+    }
+    if (tasks.length) {
+      await Promise.all(tasks);
+      setArchMap(nextMap);
+    }
+  }
+
   // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {
     if (!m?.proof) return false;
-    // Try JSON
     try {
       const p = JSON.parse(m.proof);
       if (p && typeof p === 'object') {
@@ -96,7 +117,6 @@ export default function AdminProofsPage() {
         if (Array.isArray(p.files) && p.files.length > 0) return true;
       }
     } catch {
-      // not JSON; treat non-empty string as proof
       if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
     }
     return false;
@@ -114,7 +134,16 @@ export default function AdminProofsPage() {
     return isCompleted(m) && !isPaid(m);
   }
 
-  function milestoneMatchesTab(m: any): boolean {
+  function isArchived(bidId: number, milestoneIndex: number): boolean {
+    return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
+  }
+
+  function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
+    const archived = isArchived(bidId, idx);
+
+    if (tab === 'archived') return archived;
+    if (archived) return false;
+
     switch (tab) {
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
@@ -136,26 +165,32 @@ export default function AdminProofsPage() {
     const hay =
       `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`
         .toLowerCase();
-    // also search milestone names
     const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
       .some((m: any) => (m?.name || '').toLowerCase().includes(q));
     return hay.includes(q) || msMatch;
   }
 
-  // Build a filtered structure: only include bids that have ≥1 milestone matching the current tab,
-  // and within each bid, only render the milestones that match the tab (except "All" which shows all).
+  const archivedCount = useMemo(
+    () => Object.values(archMap).filter(v => v.archived).length,
+    [archMap]
+  );
+
+  // Build a filtered view
   const filtered = useMemo(() => {
     return (bids || [])
       .filter(bidMatchesSearch)
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
         const filteredMilestones =
-          tab === 'all' ? ms : ms.filter(milestoneMatchesTab);
-
+          tab === 'all'
+            ? ms.filter((m, idx) => !isArchived(bid.bidId, idx))
+            : ms.filter((m, idx) => milestoneMatchesTab(m, bid.bidId, idx));
         return { ...bid, _visibleMilestones: filteredMilestones };
       })
-      .filter((b) => (tab === 'all' ? (b.milestones?.length ?? 0) > 0 : b._visibleMilestones.length > 0));
-  }, [bids, tab, query]);
+      .filter((b) =>
+        tab === 'all' ? (b._visibleMilestones?.length ?? 0) > 0 : b._visibleMilestones.length > 0
+      );
+  }, [bids, tab, query, archMap]);
 
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
@@ -193,7 +228,6 @@ export default function AdminProofsPage() {
       setProcessing(`reject-${bidId}-${milestoneIndex}`);
       await rejectMilestoneProof(bidId, milestoneIndex, reason);
 
-      // keep this button disabled from now on
       setRejectedLocal(prev => {
         const next = new Set(prev);
         next.add(mkRejectKey(bidId, milestoneIndex));
@@ -209,55 +243,61 @@ export default function AdminProofsPage() {
     }
   };
 
-  // 👇 NEW: server Archive / Unarchive
-  async function toggleArchive(bidId: number, milestoneIndex: number) {
-    const key = archKey(bidId, milestoneIndex);
-    setArchiving(key);
+  // NEW: Archive / Unarchive (server)
+  const handleArchive = async (bidId: number, milestoneIndex: number) => {
+    const reason = prompt('Archive reason (optional):') || '';
     try {
-      // ensure we know current state
-      let cur = archivedMap[key];
-      if (cur === undefined) {
-        try {
-          const j = await getMilestoneArchive(bidId, milestoneIndex);
-          cur = !!j?.archived;
-          setArchivedMap(prev => ({ ...prev, [key]: cur! }));
-        } catch {}
-      }
-
-      if (cur) {
-        // Unarchive
-        await unarchiveMilestone(bidId, milestoneIndex);
-      } else {
-        const reason = prompt('Archive reason (optional):') || '';
-        await archiveMilestone(bidId, milestoneIndex, reason || 'archived from admin UI');
-      }
-
-      // refresh local flag from server
-      const j2 = await getMilestoneArchive(bidId, milestoneIndex);
-      setArchivedMap(prev => ({ ...prev, [key]: !!j2?.archived }));
-
-      // optional: keep the list as-is; or reload everything:
-      // await loadProofs();
+      setProcessing(`archive-${bidId}-${milestoneIndex}`);
+      await archiveMilestone(bidId, milestoneIndex, reason || undefined);
+      setArchMap(prev => ({ ...prev, [mkKey(bidId, milestoneIndex)]: { archived: true, archiveReason: reason || null, archivedAt: new Date().toISOString() } }));
     } catch (e: any) {
-      alert(e?.message || 'Archive action failed');
+      alert(e?.message || 'Archive failed');
     } finally {
-      setArchiving(null);
+      setProcessing(null);
     }
-  }
+  };
+
+  const handleUnarchive = async (bidId: number, milestoneIndex: number) => {
+    try {
+      setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
+      await unarchiveMilestone(bidId, milestoneIndex);
+      setArchMap(prev => ({ ...prev, [mkKey(bidId, milestoneIndex)]: { archived: false, archiveReason: null, archivedAt: null } }));
+    } catch (e: any) {
+      alert(e?.message || 'Unarchive failed');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleUnarchiveAll = async () => {
+    if (!confirm('Unarchive ALL archived milestones?')) return;
+    try {
+      setProcessing('unarchive-all');
+      const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
+      for (const k of keys) {
+        const [bidIdStr, idxStr] = k.split('-');
+        const bidId = Number(bidIdStr);
+        const idx = Number(idxStr);
+        if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+          try { await unarchiveMilestone(bidId, idx); } catch {}
+        }
+      }
+      // refresh statuses from server
+      await hydrateArchiveStatuses(bids);
+    } catch (e: any) {
+      alert(e?.message || 'Unarchive all failed');
+    } finally {
+      setProcessing(null);
+    }
+  };
 
   // ---- Proof renderer (with lightbox support) ----
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
 
-    // 1) Try JSON
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(m.proof);
-    } catch {
-      /* not JSON */
-    }
+    try { parsed = JSON.parse(m.proof); } catch {}
 
-    // 2) If JSON with files
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
@@ -312,7 +352,6 @@ export default function AdminProofsPage() {
       );
     }
 
-    // 3) Fallback: plain text with URLs
     const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
@@ -398,10 +437,33 @@ export default function AdminProofsPage() {
               ].join(' ')}
             >
               {t.label}
+              {t.key === 'archived' && archivedCount > 0 && (
+                <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
+                  {archivedCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
       </div>
+
+      {/* Archive Controls (server) */}
+      {tab === 'archived' && archivedCount > 0 && (
+        <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-600">
+              {archivedCount} milestone{archivedCount === 1 ? '' : 's'} archived
+            </span>
+            <button
+              onClick={handleUnarchiveAll}
+              disabled={processing === 'unarchive-all'}
+              className="px-3 py-1 text-sm border border-slate-300 rounded hover:bg-white disabled:opacity-50"
+            >
+              {processing === 'unarchive-all' ? 'Working…' : 'Unarchive All'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="mb-6">
@@ -415,8 +477,12 @@ export default function AdminProofsPage() {
 
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <div className="text-5xl mb-3">🗂️</div>
-          <p className="text-slate-700">No items match this view.</p>
+          <div className="text-5xl mb-3">
+            {tab === 'archived' ? '📁' : '🗂️'}
+          </div>
+          <p className="text-slate-700">
+            {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -438,11 +504,13 @@ export default function AdminProofsPage() {
               </div>
 
               <div className="space-y-4">
-                {(tab === 'all' ? bid.milestones : bid._visibleMilestones).map((m: any, idx: number) => {
+                {(tab === 'all'
+                  ? bid.milestones.filter((m: any, idx: number) => !isArchived(bid.bidId, idx))
+                  : bid._visibleMilestones
+                ).map((m: any, idx: number) => {
                   const showApprove = hasProof(m) && !isCompleted(m);
-                  const showPay = isReadyToPay(m); // completed & unpaid -> show payment, regardless of bid status
-                  const aKey = archKey(bid.bidId, idx);
-                  const isArchived = archivedMap[aKey] === true;
+                  const showPay = isReadyToPay(m);
+                  const archived = isArchived(bid.bidId, idx);
 
                   return (
                     <div key={idx} className="border-t pt-4 mt-4">
@@ -450,6 +518,11 @@ export default function AdminProofsPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-medium">{m.name}</p>
+                            {archived && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
+                                Archived
+                              </span>
+                            )}
                             {isCompleted(m) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
                                 Approved
@@ -458,12 +531,6 @@ export default function AdminProofsPage() {
                             {isPaid(m) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
                                 Paid
-                              </span>
-                            )}
-                            {/* 👇 NEW: Archived chip */}
-                            {isArchived && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-700">
-                                Archived
                               </span>
                             )}
                           </div>
@@ -486,62 +553,70 @@ export default function AdminProofsPage() {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          {/* 👇 NEW: Archive / Unarchive (server) */}
-                          <button
-                            onClick={() => toggleArchive(bid.bidId, idx)}
-                            disabled={archiving === aKey}
-                            className={[
-                              'px-4 py-2 rounded text-white',
-                              archiving === aKey
-                                ? 'bg-gray-400'
-                                : isArchived
-                                  ? 'bg-slate-600 hover:bg-slate-700'
-                                  : 'bg-slate-800 hover:bg-black',
-                            ].join(' ')}
-                            title={isArchived ? 'Unarchive this milestone' : 'Archive this milestone'}
-                          >
-                            {archiving === aKey ? 'Saving…' : isArchived ? 'Unarchive' : 'Archive'}
-                          </button>
+                          {/* Action Buttons (hide approve/reject/pay in archive tab) */}
+                          {tab !== 'archived' && (
+                            <>
+                              {showApprove && (
+                                <button
+                                  onClick={() => handleApprove(bid.bidId, idx, m.proof)}
+                                  disabled={processing === `approve-${bid.bidId}-${idx}`}
+                                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                                >
+                                  {processing === `approve-${bid.bidId}-${idx}` ? 'Approving...' : 'Approve Proof'}
+                                </button>
+                              )}
 
-                          {showApprove && (
-                            <button
-                              onClick={() => handleApprove(bid.bidId, idx, m.proof)}
-                              disabled={processing === `approve-${bid.bidId}-${idx}`}
-                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                            >
-                              {processing === `approve-${bid.bidId}-${idx}` ? 'Approving...' : 'Approve Proof'}
-                            </button>
+                              {hasProof(m) && !isCompleted(m) && (() => {
+                                const key = mkRejectKey(bid.bidId, idx);
+                                const isProcessing = processing === `reject-${bid.bidId}-${idx}`;
+                                const isLocked = rejectedLocal.has(key);
+                                const disabled = isProcessing || isLocked;
+
+                                return (
+                                  <button
+                                    onClick={() => handleReject(bid.bidId, idx)}
+                                    disabled={disabled}
+                                    className={[
+                                      "px-4 py-2 rounded disabled:opacity-50",
+                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                                               : "bg-red-600 hover:bg-red-700 text-white"
+                                    ].join(" ")}
+                                  >
+                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
+                                  </button>
+                                );
+                              })()}
+
+                              {showPay && (
+                                <button
+                                  onClick={() => handlePay(bid.bidId, idx)}
+                                  disabled={processing === `pay-${bid.bidId}-${idx}`}
+                                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                                >
+                                  {processing === `pay-${bid.bidId}-${idx}` ? 'Paying...' : 'Release Payment'}
+                                </button>
+                              )}
+                            </>
                           )}
 
-                          {/* Reject */}
-                          {hasProof(m) && !isCompleted(m) && (() => {
-                            const key = mkRejectKey(bid.bidId, idx);
-                            const isProcessing = processing === `reject-${bid.bidId}-${idx}`;
-                            const isLocked = rejectedLocal.has(key);
-                            const disabled = isProcessing || isLocked;
-
-                            return (
-                              <button
-                                onClick={() => handleReject(bid.bidId, idx)}
-                                disabled={disabled}
-                                className={[
-                                  "px-4 py-2 rounded disabled:opacity-50",
-                                  disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                                           : "bg-red-600 hover:bg-red-700 text-white"
-                                ].join(" ")}
-                              >
-                                {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
-                              </button>
-                            );
-                          })()}
-
-                          {showPay && (
+                          {/* Archive/Unarchive Buttons (server) */}
+                          {!archived ? (
                             <button
-                              onClick={() => handlePay(bid.bidId, idx)}
-                              disabled={processing === `pay-${bid.bidId}-${idx}`}
-                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                              onClick={() => handleArchive(bid.bidId, idx)}
+                              disabled={processing === `archive-${bid.bidId}-${idx}`}
+                              className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                              title="Hide this milestone from default views (server archived)"
                             >
-                              {processing === `pay-${bid.bidId}-${idx}` ? 'Paying...' : 'Release Payment'}
+                              {processing === `archive-${bid.bidId}-${idx}` ? 'Archiving…' : 'Archive'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleUnarchive(bid.bidId, idx)}
+                              disabled={processing === `unarchive-${bid.bidId}-${idx}`}
+                              className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded disabled:opacity-50"
+                              title="Return this milestone to default views"
+                            >
+                              {processing === `unarchive-${bid.bidId}-${idx}` ? 'Unarchiving…' : 'Unarchive'}
                             </button>
                           )}
                         </div>
