@@ -1,7 +1,7 @@
 // src/components/AdminProofs.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   getProofs,
   approveProof,
@@ -11,6 +11,33 @@ import {
   adminCompleteMilestone,
   type Proof,
 } from '@/lib/api';
+
+// ---------- Archive functionality ----------
+const ARCHIVE_KEY = 'lx.archivedProofs.v1';
+
+function loadArchived(): Set<string> {
+  try {
+    const raw = localStorage.getItem(ARCHIVE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map(String));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveArchived(s: Set<string>) {
+  try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify([...s])); } catch {}
+}
+
+function getProofKey(proof: Proof): string {
+  const pid = Number.isFinite(proof.proposalId as any) ? Number(proof.proposalId) : -1;
+  const bid = Number.isFinite(proof.bidId as any) ? Number(proof.bidId) : -1;
+  const ms  = Number.isFinite(proof.milestoneIndex as any) ? Number(proof.milestoneIndex) : -1;
+  const rid = Number.isFinite((proof.proofId) as any) ? Number(proof.proofId) : -1;
+  return `${pid}:${bid}:${ms}:${rid}`;
+}
 
 // ---------- Gateway + helpers ----------
 const PINATA_GATEWAY =
@@ -22,7 +49,7 @@ const PINATA_GATEWAY =
 
 function isImg(s?: string) {
   if (!s) return false;
-  // treat “…jpg?filename=foo.jpg” and “…png#anchor” as images too
+  // treat "...jpg?filename=foo.jpg" and "...png#anchor" as images too
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
@@ -55,7 +82,7 @@ function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string 
   u = u.replace(/^\/+/, '');
   u = u.replace(/^(?:ipfs\/)+/i, ''); // <-- remove ipfs/ ipfs/ ... at the start
 
-  // 3) If it’s not http(s) after stripping, prefix our gateway.
+  // 3) If it's not http(s) after stripping, prefix our gateway.
   if (!/^https?:\/\//i.test(u)) {
     u = `${GW}/${u}`;
   }
@@ -75,35 +102,9 @@ function toMilestones(raw: any): any[] {
   return [];
 }
 
-// ---------- Archive helpers (local-only, additive) ----------
-type AdminView = 'active' | 'archived';
-const ARCHIVE_KEY = 'lx.archivedProofs.v1';
-
-function loadArchived(): Set<string> {
-  try {
-    const s = localStorage.getItem(ARCHIVE_KEY);
-    const arr = s ? JSON.parse(s) : [];
-    return new Set(Array.isArray(arr) ? arr.map(String) : []);
-  } catch {
-    return new Set();
-  }
-}
-function saveArchived(set: Set<string>) {
-  try {
-    localStorage.setItem(ARCHIVE_KEY, JSON.stringify([...set]));
-  } catch {}
-}
-function proofKey(row: any): string {
-  const pid = Number.isFinite(row?.proposalId) ? Number(row.proposalId) : -1;
-  const bid = Number.isFinite(row?.bidId) ? Number(row.bidId) : -1;
-  const ms  = Number.isFinite(row?.milestoneIndex) ? Number(row.milestoneIndex) : -1;
-  const rid = Number.isFinite(row?.proofId ?? row?.id) ? Number(row.proofId ?? row.id) : -1;
-  return `${pid}:${bid}:${ms}:${rid}`;
-}
-
 // ---------- types ----------
 type Props = {
-  /** When rendered on project page, pass this project’s bid ids to filter by bidId */
+  /** When rendered on project page, pass this project's bid ids to filter by bidId */
   bidIds?: number[];
   /** Also pass proposalId to enable "Request Changes" API calls */
   proposalId?: number;
@@ -113,20 +114,26 @@ type Props = {
   onRefresh?: () => void;
 };
 
+type Filter = 'all' | 'needs' | 'ready' | 'paid' | 'no' | 'archived';
+
+const chip = (...xs: (string | false)[]) => xs.filter(Boolean).join(' ');
+
 export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefresh }: Props) {
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [archived, setArchived] = useState<Set<string>>(new Set());
 
-  // “Request Changes” UI state (inline composer)
+  // "Request Changes" UI state (inline composer)
   const [crOpenFor, setCrOpenFor] = useState<number | null>(null);
   const [crComment, setCrComment] = useState('');
   const [crChecklist, setCrChecklist] = useState('');
 
-  // Archive view + store
-  const [view, setView] = useState<AdminView>('active');
-  const [archived, setArchived] = useState<Set<string>>(new Set());
-  useEffect(() => { setArchived(loadArchived()); }, []);
+  // Load archived proofs on mount
+  useEffect(() => {
+    setArchived(loadArchived());
+  }, []);
 
   async function loadProofs() {
     try {
@@ -180,63 +187,136 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     } catch {}
   };
 
-  // View derivation (Active vs Archived)
-  const visibleProofs = (proofs || []).filter(p => {
-    const key = proofKey(p);
-    return view === 'archived' ? archived.has(key) : !archived.has(key);
-  });
+  // Archive functions
+  function doArchive(proof: Proof) {
+    const s = new Set(archived);
+    s.add(getProofKey(proof));
+    setArchived(s);
+    saveArchived(s);
+  }
 
-  // Archive togglers (do not affect backend)
-  const archive = (key: string) => {
-    const next = new Set(archived); next.add(key); setArchived(next); saveArchived(next);
-  };
-  const unarchive = (key: string) => {
-    const next = new Set(archived); next.delete(key); setArchived(next); saveArchived(next);
-  };
-  const unarchiveAll = () => { const next = new Set<string>(); setArchived(next); saveArchived(next); };
+  function undoArchive(proof: Proof) {
+    const s = new Set(archived);
+    s.delete(getProofKey(proof));
+    setArchived(s);
+    saveArchived(s);
+  }
 
-  if (loading) return <div className="p-6">Loading proofs…</div>;
+  // Filter proofs based on selected filter and archive status
+  const filteredProofs = useMemo(() => {
+    let filtered = proofs.filter(proof => {
+      const isArchived = archived.has(getProofKey(proof));
+      
+      // For non-archive filters, exclude archived items
+      if (filter !== 'archived' && isArchived) {
+        return false;
+      }
+      
+      // For archive filter, only include archived items
+      if (filter === 'archived' && !isArchived) {
+        return false;
+      }
+
+      // Apply other filters
+      const paid = !!(proof as any).paymentTxHash;
+      const approved = proof.status === 'approved';
+      const hasFiles = Array.isArray(proof.files) && proof.files.length > 0;
+
+      switch (filter) {
+        case 'needs':
+          return !approved && hasFiles;
+        case 'ready':
+          return approved && !paid;
+        case 'paid':
+          return paid;
+        case 'no':
+          return !hasFiles;
+        case 'all':
+        case 'archived':
+        default:
+          return true;
+      }
+    });
+
+    // Sort by updated date (newest first)
+    return filtered.sort((a, b) => 
+      new Date(b.updatedAt || b.createdAt || 0).getTime() - 
+      new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
+  }, [proofs, filter, archived]);
+
+  if (loading) return <div className="p-6">Loading proofs...</div>;
   if (error) return <div className="p-6 text-rose-600">{error}</div>;
 
   return (
-    <div className="grid gap-4">
-      {/* Archive view controls */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setView('active')}
-          className={`px-3 py-1 rounded border text-sm ${view==='active' ? 'bg-slate-900 text-white' : ''}`}
-        >
-          Active
-        </button>
-        <button
-          onClick={() => setView('archived')}
-          className={`px-3 py-1 rounded border text-sm ${view==='archived' ? 'bg-slate-900 text-white' : ''}`}
-        >
-          Archived ({archived.size})
-        </button>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={refreshAll}
-            className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
+    <div>
+      {/* Filter Bar */}
+      <div className="mb-6 p-4 bg-white rounded-lg shadow border">
+        <div className="flex flex-wrap items-center gap-2">
+          <button 
+            onClick={() => setFilter('all')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'all' && 'bg-slate-900 text-white')}
           >
-            Refresh
+            All
           </button>
-          {view === 'archived' && archived.size > 0 && (
+          <button 
+            onClick={() => setFilter('needs')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'needs' && 'bg-slate-900 text-white')}
+          >
+            Needs Approval
+          </button>
+          <button 
+            onClick={() => setFilter('ready')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'ready' && 'bg-slate-900 text-white')}
+          >
+            Ready to Pay
+          </button>
+          <button 
+            onClick={() => setFilter('paid')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'paid' && 'bg-slate-900 text-white')}
+          >
+            Paid
+          </button>
+          <button 
+            onClick={() => setFilter('no')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'no' && 'bg-slate-900 text-white')}
+          >
+            No Proof
+          </button>
+
+          <div className="mx-2 h-5 w-px bg-slate-200" />
+
+          <button 
+            onClick={() => setFilter('archived')} 
+            className={chip('px-3 py-1 rounded text-sm border', filter === 'archived' && 'bg-slate-900 text-white')}
+          >
+            Archived ({archived.size})
+          </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            {archived.size > 0 && filter === 'archived' && (
+              <button
+                onClick={() => { const s = new Set<string>(); setArchived(s); saveArchived(s); }}
+                className="px-3 py-1 rounded text-sm border hover:bg-slate-50"
+                title="Unarchive all (local)"
+              >
+                Unarchive All
+              </button>
+            )}
             <button
-              onClick={unarchiveAll}
-              className="px-3 py-1 rounded border text-sm"
-              title="Bring back all archived proofs to Active (local only)"
+              onClick={refreshAll}
+              className="px-3 py-1 rounded bg-slate-900 text-white text-sm disabled:opacity-60"
+              disabled={loading}
             >
-              Unarchive all
+              {loading ? 'Refreshing...' : 'Refresh'}
             </button>
-          )}
+          </div>
         </div>
       </div>
 
-      {visibleProofs.map((proof) => {
-        const key = proofKey(proof);
-        const isArchived = archived.has(key);
-        return (
+      {/* Proofs Grid */}
+      <div className="grid gap-6">
+        {filteredProofs.map((proof) => (
           <ProofCard
             key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
             proof={proof}
@@ -249,18 +329,20 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
             setCrComment={setCrComment}
             crChecklist={crChecklist}
             setCrChecklist={setCrChecklist}
-            archived={isArchived}
-            pkey={key}
-            onArchive={(next) => (next ? archive(key) : unarchive(key))}
+            isArchived={archived.has(getProofKey(proof))}
+            onArchive={() => doArchive(proof)}
+            onUnarchive={() => undoArchive(proof)}
           />
-        );
-      })}
+        ))}
 
-      {visibleProofs.length === 0 && (
-        <div className="text-gray-500 text-center py-10 border rounded bg-white">
-          {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
-        </div>
-      )}
+        {filteredProofs.length === 0 && (
+          <div className="text-gray-500 text-center py-10 border rounded bg-white">
+            {filter === 'archived' 
+              ? 'No archived proofs.' 
+              : 'No proofs match this filter.'}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -273,7 +355,9 @@ function ProofCard({
   crOpenFor, setCrOpenFor,
   crComment, setCrComment,
   crChecklist, setCrChecklist,
-  archived, pkey, onArchive,
+  isArchived,
+  onArchive,
+  onUnarchive,
 }: {
   proof: Proof;
   bids?: any[];
@@ -285,9 +369,9 @@ function ProofCard({
   setCrComment: (s: string) => void;
   crChecklist: string;
   setCrChecklist: (s: string) => void;
-  archived: boolean;
-  pkey: string;
-  onArchive: (archive: boolean) => void;
+  isArchived: boolean;
+  onArchive: () => void;
+  onUnarchive: () => void;
 }) {
   const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState('');
@@ -305,6 +389,9 @@ function ProofCard({
   const msArr = toMilestones(bid?.milestones);
   const m = msArr?.[Number(proof.milestoneIndex) || 0] || null;
   const milestoneLabel = (m?.name && String(m.name).trim()) || `Milestone ${Number(proof.milestoneIndex) + 1}`;
+
+  // Payment status
+  const paid = !!(proof as any).paymentTxHash;
 
   async function onRun() {
     setErr(null);
@@ -338,7 +425,7 @@ function ProofCard({
     }
   }
 
-  // APPROVE — primary: /proofs/:proofId/approve; fallback: adminCompleteMilestone
+  // APPROVE - primary: /proofs/:proofId/approve; fallback: adminCompleteMilestone
   async function handleApprove() {
     setErr(null);
     setBusyApprove(true);
@@ -386,7 +473,7 @@ function ProofCard({
     }
   }
 
-  // REJECT — the legacy route that already worked for you
+  // REJECT - the legacy route that already worked for you
   async function handleReject() {
     setErr(null);
     setBusyReject(true);
@@ -400,7 +487,7 @@ function ProofCard({
     }
   }
 
-  // REQUEST CHANGES — posts to /api/proofs/change-requests
+  // REQUEST CHANGES - posts to /api/proofs/change-requests
   async function handleCreateChangeRequest() {
     setErr(null);
     if (!Number.isFinite(proposalId as number)) {
@@ -445,22 +532,27 @@ function ProofCard({
   return (
     <div className="bg-white rounded-lg shadow border p-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold mb-1">
-            {proof.title || `Proof — ${milestoneLabel}`}
-          </h2>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-lg font-semibold">
+              {proof.title || `Proof — ${milestoneLabel}`}
+            </h2>
+            {isArchived && (
+              <span className="px-2 py-0.5 text-xs bg-slate-100 text-slate-700 rounded border">
+                Archived
+              </span>
+            )}
+            {paid && (
+              <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded border">
+                Paid ✅
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-600 mb-2">
-            Vendor: <span className="font-medium">{proof.vendorName || '—'}</span> &middot; Bid #{proof.bidId} &middot; {milestoneLabel}
+            Vendor: <span className="font-medium">{proof.vendorName || '-'}</span> • Bid #{proof.bidId} • {milestoneLabel}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {archived && (
-            <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
-              Archived
-            </span>
-          )}
-          <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
-        </div>
+        <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
       </div>
 
       <p className="text-gray-700 mb-3 whitespace-pre-wrap">{proof.description || 'No description'}</p>
@@ -509,6 +601,15 @@ function ProofCard({
         </div>
       )}
 
+      {/* Payment transaction hash */}
+      {paid && (proof as any).paymentTxHash && (
+        <div className="mb-4 p-2 rounded border bg-green-50">
+          <div className="text-xs text-green-700 break-all">
+            <strong>Payment Tx:</strong> {(proof as any).paymentTxHash}
+          </div>
+        </div>
+      )}
+
       {/* Existing AI analysis (if any) */}
       {proof.aiAnalysis && (
         <div className="mb-4 p-3 rounded border bg-slate-50">
@@ -539,7 +640,7 @@ function ProofCard({
           className="px-3 py-1 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
           title={canAnalyze ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
         >
-          {running ? 'Running…' : 'Run Agent 2'}
+          {running ? 'Running...' : 'Run Agent 2'}
         </button>
 
         <button
@@ -548,10 +649,29 @@ function ProofCard({
           className="px-3 py-1 rounded bg-indigo-600 text-white text-xs disabled:opacity-50"
           title={canAnalyze ? 'Stream a one-off chat answer' : 'Proof ID missing'}
         >
-          {streaming ? 'Asking…' : 'Ask Agent 2 (Chat)'}
+          {streaming ? 'Asking...' : 'Ask Agent 2 (Chat)'}
         </button>
 
         <div className="ml-auto flex gap-2">
+          {/* Archive/Unarchive Button */}
+          {!isArchived ? (
+            <button
+              onClick={onArchive}
+              className="px-3 py-1 text-sm bg-gray-600 text-white rounded"
+              title="Hide from default views (local to your browser)"
+            >
+              Archive
+            </button>
+          ) : (
+            <button
+              onClick={onUnarchive}
+              className="px-3 py-1 text-sm bg-gray-400 text-white rounded"
+              title="Bring back to default views"
+            >
+              Unarchive
+            </button>
+          )}
+
           <button
             onClick={() => setCrOpenFor(crOpenFor === (proof.proofId || -1) ? null : (proof.proofId || -1))}
             className="px-3 py-1 text-sm bg-amber-600 text-white rounded"
@@ -565,7 +685,7 @@ function ProofCard({
             disabled={proof.status === 'approved' || busyApprove}
             className="px-3 py-1 text-sm bg-emerald-600 text-white rounded disabled:bg-gray-300"
           >
-            {busyApprove ? 'Approving…' : 'Approve'}
+            {busyApprove ? 'Approving...' : 'Approve'}
           </button>
 
           <button
@@ -573,27 +693,8 @@ function ProofCard({
             disabled={proof.status === 'rejected' || busyReject}
             className="px-3 py-1 text-sm bg-rose-600 text-white rounded disabled:bg-gray-300"
           >
-            {busyReject ? 'Rejecting…' : 'Reject'}
+            {busyReject ? 'Rejecting...' : 'Reject'}
           </button>
-
-          {/* Archive / Unarchive (local) */}
-          {!archived ? (
-            <button
-              onClick={() => onArchive(true)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Hide this proof from Active view (local only)"
-            >
-              Archive
-            </button>
-          ) : (
-            <button
-              onClick={() => onArchive(false)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Return this proof to Active view"
-            >
-              Unarchive
-            </button>
-          )}
         </div>
       </div>
 
@@ -622,7 +723,7 @@ function ProofCard({
                 disabled={busyCR}
                 className="px-3 py-1 text-sm bg-amber-700 text-white rounded disabled:opacity-60"
               >
-                {busyCR ? 'Sending…' : 'Send Request'}
+                {busyCR ? 'Sending...' : 'Send Request'}
               </button>
               <button
                 onClick={() => setCrOpenFor(null)}
