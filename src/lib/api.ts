@@ -1044,6 +1044,42 @@ export async function saveProofFilesToDb(params: {
   return await res.json();
 }
 
+// ---- Milestone archive (Next API) ----
+// Uses your Next routes at /api/milestones/:bidId/:milestoneIndex/archive
+
+export async function archiveMilestone(bidId: number, milestoneIndex: number, reason?: string) {
+  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason ?? '' }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  return j;
+}
+
+export async function getMilestoneArchive(bidId: number, milestoneIndex: number) {
+  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  return j;
+}
+
+export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
+  const res = await fetch(`/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  return j;
+}
+
 // ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
@@ -1115,6 +1151,11 @@ export default {
   // proofs uploads via Next API
   uploadProofFiles,
   saveProofFilesToDb,
+
+  // milestone archive
+  archiveMilestone,
+  getMilestoneArchive,
+  unarchiveMilestone,
 
   // ipfs & misc
   uploadJsonToIPFS,
