@@ -238,14 +238,12 @@ for (const original of localFiles) {
       }
 
       // 5) If there is an OPEN change request → append a response (so admin sees every reply)
-      const crId = pickOpenCrId(index);
-      if (crId) {
-        await appendCrResponse(crId, note, filesToSave);
-        // do NOT auto-complete while CR is open
-      } else {
-        // Legacy: no CR → we can mark as completed
-        await completeMilestone(bid.bidId, index, note || 'vendor submitted');
-      }
+//    If there is NO open CR, DO NOT auto-complete. Leave as "awaiting review".
+const crId = pickOpenCrId(index);
+if (crId) {
+  await appendCrResponse(crId, note, filesToSave);
+}
+// (no else; do NOT call completeMilestone here)
 
       // 6) Optional: backend proofs for legacy readers
       await submitProof({
