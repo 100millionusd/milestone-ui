@@ -68,7 +68,7 @@ export async function POST(
     const milestone = await prisma.milestone.upsert({
       where: { bidId_milestoneIndex: { bidId, milestoneIndex } },
       update: {
-        archived: true,
+        archived: true, // ✅ ADD THIS MISSING FIELD
         archivedAt: new Date(),
         archivedBy,
         archiveReason: reason,
@@ -76,7 +76,7 @@ export async function POST(
       create: {
         bidId,
         milestoneIndex,
-        archived: true,
+        archived: true, // ✅ ADD THIS MISSING FIELD
         archivedAt: new Date(),
         archivedBy,
         archiveReason: reason,
@@ -128,7 +128,7 @@ export async function DELETE(
     const milestone = await prisma.milestone.update({
       where: { bidId_milestoneIndex: { bidId, milestoneIndex } },
       data: {
-        archived: false,
+        archived: false, // ✅ Set to false instead of deleting
         archivedAt: null,
         archivedBy: null,
         archiveReason: null,
