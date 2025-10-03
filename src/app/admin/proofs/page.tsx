@@ -12,10 +12,34 @@ const TABS = [
   { key: 'ready-to-pay', label: 'Ready to Pay' },     // completed, not yet paid
   { key: 'paid', label: 'Paid' },                     // paymentTxHash present
   { key: 'no-proof', label: 'No Proof' },             // no proof and not completed
+  { key: 'archived', label: 'Archived' },             // NEW: Archived items
 ] as const;
 type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
+
+// ---------- Archive functionality (local-only, additive) ----------
+const ARCHIVE_KEY = 'lx.archivedMilestones.v1';
+
+function loadArchived(): Set<string> {
+  try {
+    const s = localStorage.getItem(ARCHIVE_KEY);
+    const arr = s ? JSON.parse(s) : [];
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveArchived(set: Set<string>) {
+  try {
+    localStorage.setItem(ARCHIVE_KEY, JSON.stringify([...set]));
+  } catch {}
+}
+
+function getMilestoneKey(bidId: number, milestoneIndex: number): string {
+  return `${bidId}-${milestoneIndex}`;
+}
 
 export default function AdminProofsPage() {
   const [loading, setLoading] = useState(true);
@@ -27,9 +51,15 @@ export default function AdminProofsPage() {
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
   const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
-  // NEW: tabs + search
+  // Tabs + search + archive state
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
+  const [archived, setArchived] = useState<Set<string>>(new Set());
+
+  // Load archived milestones on mount
+  useEffect(() => {
+    setArchived(loadArchived());
+  }, []);
 
   useEffect(() => {
     loadProofs();
@@ -49,6 +79,27 @@ export default function AdminProofsPage() {
       setLoading(false);
     }
   }
+
+  // Archive functions
+  const archiveMilestone = (bidId: number, milestoneIndex: number) => {
+    const next = new Set(archived);
+    next.add(getMilestoneKey(bidId, milestoneIndex));
+    setArchived(next);
+    saveArchived(next);
+  };
+
+  const unarchiveMilestone = (bidId: number, milestoneIndex: number) => {
+    const next = new Set(archived);
+    next.delete(getMilestoneKey(bidId, milestoneIndex));
+    setArchived(next);
+    saveArchived(next);
+  };
+
+  const unarchiveAll = () => {
+    const next = new Set<string>();
+    setArchived(next);
+    saveArchived(next);
+  };
 
   // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {
@@ -79,7 +130,24 @@ export default function AdminProofsPage() {
     return isCompleted(m) && !isPaid(m);
   }
 
-  function milestoneMatchesTab(m: any): boolean {
+  function isArchived(bidId: number, milestoneIndex: number): boolean {
+    return archived.has(getMilestoneKey(bidId, milestoneIndex));
+  }
+
+  function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
+    const isMilestoneArchived = isArchived(bidId, idx);
+
+    // For archive tab, only show archived milestones
+    if (tab === 'archived') {
+      return isMilestoneArchived;
+    }
+
+    // For other tabs, exclude archived milestones
+    if (isMilestoneArchived) {
+      return false;
+    }
+
+    // Apply existing tab filters
     switch (tab) {
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
@@ -115,12 +183,14 @@ export default function AdminProofsPage() {
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
         const filteredMilestones =
-          tab === 'all' ? ms : ms.filter(milestoneMatchesTab);
+          tab === 'all' 
+            ? ms.filter((m, idx) => !isArchived(bid.bidId, idx)) 
+            : ms.filter((m, idx) => milestoneMatchesTab(m, bid.bidId, idx));
 
         return { ...bid, _visibleMilestones: filteredMilestones };
       })
       .filter((b) => (tab === 'all' ? (b.milestones?.length ?? 0) > 0 : b._visibleMilestones.length > 0));
-  }, [bids, tab, query]);
+  }, [bids, tab, query, archived]);
 
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
@@ -152,27 +222,27 @@ export default function AdminProofsPage() {
   };
 
   const handleReject = async (bidId: number, milestoneIndex: number) => {
-  const reason = prompt('Reason for rejection (optional):') || '';
-  if (!confirm('Reject this proof?')) return;
-  try {
-    setProcessing(`reject-${bidId}-${milestoneIndex}`);
-    await rejectMilestoneProof(bidId, milestoneIndex, reason);
+    const reason = prompt('Reason for rejection (optional):') || '';
+    if (!confirm('Reject this proof?')) return;
+    try {
+      setProcessing(`reject-${bidId}-${milestoneIndex}`);
+      await rejectMilestoneProof(bidId, milestoneIndex, reason);
 
-    // keep this button disabled from now on
-    setRejectedLocal(prev => {
-      const next = new Set(prev);
-      next.add(mkRejectKey(bidId, milestoneIndex));
-      return next;
-    });
+      // keep this button disabled from now on
+      setRejectedLocal(prev => {
+        const next = new Set(prev);
+        next.add(mkRejectKey(bidId, milestoneIndex));
+        return next;
+      });
 
-    await loadProofs(); // re-fetch list if you want the server state reflected too
-  } catch (e: any) {
-    console.error('Error rejecting proof:', e);
-    alert(e?.message || 'Failed to reject proof');
-  } finally {
-    setProcessing(null);
-  }
-};
+      await loadProofs(); // re-fetch list if you want the server state reflected too
+    } catch (e: any) {
+      console.error('Error rejecting proof:', e);
+      alert(e?.message || 'Failed to reject proof');
+    } finally {
+      setProcessing(null);
+    }
+  };
 
   // ---- Proof renderer (with lightbox support) ----
   const renderProof = (m: any) => {
@@ -310,201 +380,257 @@ export default function AdminProofsPage() {
   }
 
   return (
-  <div className="max-w-5xl mx-auto py-8">
-    {/* Header + Tabs */}
-    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-      <h1 className="text-2xl font-bold">Submitted Proofs (Admin)</h1>
-      <div className="flex items-center gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={[
-              'px-3 py-1.5 rounded-full text-sm font-medium border',
-              tab === t.key
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
-            ].join(' ')}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div className="max-w-5xl mx-auto py-8">
+      {/* Header + Tabs */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+        <h1 className="text-2xl font-bold">Submitted Proofs (Admin)</h1>
+        <div className="flex items-center gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={[
+                'px-3 py-1.5 rounded-full text-sm font-medium border',
+                tab === t.key
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+              ].join(' ')}
+            >
+              {t.label}
+              {t.key === 'archived' && archived.size > 0 && (
+                <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
+                  {archived.size}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
 
-    {/* Search */}
-    <div className="mb-6">
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by vendor, project, wallet, milestone…"
-        className="w-full md:w-96 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-      />
-    </div>
+      {/* Archive Controls */}
+      {tab === 'archived' && archived.size > 0 && (
+        <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-600">
+              {archived.size} milestone{archived.size === 1 ? '' : 's'} archived
+            </span>
+            <button
+              onClick={unarchiveAll}
+              className="px-3 py-1 text-sm border border-slate-300 rounded hover:bg-white"
+            >
+              Unarchive All
+            </button>
+          </div>
+        </div>
+      )}
 
-    {filtered.length === 0 ? (
-      <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-        <div className="text-5xl mb-3">🗂️</div>
-        <p className="text-slate-700">No items match this view.</p>
+      {/* Search */}
+      <div className="mb-6">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by vendor, project, wallet, milestone…"
+          className="w-full md:w-96 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+        />
       </div>
-    ) : (
-      <div className="space-y-6">
-        {filtered.map((bid) => (
-          <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {bid.vendorName} — Proposal #{bid.proposalId}
-                </h2>
-                <p className="text-gray-600 text-sm">Bid ID: {bid.bidId}</p>
+
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
+          <div className="text-5xl mb-3">
+            {tab === 'archived' ? '📁' : '🗂️'}
+          </div>
+          <p className="text-slate-700">
+            {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {filtered.map((bid) => (
+            <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    {bid.vendorName} — Proposal #{bid.proposalId}
+                  </h2>
+                  <p className="text-gray-600 text-sm">Bid ID: {bid.bidId}</p>
+                </div>
+                <Link
+                  href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  Manage →
+                </Link>
               </div>
-              <Link
-                href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
-                className="text-sm text-blue-600 hover:underline"
-              >
-                Manage →
-              </Link>
-            </div>
 
-            <div className="space-y-4">
-              {(tab === 'all' ? bid.milestones : bid._visibleMilestones).map((m: any, idx: number) => {
-                const showApprove = hasProof(m) && !isCompleted(m);
-                const showPay = isReadyToPay(m); // completed & unpaid -> show payment, regardless of bid status
+              <div className="space-y-4">
+                {(tab === 'all' ? bid.milestones.filter((m: any, idx: number) => !isArchived(bid.bidId, idx)) : bid._visibleMilestones).map((m: any, idx: number) => {
+                  const showApprove = hasProof(m) && !isCompleted(m);
+                  const showPay = isReadyToPay(m); // completed & unpaid -> show payment, regardless of bid status
+                  const isMilestoneArchived = isArchived(bid.bidId, idx);
 
-                return (
-                  <div key={idx} className="border-t pt-4 mt-4">
-                    <div className="flex justify-between items-start gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{m.name}</p>
-                          {isCompleted(m) && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
-                              Approved
-                            </span>
+                  return (
+                    <div key={idx} className="border-t pt-4 mt-4">
+                      <div className="flex justify-between items-start gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{m.name}</p>
+                            {isMilestoneArchived && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
+                                Archived
+                              </span>
+                            )}
+                            {isCompleted(m) && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
+                                Approved
+                              </span>
+                            )}
+                            {isPaid(m) && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                                Paid
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            Amount: ${m.amount} | Due: {m.dueDate}
+                          </p>
+
+                          {renderProof(m)}
+
+                          {m.paymentTxHash && (
+                            <p className="text-sm text-green-600 mt-2 break-all">
+                              Paid ✅ Tx: {m.paymentTxHash}
+                            </p>
                           )}
-                          {isPaid(m) && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                              Paid
-                            </span>
+                          {!hasProof(m) && !isCompleted(m) && (
+                            <p className="text-sm text-amber-600 mt-2">
+                              No proof submitted yet.
+                            </p>
                           )}
                         </div>
-                        <p className="text-sm text-gray-600">
-                          Amount: ${m.amount} | Due: {m.dueDate}
-                        </p>
 
-                        {renderProof(m)}
+                        <div className="flex flex-col gap-2">
+                          {/* Action Buttons (hidden in archive view) */}
+                          {tab !== 'archived' && (
+                            <>
+                              {showApprove && (
+                                <button
+                                  onClick={() => handleApprove(bid.bidId, idx, m.proof)}
+                                  disabled={processing === `approve-${bid.bidId}-${idx}`}
+                                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                                >
+                                  {processing === `approve-${bid.bidId}-${idx}` ? 'Approving...' : 'Approve Proof'}
+                                </button>
+                              )}
 
-                        {m.paymentTxHash && (
-                          <p className="text-sm text-green-600 mt-2 break-all">
-                            Paid ✅ Tx: {m.paymentTxHash}
-                          </p>
-                        )}
-                        {!hasProof(m) && !isCompleted(m) && (
-                          <p className="text-sm text-amber-600 mt-2">
-                            No proof submitted yet.
-                          </p>
-                        )}
-                      </div>
+                              {/* Reject button */}
+                              {hasProof(m) && !isCompleted(m) && (() => {
+                                const key = mkRejectKey(bid.bidId, idx);
+                                const isProcessing = processing === `reject-${bid.bidId}-${idx}`;
+                                const isLocked = rejectedLocal.has(key);
+                                const disabled = isProcessing || isLocked;
 
-                      <div className="flex flex-col gap-2">
-                        {showApprove && (
-                          <button
-                            onClick={() => handleApprove(bid.bidId, idx, m.proof)}
-                            disabled={processing === `approve-${bid.bidId}-${idx}`}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                          >
-                            {processing === `approve-${bid.bidId}-${idx}` ? 'Approving...' : 'Approve Proof'}
-                          </button>
-                        )}
+                                return (
+                                  <button
+                                    onClick={() => handleReject(bid.bidId, idx)}
+                                    disabled={disabled}
+                                    className={[
+                                      "px-4 py-2 rounded disabled:opacity-50",
+                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                                              : "bg-red-600 hover:bg-red-700 text-white"
+                                    ].join(" ")}
+                                  >
+                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
+                                  </button>
+                                );
+                              })()}
 
-                        {/* NEW: Reject button */}
-                        {hasProof(m) && !isCompleted(m) && (() => {
-  const key = mkRejectKey(bid.bidId, idx);
-  const isProcessing = processing === `reject-${bid.bidId}-${idx}`;
-  const isLocked = rejectedLocal.has(key);
-  const disabled = isProcessing || isLocked;
+                              {showPay && (
+                                <button
+                                  onClick={() => handlePay(bid.bidId, idx)}
+                                  disabled={processing === `pay-${bid.bidId}-${idx}`}
+                                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                                >
+                                  {processing === `pay-${bid.bidId}-${idx}` ? 'Paying...' : 'Release Payment'}
+                                </button>
+                              )}
+                            </>
+                          )}
 
-  return (
-    <button
-      onClick={() => handleReject(bid.bidId, idx)}
-      disabled={disabled}
-      className={[
-        "px-4 py-2 rounded disabled:opacity-50",
-        disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                 : "bg-red-600 hover:bg-red-700 text-white"
-      ].join(" ")}
-    >
-      {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
-    </button>
-  );
-})()}
-
-                        {showPay && (
-                          <button
-                            onClick={() => handlePay(bid.bidId, idx)}
-                            disabled={processing === `pay-${bid.bidId}-${idx}`}
-                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50"
-                          >
-                            {processing === `pay-${bid.bidId}-${idx}` ? 'Paying...' : 'Release Payment'}
-                          </button>
-                        )}
+                          {/* Archive/Unarchive Buttons */}
+                          {!isMilestoneArchived ? (
+                            <button
+                              onClick={() => archiveMilestone(bid.bidId, idx)}
+                              className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+                              title="Hide this milestone from default views (local only)"
+                            >
+                              Archive
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => unarchiveMilestone(bid.bidId, idx)}
+                              className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
+                              title="Return this milestone to default views"
+                            >
+                              Unarchive
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-    )}
+          ))}
+        </div>
+      )}
 
-    {/* Lightbox */}
-    {lightbox && (
-      <div
-        className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-        onClick={() => setLightbox(null)}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={lightbox.urls[lightbox.index]}
-          alt="proof preview"
-          className="max-h-full max-w-full rounded-lg shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        />
-
-        {lightbox.index > 0 && (
-          <button
-            className="absolute left-4 text-white text-3xl font-bold"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightbox({ ...lightbox, index: lightbox.index - 1 });
-            }}
-          >
-            ‹
-          </button>
-        )}
-
-        {lightbox.index < lightbox.urls.length - 1 && (
-          <button
-            className="absolute right-4 text-white text-3xl font-bold"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightbox({ ...lightbox, index: lightbox.index + 1 });
-            }}
-          >
-            ›
-          </button>
-        )}
-
-        <button
-          className="absolute top-4 right-4 text-white text-2xl"
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
-          ✕
-        </button>
-      </div>
-    )}
-   </div>
-);
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox.urls[lightbox.index]}
+            alt="proof preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+
+          {lightbox.index > 0 && (
+            <button
+              className="absolute left-4 text-white text-3xl font-bold"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ ...lightbox, index: lightbox.index - 1 });
+              }}
+            >
+              ‹
+            </button>
+          )}
+
+          {lightbox.index < lightbox.urls.length - 1 && (
+            <button
+              className="absolute right-4 text-white text-3xl font-bold"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ ...lightbox, index: lightbox.index + 1 });
+              }}
+            >
+              ›
+            </button>
+          )}
+
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
