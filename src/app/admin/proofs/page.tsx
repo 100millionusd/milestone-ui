@@ -13,6 +13,7 @@ import {
   unarchiveMilestone,
 } from '@/lib/api';
 import Link from 'next/link';
+import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
 // Tabs
 const TABS = [
@@ -54,15 +55,12 @@ export default function AdminProofsPage() {
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   useEffect(() => {
-    loadProofs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-  const h = () => loadProofs();
-  window.addEventListener('milestones:updated', h);
-  return () => window.removeEventListener('milestones:updated', h);
+  loadProofs();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
+
+// listen for archive/unarchive from anywhere (admin page, project page, other tab)
+useMilestonesUpdated(loadProofs);
 
   async function loadProofs() {
     setLoading(true);

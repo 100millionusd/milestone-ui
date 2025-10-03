@@ -1068,6 +1068,22 @@ export async function archiveMilestone(bidId: number, milestoneIndex: number, re
   );
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("milestones:updated")); // <— broadcast
+  return j;
+}
+
+export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
+  const res = await fetch(
+    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
+    {
+      method: "DELETE",
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("milestones:updated")); // <— broadcast
   return j;
 }
 
@@ -1083,20 +1099,6 @@ export async function getMilestoneArchive(bidId: number, milestoneIndex: number)
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
   return j; // { ok, milestone: { archived, archivedAt, archiveReason } }
-}
-
-export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
-  const res = await fetch(
-    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
-    {
-      method: "DELETE",
-      credentials: "include",
-      cache: "no-store",
-    }
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  return j;
 }
 
 // ---- Health ----

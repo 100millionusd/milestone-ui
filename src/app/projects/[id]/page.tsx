@@ -7,6 +7,7 @@ import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
+import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
 // ---------------- Consts ----------------
 // Pinata gateway base — sanitize so we end with exactly one "/ipfs"
@@ -342,6 +343,15 @@ const refreshProofs = async () => {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
+
+  // Re-fetch when any page archives/unarchives a milestone
+useMilestonesUpdated(async () => {
+  await refreshProofs();
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(next);
+  } catch {}
+});
 
   // Refresh proofs when opening Files tab
   useEffect(() => {
