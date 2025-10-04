@@ -536,7 +536,6 @@ if (crId) {
       </div>
     )}
   </div>
-);
 
       {/* Manual Payment Processor (unchanged) */}
       <div className="mt-6">
