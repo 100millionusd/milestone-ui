@@ -251,11 +251,16 @@ const rows = uniqByMilestone(proofs).map((p) => {
 const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
   // Archive togglers (server-backed, milestone-level)
+// Replace your current archiveMs and unarchiveMs functions with these:
+
 async function archiveMs(bidId: number, idx: number, reason?: string) {
+  const key = msKey(bidId, idx);
+  console.log(`Archiving milestone: ${key}`); // Debug log
+  
   await archiveMilestone(bidId, idx, reason);
   setArchMap(prev => ({
     ...prev,
-    [msKey(bidId, idx)]: {
+    [key]: {
       archived: true,
       archivedAt: new Date().toISOString(),
       archiveReason: reason ?? null,
@@ -264,10 +269,13 @@ async function archiveMs(bidId: number, idx: number, reason?: string) {
 }
 
 async function unarchiveMs(bidId: number, idx: number) {
+  const key = msKey(bidId, idx);
+  console.log(`Unarchiving milestone: ${key}`); // Debug log
+  
   await unarchiveMilestone(bidId, idx);
   setArchMap(prev => ({
     ...prev,
-    [msKey(bidId, idx)]: {
+    [key]: {
       archived: false,
       archivedAt: null,
       archiveReason: null,
@@ -387,6 +395,13 @@ function ProofCard({
   pkey: string;
   onArchive: (archive: boolean) => void;
 }) {
+  console.log('ProofCard rendering:', {
+  bidId: proof.bidId,
+  milestoneIndex: proof.milestoneIndex,
+  key: pkey,
+  isArchived
+});
+
   const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState('');
   const [streaming, setStreaming] = useState(false);
