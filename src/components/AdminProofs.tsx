@@ -93,6 +93,27 @@ function proofKey(row: any): string {
   return `${pid}:${bid}:${ms}:${rid}`;
 }
 
+// Robust milestone key (falls back to row key if bidId/milestoneIndex are missing)
+function msKeyFromProof(p: any): string {
+  const bidId = Number((p as any)?.bidId);
+  const idx   = Number((p as any)?.milestoneIndex);
+  if (Number.isFinite(bidId) && Number.isFinite(idx)) return msKey(bidId, idx);
+  return `row:${proofKey(p)}`; // fallback to keep identity stable
+}
+
+// Dedupe a list to one row per milestone
+function uniqByMilestone(list: any[]): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const p of list || []) {
+    const k = msKeyFromProof(p);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
+}
+
 // ---------- types ----------
 type Props = {
   /** When rendered on project page, pass this project’s bid ids to filter by bidId */
@@ -219,9 +240,9 @@ useMilestonesUpdated(() => {
   hydrateArchiveStatuses(arr);
 });
 
-  // View derivation (Active vs Archived)
-  const visibleProofs = (proofs || []).filter(p => {
-  const k = msKey(Number(p.bidId), Number(p.milestoneIndex));
+  // View derivation (Active vs Archived), de-duped by milestone and robust keys
+const visibleProofs = uniqByMilestone(proofs).filter((p) => {
+  const k = msKeyFromProof(p);
   const a = !!archMap[k]?.archived;
   return view === 'archived' ? a : !a;
 });
@@ -251,23 +272,22 @@ async function unarchiveMs(bidId: number, idx: number) {
   }));
 }
 
+// Unarchive all (server; de-duped by milestone)
 const unarchiveAll = async () => {
-  const pairs = (proofs || []).map(p => [Number(p.bidId), Number(p.milestoneIndex)] as const);
-  for (const [bidId, idx] of pairs) {
-    try { await unarchiveMs(bidId, idx); } catch {}
+  for (const p of uniqByMilestone(proofs)) {
+    const bidId = Number(p.bidId);
+    const idx   = Number(p.milestoneIndex);
+    if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+      try { await unarchiveMs(bidId, idx); } catch {}
+    }
   }
 };
 
-// Derived archived count (server-backed)
-const unarchiveAll = async () => {
-  const keys = Array.from(
-    new Set((proofs || []).map(p => msKey(Number(p.bidId), Number(p.milestoneIndex))))
-  );
-  for (const k of keys) {
-    const [bidIdStr, idxStr] = k.split(':');
-    try { await unarchiveMs(Number(bidIdStr), Number(idxStr)); } catch {}
-  }
-};
+// Derived archived count (server-backed, de-duped by milestone)
+const archivedCount = uniqByMilestone(proofs).reduce((n, p) => {
+  const k = msKeyFromProof(p);
+  return n + (archMap[k]?.archived ? 1 : 0);
+}, 0);
 
 if (loading) return <div className="p-6">Loading proofs…</div>;
 if (error) return <div className="p-6 text-rose-600">{error}</div>;
@@ -307,15 +327,19 @@ return (
       </div>
     </div>
 
-    {visibleProofs.map((proof) => {
-  const bidId = Number(proof.bidId);
-  const idx = Number(proof.milestoneIndex);
-  const k = `${bidId}:${idx}`;
+  {visibleProofs.map((proof) => {
+  // Stable per-milestone key, even if bidId/milestoneIndex are missing in some rows
+  const k = msKeyFromProof(proof);
   const isArchived = !!archMap[k]?.archived;
+
+  // We still archive by numeric ids; guard just in case
+  const bidId = Number(proof.bidId);
+  const idx   = Number(proof.milestoneIndex);
+  const canToggle = Number.isFinite(bidId) && Number.isFinite(idx);
 
   return (
     <ProofCard
-      key={k}  // ensure stable, milestone-level identity
+      key={k}  // milestone-level identity
       proof={proof}
       bids={bids}
       proposalId={proposalId}
@@ -326,9 +350,12 @@ return (
       setCrComment={setCrComment}
       crChecklist={crChecklist}
       setCrChecklist={setCrChecklist}
-      isArchived={isArchived}  // <-- THIS MUST BE isArchived, not archived
+      isArchived={isArchived}
       pkey={k}
-      onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
+      onArchive={(next) => {
+        if (!canToggle) return; // nothing to do without ids
+        return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
+      }}
     />
   );
 })}
