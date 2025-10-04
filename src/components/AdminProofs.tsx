@@ -345,7 +345,7 @@ function ProofCard({
   crOpenFor, setCrOpenFor,
   crComment, setCrComment,
   crChecklist, setCrChecklist,
-  archived, pkey, onArchive,
+  isArchived, pkey, onArchive,
 }: {
   proof: Proof;
   bids?: any[];
@@ -357,7 +357,7 @@ function ProofCard({
   setCrComment: (s: string) => void;
   crChecklist: string;
   setCrChecklist: (s: string) => void;
-  archived: boolean;
+  isArchived: boolean;
   pkey: string;
   onArchive: (archive: boolean) => void;
 }) {
@@ -526,11 +526,11 @@ function ProofCard({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {archived && (
-            <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
-              Archived
-            </span>
-          )}
+          {isArchived && (
+  <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
+    Archived
+  </span>
+)}
           <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
         </div>
       </div>
@@ -649,7 +649,7 @@ function ProofCard({
           </button>
 
           {/* Archive / Unarchive (server) */}
-{!archived ? (
+{!isArchived ? (
   <button
     onClick={() => onArchive(true)}
     className="px-3 py-1 text-sm border rounded"
