@@ -536,56 +536,49 @@ const statusText = isPaid
       </div>
     )}
 
-    {/* Not paid → allow proof submission / payment release */}
+{/* Not paid → allow proof submission / payment release */}
 {!isPaid && (
   <div className="mt-3">
-    {(() => {
-      // Block duplicate submits unless there's an open change request
-      const hasOpenCR = !!(crByMs[i]?.length);
-      const alreadySubmitted = !!(submittedLocal[i] || m.proof);
-      const allowSubmit = !isDone && (!alreadySubmitted || hasOpenCR);
-
-      if (!allowSubmit) return null;
-
-      return (
-        <>
-          <label className="block text-sm font-medium mb-1">
-            Proof of completion (text optional)
-          </label>
-          <textarea
-            value={textByIndex[i] || ''}
-            onChange={e => setText(i, e.target.value)}
-            rows={3}
-            className="w-full p-2 border rounded text-sm mb-2"
-            placeholder="Notes (optional, files will be attached automatically)"
+    {/* Submit form (only if NOT completed yet AND (no prior proof OR there is an open CR)) */}
+    {!isDone && (((!submittedLocal[i] && !m.proof) || ((crByMs[i]?.length ?? 0) > 0))) && (
+      <>
+        <label className="block text-sm font-medium mb-1">
+          Proof of completion (text optional)
+        </label>
+        <textarea
+          value={textByIndex[i] || ''}
+          onChange={e => setText(i, e.target.value)}
+          rows={3}
+          className="w-full p-2 border rounded text-sm mb-2"
+          placeholder="Notes (optional, files will be attached automatically)"
+        />
+        <div className="flex items-center gap-3 mb-2">
+          <input
+            type="file"
+            multiple
+            onChange={e => setFiles(i, e.target.files)}
+            className="text-sm"
           />
-          <div className="flex items-center gap-3 mb-2">
-            <input
-              type="file"
-              multiple
-              onChange={e => setFiles(i, e.target.files)}
-              className="text-sm"
-            />
-            {!!(filesByIndex[i]?.length) && (
-              <span className="text-xs text-gray-600">
-                {filesByIndex[i].length} file(s) selected
-              </span>
-            )}
-          </div>
-          <button
-            onClick={() => handleSubmitProof(i)}
-            disabled={busyIndex === i}
-            className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-          >
-            {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-          </button>
-          <p className="text-[11px] text-gray-500 mt-1">
-            If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-          </p>
-        </>
-      );
-    })()}
+          {!!(filesByIndex[i]?.length) && (
+            <span className="text-xs text-gray-600">
+              {filesByIndex[i].length} file(s) selected
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => handleSubmitProof(i)}
+          disabled={busyIndex === i}
+          className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+        >
+          {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+        </button>
+        <p className="text-[11px] text-gray-500 mt-1">
+          If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+        </p>
+      </>
+    )}
 
+    {/* Completed but not paid → show release button */}
     {isDone && !isPaid && (
       <div className="mt-3">
         <button
