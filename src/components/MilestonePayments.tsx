@@ -413,10 +413,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
           // allow re-submit only when admin opened a Change Request, or when there is no proof yet
           const hasOpenCR = !!(crByMs[i]?.length);
-          const hasBackendProof = !!(m.proof && String(m.proof).trim());
-          const canSubmit =
-            !isPaid && !isDone && (hasOpenCR || (!hasBackendProof && !submittedLocal[i]));
-
+          const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
+          
           const statusText = isPaid
             ? 'Paid'
             : isDone
