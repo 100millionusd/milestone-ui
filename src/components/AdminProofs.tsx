@@ -321,7 +321,7 @@ return (
     setCrComment={setCrComment}
     crChecklist={crChecklist}
     setCrChecklist={setCrChecklist}
-    archived={isArchived}
+    isArchived={isArchived}
     pkey={k}
     onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
   />
