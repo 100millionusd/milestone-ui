@@ -1,6 +1,8 @@
 // src/components/AdminProofs.tsx
 'use client';
 
+import { useEffect, useState } from 'react';
+
 import {
   getProofs,
   approveProof,
@@ -118,65 +120,72 @@ const [view, setView] = useState<AdminView>('active');
 const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   async function loadProofs() {
-    try {
-      setLoading(true);
-      setError(null);
-      const list = await getProofs(); // admin list from your Railway API
+  try {
+    setLoading(true);
+    setError(null);
+    const list = await getProofs(); // admin list from your Railway API
 
-      let filtered = list;
+    let filtered = list;
 
-      // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
-      if (Array.isArray(bidIds) && bidIds.length) {
-        const set = new Set(bidIds.map((x) => Number(x)));
-        filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
-      } else if (Number.isFinite(proposalId as number)) {
-        // Secondary filter: try proposalId if your backend supplies it
-        const idNum = Number(proposalId);
-        filtered = list.filter((p: any) => {
-          const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
-          return candidates.some((v) => Number(v) === idNum);
-        });
-        if (!filtered.length) {
-          console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
-          filtered = list;
-        }
+    // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
+    if (Array.isArray(bidIds) && bidIds.length) {
+      const set = new Set(bidIds.map((x) => Number(x)));
+      filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
+    } else if (Number.isFinite(proposalId as number)) {
+      // Secondary filter: try proposalId if your backend supplies it
+      const idNum = Number(proposalId);
+      filtered = list.filter((p: any) => {
+        const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
+        return candidates.some((v) => Number(v) === idNum);
+      });
+      if (!filtered.length) {
+        console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
+        filtered = list;
       }
+    }
 
-      async function hydrateArchiveStatuses(currentProofs: any[]) {
+    setProofs(filtered);
+    await hydrateArchiveStatuses(filtered);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to load proofs');
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function hydrateArchiveStatuses(currentProofs: any[]) {
   const next: Record<string, ArchiveInfo> = { ...archMap };
   const tasks: Array<Promise<void>> = [];
 
-  const pairs = (currentProofs || []).map(p => [Number(p?.bidId), Number(p?.milestoneIndex)] as const);
+  const pairs = (currentProofs || []).map(
+    (p) => [Number(p?.bidId), Number(p?.milestoneIndex)] as const
+  );
+
   for (const [bidId, idx] of pairs) {
     const key = msKey(bidId, idx);
     if (next[key] !== undefined) continue;
-    tasks.push((async () => {
-      try {
-        const j = await getMilestoneArchive(bidId, idx);
-        const m = j?.milestone ?? j;
-        next[key] = {
-          archived: !!m?.archived,
-          archivedAt: m?.archivedAt ?? null,
-          archiveReason: m?.archiveReason ?? null,
-        };
-      } catch {
-        next[key] = { archived: false };
-      }
-    })());
+    tasks.push(
+      (async () => {
+        try {
+          const j = await getMilestoneArchive(bidId, idx);
+          const m = j?.milestone ?? j;
+          next[key] = {
+            archived: !!m?.archived,
+            archivedAt: m?.archivedAt ?? null,
+            archiveReason: m?.archiveReason ?? null,
+          };
+        } catch {
+          next[key] = { archived: false };
+        }
+      })()
+    );
   }
+
   if (tasks.length) {
     await Promise.all(tasks);
     setArchMap(next);
   }
 }
-      setProofs(filtered);
-await hydrateArchiveStatuses(filtered);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load proofs');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
     loadProofs();
@@ -639,24 +648,24 @@ function ProofCard({
             {busyReject ? 'Rejecting…' : 'Reject'}
           </button>
 
-          {/* Archive / Unarchive (local) */}
-          {!archived ? (
-            <button
-              onClick={() => onArchive(true)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Hide this proof from Active view (local only)"
-            >
-              Archive
-            </button>
-          ) : (
-            <button
-              onClick={() => onArchive(false)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Return this proof to Active view"
-            >
-              Unarchive
-            </button>
-          )}
+          {/* Archive / Unarchive (server) */}
+{!archived ? (
+  <button
+    onClick={() => onArchive(true)}
+    className="px-3 py-1 text-sm border rounded"
+    title="Archive this milestone (server)"
+  >
+    Archive
+  </button>
+) : (
+  <button
+    onClick={() => onArchive(false)}
+    className="px-3 py-1 text-sm border rounded"
+    title="Unarchive this milestone (server)"
+  >
+    Unarchive
+  </button>
+)}
         </div>
       </div>
 
