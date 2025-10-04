@@ -476,7 +476,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         </div>
       )}
 
-      {/* Not paid → allow proof submission / payment release */}
+ {/* Not paid → allow proof submission / payment release */}
 {!isPaid && (
   <div className="mt-3">
     {canSubmit ? (
@@ -536,17 +536,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     )}
   </div>
 )}
-</div> {/* ← closes the single milestone card */}
-
-))} {/* ← closes .map(...) */}
-
-</div> {/* ← closes “Milestones list” wrapper */}
 
 {/* Manual Payment Processor (unchanged) */}
 <div className="mt-6">
   <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
 </div>
-</div> {/* ← closes outer component container */}
+</div>
 );
 };
 
