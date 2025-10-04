@@ -240,7 +240,7 @@ useMilestonesUpdated(() => {
   hydrateArchiveStatuses(arr);
 });
 
-  // View derivation (Active vs Archived), de-duped by milestone and robust keys
+// View derivation (Active vs Archived) — de-duped by milestone
 const visibleProofs = uniqByMilestone(proofs).filter((p) => {
   const k = msKeyFromProof(p);
   const a = !!archMap[k]?.archived;
@@ -327,20 +327,16 @@ return (
       </div>
     </div>
 
-  {visibleProofs.map((proof) => {
-  // Stable per-milestone key, even if bidId/milestoneIndex are missing in some rows
-  const k = msKeyFromProof(proof);
+  {visibleProofs.map((p) => {
+  const k = msKeyFromProof(p);                  // stable milestone identity
+  const bidId = Number(p.bidId);
+  const idx   = Number(p.milestoneIndex);
   const isArchived = !!archMap[k]?.archived;
-
-  // We still archive by numeric ids; guard just in case
-  const bidId = Number(proof.bidId);
-  const idx   = Number(proof.milestoneIndex);
-  const canToggle = Number.isFinite(bidId) && Number.isFinite(idx);
 
   return (
     <ProofCard
-      key={k}  // milestone-level identity
-      proof={proof}
+      key={k}                                   // IMPORTANT: one card per milestone
+      proof={p}
       bids={bids}
       proposalId={proposalId}
       onRefresh={refreshAll}
@@ -352,10 +348,7 @@ return (
       setCrChecklist={setCrChecklist}
       isArchived={isArchived}
       pkey={k}
-      onArchive={(next) => {
-        if (!canToggle) return; // nothing to do without ids
-        return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
-      }}
+      onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
     />
   );
 })}
