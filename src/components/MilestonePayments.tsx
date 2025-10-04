@@ -83,6 +83,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
+  // mark milestones as submitted locally so the chip updates immediately
+  const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
+
 
   // Open change requests grouped by milestone index (for vendor visibility)
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
@@ -230,12 +233,23 @@ for (const original of localFiles) {
         note: note || 'vendor proof',
       });
 
-      // 4) Notify page to refresh immediately (send both event names + proposalId)
-      if (typeof window !== 'undefined') {
-        const detail = { proposalId: Number(pid) };
-        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
-      }
+      // 👉 mark submitted locally so the vendor sees it instantly
+      setSubmittedLocal(prev => ({ ...prev, [index]: true }));
+
+      // 4) Notify page to refresh immediately (send both event names + proposalId) + emit precise submitted event
+if (typeof window !== 'undefined') {
+  const detail = { proposalId: Number(pid) };
+  window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+  window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+  window.dispatchEvent(new CustomEvent('proofs:submitted', {
+    detail: {
+      proposalId: Number(pid),
+      bidId: Number(bid.bidId),
+      milestoneIndex: Number(index),
+    }
+  }));
+}
+
 
       // 5) If there is an OPEN change request → append a response (so admin sees every reply)
 //    If there is NO open CR, DO NOT auto-complete. Leave as "awaiting review".
@@ -386,38 +400,36 @@ if (crId) {
         <h4 className="font-semibold">Payment Milestones</h4>
 
         {bid.milestones.map((m: Milestone, i: number) => {
-          const isPaid = !!m.paymentTxHash;
-          const isDone = !!m.completed || isPaid;
+  const isPaid = !!m.paymentTxHash;
+  const isDone = !!m.completed || isPaid;
 
-          return (
-            <div
-              key={i}
-              className={`border rounded p-4 ${
-                isPaid ? 'bg-green-50 border-green-200'
-                : isDone ? 'bg-yellow-50 border-yellow-200'
-                : 'bg-gray-50'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-                  {m.dueDate && (
-                    <div className="text-xs text-gray-600">
-                      Due: {new Date(m.dueDate).toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold text-green-700">
-                    ${Number(m.amount || 0).toLocaleString()}
-                  </div>
-                  <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
-                    isPaid ? 'bg-green-100 text-green-800'
-                    : isDone ? 'bg-yellow-100 text-yellow-800'
-                    : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {isPaid ? 'Paid' : isDone ? 'Completed (Unpaid)' : 'Pending'}
-                  </span>
+  // 👉 show "Submitted" immediately after upload on this device
+  const submitted = !!submittedLocal[i];
+  const statusText = isPaid
+    ? 'Paid'
+    : isDone
+      ? 'Completed (Unpaid)'
+      : submitted
+        ? 'Submitted'
+        : 'Pending';
+
+  return (
+    <div
+      key={i}
+      className={`border rounded p-4 ${
+        isPaid ? 'bg-green-50 border-green-200'
+        : isDone ? 'bg-yellow-50 border-yellow-200'
+        : 'bg-gray-50'
+      }`}
+    >
+      ...
+      <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
+        isPaid ? 'bg-green-100 text-green-800'
+        : isDone ? 'bg-yellow-100 text-yellow-800'
+        : 'bg-gray-100 text-gray-800'
+      }`}>
+        {statusText}
+      </span>
                 </div>
               </div>
 

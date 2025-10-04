@@ -207,6 +207,10 @@ function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
+// --- milestone key helper (for local “just submitted” flag)
+const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
+
+
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
   // ---- route param (plain) ----
@@ -224,6 +228,7 @@ export default function ProjectDetailPage() {
   const [tab, setTab] = useState<TabKey>('overview');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
@@ -376,6 +381,31 @@ useMilestonesUpdated(async () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
+
+  // instant local update when a proof is submitted (before server fetch returns)
+useEffect(() => {
+  const onJustSent = (ev: any) => {
+    const bidId = Number(ev?.detail?.bidId);
+    const idx   = Number(ev?.detail?.milestoneIndex);
+    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+
+    // 1) flip local flag for status/UX
+    setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
+
+    // 2) patch current bids so the Milestones table status updates immediately
+    setBids(prev => prev.map(b =>
+      Number(b.bidId) !== bidId ? b : {
+        ...b,
+        milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
+          i === idx ? { ...m, proof: m.proof || '{}' } : m
+        ),
+      }
+    ));
+  };
+
+  window.addEventListener('proofs:just-sent', onJustSent);
+  return () => window.removeEventListener('proofs:just-sent', onJustSent);
+}, []);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
@@ -827,26 +857,38 @@ useMilestonesUpdated(async () => {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = !!m.paymentTxHash;
-                      const completedRow = paid || !!m.completed;
-                      return (
-                        <tr key={idx} className="border-t">
-                          <td className="py-2 pr-4">M{idx + 1}</td>
-                          <td className="py-2 pr-4">{m.name || '—'}</td>
-                          <td className="py-2 pr-4">
-                            {m.amount ? currency.format(Number(m.amount)) : '—'}
-                          </td>
-                          <td className="py-2 pr-4">
-                            {paid ? 'paid' : completedRow ? 'completed' : 'pending'}
-                          </td>
-                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                          <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-                          <td className="py-2 pr-4">
-                            {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+  const paid = !!m.paymentTxHash;
+  const completedRow = paid || !!m.completed;
+
+  // 👇 NEW: show "submitted" immediately after upload
+  const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
+  const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
+  const status = paid
+    ? 'paid'
+    : completedRow
+      ? 'completed'
+      : hasProofNow
+        ? 'submitted'
+        : 'pending';
+
+  return (
+    <tr key={idx} className="border-t">
+      <td className="py-2 pr-4">M{idx + 1}</td>
+      <td className="py-2 pr-4">{m.name || '—'}</td>
+      <td className="py-2 pr-4">
+        {m.amount ? currency.format(Number(m.amount)) : '—'}
+      </td>
+      {/* 👇 replaced status cell */}
+      <td className="py-2 pr-4">{status}</td>
+      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+      <td className="py-2 pr-4">
+        {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+      </td>
+    </tr>
+  );
+})}
+
                   </tbody>
                 </table>
               </div>
