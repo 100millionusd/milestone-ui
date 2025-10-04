@@ -3,11 +3,10 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  completeMilestone,
+  completeMilestone, // (kept import, harmless if unused)
   payMilestone,
   submitProof,
-  saveProofFilesToDb,  // POST /api/proofs → persists for Files tab
-  getProofs, 
+  saveProofFilesToDb, // POST /api/proofs → persists for Files tab
   type Bid,
   type Milestone,
 } from '@/lib/api';
@@ -17,7 +16,6 @@ import PaymentVerification from './PaymentVerification';
 // ---- upload helpers (shrink big images, retry on 504) ----
 async function shrinkImageIfNeeded(file: File): Promise<File> {
   if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
-
   const bitmap = await createImageBitmap(file);
   const maxSide = 2000;
   let { width, height } = bitmap;
@@ -28,13 +26,11 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
     width = Math.round((width / height) * maxSide);
     height = maxSide;
   }
-
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(bitmap, 0, 0, width, height);
-
   const blob: Blob = await new Promise((resolve) =>
     canvas.toBlob(resolve as any, 'image/jpeg', 0.85),
   );
@@ -66,8 +62,8 @@ interface MilestonePaymentsProps {
   proposalId?: number;
 }
 
-type FilesMap = Record<number, File[]>;     // per-milestone selected files
-type TextMap  = Record<number, string>;     // per-milestone notes
+type FilesMap = Record<number, File[]>;
+type TextMap  = Record<number, string>;
 
 type ChangeRequest = {
   id: number;
@@ -86,12 +82,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
   // mark milestones as submitted locally so the chip updates immediately
   const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
-  // server-known proofs (prevents duplicate submissions across devices)
-  const [hasProofByIndex, setHasProofByIndex] = useState<Record<number, true>>({});
-
-
-
-  // Open change requests grouped by milestone index (for vendor visibility)
+  // open change requests by milestone
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
 
   // -------- helpers --------
@@ -145,7 +136,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
   }
 
-  /** Return the newest open CR id for this milestone (if any) */
+  /** newest open CR id for this milestone (if any) */
   function pickOpenCrId(msIndex: number): number | null {
     const list = crByMs[msIndex] || [];
     if (!list.length) return null;
@@ -167,11 +158,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           files: files.map(f => ({ url: f.url, name: f.name ?? (f.url.split('/').pop() || 'file'), cid: f.cid })),
         }),
       });
-      // If the route isn’t implemented yet, ignore errors so nothing breaks
-      if (!r.ok) {
-        // swallow but log (optional)
-        console.debug('[cr] respond non-OK:', r.status);
-      }
+      if (!r.ok) console.debug('[cr] respond non-OK:', r.status);
     } catch (e) {
       console.debug('[cr] respond failed (ignored):', (e as any)?.message || e);
     }
@@ -191,48 +178,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     };
   }, [resolvedProposalId]);
 
-  // Load existing proofs for this bid and keep them in sync
-useEffect(() => {
-  let alive = true;
-
-  async function load() {
-    try {
-      const rows = await getProofs(Number(bid.bidId)).catch(() => []);
-      if (!alive) return;
-      const map: Record<number, true> = {};
-      (Array.isArray(rows) ? rows : []).forEach((p: any) => {
-        const i = Number(p?.milestoneIndex ?? p?.milestone_index);
-        if (Number.isFinite(i)) map[i] = true;
-      });
-      setHasProofByIndex(map);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (Number.isFinite(Number(bid.bidId))) load();
-
-  // When any client submits a proof, mark it immediately
-  const onSubmitted = (ev: any) => {
-    const j = ev?.detail;
-    if (!j) return;
-    if (Number(j?.bidId) === Number(bid.bidId) && Number.isFinite(j?.milestoneIndex)) {
-      setHasProofByIndex(prev => ({ ...prev, [Number(j.milestoneIndex)]: true }));
-    }
-  };
-
-  window.addEventListener('proofs:submitted', onSubmitted);
-  // If other tabs save proofs, reload from server
-  const reload = () => load();
-  window.addEventListener('proofs:updated', reload);
-
-  return () => {
-    alive = false;
-    window.removeEventListener('proofs:submitted', onSubmitted);
-    window.removeEventListener('proofs:updated', reload);
-  };
-}, [bid.bidId]);
-
   // -------- actions --------
   async function handleSubmitProof(index: number) {
     const pid = resolvedProposalId;
@@ -240,7 +185,6 @@ useEffect(() => {
       alert('Cannot determine proposalId.');
       return;
     }
-
     const note = (textByIndex[index] || '').trim();
 
     try {
@@ -250,23 +194,20 @@ useEffect(() => {
       const localFiles: File[] = filesByIndex[index] || [];
 
       // 1) Upload to Pinata via Next upload route (sequential, shrink + retry)
-const uploaded: Array<{ name: string; cid: string; url: string }> = [];
-for (const original of localFiles) {
-  const file = await shrinkImageIfNeeded(original);
-
-  const fd = new FormData();
-  // IMPORTANT: the field name must be exactly "files" (plural)
-  fd.append('files', file, file.name || 'file');
-
-  const json = await postWithRetry('/api/proofs/upload', fd);
-  // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
-  if (json?.uploads?.length) {
-    uploaded.push(...json.uploads);
-  } else if (json?.cid && json?.url) {
-    // defensive fallback if handler ever returns single file
-    uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
-  }
-}
+      const uploaded: Array<{ name: string; cid: string; url: string }> = [];
+      for (const original of localFiles) {
+        const file = await shrinkImageIfNeeded(original);
+        const fd = new FormData();
+        // IMPORTANT: the field name must be exactly "files" (plural)
+        fd.append('files', file, file.name || 'file');
+        const json = await postWithRetry('/api/proofs/upload', fd);
+        // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
+        if (json?.uploads?.length) {
+          uploaded.push(...json.uploads);
+        } else if (json?.cid && json?.url) {
+          uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
+        }
+      }
 
       // 2) Map uploaded → filesToSave (full URL, name, cid)
       const filesToSave = uploaded.map(u => ({ url: u.url, name: u.name, cid: u.cid }));
@@ -279,31 +220,29 @@ for (const original of localFiles) {
         note: note || 'vendor proof',
       });
 
-      // 👉 mark submitted locally so the vendor sees it instantly
+      // mark submitted locally so the vendor sees it instantly
       setSubmittedLocal(prev => ({ ...prev, [index]: true }));
 
-      // 4) Notify page to refresh immediately (send both event names + proposalId) + emit precise submitted event
-if (typeof window !== 'undefined') {
-  const detail = { proposalId: Number(pid) };
-  window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-  window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
-  window.dispatchEvent(new CustomEvent('proofs:submitted', {
-    detail: {
-      proposalId: Number(pid),
-      bidId: Number(bid.bidId),
-      milestoneIndex: Number(index),
-    }
-  }));
-}
-
+      // 4) Notify page(s) to refresh immediately + emit precise submitted event
+      if (typeof window !== 'undefined') {
+        const detail = { proposalId: Number(pid) };
+        window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+        window.dispatchEvent(new CustomEvent('proofs:submitted', {
+          detail: {
+            proposalId: Number(pid),
+            bidId: Number(bid.bidId),
+            milestoneIndex: Number(index),
+          }
+        }));
+      }
 
       // 5) If there is an OPEN change request → append a response (so admin sees every reply)
-//    If there is NO open CR, DO NOT auto-complete. Leave as "awaiting review".
-const crId = pickOpenCrId(index);
-if (crId) {
-  await appendCrResponse(crId, note, filesToSave);
-}
-// (no else; do NOT call completeMilestone here)
+      const crId = pickOpenCrId(index);
+      if (crId) {
+        await appendCrResponse(crId, note, filesToSave);
+      }
+      // (no else; do NOT auto-complete here)
 
       // 6) Optional: backend proofs for legacy readers
       await submitProof({
@@ -325,7 +264,7 @@ if (crId) {
 
       alert(crId
         ? 'Update sent. Admin will review your response to the change request.'
-        : 'Proof submitted. Files saved and milestone marked completed.'
+        : 'Proof submitted. Files saved.'
       );
       onUpdate();
     } catch (e: any) {
@@ -446,146 +385,138 @@ if (crId) {
         <h4 className="font-semibold">Payment Milestones</h4>
 
         {bid.milestones.map((m: Milestone, i: number) => {
-  const isPaid = !!m.paymentTxHash;
-const isDone = !!m.completed || isPaid;
+          const isPaid = !!m.paymentTxHash;
+          const isDone = !!m.completed || isPaid;
 
-const alreadySubmitted =
-  !!submittedLocal[i] || !!hasProofByIndex[i] || !!m.proof;
+          // show "Submitted" immediately after upload on this device
+          const submitted = !!submittedLocal[i];
+          const statusText = isPaid
+            ? 'Paid'
+            : isDone
+              ? 'Completed (Unpaid)'
+              : submitted
+                ? 'Submitted'
+                : 'Pending';
 
-const hasOpenCR = (crByMs[i] || []).length > 0;
+          // allow submitting proof only when NOT completed and:
+          // - no proof yet on this device/server OR
+          // - there is an open change request
+          const allowSubmit =
+            !isDone && (((!submitted && !m.proof) || ((crByMs[i]?.length ?? 0) > 0)));
 
-// Allow submitting only when:
-//  - not paid
-//  - not already completed
-//  - and EITHER there is no previous submission OR there IS an open Change Request
-const allowSubmit = !isPaid && !isDone && (!alreadySubmitted || hasOpenCR);
+          return (
+            <div
+              key={i}
+              className={`border rounded p-4 ${
+                isPaid ? 'bg-green-50 border-green-200'
+                : isDone ? 'bg-yellow-50 border-yellow-200'
+                : 'bg-gray-50'
+              }`}
+            >
+              {/* Header row (title + amount + status chip) */}
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+                  {m.dueDate && (
+                    <div className="text-xs text-gray-600">
+                      Due: {new Date(m.dueDate).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold text-green-700">
+                    ${Number(m.amount || 0).toLocaleString()}
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
+                    isPaid ? 'bg-green-100 text-green-800'
+                    : isDone ? 'bg-yellow-100 text-yellow-800'
+                    : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {statusText}
+                  </span>
+                </div>
+              </div>
 
-const statusText = isPaid
-  ? 'Paid'
-  : isDone
-    ? 'Completed (Unpaid)'
-    : alreadySubmitted
-      ? 'Submitted'
-      : 'Pending';
+              {/* Change request banner (if any) */}
+              {renderChangeRequestBanner(i)}
 
-  return (
-  <div
-    key={i}
-    className={`border rounded p-4 ${
-      isPaid ? 'bg-green-50 border-green-200'
-      : isDone ? 'bg-yellow-50 border-yellow-200'
-      : 'bg-gray-50'
-    }`}
-  >
-    <div className="flex items-start justify-between">
-      <div>
-        <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-        {m.dueDate && (
-          <div className="text-xs text-gray-600">
-            Due: {new Date(m.dueDate).toLocaleDateString()}
-          </div>
-        )}
-      </div>
-      <div className="text-right">
-        <div className="text-lg font-bold text-green-700">
-          ${Number(m.amount || 0).toLocaleString()}
-        </div>
+              {/* Paid → details + verification */}
+              {isPaid && (
+                <div className="mt-3 space-y-2">
+                  <div className="p-2 bg-white rounded border text-sm">
+                    <div className="text-green-700">
+                      ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+                    </div>
+                    {m.paymentTxHash && (
+                      <div className="mt-1">
+                        <span className="font-medium">TX Hash: </span>
+                        <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
+                      </div>
+                    )}
+                    {m.proof && (
+                      <div className="mt-1">
+                        <span className="font-medium">Proof: </span>{m.proof}
+                      </div>
+                    )}
+                  </div>
 
-        {/* Status chip (uses submittedLocal for instant feedback) */}
-        <span
-          className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
-            isPaid ? 'bg-green-100 text-green-800'
-            : isDone ? 'bg-yellow-100 text-yellow-800'
-            : 'bg-gray-100 text-gray-800'
-          }`}
-        >
-          {statusText}
-        </span>
-      </div>
-    </div>
+                  <PaymentVerification
+                    transactionHash={m.paymentTxHash as string}
+                    currency={bid.preferredStablecoin}
+                    amount={Number(m.amount || 0)}
+                    toAddress={bid.walletAddress}
+                  />
+                </div>
+              )}
 
-    {/* Show admin change request (if any) */}
-    {renderChangeRequestBanner(i)}
+              {/* Not paid → allow proof submission / payment release */}
+              {!isPaid && (
+                <div className="mt-3">
+                  {allowSubmit && (
+                    <>
+                      <label className="block text-sm font-medium mb-1">
+                        Proof of completion (text optional)
+                      </label>
+                      <textarea
+                        value={textByIndex[i] || ''}
+                        onChange={e => setText(i, e.target.value)}
+                        rows={3}
+                        className="w-full p-2 border rounded text-sm mb-2"
+                        placeholder="Notes (optional, files will be attached automatically)"
+                      />
+                      <div className="flex items-center gap-3 mb-2">
+                        <input
+                          type="file"
+                          multiple
+                          onChange={e => setFiles(i, e.target.files)}
+                          className="text-sm"
+                        />
+                        {!!(filesByIndex[i]?.length) && (
+                          <span className="text-xs text-gray-600">
+                            {filesByIndex[i].length} file(s) selected
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleSubmitProof(i)}
+                        disabled={busyIndex === i}
+                        className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+                      >
+                        {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+                      </button>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+                      </p>
+                    </>
+                  )}
 
-    {/* Paid → show verification / details */}
-    {isPaid && (
-      <div className="mt-3 space-y-2">
-        <div className="p-2 bg-white rounded border text-sm">
-          <div className="text-green-700">
-            ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
-          </div>
-          {m.paymentTxHash && (
-            <div className="mt-1">
-              <span className="font-medium">TX Hash: </span>
-              <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
-            </div>
-          )}
-          {m.proof && (
-            <div className="mt-1">
-              <span className="font-medium">Proof: </span>{m.proof}
-            </div>
-          )}
-        </div>
-
-        <PaymentVerification
-          transactionHash={m.paymentTxHash as string}
-          currency={bid.preferredStablecoin}
-          amount={Number(m.amount || 0)}
-          toAddress={bid.walletAddress}
-        />
-      </div>
-    )}
-
-{/* Not paid → allow proof submission / payment release */}
-{!isPaid && (
-  <div className="mt-3">
-    {/* Submit form (only if NOT completed yet AND (no prior proof OR there is an open CR)) */}
-    {!isDone && (((!submittedLocal[i] && !m.proof) || ((crByMs[i]?.length ?? 0) > 0))) && (
-      <>
-        <label className="block text-sm font-medium mb-1">
-          Proof of completion (text optional)
-        </label>
-        <textarea
-          value={textByIndex[i] || ''}
-          onChange={e => setText(i, e.target.value)}
-          rows={3}
-          className="w-full p-2 border rounded text-sm mb-2"
-          placeholder="Notes (optional, files will be attached automatically)"
-        />
-        <div className="flex items-center gap-3 mb-2">
-          <input
-            type="file"
-            multiple
-            onChange={e => setFiles(i, e.target.files)}
-            className="text-sm"
-          />
-          {!!(filesByIndex[i]?.length) && (
-            <span className="text-xs text-gray-600">
-              {filesByIndex[i].length} file(s) selected
-            </span>
-          )}
-        </div>
-        <button
-          onClick={() => handleSubmitProof(i)}
-          disabled={busyIndex === i}
-          className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-        >
-          {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-        </button>
-        <p className="text-[11px] text-gray-500 mt-1">
-          If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-        </p>
-      </>
-    )}
-
-    {/* Completed but not paid → show release button */}
-    {isDone && !isPaid && (
-      <div className="mt-3">
-        <button
-          onClick={() => handleReleasePayment(i)}
-          disabled={busyIndex === i}
-          className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-        >
+                  {isDone && !isPaid && (
+                    <div className="mt-3">
+                      <button
+                        onClick={() => handleReleasePayment(i)}
+                        disabled={busyIndex === i}
+                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+                      >
                         {busyIndex === i ? 'Processing…' : 'Release Payment'}
                       </button>
                     </div>
@@ -604,3 +535,5 @@ const statusText = isPaid
     </div>
   );
 };
+
+export default MilestonePayments;
