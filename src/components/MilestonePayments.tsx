@@ -586,9 +586,21 @@ const statusText = isPaid
           disabled={busyIndex === i}
           className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
         >
-          {busyIndex === i ? 'Processing…' : 'Release Payment'}
-        </button>
+                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-    )}
-  </div>
-)}
+
+      {/* Manual Payment Processor (unchanged) */}
+      <div className="mt-6">
+        <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
+      </div>
+    </div>
+  );
+};
