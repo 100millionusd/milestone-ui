@@ -306,13 +306,13 @@ return (
     <div className="flex items-center gap-2">
       <button
         onClick={() => setView('active')}
-        className={`px-3 py-1 rounded border text-sm ${view==='active' ? 'bg-slate-900 text-white' : ''}`}
+        className={`px-3 py-1 rounded border text-sm ${view === 'active' ? 'bg-slate-900 text-white' : ''}`}
       >
         Active
       </button>
       <button
         onClick={() => setView('archived')}
-        className={`px-3 py-1 rounded border text-sm ${view==='archived' ? 'bg-slate-900 text-white' : ''}`}
+        className={`px-3 py-1 rounded border text-sm ${view === 'archived' ? 'bg-slate-900 text-white' : ''}`}
       >
         Archived ({archivedCount})
       </button>
@@ -335,38 +335,40 @@ return (
       </div>
     </div>
 
-  {visibleRows.map(({ p, k, isArchived }) => {
-  const bidId = Number(p.bidId);
-  const idx   = Number(p.milestoneIndex);
+    {visibleRows.map(({ p, k, isArchived }) => {
+      const bidId = Number(p.bidId);
+      const idx   = Number(p.milestoneIndex);
+      return (
+        <ProofCard
+          key={k}
+          proof={p}
+          bids={bids}
+          proposalId={proposalId}
+          onRefresh={refreshAll}
+          crOpenFor={crOpenFor}
+          setCrOpenFor={setCrOpenFor}
+          crComment={crComment}
+          setCrComment={setCrComment}
+          crChecklist={crChecklist}
+          setCrChecklist={setCrChecklist}
+          isArchived={isArchived}
+          pkey={k}
+          onArchive={(next) => {
+            if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+            return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
+          }}
+        />
+      );
+    })}
 
-  return (
-    <ProofCard
-      key={k}
-      proof={p}
-      bids={bids}
-      proposalId={proposalId}
-      onRefresh={refreshAll}
-      crOpenFor={crOpenFor}
-      setCrOpenFor={setCrOpenFor}
-      crComment={crComment}
-      setCrComment={setCrComment}
-      crChecklist={crChecklist}
-      setCrChecklist={setCrChecklist}
-      isArchived={isArchived}
-      pkey={k}
-      onArchive={(next) => {
-        if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
-        return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
-      }}
-    />
-  );
-})}
-
-{visibleRows.length === 0 && (
-  <div className="text-gray-500 text-center py-10 border rounded bg-white">
-    {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
+    {visibleRows.length === 0 && (
+      <div className="text-gray-500 text-center py-10 border rounded bg-white">
+        {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
+      </div>
+    )}
   </div>
-)}
+);
+} 
 
 type ProofCardProps = {
   proof: Proof;
