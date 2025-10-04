@@ -3,10 +3,10 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  completeMilestone, // (kept import, harmless if unused)
+  completeMilestone,
   payMilestone,
   submitProof,
-  saveProofFilesToDb, // POST /api/proofs → persists for Files tab
+  saveProofFilesToDb,  // POST /api/proofs → persists for Files tab
   type Bid,
   type Milestone,
 } from '@/lib/api';
@@ -16,6 +16,7 @@ import PaymentVerification from './PaymentVerification';
 // ---- upload helpers (shrink big images, retry on 504) ----
 async function shrinkImageIfNeeded(file: File): Promise<File> {
   if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
+
   const bitmap = await createImageBitmap(file);
   const maxSide = 2000;
   let { width, height } = bitmap;
@@ -26,11 +27,13 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
     width = Math.round((width / height) * maxSide);
     height = maxSide;
   }
+
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(bitmap, 0, 0, width, height);
+
   const blob: Blob = await new Promise((resolve) =>
     canvas.toBlob(resolve as any, 'image/jpeg', 0.85),
   );
@@ -62,8 +65,8 @@ interface MilestonePaymentsProps {
   proposalId?: number;
 }
 
-type FilesMap = Record<number, File[]>;
-type TextMap  = Record<number, string>;
+type FilesMap = Record<number, File[]>;     // per-milestone selected files
+type TextMap  = Record<number, string>;     // per-milestone notes
 
 type ChangeRequest = {
   id: number;
@@ -82,7 +85,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
   // mark milestones as submitted locally so the chip updates immediately
   const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
-  // open change requests by milestone
+  // open change requests grouped by milestone index (for vendor visibility)
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
 
   // -------- helpers --------
@@ -136,7 +139,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
   }
 
-  /** newest open CR id for this milestone (if any) */
+  /** Return the newest open CR id for this milestone (if any) */
   function pickOpenCrId(msIndex: number): number | null {
     const list = crByMs[msIndex] || [];
     if (!list.length) return null;
@@ -158,7 +161,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           files: files.map(f => ({ url: f.url, name: f.name ?? (f.url.split('/').pop() || 'file'), cid: f.cid })),
         }),
       });
-      if (!r.ok) console.debug('[cr] respond non-OK:', r.status);
+      // If the route isn’t implemented yet, ignore errors so nothing breaks
+      if (!r.ok) {
+        console.debug('[cr] respond non-OK:', r.status);
+      }
     } catch (e) {
       console.debug('[cr] respond failed (ignored):', (e as any)?.message || e);
     }
@@ -185,6 +191,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       alert('Cannot determine proposalId.');
       return;
     }
+
     const note = (textByIndex[index] || '').trim();
 
     try {
@@ -197,14 +204,17 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       const uploaded: Array<{ name: string; cid: string; url: string }> = [];
       for (const original of localFiles) {
         const file = await shrinkImageIfNeeded(original);
+
         const fd = new FormData();
         // IMPORTANT: the field name must be exactly "files" (plural)
         fd.append('files', file, file.name || 'file');
+
         const json = await postWithRetry('/api/proofs/upload', fd);
         // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
         if (json?.uploads?.length) {
           uploaded.push(...json.uploads);
         } else if (json?.cid && json?.url) {
+          // defensive fallback if handler ever returns single file
           uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
         }
       }
@@ -220,29 +230,25 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         note: note || 'vendor proof',
       });
 
-      // mark submitted locally so the vendor sees it instantly
+      // 👉 mark submitted locally so the vendor sees it instantly
       setSubmittedLocal(prev => ({ ...prev, [index]: true }));
 
-      // 4) Notify page(s) to refresh immediately + emit precise submitted event
+      // 4) Notify page to refresh immediately (send both event names + proposalId) + precise submitted event
       if (typeof window !== 'undefined') {
         const detail = { proposalId: Number(pid) };
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
         window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
         window.dispatchEvent(new CustomEvent('proofs:submitted', {
-          detail: {
-            proposalId: Number(pid),
-            bidId: Number(bid.bidId),
-            milestoneIndex: Number(index),
-          }
+          detail: { proposalId: Number(pid), bidId: Number(bid.bidId), milestoneIndex: Number(index) }
         }));
       }
 
       // 5) If there is an OPEN change request → append a response (so admin sees every reply)
+      //    If there is NO open CR, DO NOT auto-complete. Leave as "awaiting review".
       const crId = pickOpenCrId(index);
       if (crId) {
         await appendCrResponse(crId, note, filesToSave);
       }
-      // (no else; do NOT auto-complete here)
 
       // 6) Optional: backend proofs for legacy readers
       await submitProof({
@@ -264,7 +270,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
       alert(crId
         ? 'Update sent. Admin will review your response to the change request.'
-        : 'Proof submitted. Files saved.'
+        : 'Proof submitted. Files saved; awaiting review.'
       );
       onUpdate();
     } catch (e: any) {
@@ -305,7 +311,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
     let raw = latest?.checklist as any;
     if (raw && typeof raw === 'string') {
-      try { raw = JSON.parse(raw); } catch { /* keep as string */ }
+      try { raw = JSON.parse(raw); } catch {}
     }
     const itemsArr =
       Array.isArray(raw) ? raw :
@@ -386,10 +392,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
         {bid.milestones.map((m: Milestone, i: number) => {
           const isPaid = !!m.paymentTxHash;
+          const hasBackendProof = !!(m.proof && String(m.proof).trim());
+          const submitted = !!submittedLocal[i] || hasBackendProof;
           const isDone = !!m.completed || isPaid;
 
-          // show "Submitted" immediately after upload on this device
-          const submitted = !!submittedLocal[i];
           const statusText = isPaid
             ? 'Paid'
             : isDone
@@ -398,11 +404,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 ? 'Submitted'
                 : 'Pending';
 
-          // allow submitting proof only when NOT completed and:
-          // - no proof yet on this device/server OR
-          // - there is an open change request
-          const allowSubmit =
-            !isDone && (((!submitted && !m.proof) || ((crByMs[i]?.length ?? 0) > 0)));
+          // Only allow submitting when there is no proof yet and not done/paid
+          const canSubmit = !isPaid && !m.completed && !hasBackendProof && !submittedLocal[i];
 
           return (
             <div
@@ -413,7 +416,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 : 'bg-gray-50'
               }`}
             >
-              {/* Header row (title + amount + status chip) */}
               <div className="flex items-start justify-between">
                 <div>
                   <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
@@ -430,6 +432,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
                     isPaid ? 'bg-green-100 text-green-800'
                     : isDone ? 'bg-yellow-100 text-yellow-800'
+                    : submitted ? 'bg-blue-100 text-blue-800'
                     : 'bg-gray-100 text-gray-800'
                   }`}>
                     {statusText}
@@ -437,10 +440,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* Change request banner (if any) */}
+              {/* Show admin change request (if any) */}
               {renderChangeRequestBanner(i)}
 
-              {/* Paid → details + verification */}
+              {/* Paid → show verification / details */}
               {isPaid && (
                 <div className="mt-3 space-y-2">
                   <div className="p-2 bg-white rounded border text-sm">
@@ -472,7 +475,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
               {/* Not paid → allow proof submission / payment release */}
               {!isPaid && (
                 <div className="mt-3">
-                  {allowSubmit && (
+                  {canSubmit ? (
                     <>
                       <label className="block text-sm font-medium mb-1">
                         Proof of completion (text optional)
@@ -508,6 +511,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                         If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
                       </p>
                     </>
+                  ) : (
+                    !isDone && (
+                      <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                        Proof submitted — awaiting review.
+                      </div>
+                    )
                   )}
 
                   {isDone && !isPaid && (
