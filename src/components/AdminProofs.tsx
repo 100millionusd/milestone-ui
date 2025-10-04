@@ -362,7 +362,7 @@ return (
   );
 })}
 
-  {visibleRows.length === 0 && (
+{visibleRows.length === 0 && (
   <div className="text-gray-500 text-center py-10 border rounded bg-white">
     {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
   </div>
