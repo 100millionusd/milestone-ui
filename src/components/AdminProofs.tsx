@@ -259,10 +259,15 @@ const unarchiveAll = async () => {
 };
 
 // Derived archived count (server-backed)
-const archivedCount = (proofs || []).reduce((n, p) => {
-  const k = msKey(Number(p.bidId), Number(p.milestoneIndex));
-  return n + (archMap[k]?.archived ? 1 : 0);
-}, 0);
+const unarchiveAll = async () => {
+  const keys = Array.from(
+    new Set((proofs || []).map(p => msKey(Number(p.bidId), Number(p.milestoneIndex))))
+  );
+  for (const k of keys) {
+    const [bidIdStr, idxStr] = k.split(':');
+    try { await unarchiveMs(Number(bidIdStr), Number(idxStr)); } catch {}
+  }
+};
 
 if (loading) return <div className="p-6">Loading proofs…</div>;
 if (error) return <div className="p-6 text-rose-600">{error}</div>;
@@ -302,31 +307,31 @@ return (
       </div>
     </div>
 
-      {visibleProofs.map((proof) => {
-        const bidId = Number(proof.bidId);
-const idx = Number(proof.milestoneIndex);
-const k = msKey(bidId, idx);
-const isArchived = !!archMap[k]?.archived;
+    {visibleProofs.map((proof) => {
+  const bidId = Number(proof.bidId);
+  const idx = Number(proof.milestoneIndex);
+  const k = `${bidId}:${idx}`;
+  const isArchived = !!archMap[k]?.archived;
 
-return (
-  <ProofCard
-    key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
-    proof={proof}
-    bids={bids}
-    proposalId={proposalId}
-    onRefresh={refreshAll}
-    crOpenFor={crOpenFor}
-    setCrOpenFor={setCrOpenFor}
-    crComment={crComment}
-    setCrComment={setCrComment}
-    crChecklist={crChecklist}
-    setCrChecklist={setCrChecklist}
-    isArchived={isArchived}
-    pkey={k}
-    onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
-  />
-);
-      })}
+  return (
+    <ProofCard
+      key={k}  // ensure stable, milestone-level identity
+      proof={proof}
+      bids={bids}
+      proposalId={proposalId}
+      onRefresh={refreshAll}
+      crOpenFor={crOpenFor}
+      setCrOpenFor={setCrOpenFor}
+      crComment={crComment}
+      setCrComment={setCrComment}
+      crChecklist={crChecklist}
+      setCrChecklist={setCrChecklist}
+      isArchived={isArchived}  // <-- THIS MUST BE isArchived, not archived
+      pkey={k}
+      onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
+    />
+  );
+})}
 
       {visibleProofs.length === 0 && (
         <div className="text-gray-500 text-center py-10 border rounded bg-white">
