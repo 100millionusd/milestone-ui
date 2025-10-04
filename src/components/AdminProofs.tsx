@@ -1,7 +1,6 @@
 // src/components/AdminProofs.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
 import {
   getProofs,
   approveProof,
@@ -9,8 +8,12 @@ import {
   analyzeProof,
   chatProof,
   adminCompleteMilestone,
+  getMilestoneArchive,
+  archiveMilestone,
+  unarchiveMilestone,
   type Proof,
 } from '@/lib/api';
+import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
 // ---------- Gateway + helpers ----------
 const PINATA_GATEWAY =
@@ -75,24 +78,11 @@ function toMilestones(raw: any): any[] {
   return [];
 }
 
-// ---------- Archive helpers (local-only, additive) ----------
+// ---------- Archive helpers (server-backed, milestone-level) ----------
 type AdminView = 'active' | 'archived';
-const ARCHIVE_KEY = 'lx.archivedProofs.v1';
+type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
+const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
-function loadArchived(): Set<string> {
-  try {
-    const s = localStorage.getItem(ARCHIVE_KEY);
-    const arr = s ? JSON.parse(s) : [];
-    return new Set(Array.isArray(arr) ? arr.map(String) : []);
-  } catch {
-    return new Set();
-  }
-}
-function saveArchived(set: Set<string>) {
-  try {
-    localStorage.setItem(ARCHIVE_KEY, JSON.stringify([...set]));
-  } catch {}
-}
 function proofKey(row: any): string {
   const pid = Number.isFinite(row?.proposalId) ? Number(row.proposalId) : -1;
   const bid = Number.isFinite(row?.bidId) ? Number(row.bidId) : -1;
@@ -123,10 +113,9 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const [crComment, setCrComment] = useState('');
   const [crChecklist, setCrChecklist] = useState('');
 
-  // Archive view + store
-  const [view, setView] = useState<AdminView>('active');
-  const [archived, setArchived] = useState<Set<string>>(new Set());
-  useEffect(() => { setArchived(loadArchived()); }, []);
+  // Archive view + server-backed status map
+const [view, setView] = useState<AdminView>('active');
+const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   async function loadProofs() {
     try {
@@ -153,7 +142,35 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         }
       }
 
+      async function hydrateArchiveStatuses(currentProofs: any[]) {
+  const next: Record<string, ArchiveInfo> = { ...archMap };
+  const tasks: Array<Promise<void>> = [];
+
+  const pairs = (currentProofs || []).map(p => [Number(p?.bidId), Number(p?.milestoneIndex)] as const);
+  for (const [bidId, idx] of pairs) {
+    const key = msKey(bidId, idx);
+    if (next[key] !== undefined) continue;
+    tasks.push((async () => {
+      try {
+        const j = await getMilestoneArchive(bidId, idx);
+        const m = j?.milestone ?? j;
+        next[key] = {
+          archived: !!m?.archived,
+          archivedAt: m?.archivedAt ?? null,
+          archiveReason: m?.archiveReason ?? null,
+        };
+      } catch {
+        next[key] = { archived: false };
+      }
+    })());
+  }
+  if (tasks.length) {
+    await Promise.all(tasks);
+    setArchMap(next);
+  }
+}
       setProofs(filtered);
+await hydrateArchiveStatuses(filtered);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load proofs');
     } finally {
@@ -180,80 +197,126 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     } catch {}
   };
 
+  // Re-hydrate when the list of proofs changes
+useEffect(() => {
+  const arr = Array.isArray(proofs) ? proofs : [];
+  hydrateArchiveStatuses(arr);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [proofs]);
+
+// Re-hydrate when any page archives/unarchives a milestone
+useMilestonesUpdated(() => {
+  const arr = Array.isArray(proofs) ? proofs : [];
+  hydrateArchiveStatuses(arr);
+});
+
   // View derivation (Active vs Archived)
   const visibleProofs = (proofs || []).filter(p => {
-    const key = proofKey(p);
-    return view === 'archived' ? archived.has(key) : !archived.has(key);
-  });
+  const k = msKey(Number(p.bidId), Number(p.milestoneIndex));
+  const a = !!archMap[k]?.archived;
+  return view === 'archived' ? a : !a;
+});
 
-  // Archive togglers (do not affect backend)
-  const archive = (key: string) => {
-    const next = new Set(archived); next.add(key); setArchived(next); saveArchived(next);
-  };
-  const unarchive = (key: string) => {
-    const next = new Set(archived); next.delete(key); setArchived(next); saveArchived(next);
-  };
-  const unarchiveAll = () => { const next = new Set<string>(); setArchived(next); saveArchived(next); };
+  // Archive togglers (server-backed, milestone-level)
+async function archiveMs(bidId: number, idx: number, reason?: string) {
+  await archiveMilestone(bidId, idx, reason);
+  setArchMap(prev => ({
+    ...prev,
+    [msKey(bidId, idx)]: {
+      archived: true,
+      archivedAt: new Date().toISOString(),
+      archiveReason: reason ?? null,
+    },
+  }));
+}
 
-  if (loading) return <div className="p-6">Loading proofs…</div>;
-  if (error) return <div className="p-6 text-rose-600">{error}</div>;
+async function unarchiveMs(bidId: number, idx: number) {
+  await unarchiveMilestone(bidId, idx);
+  setArchMap(prev => ({
+    ...prev,
+    [msKey(bidId, idx)]: {
+      archived: false,
+      archivedAt: null,
+      archiveReason: null,
+    },
+  }));
+}
 
-  return (
-    <div className="grid gap-4">
-      {/* Archive view controls */}
-      <div className="flex items-center gap-2">
+const unarchiveAll = async () => {
+  const pairs = (proofs || []).map(p => [Number(p.bidId), Number(p.milestoneIndex)] as const);
+  for (const [bidId, idx] of pairs) {
+    try { await unarchiveMs(bidId, idx); } catch {}
+  }
+};
+
+// Derived archived count (server-backed)
+const archivedCount = (proofs || []).reduce((n, p) => {
+  const k = msKey(Number(p.bidId), Number(p.milestoneIndex));
+  return n + (archMap[k]?.archived ? 1 : 0);
+}, 0);
+
+if (loading) return <div className="p-6">Loading proofs…</div>;
+if (error) return <div className="p-6 text-rose-600">{error}</div>;
+
+return (
+  <div className="grid gap-4">
+    {/* Archive view controls */}
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setView('active')}
+        className={`px-3 py-1 rounded border text-sm ${view==='active' ? 'bg-slate-900 text-white' : ''}`}
+      >
+        Active
+      </button>
+      <button
+        onClick={() => setView('archived')}
+        className={`px-3 py-1 rounded border text-sm ${view==='archived' ? 'bg-slate-900 text-white' : ''}`}
+      >
+        Archived ({archivedCount})
+      </button>
+      <div className="ml-auto flex items-center gap-2">
         <button
-          onClick={() => setView('active')}
-          className={`px-3 py-1 rounded border text-sm ${view==='active' ? 'bg-slate-900 text-white' : ''}`}
+          onClick={refreshAll}
+          className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
         >
-          Active
+          Refresh
         </button>
-        <button
-          onClick={() => setView('archived')}
-          className={`px-3 py-1 rounded border text-sm ${view==='archived' ? 'bg-slate-900 text-white' : ''}`}
-        >
-          Archived ({archived.size})
-        </button>
-        <div className="ml-auto flex items-center gap-2">
+        {view === 'archived' && archivedCount > 0 && (
           <button
-            onClick={refreshAll}
-            className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
+            onClick={unarchiveAll}
+            className="px-3 py-1 rounded border text-sm"
+            title="Bring back all archived milestones"
           >
-            Refresh
+            Unarchive all
           </button>
-          {view === 'archived' && archived.size > 0 && (
-            <button
-              onClick={unarchiveAll}
-              className="px-3 py-1 rounded border text-sm"
-              title="Bring back all archived proofs to Active (local only)"
-            >
-              Unarchive all
-            </button>
-          )}
-        </div>
+        )}
       </div>
+    </div>
 
       {visibleProofs.map((proof) => {
-        const key = proofKey(proof);
-        const isArchived = archived.has(key);
-        return (
-          <ProofCard
-            key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
-            proof={proof}
-            bids={bids}
-            proposalId={proposalId}
-            onRefresh={refreshAll}
-            crOpenFor={crOpenFor}
-            setCrOpenFor={setCrOpenFor}
-            crComment={crComment}
-            setCrComment={setCrComment}
-            crChecklist={crChecklist}
-            setCrChecklist={setCrChecklist}
-            archived={isArchived}
-            pkey={key}
-            onArchive={(next) => (next ? archive(key) : unarchive(key))}
-          />
-        );
+        const bidId = Number(proof.bidId);
+const idx = Number(proof.milestoneIndex);
+const k = msKey(bidId, idx);
+const isArchived = !!archMap[k]?.archived;
+
+return (
+  <ProofCard
+    key={proof.proofId ?? `${proof.bidId}-${proof.milestoneIndex}`}
+    proof={proof}
+    bids={bids}
+    proposalId={proposalId}
+    onRefresh={refreshAll}
+    crOpenFor={crOpenFor}
+    setCrOpenFor={setCrOpenFor}
+    crComment={crComment}
+    setCrComment={setCrComment}
+    crChecklist={crChecklist}
+    setCrChecklist={setCrChecklist}
+    archived={isArchived}
+    pkey={k}
+    onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
+  />
+);
       })}
 
       {visibleProofs.length === 0 && (
