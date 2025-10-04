@@ -7,6 +7,7 @@ import {
   payMilestone,
   submitProof,
   saveProofFilesToDb,  // POST /api/proofs → persists for Files tab
+  getProofs, 
   type Bid,
   type Milestone,
 } from '@/lib/api';
@@ -85,6 +86,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
   // mark milestones as submitted locally so the chip updates immediately
   const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
+  // server-known proofs (prevents duplicate submissions across devices)
+  const [hasProofByIndex, setHasProofByIndex] = useState<Record<number, true>>({});
+
 
 
   // Open change requests grouped by milestone index (for vendor visibility)
@@ -186,6 +190,48 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
   }, [resolvedProposalId]);
+
+  // Load existing proofs for this bid and keep them in sync
+useEffect(() => {
+  let alive = true;
+
+  async function load() {
+    try {
+      const rows = await getProofs(Number(bid.bidId)).catch(() => []);
+      if (!alive) return;
+      const map: Record<number, true> = {};
+      (Array.isArray(rows) ? rows : []).forEach((p: any) => {
+        const i = Number(p?.milestoneIndex ?? p?.milestone_index);
+        if (Number.isFinite(i)) map[i] = true;
+      });
+      setHasProofByIndex(map);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (Number.isFinite(Number(bid.bidId))) load();
+
+  // When any client submits a proof, mark it immediately
+  const onSubmitted = (ev: any) => {
+    const j = ev?.detail;
+    if (!j) return;
+    if (Number(j?.bidId) === Number(bid.bidId) && Number.isFinite(j?.milestoneIndex)) {
+      setHasProofByIndex(prev => ({ ...prev, [Number(j.milestoneIndex)]: true }));
+    }
+  };
+
+  window.addEventListener('proofs:submitted', onSubmitted);
+  // If other tabs save proofs, reload from server
+  const reload = () => load();
+  window.addEventListener('proofs:updated', reload);
+
+  return () => {
+    alive = false;
+    window.removeEventListener('proofs:submitted', onSubmitted);
+    window.removeEventListener('proofs:updated', reload);
+  };
+}, [bid.bidId]);
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
@@ -401,17 +447,26 @@ if (crId) {
 
         {bid.milestones.map((m: Milestone, i: number) => {
   const isPaid = !!m.paymentTxHash;
-  const isDone = !!m.completed || isPaid;
+const isDone = !!m.completed || isPaid;
 
-  // 👉 show "Submitted" immediately after upload on this device
-  const submitted = !!submittedLocal[i];
-  const statusText = isPaid
-    ? 'Paid'
-    : isDone
-      ? 'Completed (Unpaid)'
-      : submitted
-        ? 'Submitted'
-        : 'Pending';
+const alreadySubmitted =
+  !!submittedLocal[i] || !!hasProofByIndex[i] || !!m.proof;
+
+const hasOpenCR = (crByMs[i] || []).length > 0;
+
+// Allow submitting only when:
+//  - not paid
+//  - not already completed
+//  - and EITHER there is no previous submission OR there IS an open Change Request
+const allowSubmit = !isPaid && !isDone && (!alreadySubmitted || hasOpenCR);
+
+const statusText = isPaid
+  ? 'Paid'
+  : isDone
+    ? 'Completed (Unpaid)'
+    : alreadySubmitted
+      ? 'Submitted'
+      : 'Pending';
 
   return (
   <div
@@ -482,70 +537,65 @@ if (crId) {
     )}
 
     {/* Not paid → allow proof submission / payment release */}
-    {!isPaid && (
-      <div className="mt-3">
-        {!isDone && (
-          <>
-            <label className="block text-sm font-medium mb-1">
-              Proof of completion (text optional)
-            </label>
-            <textarea
-              value={textByIndex[i] || ''}
-              onChange={e => setText(i, e.target.value)}
-              rows={3}
-              className="w-full p-2 border rounded text-sm mb-2"
-              placeholder="Notes (optional, files will be attached automatically)"
+{!isPaid && (
+  <div className="mt-3">
+    {(() => {
+      // Block duplicate submits unless there's an open change request
+      const hasOpenCR = !!(crByMs[i]?.length);
+      const alreadySubmitted = !!(submittedLocal[i] || m.proof);
+      const allowSubmit = !isDone && (!alreadySubmitted || hasOpenCR);
+
+      if (!allowSubmit) return null;
+
+      return (
+        <>
+          <label className="block text-sm font-medium mb-1">
+            Proof of completion (text optional)
+          </label>
+          <textarea
+            value={textByIndex[i] || ''}
+            onChange={e => setText(i, e.target.value)}
+            rows={3}
+            className="w-full p-2 border rounded text-sm mb-2"
+            placeholder="Notes (optional, files will be attached automatically)"
+          />
+          <div className="flex items-center gap-3 mb-2">
+            <input
+              type="file"
+              multiple
+              onChange={e => setFiles(i, e.target.files)}
+              className="text-sm"
             />
-            <div className="flex items-center gap-3 mb-2">
-              <input
-                type="file"
-                multiple
-                onChange={e => setFiles(i, e.target.files)}
-                className="text-sm"
-              />
-              {!!(filesByIndex[i]?.length) && (
-                <span className="text-xs text-gray-600">
-                  {filesByIndex[i].length} file(s) selected
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => handleSubmitProof(i)}
-              disabled={busyIndex === i}
-              className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-            >
-              {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-            </button>
-            <p className="text-[11px] text-gray-500 mt-1">
-              If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-            </p>
-          </>
-        )}
+            {!!(filesByIndex[i]?.length) && (
+              <span className="text-xs text-gray-600">
+                {filesByIndex[i].length} file(s) selected
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => handleSubmitProof(i)}
+            disabled={busyIndex === i}
+            className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+          >
+            {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+          </button>
+          <p className="text-[11px] text-gray-500 mt-1">
+            If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+          </p>
+        </>
+      );
+    })()}
 
-                          {isDone && !isPaid && (
-                    <div className="mt-3">
-                      <button
-                        onClick={() => handleReleasePayment(i)}
-                        disabled={busyIndex === i}
-                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+    {isDone && !isPaid && (
+      <div className="mt-3">
+        <button
+          onClick={() => handleReleasePayment(i)}
+          disabled={busyIndex === i}
+          className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+        >
+          {busyIndex === i ? 'Processing…' : 'Release Payment'}
+        </button>
       </div>
-
-      {/* Manual Payment Processor (unchanged) */}
-      <div className="mt-6">
-        <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
-      </div>
-    </div>
-  );
-};
-
-export default MilestonePayments;
+    )}
+  </div>
+)}
