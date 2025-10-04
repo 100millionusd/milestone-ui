@@ -240,12 +240,15 @@ useMilestonesUpdated(() => {
   hydrateArchiveStatuses(arr);
 });
 
-// View derivation (Active vs Archived) — de-duped by milestone
-const visibleProofs = uniqByMilestone(proofs).filter((p) => {
+// Snapshot rows with computed key + archive flag (single source of truth)
+const rows = uniqByMilestone(proofs).map((p) => {
   const k = msKeyFromProof(p);
-  const a = !!archMap[k]?.archived;
-  return view === 'archived' ? a : !a;
+  const isArchived = !!archMap[k]?.archived;
+  return { p, k, isArchived };
 });
+
+// View derivation (Active vs Archived) using the same snapshot
+const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
   // Archive togglers (server-backed, milestone-level)
 async function archiveMs(bidId: number, idx: number, reason?: string) {
@@ -283,11 +286,8 @@ const unarchiveAll = async () => {
   }
 };
 
-// Derived archived count (server-backed, de-duped by milestone)
-const archivedCount = uniqByMilestone(proofs).reduce((n, p) => {
-  const k = msKeyFromProof(p);
-  return n + (archMap[k]?.archived ? 1 : 0);
-}, 0);
+// Derived archived count (server-backed) using the same snapshot
+const archivedCount = rows.reduce((n, r) => n + (r.isArchived ? 1 : 0), 0);
 
 if (loading) return <div className="p-6">Loading proofs…</div>;
 if (error) return <div className="p-6 text-rose-600">{error}</div>;
@@ -327,15 +327,13 @@ return (
       </div>
     </div>
 
-  {visibleProofs.map((p) => {
-  const k = msKeyFromProof(p);                  // stable milestone identity
+  {visibleRows.map(({ p, k, isArchived }) => {
   const bidId = Number(p.bidId);
   const idx   = Number(p.milestoneIndex);
-  const isArchived = !!archMap[k]?.archived;
 
   return (
     <ProofCard
-      key={k}                                   // IMPORTANT: one card per milestone
+      key={k}
       proof={p}
       bids={bids}
       proposalId={proposalId}
@@ -348,7 +346,10 @@ return (
       setCrChecklist={setCrChecklist}
       isArchived={isArchived}
       pkey={k}
-      onArchive={(next) => (next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx))}
+      onArchive={(next) => {
+        if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+        return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
+      }}
     />
   );
 })}
