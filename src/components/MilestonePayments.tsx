@@ -414,115 +414,129 @@ if (crId) {
         : 'Pending';
 
   return (
-    <div
-      key={i}
-      className={`border rounded p-4 ${
-        isPaid ? 'bg-green-50 border-green-200'
-        : isDone ? 'bg-yellow-50 border-yellow-200'
-        : 'bg-gray-50'
-      }`}
-    >
-      ...
-      <span className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
-        isPaid ? 'bg-green-100 text-green-800'
-        : isDone ? 'bg-yellow-100 text-yellow-800'
-        : 'bg-gray-100 text-gray-800'
-      }`}>
-        {statusText}
-      </span>
-                </div>
-              </div>
+  <div
+    key={i}
+    className={`border rounded p-4 ${
+      isPaid ? 'bg-green-50 border-green-200'
+      : isDone ? 'bg-yellow-50 border-yellow-200'
+      : 'bg-gray-50'
+    }`}
+  >
+    <div className="flex items-start justify-between">
+      <div>
+        <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+        {m.dueDate && (
+          <div className="text-xs text-gray-600">
+            Due: {new Date(m.dueDate).toLocaleDateString()}
+          </div>
+        )}
+      </div>
+      <div className="text-right">
+        <div className="text-lg font-bold text-green-700">
+          ${Number(m.amount || 0).toLocaleString()}
+        </div>
 
-              {/* Show admin change request (if any) */}
-              {renderChangeRequestBanner(i)}
+        {/* Status chip (uses submittedLocal for instant feedback) */}
+        <span
+          className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
+            isPaid ? 'bg-green-100 text-green-800'
+            : isDone ? 'bg-yellow-100 text-yellow-800'
+            : 'bg-gray-100 text-gray-800'
+          }`}
+        >
+          {statusText}
+        </span>
+      </div>
+    </div>
 
-              {/* Paid → show verification / details */}
-              {isPaid && (
-                <div className="mt-3 space-y-2">
-                  <div className="p-2 bg-white rounded border text-sm">
-                    <div className="text-green-700">
-                      ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
-                    </div>
-                    {m.paymentTxHash && (
-                      <div className="mt-1">
-                        <span className="font-medium">TX Hash: </span>
-                        <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
-                      </div>
-                    )}
-                    {m.proof && (
-                      <div className="mt-1">
-                        <span className="font-medium">Proof: </span>{m.proof}
-                      </div>
-                    )}
-                  </div>
+    {/* Show admin change request (if any) */}
+    {renderChangeRequestBanner(i)}
 
-                  <PaymentVerification
-                    transactionHash={m.paymentTxHash as string}
-                    currency={bid.preferredStablecoin}
-                    amount={Number(m.amount || 0)}
-                    toAddress={bid.walletAddress}
-                  />
-                </div>
-              )}
+    {/* Paid → show verification / details */}
+    {isPaid && (
+      <div className="mt-3 space-y-2">
+        <div className="p-2 bg-white rounded border text-sm">
+          <div className="text-green-700">
+            ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+          </div>
+          {m.paymentTxHash && (
+            <div className="mt-1">
+              <span className="font-medium">TX Hash: </span>
+              <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
+            </div>
+          )}
+          {m.proof && (
+            <div className="mt-1">
+              <span className="font-medium">Proof: </span>{m.proof}
+            </div>
+          )}
+        </div>
 
-              {/* Not paid → allow proof submission / payment release */}
-              {!isPaid && (
-                <div className="mt-3">
-                  {!isDone && (
-                    <>
-                      <label className="block text-sm font-medium mb-1">
-                        Proof of completion (text optional)
-                      </label>
-                      <textarea
-                        value={textByIndex[i] || ''}
-                        onChange={e => setText(i, e.target.value)}
-                        rows={3}
-                        className="w-full p-2 border rounded text-sm mb-2"
-                        placeholder="Notes (optional, files will be attached automatically)"
-                      />
-                      <div className="flex items-center gap-3 mb-2">
-                        <input
-                          type="file"
-                          multiple
-                          onChange={e => setFiles(i, e.target.files)}
-                          className="text-sm"
-                        />
-                        {!!(filesByIndex[i]?.length) && (
-                          <span className="text-xs text-gray-600">
-                            {filesByIndex[i].length} file(s) selected
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleSubmitProof(i)}
-                        disabled={busyIndex === i}
-                        className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-                      </button>
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-                      </p>
-                    </>
-                  )}
+        <PaymentVerification
+          transactionHash={m.paymentTxHash as string}
+          currency={bid.preferredStablecoin}
+          amount={Number(m.amount || 0)}
+          toAddress={bid.walletAddress}
+        />
+      </div>
+    )}
 
-                  {isDone && !isPaid && (
-                    <div className="mt-3">
-                      <button
-                        onClick={() => handleReleasePayment(i)}
-                        disabled={busyIndex === i}
-                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
-                      </button>
-                    </div>
-                  )}
-                </div>
+    {/* Not paid → allow proof submission / payment release */}
+    {!isPaid && (
+      <div className="mt-3">
+        {!isDone && (
+          <>
+            <label className="block text-sm font-medium mb-1">
+              Proof of completion (text optional)
+            </label>
+            <textarea
+              value={textByIndex[i] || ''}
+              onChange={e => setText(i, e.target.value)}
+              rows={3}
+              className="w-full p-2 border rounded text-sm mb-2"
+              placeholder="Notes (optional, files will be attached automatically)"
+            />
+            <div className="flex items-center gap-3 mb-2">
+              <input
+                type="file"
+                multiple
+                onChange={e => setFiles(i, e.target.files)}
+                className="text-sm"
+              />
+              {!!(filesByIndex[i]?.length) && (
+                <span className="text-xs text-gray-600">
+                  {filesByIndex[i].length} file(s) selected
+                </span>
               )}
             </div>
-          );
-        })}
+            <button
+              onClick={() => handleSubmitProof(i)}
+              disabled={busyIndex === i}
+              className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+            >
+              {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+            </button>
+            <p className="text-[11px] text-gray-500 mt-1">
+              If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+            </p>
+          </>
+        )}
+
+        {isDone && !isPaid && (
+          <div className="mt-3">
+            <button
+              onClick={() => handleReleasePayment(i)}
+              disabled={busyIndex === i}
+              className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+            >
+              {busyIndex === i ? 'Processing…' : 'Release Payment'}
+            </button>
+          </div>
+        )}
       </div>
+    )}
+  </div>
+);
 
       {/* Manual Payment Processor (unchanged) */}
       <div className="mt-6">
