@@ -368,16 +368,7 @@ return (
   </div>
 )}
 
-function ProofCard({
-  proof,
-  bids = [],
-  proposalId,
-  onRefresh,
-  crOpenFor, setCrOpenFor,
-  crComment, setCrComment,
-  crChecklist, setCrChecklist,
-  isArchived, pkey, onArchive,
-}: {
+type ProofCardProps = {
   proof: Proof;
   bids?: any[];
   proposalId?: number;
@@ -391,13 +382,19 @@ function ProofCard({
   isArchived: boolean;
   pkey: string;
   onArchive: (archive: boolean) => void;
-}) {
-  console.log('ProofCard rendering:', {
-  bidId: proof.bidId,
-  milestoneIndex: proof.milestoneIndex,
-  key: pkey,
-  isArchived
-});
+};
+
+function ProofCard(props: ProofCardProps) {
+  const {
+    proof,
+    bids = [],
+    proposalId,
+    onRefresh,
+    crOpenFor, setCrOpenFor,
+    crComment, setCrComment,
+    crChecklist, setCrChecklist,
+    isArchived, pkey, onArchive,
+  } = props;
 
   const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState('');
