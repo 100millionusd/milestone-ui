@@ -477,75 +477,77 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       )}
 
       {/* Not paid → allow proof submission / payment release */}
-      {!isPaid && (
-        <div className="mt-3">
-          {canSubmit ? (
-            <>
-              <label className="block text-sm font-medium mb-1">
-                Proof of completion (text optional)
-              </label>
-              <textarea
-                value={textByIndex[i] || ''}
-                onChange={e => setText(i, e.target.value)}
-                rows={3}
-                className="w-full p-2 border rounded text-sm mb-2"
-                placeholder="Notes (optional, files will be attached automatically)"
-              />
-              <div className="flex items-center gap-3 mb-2">
-                <input
-                  type="file"
-                  multiple
-                  onChange={e => setFiles(i, e.target.files)}
-                  className="text-sm"
-                />
-                {!!(filesByIndex[i]?.length) && (
-                  <span className="text-xs text-gray-600">
-                    {filesByIndex[i].length} file(s) selected
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => handleSubmitProof(i)}
-                disabled={busyIndex === i}
-                className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-              >
-                {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-              </button>
-              <p className="text-[11px] text-gray-500 mt-1">
-                If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-              </p>
-            </>
-          ) : (
-            !isDone && (
-              <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
-                Proof submitted — awaiting review.
-              </div>
-            )
-          )}
-
-          {isDone && !isPaid && (
-            <div className="mt-3">
-              <button
-                onClick={() => handleReleasePayment(i)}
-                disabled={busyIndex === i}
-                className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-              >
-                {busyIndex === i ? 'Processing…' : 'Release Payment'}
-              </button>
-            </div>
+{!isPaid && (
+  <div className="mt-3">
+    {canSubmit ? (
+      <>
+        <label className="block text-sm font-medium mb-1">
+          Proof of completion (text optional)
+        </label>
+        <textarea
+          value={textByIndex[i] || ''}
+          onChange={e => setText(i, e.target.value)}
+          rows={3}
+          className="w-full p-2 border rounded text-sm mb-2"
+          placeholder="Notes (optional, files will be attached automatically)"
+        />
+        <div className="flex items-center gap-3 mb-2">
+          <input
+            type="file"
+            multiple
+            onChange={e => setFiles(i, e.target.files)}
+            className="text-sm"
+          />
+          {!!(filesByIndex[i]?.length) && (
+            <span className="text-xs text-gray-600">
+              {filesByIndex[i].length} file(s) selected
+            </span>
           )}
         </div>
-      )}
-    </div>
-  );
-})}
+        <button
+          onClick={() => handleSubmitProof(i)}
+          disabled={busyIndex === i}
+          className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+        >
+          {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+        </button>
+        <p className="text-[11px] text-gray-500 mt-1">
+          If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+        </p>
+      </>
+    ) : (
+      !isDone && (
+        <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+          Proof submitted — awaiting review.
+        </div>
+      )
+    )}
 
-      {/* Manual Payment Processor (unchanged) */}
-      <div className="mt-6">
-        <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
+    {isDone && !isPaid && (
+      <div className="mt-3">
+        <button
+          onClick={() => handleReleasePayment(i)}
+          disabled={busyIndex === i}
+          className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+        >
+          {busyIndex === i ? 'Processing…' : 'Release Payment'}
+        </button>
       </div>
-    </div>
-  );
+    )}
+  </div>
+)}
+</div> {/* ← closes the single milestone card */}
+
+))} {/* ← closes .map(...) */}
+
+</div> {/* ← closes “Milestones list” wrapper */}
+
+{/* Manual Payment Processor (unchanged) */}
+<div className="mt-6">
+  <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
+</div>
+</div> {/* ← closes outer component container */}
+);
 };
 
 export default MilestonePayments;
