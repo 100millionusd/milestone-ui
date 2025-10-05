@@ -21,7 +21,7 @@ interface Web3AuthContextType {
   provider: SafeEventEmitterProvider | null;
   address: string | null;
   role: Role;
-  token: string | null;           // kept for compatibility (server auth uses cookie)
+  token: string | null; // kept for compatibility (server auth uses cookie)
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -88,12 +88,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
+
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
+
         const w3a = new Web3Auth({
           clientId,
           web3AuthNetwork: 'sapphire_devnet',
           privateKeyProvider,
-          uiConfig: {},
+          uiConfig: {}, // keep empty; no modalConfig here
         });
 
         // Adapters
@@ -111,7 +113,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
+        // IMPORTANT: no modalConfig with string keys like "openlogin"
         await w3a.initModal();
+
         setWeb3auth(w3a);
 
         if (w3a.provider) {
@@ -154,7 +158,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Profile completeness helper
   const isProfileIncomplete = (p: any) => {
-    // Tweak required fields here:
     const hasName = !!(p?.vendorName || p?.companyName);
     const hasEmail = !!p?.email;
     return !(hasName && hasEmail);
@@ -178,7 +181,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace(nextParam || '/');
       }
     } catch {
-      // If anything fails, just land on home
       router.replace('/');
     }
   };
@@ -188,8 +190,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (mounted) {
       refreshRole();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
+  }, [mounted]); // eslint-disable-line
 
   const login = async () => {
     if (!web3auth) return;
@@ -207,7 +208,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // 2) Ask server for a nonce (COOKIE MODE: POST /auth/nonce)
+      // 2) Ask server for a nonce
       const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,11 +223,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         .getSigner()
         .then(s => s.signMessage(nonce));
 
-      // 4) Verify (COOKIE MODE: sets httpOnly auth_token)
+      // 4) Verify (sets httpOnly auth cookie)
       const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // IMPORTANT
+        credentials: 'include',
         body: JSON.stringify({ address: addr, signature }),
       });
       if (!verifyRes.ok) throw new Error('Auth verify failed');
@@ -234,14 +235,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const { role: srvRole } = await verifyRes.json();
       const normRole = normalizeRole(srvRole);
 
-      // Cookie mode → no need to keep a JWT in localStorage
       setToken(null);
       localStorage.removeItem('lx_jwt');
 
       setRole(normRole);
       localStorage.setItem('lx_role', normRole);
 
-      // Confirm from cookie & then enforce profile completion
       await refreshRole();
       await postLoginProfileRedirect();
     } catch (e) {
@@ -256,6 +255,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch {}
+
     setProvider(null);
     setAddress(null);
     setToken(null);
@@ -263,11 +263,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
-    // Optional: send them home after logout
+
     try { router.replace('/'); } catch {}
   };
 
-  // 🔒 Re-auth on account change to avoid stale JWTs
+  // Re-auth on account/network change
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
@@ -275,10 +275,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
-        // clear server cookie if route exists; ignore errors
         await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
       } finally {
-        // clear local state/storage
         setProvider(null);
         setAddress(null);
         setToken(null);
@@ -286,13 +284,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem('lx_addr');
         localStorage.removeItem('lx_jwt');
         localStorage.removeItem('lx_role');
-        // redirect to profile/login flow to issue a fresh JWT for the new account
         window.location.href = '/vendor/login';
       }
     };
 
     const onChainChanged = () => {
-      // simplest & safest: reload to reset providers/networks
       window.location.reload();
     };
 
