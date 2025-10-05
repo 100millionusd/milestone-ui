@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Web3Auth } from '@web3auth/modal';
-import { CHAIN_NAMESPACES, SafeEventEmitterProvider } from '@web3auth/base';
-import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
+import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@web3auth/base';
+import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
 import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
@@ -21,7 +21,6 @@ interface Web3AuthContextType {
   address: string | null;
   role: Role;
   token: string | null;
-  isInitialized: boolean; // Add this to track initialization status
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -33,34 +32,28 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   address: null,
   role: 'guest',
   token: null,
-  isInitialized: false, // Default to false
   login: async () => {},
   logout: async () => {},
   refreshRole: async () => {},
 });
 
-// ---- Environment Variables ----
+// ---- Env ----
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-// Use more reliable RPC endpoints
-const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC || 
-  'https://eth-sepolia.g.alchemy.com/v2/demo'; // Free public endpoint
+const envRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC || '';
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
-// Improved chain config with backup RPCs
+// Use relative paths so Safari treats cookies as first-party via Next rewrites
+const API_BASE = '';
+
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
-  chainId: '0xaa36a7', // Sepolia
-  rpcTarget: rpcUrl,
+  chainId: '0xaa36a7', // 11155111 (Sepolia)
+  rpcTarget: envRpc || 'https://rpc.ankr.com/eth_sepolia',
   displayName: 'Sepolia Testnet',
-  blockExplorer: 'https://sepolia.etherscan.io',
+  blockExplorerUrl: 'https://sepolia.etherscan.io',
   ticker: 'ETH',
-  tickerName: 'Ethereum',
-};
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  'https://milestone-api-production.up.railway.app';
+  tickerName: 'Ethereum Sepolia',
+} as const;
 
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -72,9 +65,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<Role>('guest');
   const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false); // Track initialization status
 
-  // Restore session from localStorage
+  // Restore session (address/role/token from storage; server role still comes from cookie)
   useEffect(() => {
     try {
       setToken(localStorage.getItem('lx_jwt') || null);
@@ -85,129 +77,57 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize Web3Auth - IMPROVED VERSION
+  // Init Web3Auth (MetaMask + WalletConnect only, NO OpenLogin anywhere)
   useEffect(() => {
-    let isMounted = true;
-
-    const initWeb3Auth = async () => {
+    const init = async () => {
       try {
         if (!clientId) {
-          console.error('❌ Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
+          console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
 
-        console.log('🔄 Initializing Web3Auth...');
+        const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        // Test RPC connection first
-        try {
-          const testProvider = new ethers.JsonRpcProvider(rpcUrl);
-          await testProvider.getNetwork();
-          console.log('✅ RPC connection successful');
-        } catch (rpcError) {
-          console.error('❌ RPC connection failed:', rpcError);
-          // Fallback to a different RPC
-          chainConfig.rpcTarget = 'https://rpc.sepolia.org';
-          console.log('🔄 Using fallback RPC:', chainConfig.rpcTarget);
-        }
-
-        // Initialize Web3Auth core with simpler config
-        const web3authInstance = new Web3Auth({
+        const w3a = new Web3Auth({
           clientId,
-          web3AuthNetwork: 'testnet', // Use 'testnet' for broader compatibility
-          chainConfig,
-          uiConfig: {
-            theme: 'dark',
-            loginMethodsOrder: ['google', 'github'],
-            appLogo: '/logo.png',
-          },
-          enableLogging: true,
+          // keep devnet if that’s what your key is registered for; warning is harmless
+          web3AuthNetwork: 'sapphire_devnet',
+          privateKeyProvider,
+          uiConfig: {},
         });
 
-        // Configure OpenLogin Adapter with minimal settings
-        const openloginAdapter = new OpenloginAdapter({
-          adapterSettings: {
-            network: 'testnet',
-            clientId,
-            uxMode: 'popup',
-            whiteLabel: {
-              name: "Milestone App",
-              logoLight: "https://your-app.com/logo-light.png",
-              logoDark: "https://your-app.com/logo-dark.png",
-              defaultLanguage: "en",
-              dark: true,
-            },
-          },
-        });
+        // Adapters (EOA wallets only)
+        w3a.configureAdapter(new MetamaskAdapter());
 
-        // Configure MetaMask Adapter
-        const metamaskAdapter = new MetamaskAdapter({
-          clientId,
-          sessionTime: 3600,
-          web3AuthNetwork: 'testnet',
-          chainConfig,
-        });
-
-        // Configure adapters
-        web3authInstance.configureAdapter(openloginAdapter);
-        web3authInstance.configureAdapter(metamaskAdapter);
-
-        // Only configure WalletConnect if project ID is available
         if (wcProjectId) {
-          const walletConnectAdapter = new WalletConnectV2Adapter({
-            clientId,
-            sessionTime: 3600,
-            web3AuthNetwork: 'testnet',
-            chainConfig,
-            adapterSettings: {
-              projectId: wcProjectId,
-              qrcodeModalOptions: {
-                themeMode: 'dark',
+          w3a.configureAdapter(
+            new WalletConnectV2Adapter({
+              adapterSettings: {
+                projectId: wcProjectId,
+                qrcodeModalOptions: { themeMode: 'dark' },
               },
-            },
-          });
-          web3authInstance.configureAdapter(walletConnectAdapter);
+            })
+          );
         }
 
-        console.log('🔄 Initializing Web3Auth modal...');
-        await web3authInstance.initModal();
-        
-        if (isMounted) {
-          setWeb3auth(web3authInstance);
-          setIsInitialized(true); // Mark as initialized
-          console.log('✅ Web3Auth initialized successfully');
+        // Explicitly hide OpenLogin so the modal never tries to init it
+        await w3a.initModal({
+          modalConfig: {
+            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
+          },
+        });
 
-          // Check if user is already connected
-          if (web3authInstance.connected && web3authInstance.provider) {
-            console.log('🔄 User already connected, setting provider...');
-            setProvider(web3authInstance.provider);
-            try {
-              const ethersProvider = new ethers.BrowserProvider(web3authInstance.provider as any);
-              const signer = await ethersProvider.getSigner();
-              const addr = await signer.getAddress();
-              setAddress(addr);
-              localStorage.setItem('lx_addr', addr);
-              console.log('✅ Connected address:', addr);
-            } catch (error) {
-              console.error('❌ Error getting address:', error);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('❌ Web3Auth initialization error:', error);
-        if (isMounted) {
-          setIsInitialized(true); // Still mark as initialized to prevent blocking
-        }
+        setWeb3auth(w3a);
+
+        // IMPORTANT: do NOT touch ethers/getSigner here. Wait for user to connect().
+      } catch (e) {
+        console.error('Web3Auth init error:', e);
       }
     };
-
-    initWeb3Auth();
-
-    return () => {
-      isMounted = false;
-    };
+    init();
   }, []);
 
-  // Refresh role from server
+  // Read role from the server (uses httpOnly cookie set by /auth/verify)
   const refreshRole = async () => {
     try {
       const res = await fetch(`${API_BASE}/auth/role`, {
@@ -225,18 +145,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         setAddress(data.address);
       }
     } catch (e) {
-      console.warn('⚠️ refreshRole failed:', e);
+      console.warn('refreshRole failed:', e);
     }
   };
 
-  // Profile completeness helper
   const isProfileIncomplete = (p: any) => {
     const hasName = !!(p?.vendorName || p?.companyName);
     const hasEmail = !!p?.email;
     return !(hasName && hasEmail);
   };
 
-  // After login, check profile and redirect
   const postLoginProfileRedirect = async () => {
     try {
       const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
@@ -262,125 +180,72 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (mounted) {
       refreshRole();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  // Login function with better error handling
   const login = async () => {
-    if (!web3auth || !isInitialized) {
-      console.error('❌ Web3Auth not initialized or still initializing');
-      return;
-    }
-
+    if (!web3auth) return;
     try {
-      console.log('🔄 Starting login process...');
-      
-      // Connect via Web3Auth modal
+      // Opens modal (MetaMask / WalletConnect)
       const web3authProvider = await web3auth.connect();
-      if (!web3authProvider) {
-        throw new Error('No provider returned from Web3Auth');
-      }
+      if (!web3authProvider) throw new Error('No provider from Web3Auth');
 
       setProvider(web3authProvider);
-      console.log('✅ Web3Auth connected');
 
-      // Get address from provider with timeout
-      const getAddressWithTimeout = async () => {
-        const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Address fetch timeout')), 10000)
-        );
-        const addressPromise = (async () => {
-          const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-          const signer = await ethersProvider.getSigner();
-          return await signer.getAddress();
-        })();
-        
-        return Promise.race([addressPromise, timeoutPromise]);
-      };
-
-      const addr = await getAddressWithTimeout();
+      // Resolve address AFTER connect
+      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
+      const signer = await ethersProvider.getSigner();
+      const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
-      console.log('✅ Address obtained:', addr);
 
-      // Get nonce from server
-      console.log('🔄 Getting nonce from server...');
+      // Ask server for a nonce
       const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ address: addr }),
       });
-      
       if (!nonceRes.ok) throw new Error('Failed to get nonce');
       const { nonce } = await nonceRes.json();
-      console.log('✅ Nonce received');
 
-      // Sign the nonce
-      console.log('🔄 Signing nonce...');
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-      const signer = await ethersProvider.getSigner();
-      const signature = await signer.signMessage(nonce);
-      console.log('✅ Nonce signed');
+      // Sign nonce
+      const signature = await (new ethers.BrowserProvider(web3authProvider as any))
+        .getSigner()
+        .then(s => s.signMessage(nonce));
 
-      // Verify signature with server
-      console.log('🔄 Verifying signature with server...');
+      // Verify (sets httpOnly cookie)
       const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ address: addr, signature }),
       });
-      
-      if (!verifyRes.ok) {
-        const errorText = await verifyRes.text();
-        throw new Error(`Auth verification failed: ${errorText}`);
-      }
+      if (!verifyRes.ok) throw new Error('Auth verify failed');
 
       const { role: srvRole } = await verifyRes.json();
       const normRole = normalizeRole(srvRole);
 
-      // Update local state
       setToken(null);
       localStorage.removeItem('lx_jwt');
+
       setRole(normRole);
       localStorage.setItem('lx_role', normRole);
 
-      console.log('✅ Authentication successful, role:', normRole);
-
       await refreshRole();
       await postLoginProfileRedirect();
-
-    } catch (error) {
-      console.error('❌ Login error:', error);
-      // Clear state on error
-      setProvider(null);
-      setAddress(null);
-      localStorage.removeItem('lx_addr');
+    } catch (e) {
+      console.error('Login error:', e);
     }
   };
 
-  // Logout function
   const logout = async () => {
     try {
-      if (web3auth) {
-        await web3auth.logout();
-        console.log('✅ Web3Auth logout successful');
-      }
-    } catch (error) {
-      console.error('❌ Web3Auth logout error:', error);
-    }
-    
+      await web3auth?.logout();
+    } catch {}
     try {
-      await fetch(`${API_BASE}/auth/logout`, { 
-        method: 'POST', 
-        credentials: 'include' 
-      });
-      console.log('✅ Server logout successful');
-    } catch (error) {
-      console.error('❌ Server logout error:', error);
-    }
-
-    // Clear local state
+      await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+    } catch {}
     setProvider(null);
     setAddress(null);
     setToken(null);
@@ -388,41 +253,31 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
-
-    console.log('✅ Local state cleared');
-
-    try { 
-      router.replace('/'); 
-    } catch (error) {
-      console.error('❌ Router redirect error:', error);
-    }
+    try { router.replace('/'); } catch {}
   };
 
-  // Handle account/chain changes
+  // Re-auth on account/network change
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
     const eth = (window as any).ethereum;
     if (!eth?.on) return;
 
-    const onAccountsChanged = async (accounts: string[]) => {
-      console.log('🔄 Accounts changed:', accounts);
-      if (accounts.length === 0) {
-        // User disconnected all accounts
-        await logout();
-      } else {
-        // Account changed - reauthenticate
-        try {
-          await logout();
-          window.location.href = '/vendor/login';
-        } catch (error) {
-          console.error('❌ Account change handling error:', error);
-        }
+    const onAccountsChanged = async (_accounts: string[]) => {
+      try {
+        await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+      } finally {
+        setProvider(null);
+        setAddress(null);
+        setToken(null);
+        setRole('guest');
+        localStorage.removeItem('lx_addr');
+        localStorage.removeItem('lx_jwt');
+        localStorage.removeItem('lx_role');
+        window.location.href = '/vendor/login';
       }
     };
 
     const onChainChanged = () => {
-      console.log('🔄 Chain changed, reloading...');
       window.location.reload();
     };
 
@@ -433,37 +288,17 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         eth.removeListener?.('accountsChanged', onAccountsChanged);
         eth.removeListener?.('chainChanged', onChainChanged);
-      } catch (error) {
-        console.error('❌ Error removing listeners:', error);
-      }
+      } catch {}
     };
   }, []);
 
-  if (!mounted) {
-    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
-  }
+  if (!mounted) return null;
 
   return (
-    <Web3AuthContext.Provider value={{ 
-      web3auth, 
-      provider, 
-      address, 
-      role, 
-      token, 
-      isInitialized, // Expose initialization status
-      login, 
-      logout, 
-      refreshRole 
-    }}>
+    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}>
       {children}
     </Web3AuthContext.Provider>
   );
 }
 
-export const useWeb3Auth = () => {
-  const context = useContext(Web3AuthContext);
-  if (!context) {
-    throw new Error('useWeb3Auth must be used within Web3AuthProvider');
-  }
-  return context;
-};
+export const useWeb3Auth = () => useContext(Web3AuthContext);
