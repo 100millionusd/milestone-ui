@@ -205,8 +205,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const postLoginProfileRedirect = async () => {
     try {
-      const r = await fetch(api('/vendor/profile'), { credentials: 'include' });
-      const p = r.ok ? await r.json() : null;
+      const p = await getVendorProfile().catch(() => null);
 
       const url = new URL(window.location.href);
       const nextParam = url.searchParams.get('next');
