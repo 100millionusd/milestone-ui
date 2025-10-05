@@ -39,23 +39,59 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 
 // ---- Env ----
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC || 'https://rpc.ankr.com/eth_sepolia';
+const envRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC || '';
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
-const chainConfig = {
+const BASE_CHAIN = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
-  chainId: '0xaa36a7', // Sepolia
-  rpcTarget: rpcUrl,
+  chainId: '0xaa36a7', // 11155111
   displayName: 'Sepolia Testnet',
   blockExplorerUrl: 'https://sepolia.etherscan.io',
   ticker: 'ETH',
   tickerName: 'Ethereum Sepolia',
-};
+} as const;
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE ||
   'https://milestone-api-production.up.railway.app';
+
+// ---- RPC health probe (fixes: "JsonRpcProvider failed to detect network") ----
+async function probeRpc(url: string, timeoutMs = 3500): Promise<boolean> {
+  if (!url) return false;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      headers: { 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!r.ok) return false;
+    const j = await r.json().catch(() => ({} as any));
+    const hex = (j?.result || '').toString();
+    return /^0x[0-9a-f]+$/i.test(hex) && parseInt(hex, 16) === 11155111;
+  } catch {
+    return false;
+  }
+}
+
+async function pickHealthyRpc(): Promise<string> {
+  const candidates = [
+    envRpc, // your env, if set
+    'https://rpc.sepolia.org',       // public sepolia
+    'https://1rpc.io/sepolia',       // public sepolia
+    'https://rpc.ankr.com/eth_sepolia',
+  ].filter(Boolean);
+  for (const url of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await probeRpc(url)) return url;
+  }
+  // last resort (still better than empty)
+  return 'https://rpc.sepolia.org';
+}
 
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -79,7 +115,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (NO OpenLogin adapter)
+  // Init Web3Auth (no OpenLogin)
   useEffect(() => {
     const init = async () => {
       try {
@@ -87,6 +123,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
+
+        const rpcTarget = await pickHealthyRpc();
+        const chainConfig = { ...BASE_CHAIN, rpcTarget };
 
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
@@ -111,7 +150,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // Hide OpenLogin entry so modal doesn’t try to init it
+        // Make sure OpenLogin is hidden (prevents "openlogin is not a valid adapter")
         await w3a.initModal({
           modalConfig: {
             [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
@@ -119,8 +158,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         setWeb3auth(w3a);
-
-        // Do NOT call getSigner() here; we only resolve address after login()
+        // Do NOT call getSigner() here; only after user connects in login()
       } catch (e) {
         console.error('Web3Auth init error:', e);
       }
@@ -150,14 +188,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Profile completeness helper
   const isProfileIncomplete = (p: any) => {
     const hasName = !!(p?.vendorName || p?.companyName);
     const hasEmail = !!p?.email;
     return !(hasName && hasEmail);
   };
 
-  // After login, check profile and redirect
   const postLoginProfileRedirect = async () => {
     try {
       const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
