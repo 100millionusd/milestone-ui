@@ -2,9 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Web3Auth } from '@web3auth/modal';
-import { CHAIN_NAMESPACES, SafeEventEmitterProvider } from '@web3auth/base';
+import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
-import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
 import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
@@ -21,7 +20,7 @@ interface Web3AuthContextType {
   provider: SafeEventEmitterProvider | null;
   address: string | null;
   role: Role;
-  token: string | null; // kept for compatibility (server auth uses cookie)
+  token: string | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -66,13 +65,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('guest');
-  const [token, setToken] = useState<string | null>(null); // not required for cookie mode
+  const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   // Restore session (address/role/token from storage; server role still comes from cookie)
   useEffect(() => {
     try {
-      setToken(localStorage.getItem('lx_jwt') || null); // optional/unused in cookie mode
+      setToken(localStorage.getItem('lx_jwt') || null);
       setRole(normalizeRole(localStorage.getItem('lx_role')));
       setAddress(localStorage.getItem('lx_addr'));
     } finally {
@@ -80,7 +79,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth
+  // Init Web3Auth (NO OpenLogin adapter)
   useEffect(() => {
     const init = async () => {
       try {
@@ -95,11 +94,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           clientId,
           web3AuthNetwork: 'sapphire_devnet',
           privateKeyProvider,
-          uiConfig: {}, // keep empty; no modalConfig here
+          uiConfig: {},
         });
 
-        // Adapters
-        w3a.configureAdapter(new OpenloginAdapter({ adapterSettings: { uxMode: 'popup' } }));
+        // Only EOA wallets
         w3a.configureAdapter(new MetamaskAdapter());
 
         if (wcProjectId) {
@@ -113,19 +111,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // IMPORTANT: no modalConfig with string keys like "openlogin"
-        await w3a.initModal();
+        // Hide OpenLogin entry so modal doesn’t try to init it
+        await w3a.initModal({
+          modalConfig: {
+            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
+          },
+        });
 
         setWeb3auth(w3a);
 
-        if (w3a.provider) {
-          setProvider(w3a.provider);
-          const ethersProvider = new ethers.BrowserProvider(w3a.provider as any);
-          const signer = await ethersProvider.getSigner();
-          const addr = await signer.getAddress();
-          setAddress(addr);
-          localStorage.setItem('lx_addr', addr);
-        }
+        // Do NOT call getSigner() here; we only resolve address after login()
       } catch (e) {
         console.error('Web3Auth init error:', e);
       }
@@ -139,14 +134,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch(`${API_BASE}/auth/role`, {
         method: 'GET',
         cache: 'no-store',
-        credentials: 'include', // send cookie
+        credentials: 'include',
       });
       if (!res.ok) return;
       const data = await res.json();
       const norm = normalizeRole(data?.role);
       setRole(norm);
       localStorage.setItem('lx_role', norm);
-      // Optional: if server echoes address, keep it in sync
       if (data?.address && typeof data.address === 'string') {
         localStorage.setItem('lx_addr', data.address);
         setAddress(data.address);
@@ -169,7 +163,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
       const p = r.ok ? await r.json() : null;
 
-      // Prefer ?next=… from the current URL if present
       const url = new URL(window.location.href);
       const nextParam = url.searchParams.get('next');
       const fallback = pathname || '/';
@@ -190,25 +183,26 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (mounted) {
       refreshRole();
     }
-  }, [mounted]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
 
   const login = async () => {
     if (!web3auth) return;
     try {
-      // 0) Connect to a wallet or social
+      // Connect to a wallet (MetaMask / WalletConnect)
       const web3authProvider = await web3auth.connect();
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
 
       setProvider(web3authProvider);
 
-      // 1) Resolve address
+      // Resolve address AFTER connect
       const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
       const signer = await ethersProvider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // 2) Ask server for a nonce
+      // Ask server for nonce
       const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -218,12 +212,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       if (!nonceRes.ok) throw new Error('Failed to get nonce');
       const { nonce } = await nonceRes.json();
 
-      // 3) Sign the nonce
+      // Sign nonce
       const signature = await (new ethers.BrowserProvider(web3authProvider as any))
         .getSigner()
         .then(s => s.signMessage(nonce));
 
-      // 4) Verify (sets httpOnly auth cookie)
+      // Verify (sets httpOnly cookie)
       const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,7 +249,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch {}
-
     setProvider(null);
     setAddress(null);
     setToken(null);
@@ -263,7 +256,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
-
     try { router.replace('/'); } catch {}
   };
 
