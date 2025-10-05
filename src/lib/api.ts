@@ -144,7 +144,8 @@ function getApiBase(): string {
 }
 
 export const API_BASE = getApiBase();
-const url = (path: string) => `${API_BASE}${path}`;
+const trimSlashEnd = (s: string) => s.replace(/\/+$/, "");
+const isBrowser = typeof window !== "undefined";
 
 // ---- Helpers ----
 function coerceJson(val: any) {
@@ -194,7 +195,59 @@ function isAuthError(e: any) {
   );
 }
 
-// ---- Fetch helper ----
+// ---- Safari-safe fetch fallback (external → same-origin → /api) ----
+async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
+  // path must start with "/"
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const bases: string[] = [];
+
+  if (!isBrowser) {
+    bases.push(trimSlashEnd(API_BASE)); // server-side: only external
+  } else {
+    // 1) external (your current default)
+    bases.push(trimSlashEnd(API_BASE));
+    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
+    bases.push("");
+    // 3) same-origin "/api" (if your rewrites use /api/:path*)
+    bases.push("/api");
+  }
+
+  let lastResp: Response | null = null;
+
+  for (const b of bases) {
+    const url = `${b}${p}`;
+    try {
+      const resp = await fetch(url, init);
+      if (resp.ok) return resp;
+
+      // Only fall through on the auth-ish failures (Safari third‑party cookies → 401/403)
+      // and "route not found" (404 when rewrites don’t match this style).
+      if ([401, 403, 404].includes(resp.status)) {
+        lastResp = resp;
+        continue;
+      }
+      // For other statuses (e.g. 500), don't keep trying different bases.
+      return resp;
+    } catch {
+      // Network error — try next base.
+      continue;
+    }
+  }
+
+  // If we get here, nothing succeeded; throw using the last response status if we have it.
+  if (lastResp) {
+    const status = lastResp.status;
+    let msg = `HTTP ${status}`;
+    try {
+      const j = await lastResp.json();
+      msg = j?.error || j?.message || msg;
+    } catch {}
+    throw new Error(msg);
+  }
+  throw new Error("Failed to fetch");
+}
+
+// ---- JSON Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
 
@@ -204,8 +257,6 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     const sep = path.includes("?") ? "&" : "?";
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
-
-  const fullUrl = url(fullPath);
 
   // Attach JWT if available (cookie is primary)
   const token = getJwt();
@@ -229,16 +280,16 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     headers["Content-Type"] = "application/json";
   }
 
- const r = await fetch(fullUrl, {
-  ...options, // allow caller overrides EXCEPT headers
-  cache: "no-store",
-  mode: "cors",
-  redirect: "follow",
-  credentials: "include", // send auth cookie
-  headers, // our merged headers MUST come last
-}).catch((e) => {
-  throw new Error(e?.message || "Failed to fetch");
-});
+  const init: RequestInit = {
+    ...options,
+    cache: "no-store",
+    mode: "cors",
+    redirect: "follow",
+    credentials: "include",
+    headers,
+  };
+
+  const r = await fetchWithFallback(fullPath, init);
 
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
@@ -927,22 +978,26 @@ export async function chatProof(
 ) {
   if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
   const token = getJwt();
-  const res = await fetch(
-    `${API_BASE}/proofs/${encodeURIComponent(String(proofId))}/chat`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        "Content-Type": "application/json",
-        // ask server for an SSE stream
-        Accept: "text/event-stream",
-        Pragma: "no-cache",
-        "Cache-Control": "no-cache",
-      },
-      body: JSON.stringify({ messages }),
-    }
+
+  const init: RequestInit = {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+      // ask server for an SSE stream
+      Accept: "text/event-stream",
+      Pragma: "no-cache",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify({ messages }),
+  };
+
+  const res = await fetchWithFallback(
+    `/proofs/${encodeURIComponent(String(proofId))}/chat`,
+    init
   );
+
   await streamSSE(res, onToken);
 }
 
@@ -964,16 +1019,18 @@ export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
   const token = getJwt();
-  const r = await fetch(`${API_BASE}/ipfs/upload-file`, {
+
+  const init: RequestInit = {
     method: "POST",
     body: fd,
     mode: "cors",
     redirect: "follow",
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     credentials: "include",
-  }).catch((e) => {
-    throw new Error(e?.message || "Failed to upload file");
-  });
+  };
+
+  const r = await fetchWithFallback(`/ipfs/upload-file`, init);
+
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j?.error || `HTTP ${r.status}`);
@@ -1022,8 +1079,6 @@ export async function uploadProofFiles(
   }));
 }
 
-// 2) Save the uploaded file URLs into your proofs table via /api/proofs
-//    (this is what makes them appear in the Project “Files” tab automatically)
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
 //    (this is what makes them appear in the Project “Files” tab automatically)
 export async function saveProofFilesToDb(params: {
@@ -1183,7 +1238,3 @@ export default {
   testConnection,
   postJSON,
 };
-
-
-
-

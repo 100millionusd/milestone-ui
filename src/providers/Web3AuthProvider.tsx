@@ -9,6 +9,8 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
+
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -182,25 +184,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Cookie-based role from server
   const refreshRole = async () => {
-    try {
-      const res = await fetch(api('/auth/role'), {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'include',
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const norm = normalizeRole(data?.role);
-      setRole(norm);
-      localStorage.setItem('lx_role', norm);
-      if (data?.address && typeof data.address === 'string') {
-        localStorage.setItem('lx_addr', data.address);
-        setAddress(data.address);
-      }
-    } catch (e) {
-      console.warn('refreshRole failed:', e);
+  try {
+    const info = await getAuthRole(); // { role, address? }
+    setRole(info.role);
+    localStorage.setItem('lx_role', info.role);
+    if (info.address) {
+      setAddress(info.address);
+      localStorage.setItem('lx_addr', info.address);
     }
-  };
+  } catch (e) {
+    console.warn('refreshRole failed:', e);
+  }
+};
 
   const isProfileIncomplete = (p: any) => {
     const hasName = !!(p?.vendorName || p?.companyName);
@@ -233,58 +228,60 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   }, [mounted]);
 
   const login = async () => {
-    if (!web3auth) return;
-    try {
-      // 1) Connect wallet
-      const web3authProvider = await web3auth.connect();
-      if (!web3authProvider) throw new Error('No provider from Web3Auth');
-      setProvider(web3authProvider);
+  if (!web3auth) return;
+  try {
+    // 0) Connect wallet
+    const web3authProvider = await web3auth.connect();
+    if (!web3authProvider) throw new Error('No provider from Web3Auth');
+    setProvider(web3authProvider);
 
-      // 2) Resolve address AFTER connect
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-      const signer = await ethersProvider.getSigner();
-      const addr = await signer.getAddress();
-      setAddress(addr);
-      localStorage.setItem('lx_addr', addr);
+    // 1) Address
+    const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
+    const signer = await ethersProvider.getSigner();
+    const addr = await signer.getAddress();
+    setAddress(addr);
+    localStorage.setItem('lx_addr', addr);
 
-      // 3) Get server nonce (cookie mode)
-      const nonceRes = await fetch(api('/auth/nonce'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ address: addr }),
-      });
-      if (!nonceRes.ok) throw new Error('Failed to get nonce');
-      const { nonce } = await nonceRes.json();
+    // 2) Nonce
+    const { nonce } = await postJSON('/auth/nonce', { address: addr });
 
-      // 4) Sign nonce
-      const signature = await (new ethers.BrowserProvider(web3authProvider as any))
-        .getSigner()
-        .then(s => s.signMessage(nonce));
+    // 3) Sign
+    const signature = await signer.signMessage(nonce);
 
-      // 5) Verify → server sets httpOnly cookie
-      const verifyRes = await fetch(api('/auth/verify'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ address: addr, signature }),
-      });
-      if (!verifyRes.ok) throw new Error('Auth verify failed');
+    // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
+    const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      const { role: srvRole } = await verifyRes.json();
-      const normRole = normalizeRole(srvRole);
+    // 5) Update role locally
+    setRole(srvRole || 'vendor');
+    localStorage.setItem('lx_role', srvRole || 'vendor');
 
-      setToken(null);
-      localStorage.removeItem('lx_jwt');
-      setRole(normRole);
-      localStorage.setItem('lx_role', normRole);
-
-      await refreshRole();
-      await postLoginProfileRedirect();
-    } catch (e) {
-      console.error('Login error:', e);
+    // 6) Optional: confirm role from server (works via cookie or Bearer)
+    const info = await getAuthRole();
+    setRole(info.role);
+    if (info.address) {
+      setAddress(info.address);
+      localStorage.setItem('lx_addr', info.address);
     }
-  };
+
+    // 7) Profile redirect using helper (includes Bearer for Safari)
+    try {
+      const p = await getVendorProfile();
+      const url = new URL(window.location.href);
+      const nextParam = url.searchParams.get('next');
+      const fallback = pathname || '/';
+      if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
+        const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
+        router.replace(dest);
+      } else {
+        router.replace(nextParam || '/');
+      }
+    } catch {
+      router.replace('/');
+    }
+  } catch (e) {
+    console.error('Login error:', e);
+  }
+};
 
   const logout = async () => {
     try {
