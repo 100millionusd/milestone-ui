@@ -637,6 +637,11 @@ export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
 }
 
 // ---- Vendor ----
+export async function getVendorProfile(): Promise<any> {
+  // returns the logged-in vendor’s profile from your backend
+  return await apiFetch('/vendor/profile');
+}
+
 export async function getVendorBids(): Promise<Bid[]> {
   try {
     const rows = await apiFetch("/vendor/bids");
