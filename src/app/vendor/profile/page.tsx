@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BASE } from '@/lib/api';
+import { getVendorProfile, postJSON } from '@/lib/api'; // ✅ Safari-safe helpers
 
 type Address = {
   line1: string;
@@ -57,9 +57,8 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
+        // ✅ Safari-safe: goes through api.ts (adds Bearer if cookie is blocked)
+        const j = await getVendorProfile();
 
         // Server may return address as string or object — normalize to object.
         const a = j?.address ?? {};
@@ -126,19 +125,9 @@ export default function VendorProfilePage() {
         return;
       }
 
-      const r = await fetch(`${API_BASE}/vendor/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
+      // ✅ Safari-safe: uses api.ts helper so Bearer is sent if cookie is blocked
+      await postJSON('/vendor/profile', payload);
 
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${r.status}`);
-      }
-
-      await r.json();
       router.push('/'); // or router.back();
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
