@@ -1192,6 +1192,7 @@ export default {
   updateBid,
 
   // vendor/admin
+  getVendorProfile,
   getVendorBids,
   completeMilestone,
   getVendorPayments,
