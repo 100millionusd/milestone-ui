@@ -127,24 +127,19 @@ export type ChatMsg = { role: "user" | "assistant"; content: string };
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
-function getApiBase(): string {
-  if (typeof window === "undefined") {
-    const s =
-      (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-      DEFAULT_API_BASE;
-    return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
-  }
-  const c =
-    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-    DEFAULT_API_BASE;
-  return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
-}
+// ✅ In the browser: use RELATIVE paths (so cookies are first-party → Safari works).
+// ✅ On the server (SSR / RSC): use ABSOLUTE API base.
+const isBrowser = typeof window !== "undefined";
+const API_ABSOLUTE =
+  (typeof process !== "undefined" &&
+    ((process as any).env?.NEXT_PUBLIC_API_BASE_URL ||
+     (process as any).env?.NEXT_PUBLIC_API_BASE ||
+     (process as any).env?.API_BASE_URL)) ||
+  DEFAULT_API_BASE;
 
-export const API_BASE = getApiBase();
-const url = (path: string) => `${API_BASE}${path}`;
+export const API_BASE = isBrowser ? "" : API_ABSOLUTE.replace(/\/+$/, "");
+const apiUrl = (path: string) => (isBrowser ? path : `${API_BASE}${path}`);
+
 
 // ---- Helpers ----
 function coerceJson(val: any) {
@@ -205,7 +200,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
-  const fullUrl = url(fullPath);
+  const fullUrl = apiUrl(fullPath);
 
   // Attach JWT if available (cookie is primary)
   const token = getJwt();
@@ -928,21 +923,20 @@ export async function chatProof(
   if (!Number.isFinite(proofId)) throw new Error("Invalid proof ID");
   const token = getJwt();
   const res = await fetch(
-    `${API_BASE}/proofs/${encodeURIComponent(String(proofId))}/chat`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        "Content-Type": "application/json",
-        // ask server for an SSE stream
-        Accept: "text/event-stream",
-        Pragma: "no-cache",
-        "Cache-Control": "no-cache",
-      },
-      body: JSON.stringify({ messages }),
-    }
-  );
+  apiUrl(`/proofs/${encodeURIComponent(String(proofId))}/chat`),
+  {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      Pragma: "no-cache",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify({ messages }),
+  }
+);
   await streamSSE(res, onToken);
 }
 
@@ -964,16 +958,17 @@ export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
   const token = getJwt();
-  const r = await fetch(`${API_BASE}/ipfs/upload-file`, {
-    method: "POST",
-    body: fd,
-    mode: "cors",
-    redirect: "follow",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    credentials: "include",
-  }).catch((e) => {
-    throw new Error(e?.message || "Failed to upload file");
-  });
+  const r = await fetch(apiUrl(`/ipfs/upload-file`), {
+  method: "POST",
+  body: fd,
+  // mode stays fine; relative path means no CORS problems anyway
+  mode: "cors",
+  redirect: "follow",
+  headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  credentials: "include",
+}).catch((e) => {
+  throw new Error(e?.message || "Failed to upload file");
+});
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j?.error || `HTTP ${r.status}`);
