@@ -1,3 +1,4 @@
+// src/providers/Web3AuthProvider.tsx
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
@@ -39,21 +40,65 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 
 // ---- Env ----
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const envRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC || '';
+
+// If you have an ANKR API key, we’ll build the Sepolia URL with it.
+// Or you can supply a full RPC url in NEXT_PUBLIC_SEPOLIA_RPC.
+const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
+const envRpc =
+  process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
+  (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
+
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
-// Use relative paths so Safari treats cookies as first-party via Next rewrites
-const API_BASE = '';
-
-const chainConfig = {
+const BASE_CHAIN = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
   chainId: '0xaa36a7', // 11155111 (Sepolia)
-  rpcTarget: envRpc || 'https://rpc.ankr.com/eth_sepolia',
   displayName: 'Sepolia Testnet',
   blockExplorerUrl: 'https://sepolia.etherscan.io',
   ticker: 'ETH',
   tickerName: 'Ethereum Sepolia',
 } as const;
+
+// Use relative endpoints if NEXT rewrites proxy your backend (best for Safari).
+// If NEXT_PUBLIC_API_BASE_URL is set, we’ll call that absolute origin instead.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
+
+// ---- RPC health probe (prevents “failed to detect network”) ----
+async function probeRpc(url: string, timeoutMs = 3500): Promise<boolean> {
+  if (!url) return false;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      headers: { 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!r.ok) return false;
+    const j = await r.json().catch(() => ({} as any));
+    const hex = (j?.result || '').toString();
+    return /^0x[0-9a-f]+$/i.test(hex) && parseInt(hex, 16) === 11155111;
+  } catch {
+    return false;
+  }
+}
+
+async function pickHealthyRpc(): Promise<string> {
+  const candidates = [
+    envRpc,                             // ← your env (ANKR with key if provided)
+    'https://rpc.sepolia.org',
+    'https://1rpc.io/sepolia',
+    'https://rpc.ankr.com/eth_sepolia', // public fallback (no key)
+  ].filter(Boolean);
+  for (const url of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await probeRpc(url)) return url;
+  }
+  return 'https://rpc.sepolia.org';
+}
 
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -77,7 +122,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (MetaMask + WalletConnect only, NO OpenLogin anywhere)
+  // Init Web3Auth (NO OpenLogin adapter)
   useEffect(() => {
     const init = async () => {
       try {
@@ -86,17 +131,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const rpcTarget = await pickHealthyRpc();
+        const chainConfig = { ...BASE_CHAIN, rpcTarget };
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
         const w3a = new Web3Auth({
           clientId,
-          // keep devnet if that’s what your key is registered for; warning is harmless
-          web3AuthNetwork: 'sapphire_devnet',
+          web3AuthNetwork: 'sapphire_mainnet', // production network
           privateKeyProvider,
           uiConfig: {},
         });
 
-        // Adapters (EOA wallets only)
+        // Only EOA wallets (no OpenLogin)
         w3a.configureAdapter(new MetamaskAdapter());
 
         if (wcProjectId) {
@@ -110,7 +156,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // Explicitly hide OpenLogin so the modal never tries to init it
+        // Hide OpenLogin from modal to avoid “openlogin is not a valid adapter”
         await w3a.initModal({
           modalConfig: {
             [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
@@ -118,8 +164,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         setWeb3auth(w3a);
-
-        // IMPORTANT: do NOT touch ethers/getSigner here. Wait for user to connect().
+        // Do NOT call getSigner() here; only after user connects in login()
       } catch (e) {
         console.error('Web3Auth init error:', e);
       }
@@ -127,10 +172,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
-  // Read role from the server (uses httpOnly cookie set by /auth/verify)
+  // Read role from the server (cookie-based)
   const refreshRole = async () => {
     try {
-      const res = await fetch(`${API_BASE}/auth/role`, {
+      const res = await fetch(api('/auth/role'), {
         method: 'GET',
         cache: 'no-store',
         credentials: 'include',
@@ -157,7 +202,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const postLoginProfileRedirect = async () => {
     try {
-      const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
+      const r = await fetch(api('/vendor/profile'), { credentials: 'include' });
       const p = r.ok ? await r.json() : null;
 
       const url = new URL(window.location.href);
@@ -186,21 +231,21 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     if (!web3auth) return;
     try {
-      // Opens modal (MetaMask / WalletConnect)
+      // Connect to a wallet (MetaMask / WalletConnect)
       const web3authProvider = await web3auth.connect();
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
 
       setProvider(web3authProvider);
 
-      // Resolve address AFTER connect
+      // Resolve address AFTER connect (avoid “eth_requestAccounts method not found”)
       const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
       const signer = await ethersProvider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // Ask server for a nonce
-      const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
+      // Ask server for nonce
+      const nonceRes = await fetch(api('/auth/nonce'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -214,8 +259,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         .getSigner()
         .then(s => s.signMessage(nonce));
 
-      // Verify (sets httpOnly cookie)
-      const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
+      // Verify (sets httpOnly auth cookie)
+      const verifyRes = await fetch(api('/auth/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -244,8 +289,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       await web3auth?.logout();
     } catch {}
     try {
-      await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
     } catch {}
+
     setProvider(null);
     setAddress(null);
     setToken(null);
@@ -253,6 +299,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
+
     try { router.replace('/'); } catch {}
   };
 
@@ -264,7 +311,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
-        await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
       } finally {
         setProvider(null);
         setAddress(null);
