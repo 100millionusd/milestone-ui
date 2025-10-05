@@ -128,17 +128,19 @@ export type ChatMsg = { role: "user" | "assistant"; content: string };
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
 function getApiBase(): string {
-  // On the browser, use relative URLs so the httpOnly cookie is first-party (works in Safari).
-  if (typeof window !== "undefined") return "";
-
-  // On the server (SSR/functions), use env to reach the upstream API.
-  const s =
-    (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
+  if (typeof window === "undefined") {
+    const s =
+      (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
+      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
+      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
+      DEFAULT_API_BASE;
+    return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
+  }
+  const c =
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
     DEFAULT_API_BASE;
-
-  return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
+  return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
 export const API_BASE = getApiBase();
@@ -1066,22 +1068,6 @@ export async function archiveMilestone(bidId: number, milestoneIndex: number, re
   );
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("milestones:updated")); // <— broadcast
-  return j;
-}
-
-export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
-  const res = await fetch(
-    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
-    {
-      method: "DELETE",
-      credentials: "include",
-      cache: "no-store",
-    }
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("milestones:updated")); // <— broadcast
   return j;
 }
 
@@ -1097,6 +1083,20 @@ export async function getMilestoneArchive(bidId: number, milestoneIndex: number)
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
   return j; // { ok, milestone: { archived, archivedAt, archiveReason } }
+}
+
+export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
+  const res = await fetch(
+    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
+    {
+      method: "DELETE",
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+  return j;
 }
 
 // ---- Health ----
@@ -1183,5 +1183,7 @@ export default {
   testConnection,
   postJSON,
 };
+
+
 
 
