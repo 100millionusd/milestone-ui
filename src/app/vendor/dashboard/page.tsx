@@ -9,6 +9,12 @@ import { getBids, getProofs, archiveProof } from '@/lib/api';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import SendFunds from '@/components/SendFunds';
 
+// ---- RPC (read-only) ----
+// Uses env when present (NEXT_PUBLIC_SEPOLIA_RPC) and falls back to public Sepolia.
+const RPC_URL =
+  (process.env.NEXT_PUBLIC_SEPOLIA_RPC || '').replace(/\/+$/, '') ||
+  'https://rpc.ankr.com/eth_sepolia';
+
 // --- ERC20 + Tokens (unchanged) ---
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -90,8 +96,11 @@ export default function VendorDashboard() {
     if (!address) return;
     try {
       let ethersProvider: ethers.Provider;
-      if (provider) ethersProvider = new ethers.BrowserProvider(provider as any);
-      else ethersProvider = new ethers.JsonRpcProvider('https://rpc.ankr.com/eth_sepolia');
+      if (provider) {
+        ethersProvider = new ethers.BrowserProvider(provider as any);
+      } else {
+        ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
+      }
 
       const rawBalance = await ethersProvider.getBalance(address);
       const ethBal = ethers.formatEther(rawBalance);
