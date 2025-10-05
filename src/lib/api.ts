@@ -128,19 +128,17 @@ export type ChatMsg = { role: "user" | "assistant"; content: string };
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
 function getApiBase(): string {
-  if (typeof window === "undefined") {
-    const s =
-      (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-      DEFAULT_API_BASE;
-    return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
-  }
-  const c =
+  // On the browser, use relative URLs so the httpOnly cookie is first-party (works in Safari).
+  if (typeof window !== "undefined") return "";
+
+  // On the server (SSR/functions), use env to reach the upstream API.
+  const s =
+    (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
     DEFAULT_API_BASE;
-  return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
+
+  return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
 export const API_BASE = getApiBase();

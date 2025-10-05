@@ -51,11 +51,6 @@ const BASE_CHAIN = {
   tickerName: 'Ethereum Sepolia',
 } as const;
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  'https://milestone-api-production.up.railway.app';
-
 // ---- RPC health probe (fixes: "JsonRpcProvider failed to detect network") ----
 async function probeRpc(url: string, timeoutMs = 3500): Promise<boolean> {
   if (!url) return false;
@@ -81,15 +76,14 @@ async function probeRpc(url: string, timeoutMs = 3500): Promise<boolean> {
 async function pickHealthyRpc(): Promise<string> {
   const candidates = [
     envRpc, // your env, if set
-    'https://rpc.sepolia.org',       // public sepolia
-    'https://1rpc.io/sepolia',       // public sepolia
+    'https://rpc.sepolia.org',
+    'https://1rpc.io/sepolia',
     'https://rpc.ankr.com/eth_sepolia',
   ].filter(Boolean);
   for (const url of candidates) {
     // eslint-disable-next-line no-await-in-loop
     if (await probeRpc(url)) return url;
   }
-  // last resort (still better than empty)
   return 'https://rpc.sepolia.org';
 }
 
@@ -126,7 +120,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = { ...BASE_CHAIN, rpcTarget };
-
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
         const w3a = new Web3Auth({
@@ -150,7 +143,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // Make sure OpenLogin is hidden (prevents "openlogin is not a valid adapter")
+        // Hide OpenLogin in modal to avoid "openlogin is not a valid adapter"
         await w3a.initModal({
           modalConfig: {
             [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
@@ -158,7 +151,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         setWeb3auth(w3a);
-        // Do NOT call getSigner() here; only after user connects in login()
+        // do not call getSigner() here; only after connect in login()
       } catch (e) {
         console.error('Web3Auth init error:', e);
       }
@@ -169,7 +162,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Read role from the server (uses httpOnly cookie set by /auth/verify)
   const refreshRole = async () => {
     try {
-      const res = await fetch(`${API_BASE}/auth/role`, {
+      const res = await fetch('/api/auth/role', {
         method: 'GET',
         cache: 'no-store',
         credentials: 'include',
@@ -196,7 +189,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const postLoginProfileRedirect = async () => {
     try {
-      const r = await fetch(`${API_BASE}/vendor/profile`, { credentials: 'include' });
+      const r = await fetch('/api/vendor/profile', { credentials: 'include' });
       const p = r.ok ? await r.json() : null;
 
       const url = new URL(window.location.href);
@@ -239,7 +232,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('lx_addr', addr);
 
       // Ask server for nonce
-      const nonceRes = await fetch(`${API_BASE}/auth/nonce`, {
+      const nonceRes = await fetch('/api/auth/nonce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -254,7 +247,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         .then(s => s.signMessage(nonce));
 
       // Verify (sets httpOnly cookie)
-      const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
+      const verifyRes = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -283,7 +276,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       await web3auth?.logout();
     } catch {}
     try {
-      await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     } catch {}
     setProvider(null);
     setAddress(null);
@@ -303,7 +296,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
-        await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
       } finally {
         setProvider(null);
         setAddress(null);
