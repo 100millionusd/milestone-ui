@@ -1,7 +1,7 @@
 // src/providers/Web3AuthProvider.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
@@ -10,7 +10,6 @@ import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
 import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
-
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -44,8 +43,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 
 // Web3Auth network: keep devnet by default to avoid 400s (switch with env when allowlisted)
-const WEB3AUTH_NETWORK =
-  process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
+const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
 
 // ANKR: either give a full RPC in NEXT_PUBLIC_SEPOLIA_RPC,
 // or set NEXT_PUBLIC_ANKR_API_KEY and we’ll build the URL for you.
@@ -124,78 +122,87 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (NO OpenLogin adapter)
-  useEffect(() => {
-    const init = async () => {
-      try {
-        if (!clientId) {
-          console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
-          return;
-        }
+  // ---------- LAZY INIT FOR WEB3AUTH ----------
+  const initOnceRef = useRef<Promise<Web3Auth | null> | null>(null);
 
-        const rpcTarget = await pickHealthyRpc();
-        const chainConfig = {
-          chainNamespace: CHAIN_NAMESPACES.EIP155,
-          chainId: '0xaa36a7', // 11155111
-          rpcTarget,
-          displayName: 'Sepolia Testnet',
-          blockExplorerUrl: 'https://sepolia.etherscan.io',
-          ticker: 'ETH',
-          tickerName: 'Ethereum Sepolia',
-        };
+  async function ensureWeb3Auth(): Promise<Web3Auth> {
+    if (web3auth) return web3auth;
+    if (initOnceRef.current) {
+      const existing = await initOnceRef.current;
+      if (!existing) throw new Error('Web3Auth failed to initialize');
+      return existing;
+    }
 
-        const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
-
-        const w3a = new Web3Auth({
-          clientId,
-          web3AuthNetwork: WEB3AUTH_NETWORK, // 'sapphire_devnet' by default
-          privateKeyProvider,
-          uiConfig: {},
-        });
-
-        // Wallet adapters (EOA only)
-        w3a.configureAdapter(new MetamaskAdapter());
-
-        if (wcProjectId) {
-          w3a.configureAdapter(
-            new WalletConnectV2Adapter({
-              adapterSettings: {
-                projectId: wcProjectId,
-                qrcodeModalOptions: { themeMode: 'dark' },
-              },
-            })
-          );
-        }
-
-        // Hide OpenLogin entry to avoid “openlogin is not a valid adapter”
-        await w3a.initModal({
-          modalConfig: {
-            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
-          },
-        });
-
-        setWeb3auth(w3a);
-      } catch (e) {
-        console.error('Web3Auth init error:', e);
+    initOnceRef.current = (async () => {
+      if (!clientId) {
+        console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
+        return null;
       }
-    };
-    init();
-  }, []);
+
+      const rpcTarget = await pickHealthyRpc();
+      const chainConfig = {
+        chainNamespace: CHAIN_NAMESPACES.EIP155,
+        chainId: '0xaa36a7', // 11155111
+        rpcTarget,
+        displayName: 'Sepolia Testnet',
+        blockExplorerUrl: 'https://sepolia.etherscan.io',
+        ticker: 'ETH',
+        tickerName: 'Ethereum Sepolia',
+      };
+
+      const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
+
+      const w3a = new Web3Auth({
+        clientId,
+        web3AuthNetwork: WEB3AUTH_NETWORK, // 'sapphire_devnet' by default
+        privateKeyProvider,
+        uiConfig: {},
+      });
+
+      // Wallet adapters (EOA only)
+      w3a.configureAdapter(new MetamaskAdapter());
+
+      if (wcProjectId) {
+        w3a.configureAdapter(
+          new WalletConnectV2Adapter({
+            adapterSettings: {
+              projectId: wcProjectId,
+              qrcodeModalOptions: { themeMode: 'dark' },
+            },
+          })
+        );
+      }
+
+      // Hide OpenLogin entry to avoid “openlogin is not a valid adapter”
+      await w3a.initModal({
+        modalConfig: {
+          [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
+        },
+      });
+
+      setWeb3auth(w3a);
+      return w3a;
+    })();
+
+    const w3a = await initOnceRef.current;
+    if (!w3a) throw new Error('Web3Auth failed to initialize');
+    return w3a;
+  }
 
   // Cookie-based role from server
   const refreshRole = async () => {
-  try {
-    const info = await getAuthRole(); // { role, address? }
-    setRole(info.role);
-    localStorage.setItem('lx_role', info.role);
-    if (info.address) {
-      setAddress(info.address);
-      localStorage.setItem('lx_addr', info.address);
+    try {
+      const info = await getAuthRole(); // { role, address? }
+      setRole(info.role);
+      localStorage.setItem('lx_role', info.role);
+      if (info.address) {
+        setAddress(info.address);
+        localStorage.setItem('lx_addr', info.address);
+      }
+    } catch (e) {
+      console.warn('refreshRole failed:', e);
     }
-  } catch (e) {
-    console.warn('refreshRole failed:', e);
-  }
-};
+  };
 
   const isProfileIncomplete = (p: any) => {
     const hasName = !!(p?.vendorName || p?.companyName);
@@ -227,60 +234,60 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   }, [mounted]);
 
   const login = async () => {
-  if (!web3auth) return;
-  try {
-    // 0) Connect wallet
-    const web3authProvider = await web3auth.connect();
-    if (!web3authProvider) throw new Error('No provider from Web3Auth');
-    setProvider(web3authProvider);
-
-    // 1) Address
-    const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-    const signer = await ethersProvider.getSigner();
-    const addr = await signer.getAddress();
-    setAddress(addr);
-    localStorage.setItem('lx_addr', addr);
-
-    // 2) Nonce
-    const { nonce } = await postJSON('/auth/nonce', { address: addr });
-
-    // 3) Sign
-    const signature = await signer.signMessage(nonce);
-
-    // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
-    const { role: srvRole } = await loginWithSignature(addr, signature);
-
-    // 5) Update role locally
-    setRole(srvRole || 'vendor');
-    localStorage.setItem('lx_role', srvRole || 'vendor');
-
-    // 6) Optional: confirm role from server (works via cookie or Bearer)
-    const info = await getAuthRole();
-    setRole(info.role);
-    if (info.address) {
-      setAddress(info.address);
-      localStorage.setItem('lx_addr', info.address);
-    }
-
-    // 7) Profile redirect using helper (includes Bearer for Safari)
+    const w3a = await ensureWeb3Auth(); // <-- LAZY INIT
     try {
-      const p = await getVendorProfile();
-      const url = new URL(window.location.href);
-      const nextParam = url.searchParams.get('next');
-      const fallback = pathname || '/';
-      if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
-        const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
-        router.replace(dest);
-      } else {
-        router.replace(nextParam || '/');
+      // 0) Connect wallet
+      const web3authProvider = await w3a.connect();
+      if (!web3authProvider) throw new Error('No provider from Web3Auth');
+      setProvider(web3authProvider);
+
+      // 1) Address
+      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
+      const signer = await ethersProvider.getSigner();
+      const addr = await signer.getAddress();
+      setAddress(addr);
+      localStorage.setItem('lx_addr', addr);
+
+      // 2) Nonce
+      const { nonce } = await postJSON('/auth/nonce', { address: addr });
+
+      // 3) Sign
+      const signature = await signer.signMessage(nonce);
+
+      // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
+      const { role: srvRole } = await loginWithSignature(addr, signature);
+
+      // 5) Update role locally
+      setRole(srvRole || 'vendor');
+      localStorage.setItem('lx_role', srvRole || 'vendor');
+
+      // 6) Optional: confirm role from server (works via cookie or Bearer)
+      const info = await getAuthRole();
+      setRole(info.role);
+      if (info.address) {
+        setAddress(info.address);
+        localStorage.setItem('lx_addr', info.address);
       }
-    } catch {
-      router.replace('/');
+
+      // 7) Profile redirect using helper (includes Bearer for Safari)
+      try {
+        const p = await getVendorProfile();
+        const url = new URL(window.location.href);
+        const nextParam = url.searchParams.get('next');
+        const fallback = pathname || '/';
+        if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
+          const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
+          router.replace(dest);
+        } else {
+          router.replace(nextParam || '/');
+        }
+      } catch {
+        router.replace('/');
+      }
+    } catch (e) {
+      console.error('Login error:', e);
     }
-  } catch (e) {
-    console.error('Login error:', e);
-  }
-};
+  };
 
   const logout = async () => {
     try {
@@ -296,7 +303,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('lx_addr');
     localStorage.removeItem('lx_jwt');
     localStorage.removeItem('lx_role');
-    try { router.replace('/'); } catch {}
+    try {
+      router.replace('/');
+    } catch {}
   };
 
   // Reset on account/network change
@@ -306,7 +315,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
-      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {}); } finally {
+      try {
+        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
+      } finally {
         setProvider(null);
         setAddress(null);
         setToken(null);
@@ -333,7 +344,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   if (!mounted) return null;
 
   return (
-    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}>
+    <Web3AuthContext.Provider
+      value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}
+    >
       {children}
     </Web3AuthContext.Provider>
   );
