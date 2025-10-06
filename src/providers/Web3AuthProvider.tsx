@@ -1,4 +1,3 @@
-// src/providers/Web3AuthProvider.tsx
 'use client';
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
@@ -10,7 +9,7 @@ import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
 
-// ⚠️ IMPORTANT: alias the API logout to avoid name clash with our local logout()
+// ⚠️ alias API logout to avoid name clash
 import {
   postJSON,
   loginWithSignature,
@@ -51,48 +50,45 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
 
-// ANKR: either give a full RPC in NEXT_PUBLIC_SEPOLIA_RPC,
-// or set NEXT_PUBLIC_ANKR_API_KEY and we’ll build the URL for you.
 const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
 const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
-  (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : ''); // only if key present
+  (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
 
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
 // ---------- HARD LOGOUT HELPERS ----------
 function clearWeb3AuthCaches() {
-  if (typeof localStorage === 'undefined') return;
-
-  // Stop Web3Auth from remembering the last adapter (prevents auto-reconnect)
-  try { localStorage.removeItem('web3auth_cached_adapter'); } catch {}
-
-  // WalletConnect v2 caches
-  try {
-    const keys = Object.keys(localStorage);
-    for (const k of keys) {
-      if (k.startsWith('wc@2') || k.startsWith('walletconnect')) {
-        localStorage.removeItem(k);
+  if (typeof localStorage !== 'undefined') {
+    try { localStorage.removeItem('web3auth_cached_adapter'); } catch {}
+    try {
+      const keys = Object.keys(localStorage);
+      for (const k of keys) {
+        if (k.startsWith('wc@2') || k.startsWith('walletconnect')) localStorage.removeItem(k);
       }
-    }
-  } catch {}
-
-  // Common deeplink flag
-  try { localStorage.removeItem('WALLETCONNECT_DEEPLINK_CHOICE'); } catch {}
+    } catch {}
+    try { localStorage.removeItem('WALLETCONNECT_DEEPLINK_CHOICE'); } catch {}
+  }
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const kill: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i)!;
+        if (k.includes('web3auth') || k.startsWith('wc@2') || k.includes('walletconnect')) {
+          kill.push(k);
+        }
+      }
+      kill.forEach((k) => sessionStorage.removeItem(k));
+    } catch {}
+  }
 }
 
 async function disconnectAdaptersSafely(w3a: Web3Auth | null) {
   if (!w3a) return;
-
-  // Try adapter-specific disconnects (best-effort)
   try {
     const wc = w3a.getAdapter?.(WALLET_ADAPTERS.WALLET_CONNECT_V2) as any;
-    if (wc?.disconnectSession) {
-      await wc.disconnectSession().catch(() => {});
-    }
+    if (wc?.disconnectSession) await wc.disconnectSession().catch(() => {});
   } catch {}
-
-  // Web3Auth generic logout (clears internal session)
   try { await w3a.logout(); } catch {}
 }
 
@@ -122,7 +118,7 @@ const isBareAnkr = (u: string) => /rpc\.ankr\.com\/eth_sepolia\/?$/.test(u);
 
 async function pickHealthyRpc(): Promise<string> {
   const candidates = [
-    envRpc && !isBareAnkr(envRpc) ? envRpc : '', // only use ANKR if key is present
+    envRpc && !isBareAnkr(envRpc) ? envRpc : '',
     'https://rpc.sepolia.org',
     'https://1rpc.io/sepolia',
   ].filter(Boolean);
@@ -130,7 +126,6 @@ async function pickHealthyRpc(): Promise<string> {
     // eslint-disable-next-line no-await-in-loop
     if (await probeRpc(url)) return url;
   }
-  // worst-case
   return 'https://rpc.sepolia.org';
 }
 
@@ -157,7 +152,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // ---------- LAZY INIT FOR WEB3AUTH ----------
+  // LAZY INIT
   const initOnceRef = useRef<Promise<Web3Auth | null> | null>(null);
 
   async function ensureWeb3Auth(): Promise<Web3Auth> {
@@ -177,7 +172,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const rpcTarget = await pickHealthyRpc();
       const chainConfig = {
         chainNamespace: CHAIN_NAMESPACES.EIP155,
-        chainId: '0xaa36a7', // 11155111
+        chainId: '0xaa36a7',
         rpcTarget,
         displayName: 'Sepolia Testnet',
         blockExplorerUrl: 'https://sepolia.etherscan.io',
@@ -189,12 +184,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
       const w3a = new Web3Auth({
         clientId,
-        web3AuthNetwork: WEB3AUTH_NETWORK, // 'sapphire_devnet' by default
+        web3AuthNetwork: WEB3AUTH_NETWORK,
         privateKeyProvider,
         uiConfig: {},
       });
 
-      // Wallet adapters (EOA only)
       w3a.configureAdapter(new MetamaskAdapter());
 
       if (wcProjectId) {
@@ -208,7 +202,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      // Hide OpenLogin entry to avoid “openlogin is not a valid adapter”
       await w3a.initModal({
         modalConfig: {
           [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
@@ -227,7 +220,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Cookie-based role from server
   const refreshRole = async () => {
     try {
-      const info = await getAuthRole(); // { role, address? }
+      const info = await getAuthRole();
       setRole(info.role);
       localStorage.setItem('lx_role', info.role);
       if (info.address) {
@@ -251,7 +244,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const url = new URL(window.location.href);
       const nextParam = url.searchParams.get('next');
       const fallback = pathname || '/';
-
       if (!p || isProfileIncomplete(p)) {
         router.replace(`/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`);
       } else {
@@ -270,32 +262,23 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     const w3a = await ensureWeb3Auth();
     try {
-      // 0) Connect wallet
       const web3authProvider = await w3a.connect();
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
       setProvider(web3authProvider);
 
-      // 1) Address
       const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
       const signer = await ethersProvider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // 2) Nonce
       const { nonce } = await postJSON('/auth/nonce', { address: addr });
-
-      // 3) Sign
       const signature = await signer.signMessage(nonce);
-
-      // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
       const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      // 5) Update role locally
       setRole(srvRole || 'vendor');
       localStorage.setItem('lx_role', srvRole || 'vendor');
 
-      // 6) Optional: confirm role from server (works via cookie or Bearer)
       const info = await getAuthRole();
       setRole(info.role);
       if (info.address) {
@@ -303,7 +286,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('lx_addr', info.address);
       }
 
-      // 7) Profile redirect
       await postLoginProfileRedirect();
     } catch (e) {
       console.error('Login error:', e);
@@ -311,32 +293,30 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // 1) Disconnect wallet/adapters + Web3Auth internal session
+    // 1) Disconnect adapters + Web3Auth
     await disconnectAdaptersSafely(web3auth);
 
-    // 2) Tell your backend (local Next route) to clear cookies on this domain
-    try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch {}
+    // 2) Clear cookies on *this* domain (Next API route)
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
 
-    // 3) Also call external API logout (no-op if not needed)
-    try {
-      await apiLogout();
-    } catch {}
+    // 3) Also ask external API to drop any cookie/Bearer fallback
+    try { await apiLogout(); } catch {}
 
-    // 4) Clear app-local auth state & caches
+    // 4) Clear local app/session caches to prevent auto-reconnect
     try { localStorage.removeItem('lx_addr'); } catch {}
     try { localStorage.removeItem('lx_jwt'); } catch {}
     try { localStorage.removeItem('lx_role'); } catch {}
     clearWeb3AuthCaches();
 
-    // 5) Reset React state
+    // 5) Reset provider state and kill lazy-init promise so next login is fresh
     setProvider(null);
     setAddress(null);
     setToken(null);
     setRole('guest');
+    setWeb3auth(null);
+    initOnceRef.current = null;
 
-    // 6) Hard redirect to login (prevents any in-memory leftovers)
+    // 6) Hard redirect so nothing can resurrect session
     try { window.location.replace('/vendor/login?loggedout=1'); } catch {}
   };
 
@@ -347,9 +327,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
-      try {
-        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
-      } finally {
+      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}); } finally {
         setProvider(null);
         setAddress(null);
         setToken(null);
