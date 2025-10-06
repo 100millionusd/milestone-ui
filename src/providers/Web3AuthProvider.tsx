@@ -289,34 +289,39 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // 1) Disconnect wallet/adapters + Web3Auth internal session
+  try {
+    // A) Disconnect wallet/adapters + Web3Auth internal session
     await disconnectAdaptersSafely(web3auth);
+  } catch {}
 
-    // 2) Clear backend session on this site (same-origin)
-    try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch {}
+  // B) Tell backend(s) to clear cookies/sessions (do BOTH; whichever exists will work)
+  try {
+    // local Next route that force-clears cookies (we add it in step 2)
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  } catch {}
+  try {
+    // external API logout (from lib/api) — harmless if it’s a no-op
+    // IMPORTANT: make sure it's imported as `logout as apiLogout`
+    await apiLogout();
+  } catch {}
 
-    // 3) Also clear external API session (if used)
-    try {
-      await apiLogout(); // from lib/api (alias)
-    } catch {}
+  // C) Clear app-local auth state & any reconnect caches
+  try { localStorage.removeItem('lx_addr'); } catch {}
+  try { localStorage.removeItem('lx_jwt'); } catch {}
+  try { localStorage.removeItem('lx_role'); } catch {}
 
-    // 4) Clear local app state & caches
-    try { localStorage.removeItem('lx_addr'); } catch {}
-    try { localStorage.removeItem('lx_jwt'); } catch {}
-    try { localStorage.removeItem('lx_role'); } catch {}
-    clearWeb3AuthCaches();
+  // Web3Auth & WalletConnect caches to stop auto-reconnect
+  clearWeb3AuthCaches();
 
-    // 5) Reset provider state
-    setProvider(null);
-    setAddress(null);
-    setToken(null);
-    setRole('guest');
+  // D) Reset in-memory state
+  setProvider(null);
+  setAddress(null);
+  setToken(null);
+  setRole('guest');
 
-    // 6) Hard redirect (guarantees clean memory)
-    try { window.location.assign('/vendor/login?loggedout=1'); } catch {}
-  };
+  // E) HARD redirect to login so nothing lingers in memory
+  window.location.replace('/vendor/login?loggedout=1');
+};
 
   // Reset on account/network change
   useEffect(() => {
