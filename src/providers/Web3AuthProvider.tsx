@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
@@ -8,7 +8,13 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
+import {
+  postJSON,
+  loginWithSignature,
+  getAuthRole,
+  getVendorProfile,
+  logout as apiLogout, // <-- use backend logout from src/lib/api.ts
+} from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -42,7 +48,6 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
 
-// ANKR (optional)
 const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
 const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
@@ -50,7 +55,6 @@ const envRpc =
 
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
-// Backend API base (leave empty to use Next rewrites at /api/*)
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
@@ -60,16 +64,14 @@ function clearWeb3AuthCaches() {
   try { localStorage.removeItem('web3auth_cached_adapter'); } catch {}
   try { localStorage.removeItem('WALLETCONNECT_DEEPLINK_CHOICE'); } catch {}
   try {
-    const keys = Object.keys(localStorage);
-    for (const k of keys) {
+    for (const k of Object.keys(localStorage)) {
       if (k.startsWith('wc@2') || k.startsWith('walletconnect') || k.startsWith('openlogin')) {
         localStorage.removeItem(k);
       }
     }
   } catch {}
   try {
-    const skeys = Object.keys(sessionStorage);
-    for (const k of skeys) {
+    for (const k of Object.keys(sessionStorage)) {
       if (k.startsWith('wc@2') || k.startsWith('walletconnect')) {
         sessionStorage.removeItem(k);
       }
@@ -187,7 +189,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      // Prevent OpenLogin showing (and any auto-login via it)
+      // Prevent OpenLogin from showing / caching
       await w3a.initModal({
         modalConfig: { [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false } },
       });
@@ -201,7 +203,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   // Server-authoritative role
-  const refreshRole = async () => {
+  const refreshRole = useCallback(async () => {
     try {
       const info = await getAuthRole(); // cookie/bearer based
       setRole(info.role);
@@ -211,20 +213,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('lx_addr', info.address);
       }
     } catch (e) {
-      console.warn('refreshRole failed:', e);
       setRole('guest');
       localStorage.setItem('lx_role', 'guest');
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (mounted) void refreshRole();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
+  }, [mounted, refreshRole]);
 
   const isProfileIncomplete = (p: any) => !(!!(p?.vendorName || p?.companyName) && !!p?.email);
 
-  const login = async () => {
+  const login = useCallback(async () => {
     const w3a = await ensureWeb3Auth();
     try {
       // ensure no cached auto-connect
@@ -270,16 +270,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('Login error:', e);
     }
-  };
+  }, [pathname, router]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     // 1) Disconnect wallet/adapters & Web3Auth session
     await disconnectAdaptersSafely(web3auth);
 
-    // 2) Backend cookie clear (via Next /api proxy or direct base)
-    try {
-      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
-    } catch {}
+    // 2) Backend cookie clear (use your api.ts logout that handles fallbacks)
+    try { await apiLogout(); } catch {}
 
     // 3) App-local auth
     try { localStorage.removeItem('lx_addr'); } catch {}
@@ -297,27 +295,15 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 6) Hard navigation (kill in-memory providers)
     try { window.location.replace('/vendor/login?loggedout=1'); } catch {}
-  };
+  }, [web3auth]);
 
-  // Reset on account/network change
+  // Reset on account/network change — call the same logout handler
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
     if (!eth?.on) return;
 
-    const onAccountsChanged = async (_accounts: string[]) => {
-      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }); } catch {}
-      try { localStorage.removeItem('lx_addr'); } catch {}
-      try { localStorage.removeItem('lx_jwt'); } catch {}
-      try { localStorage.removeItem('lx_role'); } catch {}
-      clearWeb3AuthCaches();
-      setProvider(null);
-      setAddress(null);
-      setToken(null);
-      setRole('guest');
-      window.location.replace('/vendor/login?loggedout=1');
-    };
-
+    const onAccountsChanged = async () => { try { await logout(); } catch {} };
     const onChainChanged = () => window.location.reload();
 
     eth.on('accountsChanged', onAccountsChanged);
@@ -328,7 +314,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         eth.removeListener?.('chainChanged', onChainChanged);
       } catch {}
     };
-  }, []);
+  }, [logout]);
 
   if (!mounted) return null;
 
