@@ -189,14 +189,15 @@ export default function Navigation() {
         </Link>
 
         <button
-  onClick={() => {
-    setIsProfileOpen(false); // close the menu
-    logout();                // provider does the hard redirect
-  }}
-  className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
->
-  Logout
-</button>
+          onClick={async () => {
+            setIsProfileOpen(false);                     // close immediately
+            await logout();
+            router.push('/vendor/login');
+          }}
+          className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+        >
+          Logout
+        </button>
       </>
     ) : (
       <button
