@@ -258,10 +258,8 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
-  // Attach JWT if available (cookie is primary)
+  // Your existing helpers
   const token = getJwt();
-
-  // Avoid forcing JSON Content-Type when the caller passed FormData
   const callerCT =
     (options.headers as any)?.["Content-Type"] ||
     (options.headers as any)?.["content-type"];
@@ -275,7 +273,6 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as any),
   };
-
   if (!callerCT && !isFormData) {
     headers["Content-Type"] = "application/json";
   }
@@ -291,6 +288,23 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const r = await fetchWithFallback(fullPath, init);
 
+  // ✅ NEW: global unauthorized handler
+  if (r.status === 401 || r.status === 403) {
+    // drop the token your file already stores under "lx_jwt"
+    setJwt(null);
+    // optional: try server logout if you expose it
+    // try { await fetchWithFallback('/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+
+    // client-side redirect to login (don’t loop if already there)
+    if (typeof window !== "undefined") {
+      const next = location.pathname + location.search;
+      if (!/\/login\b/.test(next)) {
+        location.assign(`/login?next=${encodeURIComponent(next)}`);
+      }
+    }
+    throw new Error(`HTTP ${r.status}`);
+  }
+
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try {
@@ -300,7 +314,6 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     throw new Error(msg);
   }
 
-  // 204 or non-JSON
   const ct = r.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
 
