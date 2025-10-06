@@ -39,6 +39,7 @@ type Paged<T> = {
 export default function AdminVendorsPage() {
   const sp = useSearchParams();
   const router = useRouter();
+  const hasJwt = typeof window !== 'undefined' && !!localStorage.getItem('lx_jwt');
 
   // auth gate
   const [role, setRole] = useState<Role | null>(null);
@@ -116,7 +117,11 @@ export default function AdminVendorsPage() {
     }
   };
 
-  useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, [q, status, kyc, page, pageSize, includeArchived]);
+    useEffect(() => {
+    if (role !== 'admin' || !hasJwt) return; // gate Safari until Bearer is ready AND role is confirmed
+    fetchList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, hasJwt, q, status, kyc, page, pageSize, includeArchived]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
 
