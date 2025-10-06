@@ -327,30 +327,49 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = async () => {
-  // 1) Disconnect wallet/adapters + Web3Auth internal session
-  await disconnectAdaptersSafely(web3auth);
+  async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const isAuthRoute = p.startsWith("/auth/"); // <— detect auth endpoints
+  const bases: string[] = [];
 
-  // 2) Tell your backend to clear the auth cookie **and** clear role cache
-  try { await apiLogout(); } catch {}
+  if (!isBrowser) {
+    // server-side: only external
+    bases.push(trimSlashEnd(API_BASE));
+  } else {
+    if (isAuthRoute) {
+      // For auth, clear/verify cookies on *this origin* first, then fall back
+      bases.push("");       // same-origin
+      bases.push("/api");   // same-origin /api proxy
+      bases.push(trimSlashEnd(API_BASE)); // external last
+    } else {
+      // For others, keep your existing priority
+      bases.push(trimSlashEnd(API_BASE)); // external
+      bases.push("");                     // same-origin
+      bases.push("/api");                 // same-origin /api
+    }
+  }
 
-  // 3) Clear app-local auth state
-  try { localStorage.removeItem('lx_addr'); } catch {}
-  try { localStorage.removeItem('lx_jwt'); } catch {}
-  try { localStorage.removeItem('lx_role'); } catch {}
+  let lastResp: Response | null = null;
+  for (const b of bases) {
+    const url = `${b}${p}`;
+    try {
+      const resp = await fetch(url, init);
+      if (resp.ok) return resp;
+      if ([401, 403, 404].includes(resp.status)) { lastResp = resp; continue; }
+      return resp;
+    } catch {
+      continue;
+    }
+  }
 
-  // 4) Nuke Web3Auth / WalletConnect caches so there’s no auto-reconnect
-  clearWeb3AuthCaches();
-
-  // 5) Reset provider state in React
-  setProvider(null);
-  setAddress(null);
-  setToken(null);
-  setRole('guest');
-
-  // 6) Hard redirect so any in-memory providers are gone
-  try { window.location.assign('/vendor/login?loggedout=1'); } catch {}
-};
+  if (lastResp) {
+    const status = lastResp.status;
+    let msg = `HTTP ${status}`;
+    try { const j = await lastResp.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+  throw new Error("Failed to fetch");
+}
 
   // Reset on account/network change
   useEffect(() => {
