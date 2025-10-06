@@ -100,7 +100,7 @@ export default function AdminVendorsPage() {
       if (includeArchived) url.searchParams.set('includeArchived', 'true'); // NEW
       url.searchParams.set('page', String(page));
       url.searchParams.set('limit', String(pageSize));
-      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json' } });
+      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
@@ -129,7 +129,7 @@ export default function AdminVendorsPage() {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/archive`, {
         method: 'POST',
         credentials: 'include',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchList();
@@ -147,7 +147,7 @@ export default function AdminVendorsPage() {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, {
         method: 'POST',
         credentials: 'include',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchList();
@@ -166,7 +166,7 @@ export default function AdminVendorsPage() {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}`, {
         method: 'DELETE',
         credentials: 'include',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchList();
@@ -183,7 +183,7 @@ export default function AdminVendorsPage() {
     if (!w) return [];
     const url = new URL(`${API_BASE}/admin/bids`);
     url.searchParams.set('vendorWallet', w);
-    const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json' } });
+    const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const arr = Array.isArray(json?.items) ? json.items : [];
