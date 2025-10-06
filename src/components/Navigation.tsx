@@ -124,21 +124,24 @@ export default function Navigation() {
                     </svg>
                   </button>
                   {isAdminOpen && (
-                    <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                      onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
-                      >
-                        <Link prefetch={false}
-                          key={sub.href}
-                          href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                          }`}
-                        >
-                          {sub.label}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
+  <div
+    className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
+    onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
+  >
+    {item.children.map((sub) => (
+      <Link
+        prefetch={false}
+        key={sub.href}
+        href={sub.href}
+        className={`block px-4 py-2 text-sm ${
+          isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+        }`}
+      >
+        {sub.label}
+      </Link>
+    ))}
+  </div>
+)}
                 </div>
               ) : (
                 <Link prefetch={false}
