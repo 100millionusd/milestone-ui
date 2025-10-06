@@ -9,7 +9,8 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, logout as apiLogout } from '@/lib/api';
+
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -330,10 +331,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // 1) Disconnect wallet/adapters + Web3Auth internal session
   await disconnectAdaptersSafely(web3auth);
 
-  // 2) Tell your backend to clear the auth cookie
-  try {
-    await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
-  } catch {}
+  // 2) Tell your backend to clear the auth cookie **and** clear role cache
+  try { await apiLogout(); } catch {}
 
   // 3) Clear app-local auth state
   try { localStorage.removeItem('lx_addr'); } catch {}
@@ -350,7 +349,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   setRole('guest');
 
   // 6) Hard redirect so any in-memory providers are gone
-  try { window.location.assign('/vendor/login'); } catch {}
+  try { window.location.assign('/vendor/login?loggedout=1'); } catch {}
 };
 
   // Reset on account/network change
