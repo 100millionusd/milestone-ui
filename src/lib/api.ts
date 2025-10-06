@@ -388,6 +388,7 @@ export async function loginWithSignature(address: string, signature: string) {
   if (res?.token) setJwt(res.token);
   __clearRoleCache(); // ensure next getAuthRole() refetches
   return { role: (res?.role as AuthInfo["role"]) || "vendor" };
+  }
 
 /** Clears cookie on server and local JWT cache */
 export async function logout() {
