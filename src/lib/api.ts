@@ -1128,48 +1128,67 @@ export async function saveProofFilesToDb(params: {
   return await res.json();
 }
 
-export async function archiveMilestone(bidId: number, milestoneIndex: number, reason?: string) {
-  const res = await fetch(
-    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason ?? "" }),
-      cache: "no-store",
-    }
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  return j;
+// ---- Milestone archive helpers (batched + cached) ----
+type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
+
+// Per-bid cache so 5 lookups -> 1 request
+const __ARCH_CACHE: Record<number, Promise<Record<number, ArchiveInfo>>> = {};
+
+/** Fetch many milestone statuses at once. */
+export async function getMilestonesArchiveMap(
+  bidId: number,
+  indices: number[] = [0, 1, 2, 3, 4]
+): Promise<Record<number, ArchiveInfo>> {
+  const qs = new URLSearchParams({ bidId: String(bidId), indices: indices.join(',') });
+  const res = await fetch(`/api/milestones/bulk-status?${qs.toString()}`, {
+    method: 'GET',
+    credentials: 'omit',
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
-export async function getMilestoneArchive(bidId: number, milestoneIndex: number) {
-  const res = await fetch(
-    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
-    {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-    }
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  return j; // { ok, milestone: { archived, archivedAt, archiveReason } }
+/** Backwards-compatible: returns one index, but internally batches & caches. */
+export async function getMilestoneArchive(bidId: number, milestoneIndex: number): Promise<ArchiveInfo> {
+  if (!__ARCH_CACHE[bidId]) {
+    // First call for this bidId -> fetch whole set once
+    __ARCH_CACHE[bidId] = getMilestonesArchiveMap(bidId, [0, 1, 2, 3, 4]);
+  }
+  const map = await __ARCH_CACHE[bidId];
+  return map[milestoneIndex] ?? { archived: false };
 }
 
-export async function unarchiveMilestone(bidId: number, milestoneIndex: number) {
-  const res = await fetch(
-    `/api/milestones/${encodeURIComponent(String(bidId))}/${encodeURIComponent(String(milestoneIndex))}/archive/`,
-    {
-      method: "DELETE",
-      credentials: "include",
-      cache: "no-store",
-    }
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-  return j;
+/** Archive ONE milestone via batch endpoint (then invalidate cache). */
+export async function archiveMilestone(
+  bidId: number,
+  milestoneIndex: number,
+  reason?: string
+): Promise<{ ok: true; count: number }> {
+  const res = await fetch('/api/milestones/bulk-archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ items: [{ bidId, milestoneIndex, reason: reason ?? '' }] }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  delete __ARCH_CACHE[bidId]; // cache invalidation
+  return res.json();
+}
+
+/** Unarchive ONE milestone via batch endpoint (then invalidate cache). */
+export async function unarchiveMilestone(
+  bidId: number,
+  milestoneIndex: number
+): Promise<{ ok: true; count: number }> {
+  const res = await fetch('/api/milestones/bulk-archive', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ items: [{ bidId, milestoneIndex }] }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  delete __ARCH_CACHE[bidId]; // cache invalidation
+  return res.json();
 }
 
 // ---- Health ----
