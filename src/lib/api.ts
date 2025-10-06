@@ -1140,7 +1140,7 @@ export async function getMilestonesArchiveMap(
   indices: number[] = [0, 1, 2, 3, 4]
 ): Promise<Record<number, ArchiveInfo>> {
   const qs = new URLSearchParams({ bidId: String(bidId), indices: indices.join(',') });
-  const res = await fetch(`/api/milestones/bulk-status?${qs.toString()}`, {
+  const res = await fetch(`/api/milestones/bulk-status/?${qs.toString()}`, {
     method: 'GET',
     credentials: 'omit',
   });
