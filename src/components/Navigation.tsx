@@ -93,7 +93,7 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
+          <Link prefetch={false} href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
             </div>
@@ -126,7 +126,7 @@ export default function Navigation() {
                   {isAdminOpen && (
                     <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                       {item.children.map((sub) => (
-                        <Link
+                        <Link prefetch={false}
                           key={sub.href}
                           href={sub.href}
                           className={`block px-4 py-2 text-sm ${
@@ -140,7 +140,7 @@ export default function Navigation() {
                   )}
                 </div>
               ) : (
-                <Link
+                <Link prefetch={false}
                   key={item.href}
                   href={resolveHref(item.href)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -175,7 +175,7 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
                     <>
-                      <Link
+                      <Link prefetch={false}
                         href="/vendor/profile"
                         className="block px-4 py-2 text-sm hover:bg-gray-100"
                       >
@@ -227,7 +227,7 @@ export default function Navigation() {
                   <div key={item.label}>
                     <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
                     {item.children.map((sub) => (
-                      <Link
+                      <Link prefetch={false}
                         key={sub.href}
                         href={sub.href}
                         className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
@@ -240,7 +240,7 @@ export default function Navigation() {
                     ))}
                   </div>
                 ) : (
-                  <Link
+                  <Link prefetch={false}
                     key={item.href}
                     href={resolveHref(item.href)}
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
@@ -254,7 +254,7 @@ export default function Navigation() {
               )}
 
               {address && (
-                <Link
+                <Link prefetch={false}
                   href="/vendor/profile"
                   className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
                   onClick={() => setIsMobileMenuOpen(false)}
