@@ -60,6 +60,42 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 // This fixes the Safari cookie issue and also your 404s like /auth/role.
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
+// --- Hard logout helpers (clear Web3Auth + WalletConnect caches) ---
+function clearWeb3AuthCaches() {
+  if (typeof localStorage === 'undefined') return;
+
+  // 1) Stop Web3Auth from remembering the last adapter (prevents auto-reconnect)
+  try { localStorage.removeItem('web3auth_cached_adapter'); } catch {}
+
+  // 2) WalletConnect v2 caches
+  try {
+    const keys = Object.keys(localStorage);
+    for (const k of keys) {
+      if (k.startsWith('wc@2') || k.startsWith('walletconnect')) {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch {}
+
+  // 3) Common deeplink flag
+  try { localStorage.removeItem('WALLETCONNECT_DEEPLINK_CHOICE'); } catch {}
+}
+
+async function disconnectAdaptersSafely(web3auth: Web3Auth | null) {
+  if (!web3auth) return;
+
+  // Try adapter-specific disconnects (best-effort)
+  try {
+    const wc = web3auth.getAdapter?.(WALLET_ADAPTERS.WALLET_CONNECT_V2) as any;
+    if (wc?.disconnectSession) {
+      await wc.disconnectSession().catch(() => {});
+    }
+  } catch {}
+
+  // Web3Auth generic logout (clears internal session)
+  try { await web3auth.logout(); } catch {}
+}
+
 // ---------- RPC HEALTH ----------
 async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
   if (!url) return false;
@@ -237,6 +273,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     const w3a = await ensureWeb3Auth(); // <-- LAZY INIT
     try {
       // 0) Connect wallet
+      clearWeb3AuthCaches();
       const web3authProvider = await w3a.connect();
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
       setProvider(web3authProvider);
@@ -290,23 +327,31 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      await web3auth?.logout();
-    } catch {}
-    try {
-      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
-    } catch {}
-    setProvider(null);
-    setAddress(null);
-    setToken(null);
-    setRole('guest');
-    localStorage.removeItem('lx_addr');
-    localStorage.removeItem('lx_jwt');
-    localStorage.removeItem('lx_role');
-    try {
-      router.replace('/');
-    } catch {}
-  };
+  // 1) Disconnect wallet/adapters + Web3Auth internal session
+  await disconnectAdaptersSafely(web3auth);
+
+  // 2) Tell your backend to clear the auth cookie
+  try {
+    await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
+  } catch {}
+
+  // 3) Clear app-local auth state
+  try { localStorage.removeItem('lx_addr'); } catch {}
+  try { localStorage.removeItem('lx_jwt'); } catch {}
+  try { localStorage.removeItem('lx_role'); } catch {}
+
+  // 4) Nuke Web3Auth / WalletConnect caches so there’s no auto-reconnect
+  clearWeb3AuthCaches();
+
+  // 5) Reset provider state in React
+  setProvider(null);
+  setAddress(null);
+  setToken(null);
+  setRole('guest');
+
+  // 6) Hard redirect so any in-memory providers are gone
+  try { window.location.assign('/vendor/login'); } catch {}
+};
 
   // Reset on account/network change
   useEffect(() => {
@@ -315,19 +360,20 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
-      try {
-        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
-      } finally {
-        setProvider(null);
-        setAddress(null);
-        setToken(null);
-        setRole('guest');
-        localStorage.removeItem('lx_addr');
-        localStorage.removeItem('lx_jwt');
-        localStorage.removeItem('lx_role');
-        window.location.href = '/vendor/login';
-      }
-    };
+  try {
+    await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
+  } finally {
+    setProvider(null);
+    setAddress(null);
+    setToken(null);
+    setRole('guest');
+    try { localStorage.removeItem('lx_addr'); } catch {}
+    try { localStorage.removeItem('lx_jwt'); } catch {}
+    try { localStorage.removeItem('lx_role'); } catch {}
+    clearWeb3AuthCaches();
+    window.location.href = '/vendor/login';
+  }
+};
 
     const onChainChanged = () => window.location.reload();
 
