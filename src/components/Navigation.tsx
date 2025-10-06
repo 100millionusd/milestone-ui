@@ -175,25 +175,22 @@ export default function Navigation() {
                 </svg>
               </div>
 
-              {isProfileOpen && (
-  <div
-    className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-    onClickCapture={() => setIsProfileOpen(false)}      // ← closes as soon as an item is clicked
-    onMouseDownCapture={() => setIsProfileOpen(false)}  // ← extra-snappy close before navigation
-  >
+ {isProfileOpen && (
+  <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
     {address ? (
       <>
         <Link
           prefetch={false}
           href="/vendor/profile"
           className="block px-4 py-2 text-sm hover:bg-gray-100"
+          onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
         >
           Vendor Profile
         </Link>
 
         <button
           onClick={async () => {
-            setIsProfileOpen(false); // make sure it closes even if redirect is slow
+            setIsProfileOpen(false);                     // close immediately
             await logout();
             router.push('/vendor/login');
           }}
