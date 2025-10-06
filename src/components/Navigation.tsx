@@ -176,35 +176,45 @@ export default function Navigation() {
               </div>
 
               {isProfileOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                  {address ? (
-                    <>
-                      <Link prefetch={false}
-                        href="/vendor/profile"
-                        className="block px-4 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Vendor Profile
-                      </Link>
-                      <button
-                        onClick={async () => {
-                          await logout();
-                          router.push('/vendor/login');
-                        }}
-                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Logout
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => router.push('/vendor/login')}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Login
-                    </button>
-                  )}
-                </div>
-              )}
+  <div
+    className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
+    onClickCapture={() => setIsProfileOpen(false)}      // ← closes as soon as an item is clicked
+    onMouseDownCapture={() => setIsProfileOpen(false)}  // ← extra-snappy close before navigation
+  >
+    {address ? (
+      <>
+        <Link
+          prefetch={false}
+          href="/vendor/profile"
+          className="block px-4 py-2 text-sm hover:bg-gray-100"
+        >
+          Vendor Profile
+        </Link>
+
+        <button
+          onClick={async () => {
+            setIsProfileOpen(false); // make sure it closes even if redirect is slow
+            await logout();
+            router.push('/vendor/login');
+          }}
+          className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+        >
+          Logout
+        </button>
+      </>
+    ) : (
+      <button
+        onClick={() => {
+          setIsProfileOpen(false);
+          router.push('/vendor/login');
+        }}
+        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+      >
+        Login
+      </button>
+    )}
+  </div>
+)}
             </div>
           </div>
 
