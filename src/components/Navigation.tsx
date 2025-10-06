@@ -125,7 +125,8 @@ export default function Navigation() {
                   </button>
                   {isAdminOpen && (
                     <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-                      {item.children.map((sub) => (
+                      onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
+                      >
                         <Link prefetch={false}
                           key={sub.href}
                           href={sub.href}
