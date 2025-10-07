@@ -273,20 +273,26 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
     }
   }
 
-  // If we get here, nothing succeeded; throw using the last response status if we have it.
+    // If we get here, nothing succeeded; throw using the last response status if we have it.
   if (lastResp) {
     const status = lastResp.status;
     let msg = `HTTP ${status}`;
     try {
-      const j = await lastResp.json();
-      msg = j?.error || j?.message || msg;
+      const raw = await lastResp.text();
+      if (raw) {
+        try {
+          const j = JSON.parse(raw);
+          msg = j?.error || j?.message || msg;
+        } catch {
+          msg = raw.slice(0, 400) || msg;
+        }
+      }
     } catch {}
     throw new Error(msg);
   }
   throw new Error("Failed to fetch");
-}
 
-// ---- JSON Fetch helper ----
+// ---- JSON Fetch helper (hardened) ----
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
 
@@ -297,7 +303,6 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
-  // Your existing helpers
   const token = getJwt();
   const callerCT =
     (options.headers as any)?.["Content-Type"] ||
@@ -306,15 +311,14 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const headers: Record<string, string> = {
-    Accept: "application/json",
+    // Accept text too so we can safely read non-JSON error bodies
+    Accept: "application/json, text/plain;q=0.8, */*;q=0.5",
     Pragma: "no-cache",
     "Cache-Control": "no-cache",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as any),
   };
-  if (!callerCT && !isFormData) {
-    headers["Content-Type"] = "application/json";
-  }
+  if (!callerCT && !isFormData) headers["Content-Type"] = "application/json";
 
   const init: RequestInit = {
     ...options,
@@ -327,38 +331,45 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const r = await fetchWithFallback(fullPath, init);
 
-  // ✅ NEW: global unauthorized handler
+  // Global unauthorized → clear and bounce
   if (r.status === 401 || r.status === 403) {
-    // drop the token your file already stores under "lx_jwt"
     setJwt(null);
-    // optional: try server logout if you expose it
-    // try { await fetchWithFallback('/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
-
-    // client-side redirect to login (don’t loop if already there)
     if (typeof window !== "undefined") {
       const next = location.pathname + location.search;
-      if (!/\/login\b/.test(next)) {
-        location.assign(`/login?next=${encodeURIComponent(next)}`);
-      }
+      if (!/\/login\b/.test(next)) location.assign(`/login?next=${encodeURIComponent(next)}`);
     }
     throw new Error(`HTTP ${r.status}`);
   }
 
+  // Non-OK → read as TEXT first; optionally parse JSON
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try {
-      const j = await r.json();
-      msg = j?.error || j?.message || msg;
-    } catch {}
+      const raw = await r.text(); // ← never throws JSON errors
+      if (raw) {
+        try {
+          const j = JSON.parse(raw);
+          msg = j?.error || j?.message || msg;
+        } catch {
+          msg = raw.slice(0, 400) || msg;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     throw new Error(msg);
   }
 
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) return null;
+  // OK path: only parse JSON if content-type says so
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  if (!ct.includes("application/json")) {
+    try { return await r.text(); } catch { return null; }
+  }
 
   try {
     return await r.json();
   } catch {
+    // Malformed but 2xx: don’t crash UI
     return null;
   }
 }
