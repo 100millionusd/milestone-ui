@@ -75,6 +75,35 @@ export interface Proof {
   aiAnalysis?: any;
 }
 
+/** Read-only public project view */
+export interface PublicProject {
+  bidId: number;
+  proposalId: number;
+  proposalTitle: string;
+  orgName: string;
+  vendorName: string;
+  priceUSD: number;
+
+  // Optional curated public content from server
+  publicTitle?: string | null;
+  publicSummary?: string | null;
+
+  // Reuse your Milestone type and keep an index + "public" flag if provided
+  milestones: Array<Milestone & { index: number; public?: boolean }>;
+
+  // Only the curated/read-only proof fields needed for public display
+  proofs: Array<{
+    proofId?: number;
+    milestoneIndex: number;
+    title: string;
+    publicText?: string | null;
+    files: { name: string; url: string }[];
+    submittedAt?: string | null;
+  }>;
+
+  updatedAt?: string | null;
+}
+
 export interface AuthInfo {
   address?: string;
   role: "admin" | "vendor" | "guest";
@@ -503,6 +532,68 @@ function toProof(p: any): Proof {
     status: p?.status ?? "pending",
     submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(p?.aiAnalysis ?? p?.ai_analysis),
+  };
+}
+
+function toPublicProject(raw: any): PublicProject {
+  const bid = raw?.bid ?? raw ?? {};
+  const proposal = raw?.proposal ?? raw?.project ?? {};
+  const proofsArr: any[] = Array.isArray(raw?.proofs) ? raw.proofs : [];
+
+  // milestones can be on raw.bid.milestones or raw.milestones
+  const msRaw: any[] = Array.isArray(bid?.milestones) ? bid.milestones
+                    : Array.isArray(raw?.milestones) ? raw.milestones
+                    : [];
+
+  const milestones = msRaw.map((m: any, idx: number) => ({
+    ...{
+      name: m?.name ?? "",
+      amount: Number(m?.amount ?? 0),
+      dueDate: (m?.dueDate ?? m?.due_date) ? new Date(m?.dueDate ?? m?.due_date).toISOString() : new Date().toISOString(),
+      completed: !!m?.completed,
+      completionDate: m?.completionDate ?? null,
+      proof: m?.proof ?? "",
+      paymentTxHash: m?.paymentTxHash ?? null,
+      paymentDate: m?.paymentDate ?? null,
+      archived: (m?.archived ?? m?.archived_flag ?? false) ? true : false,
+      archivedAt: m?.archivedAt ?? m?.archived_at ?? null,
+      archiveReason: m?.archiveReason ?? m?.archive_reason ?? null,
+    },
+    index: Number.isInteger(m?.index) ? Number(m.index) : idx,
+    public: !!(m?.public ?? m?.is_public ?? false),
+  }));
+
+  const proofs = proofsArr.map((p: any) => ({
+    proofId: typeof p?.proofId === "number" ? p.proofId
+          : typeof p?.id === "number" ? p.id
+          : undefined,
+    milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index ?? 0),
+    title: p?.title ?? "",
+    publicText: p?.publicText ?? p?.public_text ?? null,
+    files: Array.isArray(p?.publicFiles ?? p?.public_files)
+      ? (p.publicFiles ?? p.public_files).map((f: any) => ({
+          name: String(f?.name ?? "file"),
+          url: String(f?.url ?? ""),
+        }))
+      : [],
+    submittedAt: p?.submittedAt ?? p?.submitted_at ?? null,
+  }));
+
+  return {
+    bidId: Number(bid?.bidId ?? bid?.bid_id ?? bid?.id ?? raw?.bidId ?? raw?.id ?? 0),
+    proposalId: Number(proposal?.proposalId ?? proposal?.proposal_id ?? raw?.proposalId ?? 0),
+    proposalTitle: proposal?.public_title ?? proposal?.publicTitle ?? proposal?.title ?? "",
+    orgName: proposal?.orgName ?? proposal?.org_name ?? "",
+    vendorName: bid?.vendorName ?? bid?.vendor_name ?? "",
+    priceUSD: Number(bid?.priceUSD ?? bid?.price_usd ?? bid?.price ?? 0),
+
+    publicTitle: proposal?.public_title ?? proposal?.publicTitle ?? null,
+    publicSummary: proposal?.public_summary ?? proposal?.publicSummary ?? null,
+
+    milestones,
+    proofs,
+
+    updatedAt: raw?.updatedAt ?? raw?.updated_at ?? bid?.updatedAt ?? bid?.updated_at ?? null,
   };
 }
 
@@ -1223,6 +1314,32 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
+// ---- Public Project (read-only, served by Next.js route) ----
+// NOTE: We call the Next API directly with a relative path so it works on Netlify/Vercel/CDN and
+// does not hit your external API_BASE.
+export async function getPublicProject(bidId: number): Promise<PublicProject | null> {
+  if (!Number.isFinite(bidId)) throw new Error('Invalid bidId');
+
+  const res = await fetch(`/api/public/project/${encodeURIComponent(String(bidId))}`, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!res.ok) {
+    // 404 -> just return null so the page can show "No public milestones/proofs yet"
+    if (res.status === 404) return null;
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json().catch(() => null);
+  if (!json) return null;
+  return toPublicProject(json);
+}
+
 // ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
@@ -1300,6 +1417,9 @@ export default {
   archiveMilestone,
   getMilestoneArchive,
   unarchiveMilestone,
+
+  // public (read-only)
+  getPublicProject,
 
   // ipfs & misc
   uploadJsonToIPFS,
