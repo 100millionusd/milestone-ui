@@ -234,28 +234,32 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
     }
   }
 
-  // If we get here, nothing succeeded; throw using the last response status if we have it.
+    // If we get here, nothing succeeded; throw using the last response status if we have it.
   if (lastResp) {
-  const status = lastResp.status;
-  const ct = lastResp.headers.get("content-type") || "";
-  let msg = `HTTP ${status}`;
+    const status = lastResp.status;
+    const ct = lastResp.headers.get("content-type") || "";
+    let msg = `HTTP ${status}`;
 
-  try {
-    if (ct.includes("application/json")) {
-      const j = await lastResp.clone().json();
-      msg = j?.error || j?.message || msg;
-    } else {
-      const t = await lastResp.clone().text();
-      if (t && t.trim()) msg = t.slice(0, 400);
-    }
-  } catch {
     try {
-      const t2 = await lastResp.text();
-      if (t2 && t2.trim()) msg = t2.slice(0, 400);
-    } catch {}
+      if (ct.includes("application/json")) {
+        const j = await lastResp.clone().json();
+        msg = j?.error || j?.message || msg;
+      } else {
+        const t = await lastResp.clone().text();
+        if (t && t.trim()) msg = t.slice(0, 400);
+      }
+    } catch {
+      try {
+        const t2 = await lastResp.text();
+        if (t2 && t2.trim()) msg = t2.slice(0, 400);
+      } catch {}
+    }
+
+    throw new Error(msg);
   }
 
-  throw new Error(msg);
+  // No last response captured (pure network failures across all bases)
+  throw new Error("Network request failed");
 }
 
 // ---- JSON Fetch helper ----
