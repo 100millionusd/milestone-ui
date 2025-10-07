@@ -1314,6 +1314,26 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
+export async function getPublicProjects(): Promise<PublicProject[]> {
+  const res = await fetch(`/api/public/projects`, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!res.ok) {
+    if (res.status === 404) return [];
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json().catch(() => []);
+  const rows = Array.isArray(json) ? json : [];
+  return rows.map(toPublicProject);
+}
+
 // ---- Public Project (read-only, served by Next.js route) ----
 // NOTE: We call the Next API directly with a relative path so it works on Netlify/Vercel/CDN and
 // does not hit your external API_BASE.
@@ -1420,6 +1440,7 @@ export default {
 
   // public (read-only)
   getPublicProject,
+  getPublicProjects, 
 
   // ipfs & misc
   uploadJsonToIPFS,
