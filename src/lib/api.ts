@@ -209,6 +209,30 @@ function isAuthError(e: any) {
   );
 }
 
+// --- Sanitize text to avoid server-side JSON/DB "\u" parse errors ---
+function _fixBrokenUnicodeEscapes(s: string): string {
+  // turn any "\u" that is NOT followed by 4 hex digits into "\\u"
+  return s.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u");
+}
+function _fixUnpairedSurrogates(s: string): string {
+  // replace lone surrogate halves with the Unicode replacement char
+  s = s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "\uFFFD");       // high, no low
+  s = s.replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");       // low, no high
+  return s;
+}
+function sanitizeUnicode(input: any): any {
+  if (typeof input === "string") {
+    return _fixUnpairedSurrogates(_fixBrokenUnicodeEscapes(input));
+  } else if (Array.isArray(input)) {
+    return input.map(sanitizeUnicode);
+  } else if (input && typeof input === "object") {
+    const out: any = {};
+    for (const k of Object.keys(input)) out[k] = sanitizeUnicode(input[k]);
+    return out;
+  }
+  return input;
+}
+
 // ---- Safari-safe fetch fallback (external → same-origin → /api) ----
 async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
   // path must start with "/"
@@ -616,7 +640,7 @@ export async function getBid(id: number): Promise<Bid> {
 export async function createBid(
   bid: Omit<Bid, "bidId" | "status" | "createdAt" | "aiAnalysis">
 ): Promise<Bid> {
-  const payload: any = { ...bid };
+  let payload: any = { ...bid };
   payload.priceUSD = Number(payload.priceUSD);
   payload.days = Number(payload.days);
   payload.milestones = (payload.milestones || []).map((m: any) => ({
@@ -624,7 +648,14 @@ export async function createBid(
     amount: Number(m.amount),
     dueDate: toIso(m.dueDate),
   }));
-  const b = await apiFetch("/bids", { method: "POST", body: JSON.stringify(payload) });
+
+  // 👇 sanitize recursively so bad "\u" sequences become safe
+  payload = sanitizeUnicode(payload);
+
+  const b = await apiFetch("/bids", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
   return toBid(b);
 }
 
