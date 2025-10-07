@@ -1334,6 +1334,21 @@ export async function getPublicProjects(): Promise<PublicProject[]> {
   return rows.map(toPublicProject);
 }
 
+// ---- Public Projects list (read-only, via Next API) ----
+export async function getPublicProjects(): Promise<PublicProject[]> {
+  const res = await fetch(`/api/public/projects`, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!res.ok) return [];
+
+  const arr = await res.json().catch(() => []);
+  return Array.isArray(arr) ? arr.map((raw: any) => toPublicProject(raw)) : [];
+}
+
 // ---- Public Project (read-only, served by Next.js route) ----
 // NOTE: We call the Next API directly with a relative path so it works on Netlify/Vercel/CDN and
 // does not hit your external API_BASE.

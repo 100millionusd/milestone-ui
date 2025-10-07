@@ -8,59 +8,71 @@ const API_BASE =
 
 export const dynamic = 'force-dynamic';
 
+async function getJSON(url: string, fallback: any) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return fallback;
+    const j = await r.json().catch(() => fallback);
+    return j ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function GET() {
   try {
-    // 1) Fetch all bids (public in your API)
-    const r = await fetch(`${API_BASE}/bids`, { cache: 'no-store' });
-    if (!r.ok) return NextResponse.json([], { status: 200 });
+    // 1) Pull proposals (try approved + pending, then fallback to all)
+    const approved = await getJSON(`${API_BASE}/proposals?status=approved`, []);
+    const pending  = await getJSON(`${API_BASE}/proposals?status=pending`,  []);
+    let proposals: any[] = [...approved, ...pending];
+    if (!proposals.length) {
+      proposals = await getJSON(`${API_BASE}/proposals`, []);
+    }
 
-    const bids: any[] = await r.json().catch(() => []);
-    const limited = Array.isArray(bids) ? bids.slice(0, 100) : [];
+    // 2) Pull all bids once and index by proposal
+    const bids: any[] = await getJSON(`${API_BASE}/bids`, []);
+    const byProposal = new Map<number, any[]>();
+    for (const b of Array.isArray(bids) ? bids : []) {
+      const pid = Number(b?.proposalId ?? b?.proposal_id);
+      if (!Number.isFinite(pid)) continue;
+      const arr = byProposal.get(pid) || [];
+      arr.push(b);
+      byProposal.set(pid, arr);
+    }
 
-    // 2) For each bid, try to fetch its proposal and proofs (best-effort, never throw)
-    const items = await Promise.allSettled(
-      limited.map(async (b: any) => {
-        const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
-        const pid = b?.proposalId ?? b?.proposal_id;
+    const pickBid = (list?: any[]) => {
+      if (!list?.length) return null;
+      const approved = list.find((x) => String(x?.status || '').toLowerCase() === 'approved');
+      return approved || list[0];
+    };
 
-        let proposal: any = null;
-        try {
-          if (pid != null) {
-            const pr = await fetch(`${API_BASE}/proposals/${encodeURIComponent(String(pid))}`, {
-              cache: 'no-store',
-            });
-            if (pr.ok) proposal = await pr.json().catch(() => null);
-          }
-        } catch {}
+    // 3) Build items: proposal + chosen bid (if any) + proofs (best-effort)
+    const limited = proposals.slice(0, 100);
+    const results = await Promise.allSettled(
+      limited.map(async (p) => {
+        const proposalId = Number(p?.proposalId ?? p?.proposal_id ?? p?.id);
+        const bid        = pickBid(byProposal.get(proposalId));
 
         let proofs: any[] = [];
-        try {
-          if (bidId != null) {
-            const prf = await fetch(`${API_BASE}/proofs/${encodeURIComponent(String(bidId))}`, {
-              cache: 'no-store',
-            });
-            if (prf.ok) {
-              const arr = await prf.json().catch(() => []);
-              proofs = Array.isArray(arr) ? arr : [];
-            }
+        if (bid) {
+          const bidId = Number(bid?.bidId ?? bid?.bid_id ?? bid?.id);
+          if (Number.isFinite(bidId)) {
+            proofs = await getJSON(`${API_BASE}/proofs/${encodeURIComponent(String(bidId))}`, []);
           }
-        } catch {}
+        }
 
-        // Note: don’t shape here; let the client helper do it
-        return { bid: b, proposal, proofs };
+        return { proposal: p, bid: bid ?? null, proofs };
       })
     );
 
-    const out = items
-      .filter((x) => x.status === 'fulfilled')
-      .map((x: any) => x.value);
+    const out = results
+      .filter((r) => r.status === 'fulfilled')
+      .map((r: any) => r.value);
 
-    return NextResponse.json(out, {
-      headers: { 'Cache-Control': 'no-store' },
-    });
+    // Never throw to RSC
+    return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     console.error('[public/projects] error', e);
-    // NEVER throw to RSC — return empty list instead
     return NextResponse.json([], { status: 200 });
   }
 }
