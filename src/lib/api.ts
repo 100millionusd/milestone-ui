@@ -1222,6 +1222,58 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
+// ---- Public projects (read-only, no auth) ----
+
+/**
+ * Return the public “projects” list for the marketing page.
+ * Tries canonical /public endpoints first, then falls back to permissive bids queries.
+ */
+export async function getPublicProjects(): Promise<any[]> {
+  const candidates = [
+    "/public/projects",
+    "/public/bids",
+    "/bids/public",
+    "/bids?public=true",
+    "/bids?status=approved&visibility=public",
+  ] as const;
+
+  for (const path of candidates) {
+    try {
+      const rows = await apiFetch(path);
+      if (Array.isArray(rows)) return rows;
+    } catch {
+      // try next candidate
+    }
+  }
+  // As a last resort, return empty list (public page should handle gracefully)
+  return [];
+}
+
+/**
+ * Return one public project by its bidId.
+ * Tries canonical /public endpoints first, then falls back to /bids/:id (works if server allows public read).
+ */
+export async function getPublicProject(bidId: number): Promise<any | null> {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+
+  const id = encodeURIComponent(String(bidId));
+  const candidates = [
+    `/public/projects/${id}`,
+    `/public/bids/${id}`,
+    `/bids/${id}`, // may succeed if the backend exposes approved/public bids without auth
+  ] as const;
+
+  for (const path of candidates) {
+    try {
+      const row = await apiFetch(path);
+      if (row && typeof row === "object") return row;
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
 // ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
@@ -1286,6 +1338,10 @@ export default {
   analyzeProof,
   getProofs,
   archiveProof,
+
+  // public read
+  getPublicProjects,
+  getPublicProject,
 
   // chat
   chatProof,
