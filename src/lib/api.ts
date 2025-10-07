@@ -269,7 +269,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
-  // Your existing helpers
+  // Auth/header prep
   const token = getJwt();
   const callerCT =
     (options.headers as any)?.["Content-Type"] ||
@@ -299,14 +299,9 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const r = await fetchWithFallback(fullPath, init);
 
-  // ✅ NEW: global unauthorized handler
+  // Unauthorized → clear token + redirect (client side)
   if (r.status === 401 || r.status === 403) {
-    // drop the token your file already stores under "lx_jwt"
     setJwt(null);
-    // optional: try server logout if you expose it
-    // try { await fetchWithFallback('/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
-
-    // client-side redirect to login (don’t loop if already there)
     if (typeof window !== "undefined") {
       const next = location.pathname + location.search;
       if (!/\/login\b/.test(next)) {
@@ -316,29 +311,36 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     throw new Error(`HTTP ${r.status}`);
   }
 
+  // Robust error handling (avoid JSON-parse crashes)
   if (!r.ok) {
-  const status = r.status;
-  const ct = r.headers.get("content-type") || "";
-  let msg = `HTTP ${status}`;
+    const status = r.status;
+    const ct = r.headers.get("content-type") || "";
+    let msg = `HTTP ${status}`;
 
-  try {
-    if (ct.includes("application/json")) {
-      const j = await r.clone().json();
-      msg = j?.error || j?.message || msg;
-    } else {
-      const t = await r.clone().text();
-      if (t && t.trim()) msg = t.slice(0, 400);
-    }
-  } catch {
+    // Prefer raw text first (covers HTML error pages, stack traces, DB errors)
     try {
-      const t2 = await r.text();
-      if (t2 && t2.trim()) msg = t2.slice(0, 400);
+      const text = await r.clone().text();
+      if (text && text.trim()) {
+        msg = text.slice(0, 400);
+      }
     } catch {}
+
+    // Only parse JSON when server says it's JSON
+    if (ct.includes("application/json")) {
+      try {
+        const j = await r.clone().json();
+        if (j && (j.error || j.message)) {
+          msg = String(j.error || j.message);
+        }
+      } catch {
+        // Swallow JSON parse errors (e.g., "unsupported Unicode escape sequence")
+      }
+    }
+
+    throw new Error(msg);
   }
 
-  throw new Error(msg);
-}
-
+  // Success path
   const ct = r.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
 
