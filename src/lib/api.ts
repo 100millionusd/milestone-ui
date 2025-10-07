@@ -1314,6 +1314,29 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
+// ---- Public Project (read-only, served by Next.js route) ----
+export async function getPublicProject(bidId: number): Promise<PublicProject | null> {
+  if (!Number.isFinite(bidId)) throw new Error('Invalid bidId');
+
+  const res = await fetch(`/api/public/project/${encodeURIComponent(String(bidId))}`, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!res.ok) {
+    if (res.status === 404) return null; // show "No public milestones/proofs yet"
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json().catch(() => null);
+  if (!json) return null;
+  return toPublicProject(json);
+}
+
 // ---- Public Projects list (read-only, via Next API) ----
 export async function getPublicProjects(): Promise<PublicProject[]> {
   const res = await fetch(`/api/public/projects`, {
