@@ -59,6 +59,7 @@ export default function Navigation() {
     () => [
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects' },
+      { href: '/public', label: 'Public Projects' },
       { href: '/new', label: 'Submit Proposal' },
       {
         label: 'Admin',

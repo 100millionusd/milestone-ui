@@ -1,105 +1,94 @@
 // src/app/public/page.tsx
-import Link from 'next/link';
+export const dynamic = 'force-dynamic';
 
-type Project = {
+type PublicProject = {
+  bidId: number;
   proposalId: number;
   title: string;
-  summary: string;
-  totalBudgetUSD: number;
-  bids: Array<{
-    bidId: number;
-    vendorName: string;
-    priceUSD: number;
-    status: string;
-    milestones: Array<{ index: number; name: string; completed: boolean }>;
-    images: string[];
-  }>;
+  orgName: string;
+  budgetUSD: number;
+  milestonesCount: number;
+  completedCount: number;
+  thumbnail?: string | null;
+  updatedAt?: string | null;
 };
 
-async function getProjects(): Promise<{ projects: Project[] }> {
-  const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-  const res = await fetch(`${base}/api/public/projects`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to load projects');
-  return res.json();
+async function fetchProjects(): Promise<PublicProject[]> {
+  // server-side relative fetch to our Next API
+  const r = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ? '' : ''}/api/public/projects`, {
+    cache: 'no-store',
+  });
+  if (!r.ok) return [];
+  return r.json();
 }
 
-export default async function PublicCatalogPage() {
-  const { projects } = await getProjects();
+function fmtUSD(v: number) {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v || 0);
+  } catch {
+    return `$${Math.round(v || 0).toLocaleString()}`;
+  }
+}
+
+export default async function PublicProjectsPage() {
+  const projects = await fetchProjects();
 
   return (
-    <main className="max-w-6xl mx-auto p-6">
-      <h1 className="text-3xl font-semibold mb-6">Public Projects</h1>
+    <div className="max-w-6xl mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-2">Public Projects</h1>
+      <p className="text-gray-600 mb-6">
+        A read-only showcase of active projects. Click any card to view its milestones and proofs.
+      </p>
 
-      {(!projects || projects.length === 0) && (
-        <div className="p-6 border border-dashed rounded text-gray-500">
+      {projects.length === 0 ? (
+        <div className="border rounded p-8 text-center text-gray-500">
           No public projects yet.
         </div>
-      )}
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {projects?.map((p) =>
-          p.bids.map((b) => (
-            <div key={`${p.proposalId}-${b.bidId}`} className="rounded border bg-white overflow-hidden">
-              {/* images strip */}
-              {b.images && b.images.length > 0 ? (
-                <div className="grid grid-cols-3 gap-1 bg-gray-50 p-1">
-                  {b.images.slice(0, 3).map((src, i) => (
-                    <img key={i} src={src} alt="" className="h-28 w-full object-cover rounded" />
-                  ))}
-                </div>
-              ) : (
-                <div className="h-28 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-                  No images yet
-                </div>
-              )}
-
-              <div className="p-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold">{p.title || `Proposal #${p.proposalId}`}</h2>
-                  <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">{b.status}</span>
-                </div>
-                {p.summary ? (
-                  <p className="text-sm text-gray-600 mt-1 line-clamp-2">{p.summary}</p>
-                ) : null}
-                <div className="text-sm text-gray-500 mt-2">
-                  Vendor: <span className="font-mono">{b.vendorName || '—'}</span> · Budget: $
-                  {p.totalBudgetUSD.toLocaleString()}
-                </div>
-
-                {/* milestones preview */}
-                {b.milestones?.length ? (
-                  <ul className="mt-3 space-y-1">
-                    {b.milestones.slice(0, 3).map((m) => (
-                      <li key={m.index} className="text-sm">
-                        <span className="font-medium">{m.name}</span>{' '}
-                        {m.completed ? (
-                          <span className="text-green-600">✓</span>
-                        ) : (
-                          <span className="text-yellow-600">•</span>
-                        )}
-                      </li>
-                    ))}
-                    {b.milestones.length > 3 ? (
-                      <li className="text-xs text-gray-500">+ {b.milestones.length - 3} more…</li>
-                    ) : null}
-                  </ul>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {projects.map((p) => (
+            <a
+              key={p.bidId}
+              href={`/public/${p.bidId}`}
+              className="block rounded-lg overflow-hidden border hover:shadow-md transition"
+            >
+              <div className="aspect-video bg-gray-100">
+                {p.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={p.thumbnail}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
                 ) : (
-                  <div className="text-sm text-gray-400 mt-3">No milestones yet</div>
+                  <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+                    No preview
+                  </div>
                 )}
-
-                <div className="mt-4">
-                  <Link
-                    href={`/public/${b.bidId}`}
-                    className="inline-block text-blue-600 underline text-sm"
-                  >
-                    View details →
-                  </Link>
-                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
-    </main>
+              <div className="p-4">
+                <div className="text-xs text-gray-500">{p.orgName || '—'}</div>
+                <div className="font-semibold truncate">{p.title || `Bid #${p.bidId}`}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-medium">{p.milestonesCount}</span> milestones
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-medium">{p.completedCount}</span> done
+                  </span>
+                  <span className="ml-auto font-medium">{fmtUSD(p.budgetUSD)}</span>
+                </div>
+                {p.updatedAt && (
+                  <div className="mt-2 text-xs text-gray-400">
+                    Updated {new Date(p.updatedAt).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
