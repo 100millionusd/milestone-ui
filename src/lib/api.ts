@@ -236,15 +236,26 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 
   // If we get here, nothing succeeded; throw using the last response status if we have it.
   if (lastResp) {
-    const status = lastResp.status;
-    let msg = `HTTP ${status}`;
-    try {
-      const j = await lastResp.json();
+  const status = lastResp.status;
+  const ct = lastResp.headers.get("content-type") || "";
+  let msg = `HTTP ${status}`;
+
+  try {
+    if (ct.includes("application/json")) {
+      const j = await lastResp.clone().json();
       msg = j?.error || j?.message || msg;
+    } else {
+      const t = await lastResp.clone().text();
+      if (t && t.trim()) msg = t.slice(0, 400);
+    }
+  } catch {
+    try {
+      const t2 = await lastResp.text();
+      if (t2 && t2.trim()) msg = t2.slice(0, 400);
     } catch {}
-    throw new Error(msg);
   }
-  throw new Error("Failed to fetch");
+
+  throw new Error(msg);
 }
 
 // ---- JSON Fetch helper ----
@@ -306,13 +317,27 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   }
 
   if (!r.ok) {
-    let msg = `HTTP ${r.status}`;
-    try {
-      const j = await r.json();
+  const status = r.status;
+  const ct = r.headers.get("content-type") || "";
+  let msg = `HTTP ${status}`;
+
+  try {
+    if (ct.includes("application/json")) {
+      const j = await r.clone().json();
       msg = j?.error || j?.message || msg;
+    } else {
+      const t = await r.clone().text();
+      if (t && t.trim()) msg = t.slice(0, 400);
+    }
+  } catch {
+    try {
+      const t2 = await r.text();
+      if (t2 && t2.trim()) msg = t2.slice(0, 400);
     } catch {}
-    throw new Error(msg);
   }
+
+  throw new Error(msg);
+}
 
   const ct = r.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
