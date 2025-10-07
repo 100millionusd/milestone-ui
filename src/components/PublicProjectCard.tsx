@@ -29,10 +29,32 @@ type Project = {
   bids?: Bid[];
 };
 
+type AuditSummary = {
+  anchored: boolean;
+  txHash?: string | null;
+  periodId?: string | null;
+  contract?: string | null;
+  chainId?: number | null;
+  anchoredAt?: string | null;
+};
+
+type AuditRow = {
+  createdAt?: string | null;
+  action?: string;
+  actorRole?: string;
+  actorAddress?: string;
+  changedFields?: string[];
+  ipfsCid?: string | null;
+};
+
 export default function PublicProjectCard({ project }: { project: Project }) {
-  const [tab, setTab] = useState<'overview'|'bids'|'milestones'|'files'>('overview');
+  const [tab, setTab] = useState<'overview'|'bids'|'milestones'|'files'|'audit'>('overview');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // --- NEW: audit state (badge + tab) ---
+  const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
+  const [auditRows, setAuditRows] = useState<AuditRow[] | null>(null);
 
   // pick the "featured" bid: approved first, else the first
   const featuredBidId = useMemo(() => {
@@ -75,12 +97,53 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     return () => { cancelled = true; };
   }, [project.proposalId]);
 
+  // --- NEW: fetch audit summary early (for badge); fetch rows when Audit tab opened ---
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/public/audit/${encodeURIComponent(String(project.proposalId))}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json().catch(() => null);
+        if (cancelled || !j) return;
+        setAuditSummary(j.summary || { anchored: false });
+        // don't set rows yet; load lazily when the Audit tab is viewed
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [project.proposalId]);
+
+  useEffect(() => {
+    if (tab !== 'audit' || auditRows) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/public/audit/${encodeURIComponent(String(project.proposalId))}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json().catch(() => null);
+        if (cancelled || !j) return;
+        setAuditRows(Array.isArray(j.events) ? j.events : []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [tab, project.proposalId, auditRows]);
+
   const tabs = [
     { key: 'overview' as const, label: 'Overview' },
     { key: 'bids' as const, label: `Bids (${project.bids?.length || 0})` },
     { key: 'milestones' as const, label: 'Milestones' },
     { key: 'files' as const, label: `Files (${files.length})` },
+    { key: 'audit' as const, label: 'Audit' }, // NEW
   ];
+
+  // envs for links (compile-time)
+  const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
+  const IPFS_GATEWAY  = process.env.NEXT_PUBLIC_IPFS_GATEWAY  || "https://gateway.pinata.cloud/ipfs";
+
+  const anchorHref =
+    auditSummary?.anchored && auditSummary.txHash && EXPLORER_BASE
+      ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}`
+      : undefined;
 
   return (
     <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white shadow-sm">
@@ -104,7 +167,31 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
       <div className="p-4">
         <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{project.orgName}</div>
-        <h2 className="text-lg font-semibold">{project.proposalTitle || 'Untitled Project'}</h2>
+
+        {/* --- CHANGED: title now includes audit badge (if available) --- */}
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          {project.proposalTitle || 'Untitled Project'}
+          {auditSummary ? (
+            auditSummary.anchored ? (
+              <a
+                href={anchorHref || '#'}
+                target={anchorHref ? '_blank' : undefined}
+                className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                title={anchorHref ? 'View anchor transaction' : 'Anchored'}
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
+                </svg>
+                Anchored
+              </a>
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                Not anchored yet
+              </span>
+            )
+          ) : null}
+        </h2>
+
         {project.summary && (
           <p className="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{project.summary}</p>
         )}
@@ -269,6 +356,43 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                 </div>
               ))}
             </>
+          )}
+
+          {/* --- NEW: Audit tab content --- */}
+          {tab === 'audit' && (
+            <section className="space-y-3 text-sm">
+              {!auditRows && (
+                <div className="text-gray-500">Loading audit…</div>
+              )}
+              {auditRows && auditRows.length === 0 && (
+                <div className="text-gray-500">No public audit events yet.</div>
+              )}
+              {auditRows && auditRows.map((r, i) => {
+                const ts = r.createdAt ? new Date(r.createdAt).toLocaleString() : '';
+                const cid = r.ipfsCid ? String(r.ipfsCid) : '';
+                const ipfsUrl = cid ? `${IPFS_GATEWAY}/${cid.replace(/^ipfs:\/\//, '')}` : '';
+                return (
+                  <div key={i} className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">{r.action || 'event'} <span className="text-gray-400">• {ts}</span></div>
+                      {cid && (
+                        <a href={ipfsUrl} target="_blank" className="text-xs text-blue-600 hover:underline">
+                          IPFS
+                        </a>
+                      )}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      {r.actorRole ? r.actorRole : ''}{r.actorAddress ? ` • ${r.actorAddress}` : ''}
+                    </div>
+                    {Array.isArray(r.changedFields) && r.changedFields.length > 0 && (
+                      <div className="mt-2 text-xs">
+                        <span className="font-medium">Changed:</span> {r.changedFields.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
           )}
         </div>
       </div>
