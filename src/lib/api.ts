@@ -375,9 +375,9 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 }
 
 // ---- POST helper ----
-export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
+export async function postJSON<T = any>(path: string, data: any): Promise<T> {
   return apiFetch(path, { method: "POST", body: JSON.stringify(data) });
-};
+}
 
 // ---- Auth ----
 export async function getAuthRole(): Promise<AuthInfo> {
