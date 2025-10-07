@@ -147,6 +147,20 @@ export const API_BASE = getApiBase();
 const trimSlashEnd = (s: string) => s.replace(/\/+$/, "");
 const isBrowser = typeof window !== "undefined";
 
+// ---- Site origin helper (SSR + browser) ----
+function getSiteOrigin(): string {
+  if (typeof window !== "undefined" && window.location) return window.location.origin;
+  const raw =
+    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_SITE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.URL) ||
+    (typeof process !== "undefined" && (process as any).env?.DEPLOY_PRIME_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.VERCEL_URL) ||
+    "";
+  const s = String(raw).trim().replace(/\/+$/, "");
+  if (!s) return "";
+  return s.startsWith("http") ? s : `https://${s}`;
+}
+
 // ---- Helpers ----
 function coerceJson(val: any) {
   if (!val) return null;
@@ -1226,14 +1240,29 @@ export async function unarchiveMilestone(
 
 /**
  * Return the public “projects” list for the marketing page.
- * Tries canonical /public endpoints first, then falls back to permissive bids queries.
+ * Prefer our Next API route (/api/public/projects) so it works with NO backend change.
  */
 export async function getPublicProjects(): Promise<any[]> {
+  // Try the Next API route first (SSR-safe + browser-safe)
+  try {
+    const url =
+      typeof window !== "undefined"
+        ? "/api/public/projects"
+        : `${getSiteOrigin()}/api/public/projects`;
+    const r = await fetch(url, { cache: "no-store" });
+    if (r.ok) {
+      const data = await r.json().catch(() => []);
+      if (Array.isArray(data)) return data;
+    }
+  } catch {}
+
+  // Fallbacks if the route is somehow unreachable
   const candidates = [
+    "/bids?status=approved",
+    "/bids?public=true",
     "/public/projects",
     "/public/bids",
     "/bids/public",
-    "/bids?public=true",
     "/bids?status=approved&visibility=public",
   ] as const;
 
@@ -1241,35 +1270,40 @@ export async function getPublicProjects(): Promise<any[]> {
     try {
       const rows = await apiFetch(path);
       if (Array.isArray(rows)) return rows;
-    } catch {
-      // try next candidate
-    }
+    } catch {}
   }
-  // As a last resort, return empty list (public page should handle gracefully)
   return [];
 }
 
 /**
  * Return one public project by its bidId.
- * Tries canonical /public endpoints first, then falls back to /bids/:id (works if server allows public read).
+ * Prefer a Next API detail route if you add one later; for now use backend with graceful fallbacks.
  */
 export async function getPublicProject(bidId: number): Promise<any | null> {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+
+  // If you later add /api/public/projects/[id], uncomment this preferred path:
+  // try {
+  //   const url =
+  //     typeof window !== "undefined"
+  //       ? `/api/public/projects/${encodeURIComponent(String(bidId))}`
+  //       : `${getSiteOrigin()}/api/public/projects/${encodeURIComponent(String(bidId))}`;
+  //   const r = await fetch(url, { cache: "no-store" });
+  //   if (r.ok) return await r.json();
+  // } catch {}
 
   const id = encodeURIComponent(String(bidId));
   const candidates = [
     `/public/projects/${id}`,
     `/public/bids/${id}`,
-    `/bids/${id}`, // may succeed if the backend exposes approved/public bids without auth
+    `/bids/${id}`, // may succeed if backend exposes approved/public bids without auth
   ] as const;
 
   for (const path of candidates) {
     try {
       const row = await apiFetch(path);
       if (row && typeof row === "object") return row;
-    } catch {
-      // try next candidate
-    }
+    } catch {}
   }
   return null;
 }

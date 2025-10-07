@@ -1,4 +1,3 @@
-// src/app/api/public/projects/route.ts
 import { NextResponse } from 'next/server';
 import { API_BASE } from '@/lib/api';
 
@@ -35,70 +34,60 @@ async function fetchJSON(url: string) {
 
 export async function GET() {
   try {
-    // 1) Get ALL bids (publicly visible on your backend). No status filter here.
-    const bids = (await fetchJSON(`${API_BASE}/bids?_ts=${Date.now()}`)) || [];
-    const visible = (Array.isArray(bids) ? bids : []).filter((b: any) => {
-      const s = String(b?.status || '').toLowerCase();
+    // ✅ Use public proposals so the list works without auth
+    const proposals = (await fetchJSON(`${API_BASE}/proposals?_ts=${Date.now()}`)) || [];
+    const visible = (Array.isArray(proposals) ? proposals : []).filter((p: any) => {
+      const s = String(p?.status || '').toLowerCase();
       return s !== 'archived' && s !== 'rejected';
     });
 
-    // 2) Fetch proposals for titles/org names
-    const proposalIds = Array.from(
-      new Set(
-        visible
-          .map((b: any) => b?.proposalId ?? b?.proposal_id)
-          .filter((v: any) => v != null)
-      )
-    );
-
-    const proposals = new Map<number, any>();
-    await Promise.all(
-      proposalIds.map(async (id: any) => {
-        const p = await fetchJSON(`${API_BASE}/proposals/${encodeURIComponent(String(id))}?_ts=${Date.now()}`);
-        if (p) proposals.set(Number(id), p);
-      })
-    );
-
-    // 3) Proofs per bid (best effort; ignore if endpoint is restricted)
-    async function fetchProofs(bidId: number) {
-      const p = await fetchJSON(`${API_BASE}/proofs/${encodeURIComponent(String(bidId))}?_ts=${Date.now()}`);
-      const arr = Array.isArray(p) ? p : [];
-      return arr.map((r: any) => ({
-        proofId: r?.proofId ?? r?.id,
-        milestoneIndex: asNum(r?.milestoneIndex ?? r?.milestone_index ?? 0),
-        title: r?.title ?? '',
-        publicText: r?.publicText ?? r?.public_text ?? r?.description ?? '',
-        files: Array.isArray(r?.public_files) ? r.public_files
-             : Array.isArray(r?.files) ? r.files
-             : [],
-        submittedAt: r?.submittedAt ?? r?.submitted_at ?? null,
-      }));
+    // Best-effort: try to enrich from bids (may be auth-guarded; ignore failures)
+    async function pickBidForProposal(proposalId: number) {
+      const list = await fetchJSON(`${API_BASE}/bids?proposalId=${encodeURIComponent(String(proposalId))}&_ts=${Date.now()}`);
+      const arr = Array.isArray(list) ? list : [];
+      const approved = arr.find((x: any) => String(x?.status).toLowerCase() === 'approved');
+      const best = approved || arr[0];
+      if (!best) return null;
+      return {
+        bidId: asNum(best?.bidId ?? best?.id ?? best?.bid_id),
+        vendorName: best?.vendorName ?? best?.vendor_name ?? '',
+        priceUSD: asNum(best?.priceUSD ?? best?.price_usd ?? best?.price ?? 0),
+        days: asNum(best?.days ?? 0),
+        milestones: toMilestones(best?.milestones),
+        updatedAt: best?.updatedAt ?? best?.updated_at ?? null,
+        status: best?.status ?? 'pending',
+      };
     }
 
-    // 4) Build public objects
     const out = await Promise.all(
-      visible.map(async (b: any) => {
-        const bidId = asNum(b?.bidId ?? b?.bid_id ?? b?.id);
-        const proposalId = asNum(b?.proposalId ?? b?.proposal_id);
-        const prop = proposals.get(proposalId) || {};
-        const proofs = await fetchProofs(bidId).catch(() => []);
-
+      visible.map(async (p: any) => {
+        const proposalId = asNum(p?.proposalId ?? p?.proposal_id ?? p?.id);
+        const bid = await pickBidForProposal(proposalId).catch(() => null);
         return {
-          bidId,
+          // identifiers
           proposalId,
-          proposalTitle: prop?.public_title ?? prop?.title ?? '',
-          orgName: prop?.orgName ?? prop?.org_name ?? '',
-          vendorName: b?.vendorName ?? b?.vendor_name ?? '',
-          priceUSD: asNum(b?.priceUSD ?? b?.price_usd ?? b?.price ?? 0),
-          publicTitle: prop?.public_title ?? null,
-          publicSummary: prop?.public_summary ?? null,
-          milestones: toMilestones(b?.milestones),
-          proofs,
-          updatedAt: b?.updatedAt ?? b?.updated_at ?? null,
+          bidId: bid?.bidId ?? null,
+
+          // proposal fields (always public)
+          orgName: p?.orgName ?? p?.org_name ?? '',
+          proposalTitle: p?.public_title ?? p?.title ?? '',
+          summary: p?.public_summary ?? p?.summary ?? p?.description ?? '',
+          status: p?.status ?? 'pending',
+
+          // optional bid enrichment
+          vendorName: bid?.vendorName ?? '',
+          priceUSD: bid?.priceUSD ?? 0,
+          days: bid?.days ?? 0,
+          milestones: bid?.milestones ?? [],
+
+          // recency
+          updatedAt: bid?.updatedAt ?? p?.updatedAt ?? p?.updated_at ?? null,
         };
       })
     );
 
+    // Show freshest first
+    out.sort((a: any, b: any) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
     return NextResponse.json(out, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 });
