@@ -195,16 +195,6 @@ function isAuthError(e: any) {
   );
 }
 
-// ---- Small cache for /auth/role (to avoid duplicate calls) ----
-let __roleCache: { value: AuthInfo; ts: number } | null = null;
-let __roleInflight: Promise<AuthInfo> | null = null;
-const ROLE_TTL = 60_000; // 60s
-
-function __clearRoleCache() {
-  __roleCache = null;
-  __roleInflight = null;
-}
-
 // ---- Safari-safe fetch fallback (external → same-origin → /api) ----
 async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
   // path must start with "/"
@@ -341,34 +331,14 @@ export const postJSON = async <T = any>(path: string, data: any): Promise<T> => 
 
 // ---- Auth ----
 export async function getAuthRole(): Promise<AuthInfo> {
-  const now = Date.now();
-
-  // serve fresh cached value
-  if (__roleCache && now - __roleCache.ts < ROLE_TTL) {
-    return __roleCache.value;
+  try {
+    const info = await apiFetch("/auth/role");
+    const role = (info?.role ?? "guest") as AuthInfo["role"];
+    const address = typeof info?.address === "string" ? info.address : undefined;
+    return { address, role };
+  } catch {
+    return { role: "guest" };
   }
-
-  // de-dupe concurrent calls
-  if (__roleInflight) return __roleInflight;
-
-  __roleInflight = (async () => {
-    try {
-      const info = await apiFetch("/auth/role");
-      const role = (info?.role ?? "guest") as AuthInfo["role"];
-      const address = typeof info?.address === "string" ? info.address : undefined;
-      const value: AuthInfo = { address, role };
-      __roleCache = { value, ts: Date.now() };
-      return value;
-    } catch {
-      const value: AuthInfo = { role: "guest" };
-      __roleCache = { value, ts: Date.now() };
-      return value;
-    } finally {
-      __roleInflight = null;
-    }
-  })();
-
-  return __roleInflight;
 }
 
 /**
@@ -384,19 +354,17 @@ export async function loginWithSignature(address: string, signature: string) {
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
-    // server returns { token, role }
+  // server returns { token, role }
   if (res?.token) setJwt(res.token);
-  __clearRoleCache(); // ensure next getAuthRole() refetches
   return { role: (res?.role as AuthInfo["role"]) || "vendor" };
-  }
+}
 
 /** Clears cookie on server and local JWT cache */
 export async function logout() {
   try {
     await apiFetch("/auth/logout", { method: "POST" });
   } catch {}
-    setJwt(null);
-  __clearRoleCache(); // invalidate cached role
+  setJwt(null);
 }
 
 // ---- Normalizers ----
@@ -1308,3 +1276,4 @@ export default {
   testConnection,
   postJSON,
 };
+
