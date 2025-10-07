@@ -1,109 +1,66 @@
 // src/app/api/public/projects/route.ts
 import { NextResponse } from 'next/server';
 
-const DEFAULT_API_BASE = 'https://milestone-api-production.up.railway.app';
 const API_BASE =
-  process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  DEFAULT_API_BASE;
+  process.env.API_BASE_URL ||
+  'https://milestone-api-production.up.railway.app';
 
-type Json = any;
-
-function toNumber(v: any) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function isImageUrl(url: string) {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(url || '');
-}
-
-async function fetchJSON(url: string) {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
-  return r.json();
-}
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // 1) Get approved proposals
-    const proposals: Json[] = await fetchJSON(`${API_BASE}/proposals?status=approved`);
+    // 1) Fetch all bids (public in your API)
+    const r = await fetch(`${API_BASE}/bids`, { cache: 'no-store' });
+    if (!r.ok) return NextResponse.json([], { status: 200 });
 
-    // 2) For each proposal, get its bids + proofs (images)
-    const results = await Promise.all(
-      proposals.map(async (p) => {
-        const proposalId = p?.proposalId ?? p?.proposal_id ?? p?.id;
-        if (!proposalId) return null;
+    const bids: any[] = await r.json().catch(() => []);
+    const limited = Array.isArray(bids) ? bids.slice(0, 100) : [];
 
-        // bids for proposal
-        const bids: Json[] = await fetchJSON(`${API_BASE}/bids?proposalId=${proposalId}`);
+    // 2) For each bid, try to fetch its proposal and proofs (best-effort, never throw)
+    const items = await Promise.allSettled(
+      limited.map(async (b: any) => {
+        const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
+        const pid = b?.proposalId ?? b?.proposal_id;
 
-        // keep approved/completed
-        const visibleBids = (bids || []).filter((b) =>
-          ['approved', 'completed'].includes(String(b?.status || '').toLowerCase())
-        );
+        let proposal: any = null;
+        try {
+          if (pid != null) {
+            const pr = await fetch(`${API_BASE}/proposals/${encodeURIComponent(String(pid))}`, {
+              cache: 'no-store',
+            });
+            if (pr.ok) proposal = await pr.json().catch(() => null);
+          }
+        } catch {}
 
-        // normalize each bid
-        const normalizedBids = await Promise.all(
-          visibleBids.map(async (b) => {
-            const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
-            const vendorName = b?.vendorName ?? b?.vendor_name ?? '';
-            const priceUSD = toNumber(b?.priceUSD ?? b?.price_usd ?? b?.price);
-            const status = String(b?.status || '');
-
-            // milestones live in bids.milestones JSON
-            const rawMilestones = Array.isArray(b?.milestones)
-              ? b.milestones
-              : (typeof b?.milestones === 'string' ? JSON.parse(b.milestones || '[]') : []);
-
-            const milestones = (rawMilestones || []).map((m: any, i: number) => ({
-              index: i,
-              name: String(m?.name ?? ''),
-              amount: toNumber(m?.amount ?? 0),
-              dueDate: m?.dueDate ?? m?.due_date ?? null,
-              completed: !!m?.completed,
-              archived: !!m?.archived,
-            }));
-
-            // try to fetch proofs for images (best-effort)
-            let images: string[] = [];
-            try {
-              const proofs: Json[] = await fetchJSON(`${API_BASE}/proofs/${bidId}`);
-              const files = (proofs || []).flatMap((pr: any) => Array.isArray(pr?.files) ? pr.files : []);
-              images = files
-                .map((f: any) => String(f?.url || ''))
-                .filter((u) => isImageUrl(u))
-                .slice(0, 6); // cap thumbnails
-            } catch {
-              images = [];
+        let proofs: any[] = [];
+        try {
+          if (bidId != null) {
+            const prf = await fetch(`${API_BASE}/proofs/${encodeURIComponent(String(bidId))}`, {
+              cache: 'no-store',
+            });
+            if (prf.ok) {
+              const arr = await prf.json().catch(() => []);
+              proofs = Array.isArray(arr) ? arr : [];
             }
+          }
+        } catch {}
 
-            return {
-              bidId,
-              vendorName,
-              priceUSD,
-              status,
-              milestones,
-              images,
-            };
-          })
-        );
-
-        return {
-          proposalId,
-          title: p?.title ?? '',
-          summary: p?.summary ?? '',
-          totalBudgetUSD: toNumber(p?.amountUSD ?? p?.amount_usd ?? p?.amount),
-          bids: normalizedBids,
-        };
+        // Note: don’t shape here; let the client helper do it
+        return { bid: b, proposal, proofs };
       })
     );
 
-    const projects = (results || []).filter(Boolean);
+    const out = items
+      .filter((x) => x.status === 'fulfilled')
+      .map((x: any) => x.value);
 
-    return NextResponse.json({ projects });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to load public projects' }, { status: 500 });
+    return NextResponse.json(out, {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (e) {
+    console.error('[public/projects] error', e);
+    // NEVER throw to RSC — return empty list instead
+    return NextResponse.json([], { status: 200 });
   }
 }
