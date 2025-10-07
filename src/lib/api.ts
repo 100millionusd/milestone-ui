@@ -75,35 +75,6 @@ export interface Proof {
   aiAnalysis?: any;
 }
 
-/** Read-only public project view */
-export interface PublicProject {
-  bidId: number;
-  proposalId: number;
-  proposalTitle: string;
-  orgName: string;
-  vendorName: string;
-  priceUSD: number;
-
-  // Optional curated public content from server
-  publicTitle?: string | null;
-  publicSummary?: string | null;
-
-  // Reuse your Milestone type and keep an index + "public" flag if provided
-  milestones: Array<Milestone & { index: number; public?: boolean }>;
-
-  // Only the curated/read-only proof fields needed for public display
-  proofs: Array<{
-    proofId?: number;
-    milestoneIndex: number;
-    title: string;
-    publicText?: string | null;
-    files: { name: string; url: string }[];
-    submittedAt?: string | null;
-  }>;
-
-  updatedAt?: string | null;
-}
-
 export interface AuthInfo {
   address?: string;
   role: "admin" | "vendor" | "guest";
@@ -273,26 +244,20 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
     }
   }
 
-    // If we get here, nothing succeeded; throw using the last response status if we have it.
+  // If we get here, nothing succeeded; throw using the last response status if we have it.
   if (lastResp) {
     const status = lastResp.status;
     let msg = `HTTP ${status}`;
     try {
-      const raw = await lastResp.text();
-      if (raw) {
-        try {
-          const j = JSON.parse(raw);
-          msg = j?.error || j?.message || msg;
-        } catch {
-          msg = raw.slice(0, 400) || msg;
-        }
-      }
+      const j = await lastResp.json();
+      msg = j?.error || j?.message || msg;
     } catch {}
     throw new Error(msg);
   }
   throw new Error("Failed to fetch");
+}
 
-// ---- JSON Fetch helper (hardened) ----
+// ---- JSON Fetch helper ----
 async function apiFetch(path: string, options: RequestInit = {}) {
   const method = (options.method || "GET").toUpperCase();
 
@@ -303,6 +268,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
+  // Your existing helpers
   const token = getJwt();
   const callerCT =
     (options.headers as any)?.["Content-Type"] ||
@@ -311,14 +277,15 @@ async function apiFetch(path: string, options: RequestInit = {}) {
     typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const headers: Record<string, string> = {
-    // Accept text too so we can safely read non-JSON error bodies
-    Accept: "application/json, text/plain;q=0.8, */*;q=0.5",
+    Accept: "application/json",
     Pragma: "no-cache",
     "Cache-Control": "no-cache",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as any),
   };
-  if (!callerCT && !isFormData) headers["Content-Type"] = "application/json";
+  if (!callerCT && !isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
 
   const init: RequestInit = {
     ...options,
@@ -331,53 +298,46 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   const r = await fetchWithFallback(fullPath, init);
 
-  // Global unauthorized → clear and bounce
+  // ✅ NEW: global unauthorized handler
   if (r.status === 401 || r.status === 403) {
+    // drop the token your file already stores under "lx_jwt"
     setJwt(null);
+    // optional: try server logout if you expose it
+    // try { await fetchWithFallback('/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+
+    // client-side redirect to login (don’t loop if already there)
     if (typeof window !== "undefined") {
       const next = location.pathname + location.search;
-      if (!/\/login\b/.test(next)) location.assign(`/login?next=${encodeURIComponent(next)}`);
+      if (!/\/login\b/.test(next)) {
+        location.assign(`/login?next=${encodeURIComponent(next)}`);
+      }
     }
     throw new Error(`HTTP ${r.status}`);
   }
 
-  // Non-OK → read as TEXT first; optionally parse JSON
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try {
-      const raw = await r.text(); // ← never throws JSON errors
-      if (raw) {
-        try {
-          const j = JSON.parse(raw);
-          msg = j?.error || j?.message || msg;
-        } catch {
-          msg = raw.slice(0, 400) || msg;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
+      const j = await r.json();
+      msg = j?.error || j?.message || msg;
+    } catch {}
     throw new Error(msg);
   }
 
-  // OK path: only parse JSON if content-type says so
-  const ct = (r.headers.get("content-type") || "").toLowerCase();
-  if (!ct.includes("application/json")) {
-    try { return await r.text(); } catch { return null; }
-  }
+  const ct = r.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) return null;
 
   try {
     return await r.json();
   } catch {
-    // Malformed but 2xx: don’t crash UI
     return null;
   }
 }
 
 // ---- POST helper ----
-export async function postJSON<T = any>(path: string, data: any): Promise<T> {
+export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
   return apiFetch(path, { method: "POST", body: JSON.stringify(data) });
-}
+};
 
 // ---- Auth ----
 export async function getAuthRole(): Promise<AuthInfo> {
@@ -543,68 +503,6 @@ function toProof(p: any): Proof {
     status: p?.status ?? "pending",
     submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(p?.aiAnalysis ?? p?.ai_analysis),
-  };
-}
-
-function toPublicProject(raw: any): PublicProject {
-  const bid = raw?.bid ?? raw ?? {};
-  const proposal = raw?.proposal ?? raw?.project ?? {};
-  const proofsArr: any[] = Array.isArray(raw?.proofs) ? raw.proofs : [];
-
-  // milestones can be on raw.bid.milestones or raw.milestones
-  const msRaw: any[] = Array.isArray(bid?.milestones) ? bid.milestones
-                    : Array.isArray(raw?.milestones) ? raw.milestones
-                    : [];
-
-  const milestones = msRaw.map((m: any, idx: number) => ({
-    ...{
-      name: m?.name ?? "",
-      amount: Number(m?.amount ?? 0),
-      dueDate: (m?.dueDate ?? m?.due_date) ? new Date(m?.dueDate ?? m?.due_date).toISOString() : new Date().toISOString(),
-      completed: !!m?.completed,
-      completionDate: m?.completionDate ?? null,
-      proof: m?.proof ?? "",
-      paymentTxHash: m?.paymentTxHash ?? null,
-      paymentDate: m?.paymentDate ?? null,
-      archived: (m?.archived ?? m?.archived_flag ?? false) ? true : false,
-      archivedAt: m?.archivedAt ?? m?.archived_at ?? null,
-      archiveReason: m?.archiveReason ?? m?.archive_reason ?? null,
-    },
-    index: Number.isInteger(m?.index) ? Number(m.index) : idx,
-    public: !!(m?.public ?? m?.is_public ?? false),
-  }));
-
-  const proofs = proofsArr.map((p: any) => ({
-    proofId: typeof p?.proofId === "number" ? p.proofId
-          : typeof p?.id === "number" ? p.id
-          : undefined,
-    milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index ?? 0),
-    title: p?.title ?? "",
-    publicText: p?.publicText ?? p?.public_text ?? null,
-    files: Array.isArray(p?.publicFiles ?? p?.public_files)
-      ? (p.publicFiles ?? p.public_files).map((f: any) => ({
-          name: String(f?.name ?? "file"),
-          url: String(f?.url ?? ""),
-        }))
-      : [],
-    submittedAt: p?.submittedAt ?? p?.submitted_at ?? null,
-  }));
-
-  return {
-    bidId: Number(bid?.bidId ?? bid?.bid_id ?? bid?.id ?? raw?.bidId ?? raw?.id ?? 0),
-    proposalId: Number(proposal?.proposalId ?? proposal?.proposal_id ?? raw?.proposalId ?? 0),
-    proposalTitle: proposal?.public_title ?? proposal?.publicTitle ?? proposal?.title ?? "",
-    orgName: proposal?.orgName ?? proposal?.org_name ?? "",
-    vendorName: bid?.vendorName ?? bid?.vendor_name ?? "",
-    priceUSD: Number(bid?.priceUSD ?? bid?.price_usd ?? bid?.price ?? 0),
-
-    publicTitle: proposal?.public_title ?? proposal?.publicTitle ?? null,
-    publicSummary: proposal?.public_summary ?? proposal?.publicSummary ?? null,
-
-    milestones,
-    proofs,
-
-    updatedAt: raw?.updatedAt ?? raw?.updated_at ?? bid?.updatedAt ?? bid?.updated_at ?? null,
   };
 }
 
@@ -1325,50 +1223,6 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
-// ---- Public Project (read-only, served by Next.js route) ----
-export async function getPublicProject(bidId: number): Promise<PublicProject | null> {
-  if (!Number.isFinite(bidId)) throw new Error('Invalid bidId');
-
-  const res = await fetch(`/api/public/project/${encodeURIComponent(String(bidId))}`, {
-    method: 'GET',
-    cache: 'no-store',
-    credentials: 'omit',
-    headers: { Accept: 'application/json' },
-  });
-
-  if (!res.ok) {
-    if (res.status === 404) return null; // show "No public milestones/proofs yet"
-    let msg = `HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
-    throw new Error(msg);
-  }
-
-  const json = await res.json().catch(() => null);
-  if (!json) return null;
-  return toPublicProject(json);
-}
-
-// ---- Public Projects list (read-only, via Next API) ----
-export async function getPublicProjects(): Promise<PublicProject[]> {
-  const res = await fetch(`/api/public/projects`, {
-    method: 'GET',
-    cache: 'no-store',
-    credentials: 'omit',
-    headers: { Accept: 'application/json' },
-  });
-
-  if (!res.ok) {
-    if (res.status === 404) return [];
-    let msg = `HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
-    throw new Error(msg);
-  }
-
-  const json = await res.json().catch(() => []);
-  const rows = Array.isArray(json) ? json : [];
-  return rows.map(toPublicProject);
-}
-
 // ---- Health ----
 export function healthCheck() {
   return apiFetch("/health");
@@ -1446,10 +1300,6 @@ export default {
   archiveMilestone,
   getMilestoneArchive,
   unarchiveMilestone,
-
-  // public (read-only)
-  getPublicProject,
-  getPublicProjects, 
 
   // ipfs & misc
   uploadJsonToIPFS,
