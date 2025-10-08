@@ -237,17 +237,19 @@ function sanitizeUnicode(input: any): any {
 async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
   // path must start with "/"
   const p = path.startsWith("/") ? path : `/${path}`;
-  const bases: string[] = [];
+  const method = String(init?.method || "GET").toUpperCase();
+  const isGet = method === "GET";
 
+  // Build bases: always try backend first. Only GETs may fall back to same-origin.
+  const bases: string[] = [];
   if (!isBrowser) {
-    bases.push(trimSlashEnd(API_BASE)); // server-side: only external
+    bases.push(trimSlashEnd(API_BASE)); // server-side: backend only
   } else {
-    // 1) external (your current default)
-    bases.push(trimSlashEnd(API_BASE));
-    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
-    bases.push("");
-    // 3) same-origin "/api" (if your rewrites use /api/:path*)
-    bases.push("/api");
+    bases.push(trimSlashEnd(API_BASE)); // browser: backend first
+    if (isGet) {
+      bases.push("");     // same-origin
+      bases.push("/api"); // same-origin /api
+    }
   }
 
   let lastResp: Response | null = null;
@@ -258,13 +260,16 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
       const resp = await fetch(url, init);
       if (resp.ok) return resp;
 
-      // Only fall through on the auth-ish failures (Safari third‑party cookies → 401/403)
-      // and "route not found" (404 when rewrites don’t match this style).
-      if ([401, 403, 404].includes(resp.status)) {
+      // For GET: allow fallthrough on 401/403/404
+      // For non-GET: never fall through on 404; only 401/403 may fall through
+      if (
+        (isGet && [401, 403, 404].includes(resp.status)) ||
+        (!isGet && [401, 403].includes(resp.status))
+      ) {
         lastResp = resp;
         continue;
       }
-      // For other statuses (e.g. 500), don't keep trying different bases.
+      // Other statuses (e.g., 500) → stop trying.
       return resp;
     } catch {
       // Network error — try next base.
@@ -272,28 +277,26 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
     }
   }
 
-    // If we get here, nothing succeeded; throw using the last response status if we have it.
+  // Nothing succeeded: throw with status + detail if available
   if (lastResp) {
     const status = lastResp.status;
     const ct = lastResp.headers.get("content-type") || "";
-    let msg = `HTTP ${status}`;
-
+    let detail = "";
     try {
       if (ct.includes("application/json")) {
         const j = await lastResp.clone().json();
-        msg = j?.error || j?.message || msg;
+        detail = j?.error || j?.message || "";
       } else {
         const t = await lastResp.clone().text();
-        if (t && t.trim()) msg = t.slice(0, 400);
+        if (t && t.trim()) detail = t.slice(0, 400);
       }
     } catch {
       try {
         const t2 = await lastResp.text();
-        if (t2 && t2.trim()) msg = t2.slice(0, 400);
+        if (t2 && t2.trim()) detail = t2.slice(0, 400);
       } catch {}
     }
-
-    throw new Error(msg);
+    throw new Error(`HTTP ${status}${detail ? ` — ${detail}` : ""}`);
   }
 
   // No last response captured (pure network failures across all bases)
