@@ -13,3 +13,11 @@
 
 [build.environment]
   NODE_VERSION = "18"
+
+# --- Add this block: API proxy to Railway ---
+# All frontend calls to "/_api/*" will be routed to your Railway API
+[[redirects]]
+  from = "/_api/*"
+  to = "https://milestone-api-production.up.railway.app/:splat"
+  status = 200
+  force = true
