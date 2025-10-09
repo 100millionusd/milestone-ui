@@ -21,3 +21,9 @@
   to = "https://milestone-api-production.up.railway.app/:splat"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/login"
+  to = "/"
+  status = 200
+  force = true
