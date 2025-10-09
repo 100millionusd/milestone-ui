@@ -125,7 +125,7 @@ export type EntitySelector = {
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
 // ---- Env-safe API base resolution ----
-const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
+const DEFAULT_API_BASE = "/_api";
 
 function getApiBase(): string {
   if (typeof window === "undefined") {
@@ -232,72 +232,36 @@ function sanitizeUnicode(input: any): any {
   }
   return input;
 }
-
-// ---- Safari-safe fetch fallback (external → same-origin → /api) ----
+// ---- First-party only fetch (no origin fallbacks) ----
 async function fetchWithFallback(path: string, init: RequestInit): Promise<Response> {
-  // path must start with "/"
   const p = path.startsWith("/") ? path : `/${path}`;
-  const bases: string[] = [];
+  const url = `${trimSlashEnd(API_BASE)}${p}`;
 
-  if (!isBrowser) {
-    bases.push(trimSlashEnd(API_BASE)); // server-side: only external
-  } else {
-    // 1) external (your current default)
-    bases.push(trimSlashEnd(API_BASE));
-    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
-    bases.push("");
-    // 3) same-origin "/api" (if your rewrites use /api/:path*)
-    bases.push("/api");
+  // Always include credentials so cookies work. Caller can still override in init if needed.
+  const opts: RequestInit = {
+    credentials: 'include',
+    ...init,
+  };
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, opts);
+  } catch {
+    throw new Error("Network request failed");
   }
 
-  let lastResp: Response | null = null;
+  // Let callers handle auth errors (e.g., show login)
+  if (resp.status === 401 || resp.status === 403) return resp;
 
-  for (const b of bases) {
-    const url = `${b}${p}`;
-    try {
-      const resp = await fetch(url, init);
-      if (resp.ok) return resp;
-
-      // Only fall through on the auth-ish failures (Safari third‑party cookies → 401/403)
-      // and "route not found" (404 when rewrites don’t match this style).
-      if ([401, 403, 404].includes(resp.status)) {
-        lastResp = resp;
-        continue;
-      }
-      // For other statuses (e.g. 500), don't keep trying different bases.
-      return resp;
-    } catch {
-      // Network error — try next base.
-      continue;
+  // If non-OK and server gave us HTML, it means we hit the wrong origin or a misroute.
+  if (!resp.ok) {
+    const ct = resp.headers.get("content-type") || "";
+    if (ct.includes("text/html")) {
+      throw new Error(`Got HTML from ${new URL(url, (typeof window !== 'undefined' ? location.href : 'http://localhost')).origin}. Check API_BASE/proxy.`);
     }
   }
 
-    // If we get here, nothing succeeded; throw using the last response status if we have it.
-  if (lastResp) {
-    const status = lastResp.status;
-    const ct = lastResp.headers.get("content-type") || "";
-    let msg = `HTTP ${status}`;
-
-    try {
-      if (ct.includes("application/json")) {
-        const j = await lastResp.clone().json();
-        msg = j?.error || j?.message || msg;
-      } else {
-        const t = await lastResp.clone().text();
-        if (t && t.trim()) msg = t.slice(0, 400);
-      }
-    } catch {
-      try {
-        const t2 = await lastResp.text();
-        if (t2 && t2.trim()) msg = t2.slice(0, 400);
-      } catch {}
-    }
-
-    throw new Error(msg);
-  }
-
-  // No last response captured (pure network failures across all bases)
-  throw new Error("Network request failed");
+  return resp;
 }
 
 // ---- JSON Fetch helper ----
