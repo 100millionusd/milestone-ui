@@ -1,151 +1,162 @@
-/**
- * auth-injector.ts
- *
- * Intercepts fetch() to:
- *  - Always call the API origin (rewrite /bids, /api/bids, etc. to the backend)
- *  - Include cross-site credentials (cookies) for auth (SameSite=None; Secure)
- *  - Optionally attach Authorization: Bearer <token> if present in localStorage
- *  - Add a cache-busting _ts param to GET requests
- *
- * Safe to import on the client. No-op on the server.
- */
+'use client';
 
-const API_ORIGIN =
-  (typeof process !== "undefined" &&
-    (process.env.NEXT_PUBLIC_API_BASE_URL ||
-      process.env.NEXT_PUBLIC_API_BASE ||
-      process.env.NEXT_PUBLIC_API))?.replace(/\/+$/, "") ||
-  "https://milestone-api-production.up.railway.app";
+// Set this to your API origin
+const API_ORIGIN = 'https://milestone-api-production.up.railway.app';
+const LOGIN_PATH = '/auth/login'; // Path to redirect on auth failures
 
-// Keys we might have stored a JWT under (keep broad for compatibility)
-const TOKEN_KEYS = ["lx_jwt", "lx_token", "token"];
-
+// Enhanced token management with refresh support
 function getToken(): string | null {
   try {
-    if (typeof window === "undefined") return null;
-    for (const k of TOKEN_KEYS) {
-      const v = window.localStorage.getItem(k);
-      if (v && v.trim()) return v.trim();
+    // Check multiple possible token storage keys
+    const tokenKeys = ['lx_token', 'token', 'auth_token', 'jwt_token'];
+    let token: string | null = null;
+    
+    for (const key of tokenKeys) {
+      const value = localStorage.getItem(key);
+      if (value && value.split('.').length === 3 && value.length > 40) {
+        token = value;
+        break;
+      }
     }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
 
-function addTsParam(u: URL): void {
-  if (!u.searchParams.has("_ts")) {
-    u.searchParams.set("_ts", `${Date.now()}`);
-  }
-}
+    if (!token) return null;
 
-function isApiPath(u: URL): boolean {
-  // True if already the API origin
-  if (u.origin === API_ORIGIN) return true;
-
-  // Rewrite common backend routes even if called relatively or against the site origin
-  // Matches: /bids, /api/bids, /proposals, /proofs, /auth, /ipfs
-  const p = u.pathname;
-  return /^\/(?:api\/)?(bids|proposals|proofs|auth|ipfs)(\/|$)/.test(p);
-}
-
-function rewriteToApiOrigin(u: URL): URL {
-  if (u.origin !== API_ORIGIN) {
-    // Keep path/query/hash; switch host to API
-    const api = new URL(u.href, u);
-    const target = new URL(API_ORIGIN);
-    api.protocol = target.protocol;
-    api.host = target.host;
-    api.pathname = u.pathname; // ensure no double slashes
-    return api;
-  }
-  return u;
-}
-
-function hasAuthHeader(headers: Headers): boolean {
-  // Headers is case-insensitive, but some polyfills are picky—check both
-  return headers.has("authorization") || headers.has("Authorization");
-}
-
-export function installAuthInjector(): void {
-  if (typeof window === "undefined") return;
-
-  const g = window as any;
-  if (g.__authInjectorInstalled) return;
-  g.__authInjectorInstalled = true;
-
-  const originalFetch: typeof fetch = window.fetch.bind(window);
-
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // Validate token expiration
     try {
-      // Normalize to a URL we can operate on
-      const href =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-          ? input.href
-          : (input as Request).url;
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload?.exp && Date.now() >= payload.exp * 1000) {
+        console.warn('JWT expired; clearing tokens');
+        clearAllTokens();
+        return null;
+      }
+      return token;
+    } catch (parseError) {
+      console.error('Invalid token format:', parseError);
+      clearAllTokens();
+      return null;
+    }
+  } catch (error) {
+    console.error('Token retrieval error:', error);
+    return null;
+  }
+}
 
-      const current = new URL(href, window.location.href);
+function clearAllTokens(): void {
+  const tokenKeys = ['lx_token', 'token', 'auth_token', 'jwt_token'];
+  tokenKeys.forEach(key => localStorage.removeItem(key));
+}
 
-      // Only touch API requests (already API host, or known API paths on site origin)
-      if (isApiPath(current)) {
-        // Ensure it goes to the API host
-        const targetUrl = rewriteToApiOrigin(current);
+function redirectToLogin(): void {
+  // Clear any existing tokens
+  clearAllTokens();
+  
+  // Redirect to login page
+  const currentPath = window.location.pathname + window.location.search;
+  const loginUrl = `${LOGIN_PATH}?redirect=${encodeURIComponent(currentPath)}`;
+  window.location.href = loginUrl;
+}
 
-        // Prepare headers, preserving any incoming ones
-        const headers = new Headers(
-          (init && init.headers) ||
-            (typeof input !== "string" && !(input instanceof URL)
-              ? (input as Request).headers
-              : undefined)
-        );
+// Enhanced fetch injector with error handling and retry logic
+(function installFetchInjector() {
+  if (typeof window === 'undefined') return;
+  if ((window as any).__authInjectorInstalled) return;
+  (window as any).__authInjectorInstalled = true;
 
-        // Optional: attach Bearer token if present and not already set
-        if (!hasAuthHeader(headers)) {
-          const tok = getToken();
-          if (tok) headers.set("Authorization", `Bearer ${tok}`);
+  const origFetch = window.fetch.bind(window);
+
+  window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    let href = typeof input === 'string' ? input : (input as Request).url;
+    let url: URL;
+    
+    try { 
+      url = new URL(href, window.location.href);
+    } catch (error) {
+      console.error('Invalid URL:', href);
+      return origFetch(input, init);
+    }
+
+    const isTargetAPI = url.origin === API_ORIGIN;
+    const isAuthEndpoint = url.pathname.includes('/auth/');
+
+    // Prepare headers for API requests
+    if (isTargetAPI && !isAuthEndpoint) {
+      const headers = new Headers(
+        init?.headers || 
+        (typeof input !== 'string' ? (input as Request).headers : undefined)
+      );
+
+      // Add Authorization header if not present
+      if (!headers.has('Authorization')) {
+        const token = getToken();
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
         }
-
-        // For GET/HEAD, add a cache-busting param
-        const method = (init?.method ||
-          (typeof input !== "string" && !(input instanceof URL)
-            ? (input as Request).method
-            : "GET")
-        ).toUpperCase();
-
-        if (method === "GET" || method === "HEAD") {
-          addTsParam(targetUrl);
-        }
-
-        // Build final init with cross-site cookies allowed
-        const finalInit: RequestInit = {
-          ...init,
-          mode: "cors",
-          credentials: "include", // CRITICAL for cookie-based auth cross-site
-          headers,
-        };
-
-        // Always pass a string URL to avoid Request cloning issues
-        return originalFetch(targetUrl.href, finalInit);
       }
 
-      // Not an API path—fall through untouched
-      return originalFetch(input as any, init);
-    } catch {
-      // If anything goes wrong in the injector, don't block the request
-      return originalFetch(input as any, init);
+      // Ensure CORS settings for cross-site requests
+      init = { 
+        mode: 'cors', 
+        credentials: 'include', 
+        ...init, 
+        headers 
+      };
+    }
+
+    try {
+      const response = await origFetch(input, init);
+      
+      // Handle authentication errors (401 Unauthorized)
+      if (isTargetAPI && response.status === 401 && !isAuthEndpoint) {
+        console.warn('Authentication failed, redirecting to login...');
+        redirectToLogin();
+        throw new Error('Authentication required');
+      }
+
+      // Handle forbidden access (403 Forbidden)
+      if (isTargetAPI && response.status === 403) {
+        console.error('Access forbidden');
+        // You could redirect to a "no access" page here
+      }
+
+      return response;
+    } catch (error) {
+      // Only log non-auth errors to avoid console noise during redirects
+      if (!error.message.includes('Authentication required')) {
+        console.error('Fetch error:', error);
+      }
+      throw error;
     }
   };
-}
 
-// Auto-install on the client when imported
-if (typeof window !== "undefined") {
-  try {
-    installAuthInjector();
-  } catch {
-    // ignore
+  // Add method to manually clear auth state
+  (window as any).clearAuth = clearAllTokens;
+  
+  // Add method to check auth status
+  (window as any).getAuthStatus = () => {
+    const token = getToken();
+    if (!token) return { isAuthenticated: false };
+    
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return { 
+        isAuthenticated: true,
+        expiresAt: payload.exp ? new Date(payload.exp * 1000) : null,
+        payload 
+      };
+    } catch {
+      return { isAuthenticated: false };
+    }
+  };
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔒 Enhanced Bearer fetch injector installed for', API_ORIGIN);
+    console.log('💡 Available methods: clearAuth(), getAuthStatus()');
   }
-}
+})();
 
-export default installAuthInjector;
+// Export functions for manual use if needed
+export const authInjector = {
+  getToken,
+  clearTokens: clearAllTokens,
+  redirectToLogin
+};
