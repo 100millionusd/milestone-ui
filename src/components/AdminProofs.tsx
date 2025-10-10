@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import {
   getProofs,
-  approveProof,
+  // approveProof, // replaced by direct API call below
   rejectProof,
   analyzeProof,
   chatProof,
@@ -14,6 +14,7 @@ import {
   archiveMilestone,
   unarchiveMilestone,
   type Proof,
+  API_BASE, // added for JSON-only backend call
 } from '@/lib/api';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
@@ -137,76 +138,76 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const [crChecklist, setCrChecklist] = useState('');
 
   // Archive view + server-backed status map
-const [view, setView] = useState<AdminView>('active');
-const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
+  const [view, setView] = useState<AdminView>('active');
+  const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   async function loadProofs() {
-  try {
-    setLoading(true);
-    setError(null);
-    const list = await getProofs(); // admin list from your Railway API
+    try {
+      setLoading(true);
+      setError(null);
+      const list = await getProofs(); // admin list from your Railway API
 
-    let filtered = list;
+      let filtered = list;
 
-    // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
-    if (Array.isArray(bidIds) && bidIds.length) {
-      const set = new Set(bidIds.map((x) => Number(x)));
-      filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
-    } else if (Number.isFinite(proposalId as number)) {
-      // Secondary filter: try proposalId if your backend supplies it
-      const idNum = Number(proposalId);
-      filtered = list.filter((p: any) => {
-        const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
-        return candidates.some((v) => Number(v) === idNum);
-      });
-      if (!filtered.length) {
-        console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
-        filtered = list;
+      // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
+      if (Array.isArray(bidIds) && bidIds.length) {
+        const set = new Set(bidIds.map((x) => Number(x)));
+        filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
+      } else if (Number.isFinite(proposalId as number)) {
+        // Secondary filter: try proposalId if your backend supplies it
+        const idNum = Number(proposalId);
+        filtered = list.filter((p: any) => {
+          const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
+          return candidates.some((v) => Number(v) === idNum);
+        });
+        if (!filtered.length) {
+          console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
+          filtered = list;
+        }
       }
+
+      setProofs(filtered);
+      await hydrateArchiveStatuses(filtered);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load proofs');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function hydrateArchiveStatuses(currentProofs: any[]) {
+    const next: Record<string, ArchiveInfo> = { ...archMap };
+    const tasks: Array<Promise<void>> = [];
+
+    const pairs = (currentProofs || []).map(
+      (p) => [Number(p?.bidId), Number(p?.milestoneIndex)] as const
+    );
+
+    for (const [bidId, idx] of pairs) {
+      const key = msKey(bidId, idx);
+      if (next[key] !== undefined) continue;
+      tasks.push(
+        (async () => {
+          try {
+            const j = await getMilestoneArchive(bidId, idx);
+            const m = j?.milestone ?? j;
+            next[key] = {
+              archived: !!m?.archived,
+              archivedAt: m?.archivedAt ?? null,
+              archiveReason: m?.archiveReason ?? null,
+            };
+          } catch {
+            next[key] = { archived: false };
+          }
+        })()
+      );
     }
 
-    setProofs(filtered);
-    await hydrateArchiveStatuses(filtered);
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to load proofs');
-  } finally {
-    setLoading(false);
+    if (tasks.length) {
+      await Promise.all(tasks);
+      setArchMap(next);
+    }
   }
-}
-
-async function hydrateArchiveStatuses(currentProofs: any[]) {
-  const next: Record<string, ArchiveInfo> = { ...archMap };
-  const tasks: Array<Promise<void>> = [];
-
-  const pairs = (currentProofs || []).map(
-    (p) => [Number(p?.bidId), Number(p?.milestoneIndex)] as const
-  );
-
-  for (const [bidId, idx] of pairs) {
-    const key = msKey(bidId, idx);
-    if (next[key] !== undefined) continue;
-    tasks.push(
-      (async () => {
-        try {
-          const j = await getMilestoneArchive(bidId, idx);
-          const m = j?.milestone ?? j;
-          next[key] = {
-            archived: !!m?.archived,
-            archivedAt: m?.archivedAt ?? null,
-            archiveReason: m?.archiveReason ?? null,
-          };
-        } catch {
-          next[key] = { archived: false };
-        }
-      })()
-    );
-  }
-
-  if (tasks.length) {
-    await Promise.all(tasks);
-    setArchMap(next);
-  }
-}
 
   useEffect(() => {
     loadProofs();
@@ -228,146 +229,144 @@ async function hydrateArchiveStatuses(currentProofs: any[]) {
   };
 
   // Re-hydrate when the list of proofs changes
-useEffect(() => {
-  const arr = Array.isArray(proofs) ? proofs : [];
-  hydrateArchiveStatuses(arr);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [proofs]);
+  useEffect(() => {
+    const arr = Array.isArray(proofs) ? proofs : [];
+    hydrateArchiveStatuses(arr);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proofs]);
 
-// Re-hydrate when any page archives/unarchives a milestone
-useMilestonesUpdated(() => {
-  const arr = Array.isArray(proofs) ? proofs : [];
-  hydrateArchiveStatuses(arr);
-});
+  // Re-hydrate when any page archives/unarchives a milestone
+  useMilestonesUpdated(() => {
+    const arr = Array.isArray(proofs) ? proofs : [];
+    hydrateArchiveStatuses(arr);
+  });
 
-// Snapshot rows with computed key + archive flag (single source of truth)
-const rows = uniqByMilestone(proofs).map((p) => {
-  const k = msKeyFromProof(p);
-  const isArchived = !!archMap[k]?.archived;
-  return { p, k, isArchived };
-});
+  // Snapshot rows with computed key + archive flag (single source of truth)
+  const rows = uniqByMilestone(proofs).map((p) => {
+    const k = msKeyFromProof(p);
+    const isArchived = !!archMap[k]?.archived;
+    return { p, k, isArchived };
+  });
 
-// View derivation (Active vs Archived) using the same snapshot
-const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
+  // View derivation (Active vs Archived) using the same snapshot
+  const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
   // Archive togglers (server-backed, milestone-level)
-// Replace your current archiveMs and unarchiveMs functions with these:
+  async function archiveMs(bidId: number, idx: number, reason?: string) {
+    const key = msKey(bidId, idx);
+    console.log(`Archiving milestone: ${key}`); // Debug log
 
-async function archiveMs(bidId: number, idx: number, reason?: string) {
-  const key = msKey(bidId, idx);
-  console.log(`Archiving milestone: ${key}`); // Debug log
-  
-  await archiveMilestone(bidId, idx, reason);
-  setArchMap(prev => ({
-    ...prev,
-    [key]: {
-      archived: true,
-      archivedAt: new Date().toISOString(),
-      archiveReason: reason ?? null,
-    },
-  }));
-}
-
-async function unarchiveMs(bidId: number, idx: number) {
-  const key = msKey(bidId, idx);
-  console.log(`Unarchiving milestone: ${key}`); // Debug log
-  
-  await unarchiveMilestone(bidId, idx);
-  setArchMap(prev => ({
-    ...prev,
-    [key]: {
-      archived: false,
-      archivedAt: null,
-      archiveReason: null,
-    },
-  }));
-}
-
-// Unarchive all (server; de-duped by milestone)
-const unarchiveAll = async () => {
-  for (const p of uniqByMilestone(proofs)) {
-    const bidId = Number(p.bidId);
-    const idx   = Number(p.milestoneIndex);
-    if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-      try { await unarchiveMs(bidId, idx); } catch {}
-    }
+    await archiveMilestone(bidId, idx, reason);
+    setArchMap(prev => ({
+      ...prev,
+      [key]: {
+        archived: true,
+        archivedAt: new Date().toISOString(),
+        archiveReason: reason ?? null,
+      },
+    }));
   }
-};
 
-// Derived archived count (server-backed) using the same snapshot
-const archivedCount = rows.reduce((n, r) => n + (r.isArchived ? 1 : 0), 0);
+  async function unarchiveMs(bidId: number, idx: number) {
+    const key = msKey(bidId, idx);
+    console.log(`Unarchiving milestone: ${key}`); // Debug log
 
-if (loading) return <div className="p-6">Loading proofs…</div>;
-if (error) return <div className="p-6 text-rose-600">{error}</div>;
+    await unarchiveMilestone(bidId, idx);
+    setArchMap(prev => ({
+      ...prev,
+      [key]: {
+        archived: false,
+        archivedAt: null,
+        archiveReason: null,
+      },
+    }));
+  }
 
-return (
-  <div className="grid gap-4">
-    {/* Archive view controls */}
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => setView('active')}
-        className={`px-3 py-1 rounded border text-sm ${view === 'active' ? 'bg-slate-900 text-white' : ''}`}
-      >
-        Active
-      </button>
-      <button
-        onClick={() => setView('archived')}
-        className={`px-3 py-1 rounded border text-sm ${view === 'archived' ? 'bg-slate-900 text-white' : ''}`}
-      >
-        Archived ({archivedCount})
-      </button>
-      <div className="ml-auto flex items-center gap-2">
-        <button
-          onClick={refreshAll}
-          className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
-        >
-          Refresh
-        </button>
-        {view === 'archived' && archivedCount > 0 && (
-          <button
-            onClick={unarchiveAll}
-            className="px-3 py-1 rounded border text-sm"
-            title="Bring back all archived milestones"
-          >
-            Unarchive all
-          </button>
-        )}
-      </div>
-    </div>
-
-    {visibleRows.map(({ p, k, isArchived }) => {
+  // Unarchive all (server; de-duped by milestone)
+  const unarchiveAll = async () => {
+    for (const p of uniqByMilestone(proofs)) {
       const bidId = Number(p.bidId);
       const idx   = Number(p.milestoneIndex);
-      return (
-        <ProofCard
-          key={k}
-          proof={p}
-          bids={bids}
-          proposalId={proposalId}
-          onRefresh={refreshAll}
-          crOpenFor={crOpenFor}
-          setCrOpenFor={setCrOpenFor}
-          crComment={crComment}
-          setCrComment={setCrComment}
-          crChecklist={crChecklist}
-          setCrChecklist={setCrChecklist}
-          isArchived={isArchived}
-          pkey={k}
-          onArchive={(next) => {
-            if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
-            return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
-          }}
-        />
-      );
-    })}
+      if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+        try { await unarchiveMs(bidId, idx); } catch {}
+      }
+    }
+  };
 
-    {visibleRows.length === 0 && (
-      <div className="text-gray-500 text-center py-10 border rounded bg-white">
-        {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
+  // Derived archived count (server-backed) using the same snapshot
+  const archivedCount = rows.reduce((n, r) => n + (r.isArchived ? 1 : 0), 0);
+
+  if (loading) return <div className="p-6">Loading proofs…</div>;
+  if (error) return <div className="p-6 text-rose-600">{error}</div>;
+
+  return (
+    <div className="grid gap-4">
+      {/* Archive view controls */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setView('active')}
+          className={`px-3 py-1 rounded border text-sm ${view === 'active' ? 'bg-slate-900 text-white' : ''}`}
+        >
+          Active
+        </button>
+        <button
+          onClick={() => setView('archived')}
+          className={`px-3 py-1 rounded border text-sm ${view === 'archived' ? 'bg-slate-900 text-white' : ''}`}
+        >
+          Archived ({archivedCount})
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={refreshAll}
+            className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
+          >
+            Refresh
+          </button>
+          {view === 'archived' && archivedCount > 0 && (
+            <button
+              onClick={unarchiveAll}
+              className="px-3 py-1 rounded border text-sm"
+              title="Bring back all archived milestones"
+            >
+              Unarchive all
+            </button>
+          )}
+        </div>
       </div>
-    )}
-  </div>
-);
+
+      {visibleRows.map(({ p, k, isArchived }) => {
+        const bidId = Number(p.bidId);
+        const idx   = Number(p.milestoneIndex);
+        return (
+          <ProofCard
+            key={k}
+            proof={p}
+            bids={bids}
+            proposalId={proposalId}
+            onRefresh={refreshAll}
+            crOpenFor={crOpenFor}
+            setCrOpenFor={setCrOpenFor}
+            crComment={crComment}
+            setCrComment={setCrComment}
+            crChecklist={crChecklist}
+            setCrChecklist={setCrChecklist}
+            isArchived={isArchived}
+            pkey={k}
+            onArchive={(next) => {
+              if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+              return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
+            }}
+          />
+        );
+      })}
+
+      {visibleRows.length === 0 && (
+        <div className="text-gray-500 text-center py-10 border rounded bg-white">
+          {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
+        </div>
+      )}
+    </div>
+  );
 } 
 
 type ProofCardProps = {
@@ -447,7 +446,35 @@ function ProofCard(props: ProofCardProps) {
     }
   }
 
-  // APPROVE — primary: /proofs/:proofId/approve; fallback: adminCompleteMilestone
+  // --- JSON-only Approve helper (prevents dumping HTML into the page) ---
+  function isProbablyHtml(s: string | undefined | null) {
+    return !!s && /<!doctype html|<html[\s>]/i.test(s);
+  }
+  async function approveViaApi(proofId: number) {
+    const r = await fetch(`${API_BASE}/proofs/${proofId}/approve`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (!r.ok) {
+      if (ct.includes('application/json')) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
+      } else {
+        const txt = await r.text().catch(() => '');
+        throw new Error(
+          isProbablyHtml(txt)
+            ? `Unexpected HTML from server (are you logged in as admin?). HTTP ${r.status}`
+            : `HTTP ${r.status}`
+        );
+      }
+    }
+    if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
+  }
+
+  // APPROVE — hit API_BASE JSON endpoint; if 404/400 or HTML, fallback to adminCompleteMilestone
   async function handleApprove() {
     setErr(null);
     setBusyApprove(true);
@@ -455,11 +482,11 @@ function ProofCard(props: ProofCardProps) {
       if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
         try {
           console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
-          await approveProof(proof.proofId);
+          await approveViaApi(proof.proofId);
         } catch (e: any) {
           const msg = String(e?.message || '');
           const shouldFallback =
-            /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg);
+            /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
 
           if (
             shouldFallback &&
@@ -473,7 +500,8 @@ function ProofCard(props: ProofCardProps) {
               'Approved by admin'
             );
           } else {
-            throw e; // real error → surface it
+            const clean = isProbablyHtml(msg) ? 'Action failed (server returned HTML — check login / endpoint).' : msg;
+            throw new Error(clean || 'Approve failed');
           }
         }
       } else if (Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex)) {
@@ -489,7 +517,8 @@ function ProofCard(props: ProofCardProps) {
 
       await onRefresh();
     } catch (e: any) {
-      setErr(e?.message || 'Approve failed');
+      const msg = String(e?.message || '');
+      setErr(isProbablyHtml(msg) ? 'Approve failed (unexpected HTML from server).' : msg || 'Approve failed');
     } finally {
       setBusyApprove(false);
     }
@@ -564,10 +593,10 @@ function ProofCard(props: ProofCardProps) {
         </div>
         <div className="flex items-center gap-2">
           {isArchived && (
-  <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
-    Archived
-  </span>
-)}
+            <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
+              Archived
+            </span>
+          )}
           <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
         </div>
       </div>
@@ -686,23 +715,23 @@ function ProofCard(props: ProofCardProps) {
           </button>
 
           {/* Archive / Unarchive (server) */}
-{!isArchived ? (
-  <button
-    onClick={() => onArchive(true)}
-    className="px-3 py-1 text-sm border rounded"
-    title="Archive this milestone (server)"
-  >
-    Archive
-  </button>
-) : (
-  <button
-    onClick={() => onArchive(false)}
-    className="px-3 py-1 text-sm border rounded"
-    title="Unarchive this milestone (server)"
-  >
-    Unarchive
-  </button>
-)}
+          {!isArchived ? (
+            <button
+              onClick={() => onArchive(true)}
+              className="px-3 py-1 text-sm border rounded"
+              title="Archive this milestone (server)"
+            >
+              Archive
+            </button>
+          ) : (
+            <button
+              onClick={() => onArchive(false)}
+              className="px-3 py-1 text-sm border rounded"
+              title="Unarchive this milestone (server)"
+            >
+              Unarchive
+            </button>
+          )}
         </div>
       </div>
 
