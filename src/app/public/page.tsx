@@ -1,8 +1,9 @@
 // src/app/public/page.tsx
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { getPublicProjects } from "@/lib/api";
 import PublicProjectsGrid from "@/components/PublicProjectsGrid";
-
-export const revalidate = 0; // no caching
 
 export default async function PublicProjectsPage() {
   const items = await getPublicProjects();

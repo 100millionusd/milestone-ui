@@ -1,9 +1,10 @@
 // src/app/public/[bidId]/page.tsx
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicProjects } from "@/lib/api";
-
-export const revalidate = 0;
 
 function usd(n: number) {
   try {
@@ -35,7 +36,7 @@ async function fetchProofs(proposalId: number) {
   if (!origin) return [];
   try {
     const r = await fetch(
-      `${origin}/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}`,
+      `${origin}/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
       { cache: "no-store" }
     );
     if (!r.ok) return [];
@@ -57,7 +58,7 @@ export default async function PublicProjectDetail({
   if (!Number.isFinite(bidId)) notFound();
 
   // load all projects and pick the one matching this bidId
-  const items = await getPublicProjects();
+  const items = await getPublicProjects(); // ensure this uses { cache: 'no-store' } in src/lib/api.ts
   const project = (Array.isArray(items) ? items : []).find(
     (p: any) => Number(p?.bidId) === bidId
   );
@@ -264,6 +265,7 @@ export default async function PublicProjectDetail({
                           href={f.url}
                           target="_blank"
                           className="block rounded-lg border overflow-hidden"
+                          rel="noreferrer"
                         >
                           {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || "")) ? (
                             <img
