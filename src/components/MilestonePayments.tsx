@@ -90,6 +90,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
   // role gate for cosmetic hiding of admin-only actions
   const [isAdmin, setIsAdmin] = useState(false);
+  // local paid latch so button disappears immediately after 200/409
+  const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
 
   // -------- helpers --------
   const setText = (i: number, v: string) =>
@@ -325,10 +327,20 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
       await payMilestone(bid.bidId, index);
+      // Optimistic latch so the button vanishes immediately
+      setPaidLocal((prev) => ({ ...prev, [index]: true }));
       alert('Payment released.');
       onUpdate();
     } catch (e: any) {
-      alert(e?.message || 'Failed to release payment');
+      const msg = String(e?.message || '');
+      // If server is idempotent and replies 409/“already paid”, latch locally too
+      if (/\b409\b/.test(msg) || /already paid|already in progress/i.test(msg)) {
+        setPaidLocal((prev) => ({ ...prev, [index]: true }));
+        alert('Already paid.');
+        onUpdate();
+      } else {
+        alert(msg || 'Failed to release payment');
+      }
     } finally {
       setBusyIndex(null);
     }
@@ -341,10 +353,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       .filter((m) => m.completed)
       .reduce((s, m) => s + (Number(m.amount) || 0), 0);
     const paid = bid.milestones
-      .filter((m) => m.paymentTxHash)
+      .filter((m, i) =>
+        !!m.paymentTxHash || !!m.paymentDate || String(m.status || '').toLowerCase() === 'paid' || !!paidLocal[i]
+      )
       .reduce((s, m) => s + (Number(m.amount) || 0), 0);
     return { total, completed, paid };
-  }, [bid.milestones]);
+  }, [bid.milestones, paidLocal]);
 
   // -------- UI helpers --------
   function renderChangeRequestBanner(msIndex: number) {
@@ -410,7 +424,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           <p className="text-sm text-purple-600">Amount Paid</p>
           <p className="text-2xl font-bold">${totals.paid.toLocaleString()}</p>
           <p className="text-sm">
-            {bid.milestones.filter((m) => m.paymentTxHash).length} payments
+            {
+              bid.milestones.filter((m, i) =>
+                !!m.paymentTxHash || !!m.paymentDate || String(m.status || '').toLowerCase() === 'paid' || !!paidLocal[i]
+              ).length
+            } payments
           </p>
         </div>
       </div>
@@ -429,7 +447,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         <h4 className="font-semibold">Payment Milestones</h4>
 
         {bid.milestones.map((m: Milestone, i: number) => {
-          const isPaid = !!m.paymentTxHash;
+          const paidTruth =
+            !!m.paymentTxHash ||
+            !!m.paymentDate ||
+            String(m.status || '').toLowerCase() === 'paid' ||
+            !!paidLocal[i];
+
+          const isPaid = paidTruth;
           const isDone = !!m.completed || isPaid;
 
           // show "Submitted" immediately after upload on this device
@@ -569,7 +593,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     <div className="mt-3">
                       <button
                         onClick={() => handleReleasePayment(i)}
-                        disabled={busyIndex === i}
+                        disabled={busyIndex === i || !!paidLocal[i]}
                         className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
                       >
                         {busyIndex === i ? 'Processing…' : 'Release Payment'}
