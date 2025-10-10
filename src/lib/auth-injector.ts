@@ -40,16 +40,19 @@ function getToken(): string | null {
     try { origin = new URL(href).origin; } catch {}
 
     if (origin === API_ORIGIN) {
-      const headers = new Headers(
-        (init && init.headers) ||
-        (typeof input !== 'string' ? (input as Request).headers : undefined)
-      );
-      if (!headers.get('authorization')) {
-        const tok = getToken();
-        if (tok) headers.set('authorization', 'Bearer ' + tok);
-      }
-      init = { mode: 'cors', credentials: 'omit', ...init, headers };
-    }
+  const headers = new Headers(
+    (init && init.headers) ||
+    (typeof input !== 'string' ? (input as Request).headers : undefined)
+  );
+
+  if (!headers.has('Authorization')) {
+    const tok = getToken();
+    if (tok) headers.set('Authorization', 'Bearer ' + tok);
+  }
+
+  // IMPORTANT: send auth cookie cross-site
+  init = { mode: 'cors', credentials: 'include', ...init, headers };
+}
     return origFetch(input, init);
   };
 
