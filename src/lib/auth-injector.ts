@@ -3,7 +3,6 @@
 // Set this to your API origin
 const API_ORIGIN = 'https://milestone-api-production.up.railway.app';
 const FRONTEND_BASE_URL = 'https://lithiumx.netlify.app';
-const LOGIN_PATH = '/login'; // Frontend login page path
 
 // Enhanced token management with refresh support
 function getToken(): string | null {
@@ -51,15 +50,67 @@ function redirectToLogin(): void {
   // Clear any existing tokens
   clearAllTokens();
   
-  // Redirect to frontend login page (not API login)
+  // Try to find the correct login path by checking common routes
+  const commonLoginPaths = ['/', '/login', '/auth', '/auth/login', '/signin', '/sign-in'];
   const currentPath = window.location.pathname + window.location.search;
-  const loginUrl = `${FRONTEND_BASE_URL}${LOGIN_PATH}?redirect=${encodeURIComponent(currentPath)}`;
   
-  console.log('Redirecting to login:', loginUrl);
-  window.location.href = loginUrl;
+  // Check if we're already on a page that might be the login
+  const isAlreadyOnLoginPage = commonLoginPaths.some(path => 
+    window.location.pathname === path || window.location.pathname.startsWith(path + '/')
+  );
+  
+  if (isAlreadyOnLoginPage) {
+    console.log('Already on potential login page, not redirecting');
+    return;
+  }
+  
+  // Try each common login path until we find one that works
+  let loginAttempts = 0;
+  
+  const tryLoginRedirect = () => {
+    if (loginAttempts >= commonLoginPaths.length) {
+      console.error('No valid login path found, redirecting to home');
+      window.location.href = FRONTEND_BASE_URL;
+      return;
+    }
+    
+    const loginPath = commonLoginPaths[loginAttempts];
+    const loginUrl = `${FRONTEND_BASE_URL}${loginPath}?redirect=${encodeURIComponent(currentPath)}`;
+    
+    console.log(`Trying login redirect to: ${loginUrl}`);
+    
+    // Test if this path exists by checking if we'd be staying on the same page
+    if (loginPath === window.location.pathname) {
+      loginAttempts++;
+      tryLoginRedirect();
+      return;
+    }
+    
+    // Use a hidden iframe to test the URL first
+    const testFrame = document.createElement('iframe');
+    testFrame.style.display = 'none';
+    testFrame.src = loginUrl;
+    
+    testFrame.onload = () => {
+      document.body.removeChild(testFrame);
+      console.log(`Login path ${loginPath} exists, redirecting...`);
+      window.location.href = loginUrl;
+    };
+    
+    testFrame.onerror = () => {
+      document.body.removeChild(testFrame);
+      console.warn(`Login path ${loginPath} not found, trying next...`);
+      loginAttempts++;
+      setTimeout(tryLoginRedirect, 100);
+    };
+    
+    document.body.appendChild(testFrame);
+  };
+  
+  tryLoginRedirect();
 }
 
-// Enhanced fetch injector with error handling and retry logic
+// Enhanced fetch injector with better error handling
 (function installFetchInjector() {
   if (typeof window === 'undefined') return;
   if ((window as any).__authInjectorInstalled) return;
@@ -94,10 +145,20 @@ function redirectToLogin(): void {
         if (token) {
           headers.set('Authorization', `Bearer ${token}`);
           if (process.env.NODE_ENV !== 'production') {
-            console.log('🔒 Injecting Bearer token for API request');
+            console.log('🔒 Injecting Bearer token for API request to:', url.pathname);
           }
         } else {
-          console.warn('No auth token available for API request');
+          console.warn('No auth token available for API request to:', url.pathname);
+          
+          // Don't redirect for public endpoints that might not need auth
+          const publicEndpoints = ['/proposals', '/health', '/test'];
+          const isPublicEndpoint = publicEndpoints.some(endpoint => 
+            url.pathname === endpoint || url.pathname.startsWith(endpoint + '/')
+          );
+          
+          if (!isPublicEndpoint) {
+            console.warn('Non-public endpoint without auth, might fail:', url.pathname);
+          }
         }
       }
 
@@ -115,14 +176,17 @@ function redirectToLogin(): void {
       
       // Handle authentication errors (401 Unauthorized)
       if (isTargetAPI && response.status === 401 && !isAuthEndpoint) {
-        console.warn('Authentication failed (401), redirecting to login...');
+        console.warn('Authentication failed (401) for:', url.pathname);
         
-        // Try to get more info from response body for debugging
-        try {
-          const errorData = await response.clone().json();
-          console.warn('Auth error details:', errorData);
-        } catch (e) {
-          // Ignore if response body is not JSON
+        // Don't redirect if we're already trying to authenticate
+        if (url.pathname.includes('/auth/')) {
+          return response;
+        }
+        
+        // Check if we have a token that might be expired
+        const token = getToken();
+        if (token) {
+          console.warn('Token exists but API returned 401, token might be expired');
         }
         
         redirectToLogin();
@@ -131,15 +195,14 @@ function redirectToLogin(): void {
 
       // Handle forbidden access (403 Forbidden)
       if (isTargetAPI && response.status === 403) {
-        console.error('Access forbidden (403)');
-        // You could redirect to a "no access" page here or show a message
+        console.error('Access forbidden (403) for:', url.pathname);
       }
 
       return response;
     } catch (error) {
       // Only log non-auth errors to avoid console noise during redirects
       if (!error.message.includes('Authentication required')) {
-        console.error('Fetch error:', error);
+        console.error('Fetch error for', url.pathname, ':', error);
       }
       throw error;
     }
@@ -155,13 +218,16 @@ function redirectToLogin(): void {
     
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
+      const isExpired = payload.exp ? Date.now() >= payload.exp * 1000 : false;
+      
       return { 
-        isAuthenticated: true,
+        isAuthenticated: !isExpired,
+        isExpired,
         expiresAt: payload.exp ? new Date(payload.exp * 1000) : null,
         payload 
       };
     } catch {
-      return { isAuthenticated: false };
+      return { isAuthenticated: false, isExpired: true };
     }
   };
 
@@ -171,15 +237,24 @@ function redirectToLogin(): void {
   if (process.env.NODE_ENV !== 'production') {
     console.log('🔒 Enhanced Bearer fetch injector installed for', API_ORIGIN);
     console.log('💡 Available methods: clearAuth(), getAuthStatus(), redirectToLogin()');
-    console.log('📍 Frontend base URL:', FRONTEND_BASE_URL);
-    console.log('🔑 Login path:', LOGIN_PATH);
   }
 
-  // Optional: Auto-check auth status on page load
+  // Auto-check auth status on page load
   setTimeout(() => {
     const status = (window as any).getAuthStatus();
     if (!status.isAuthenticated) {
       console.log('🔐 No active authentication session found');
+      
+      // If we're on a protected route and not authenticated, consider redirecting
+      const protectedRoutes = ['/vendor/', '/admin/', '/dashboard'];
+      const isProtectedRoute = protectedRoutes.some(route => 
+        window.location.pathname.startsWith(route)
+      );
+      
+      if (isProtectedRoute && !status.isAuthenticated) {
+        console.log('🛡️ Protected route without auth, considering redirect...');
+        // You might want to redirect here, or let the frontend handle it
+      }
     } else {
       console.log('🔐 Active session found, expires:', status.expiresAt);
     }
@@ -192,18 +267,3 @@ export const authInjector = {
   clearTokens: clearAllTokens,
   redirectToLogin
 };
-
-// Optional: Auto-initialize and check auth status
-if (typeof window !== 'undefined') {
-  // You can also add a global auth state listener
-  window.addEventListener('storage', (event) => {
-    if (event.key === 'lx_token' || event.key === 'token') {
-      console.log('Auth storage changed, rechecking status...');
-      const status = (window as any).getAuthStatus();
-      if (!status.isAuthenticated && !window.location.pathname.includes(LOGIN_PATH)) {
-        console.log('Token removed, redirecting to login...');
-        redirectToLogin();
-      }
-    }
-  });
-}
