@@ -1,25 +1,43 @@
 'use client';
 
-// Set this to your API origin
+// If you can, derive this from env or your api.ts export.
+// For now, keep it literal:
 const API_ORIGIN = 'https://milestone-api-production.up.railway.app';
+
+function b64urlDecode(s: string) {
+  // make base64url → base64
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  // pad
+  while (s.length % 4) s += '=';
+  return atob(s);
+}
 
 function getToken(): string | null {
   try {
-    const t =
-      localStorage.getItem('lx_token') ||
-      localStorage.getItem('token') ||
-      Object.values(localStorage).find(v => (v || '').split('.').length === 3 && (v as string).length > 40);
-    if (!t) return null;
+    // ✅ include lx_jwt (what your app sets)
+    const keys = ['lx_jwt', 'lx_token', 'token'];
+    for (const k of keys) {
+      const t = localStorage.getItem(k);
+      if (!t) continue;
 
-    // optional: auto-logout if expired
-    const p = JSON.parse(atob((t as string).split('.')[1]));
-    if (p?.exp && Date.now() > p.exp * 1000) {
-      console.warn('JWT expired; clearing');
-      localStorage.removeItem('lx_token');
-      localStorage.removeItem('token');
-      return null;
+      // optional: auto-logout if expired
+      try {
+        const payload = JSON.parse(b64urlDecode(t.split('.')[1] || ''));
+        if (payload?.exp && Date.now() > payload.exp * 1000) {
+          localStorage.removeItem(k);
+          continue;
+        }
+      } catch {
+        // ignore decode errors; still attempt to use token
+      }
+      return t;
     }
-    return t as string;
+
+    // last-resort: scan for any JWT-ish string
+    const anyJwt = Object.values(localStorage).find(
+      (v) => typeof v === 'string' && v.split('.').length === 3 && v.length > 40
+    );
+    return (anyJwt as string) || null;
   } catch {
     return null;
   }
@@ -40,21 +58,24 @@ function getToken(): string | null {
     try { origin = new URL(href).origin; } catch {}
 
     if (origin === API_ORIGIN) {
-      const headers = new Headers(
-        (init && init.headers) ||
-        (typeof input !== 'string' ? (input as Request).headers : undefined)
-      );
-      if (!headers.get('authorization')) {
+      // Start with headers from Request object (if any)...
+      const headers = new Headers(typeof input !== 'string' ? (input as Request).headers : undefined);
+      // ...then merge any incoming init.headers on top
+      if (init.headers) new Headers(init.headers as any).forEach((v, k) => headers.set(k, v));
+
+      if (!headers.has('authorization')) {
         const tok = getToken();
-        if (tok) headers.set('authorization', 'Bearer ' + tok);
+        if (tok) headers.set('authorization', `Bearer ${tok}`);
       }
-      init = { mode: 'cors', credentials: 'omit', ...init, headers };
+
+      // Preserve caller’s mode/credentials; just replace headers
+      init = { ...init, headers };
     }
-    return origFetch(input, init);
+
+    return origFetch(input as any, init);
   };
 
   if (process.env.NODE_ENV !== 'production') {
-    console.log('🔒 Bearer fetch injector installed for', API_ORIGIN);
+    console.log('🔒 Bearer fetch injector active for', API_ORIGIN);
   }
 })();
-
