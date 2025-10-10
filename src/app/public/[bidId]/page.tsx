@@ -5,6 +5,7 @@ export const revalidate = 0;
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicProjects } from "@/lib/api";
+import AuditPanel from "@/components/AuditPanel";
 
 function usd(n: number) {
   try {
@@ -47,6 +48,54 @@ async function fetchProofs(proposalId: number) {
   }
 }
 
+// best-effort: load audit rows from our own Next API (fallback to project.audit)
+async function fetchAudit(proposalId: number) {
+  const origin = getSiteOrigin();
+  if (!origin) return [];
+  try {
+    const r = await fetch(
+      `${origin}/api/audit?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
+      { cache: "no-store" }
+    );
+    if (!r.ok) return [];
+    const list = await r.json().catch(() => []);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeAudit(items: any[]) {
+  return (Array.isArray(items) ? items : []).map((a: any, i: number) => {
+    const change =
+      String(a.change_key ?? a.changed ?? a.change ?? "update").toLowerCase();
+    const at =
+      a.createdAt ?? a.timestamp ?? a.at ?? a.time ?? a.date;
+    const actor = a.actor ?? a.user ?? a.wallet ?? a.address ?? a.by;
+    const milestoneIndex =
+      Number.isFinite(a.milestoneIndex) ? Number(a.milestoneIndex)
+      : Number.isFinite(a.milestone_index) ? Number(a.milestone_index)
+      : Number.isFinite(a.msIndex) ? Number(a.msIndex)
+      : undefined;
+    const txHash = a.txHash ?? a.payment_tx_hash ?? a.hash;
+    const ipfs = a.ipfs_url ?? a.ipfsUrl ?? a.ipfs;
+
+    return {
+      id: a.id ?? `${change}-${i}`,
+      at: at ? String(at) : undefined,
+      actor: actor ? String(actor) : undefined,
+      change,
+      details:
+        a.details ??
+        a.description ??
+        (a.changed ? `Changed: ${a.changed}` : undefined),
+      ipfs,
+      milestoneIndex,
+      txHash,
+    };
+  }).filter((e) => !!e.at);
+}
+
 export default async function PublicProjectDetail({
   params,
   searchParams,
@@ -58,7 +107,7 @@ export default async function PublicProjectDetail({
   if (!Number.isFinite(bidId)) notFound();
 
   // load all projects and pick the one matching this bidId
-  const items = await getPublicProjects(); // ensure this uses { cache: 'no-store' } in src/lib/api.ts
+  const items = await getPublicProjects(); // ensure { cache: 'no-store' } in src/lib/api.ts
   const project = (Array.isArray(items) ? items : []).find(
     (p: any) => Number(p?.bidId) === bidId
   );
@@ -76,7 +125,13 @@ export default async function PublicProjectDetail({
   }
 
   // also load proofs/files (for Files tab)
-  const proofs = await fetchProofs(Number(project.proposalId ?? 0));
+  const proposalIdNum = Number(project.proposalId ?? 0);
+  const proofs = await fetchProofs(proposalIdNum);
+
+  // load audit (public) — fallback to embedded project.audit if provided
+  const apiAudit = await fetchAudit(proposalIdNum);
+  const rawAudit = Array.isArray(apiAudit) && apiAudit.length ? apiAudit : (project as any).audit || [];
+  const events = normalizeAudit(rawAudit);
 
   // tabs via query param (no client JS needed)
   const tab = String(searchParams?.tab || "overview");
@@ -86,6 +141,7 @@ export default async function PublicProjectDetail({
     { key: "bids", label: `Bids (${project.bids?.length || 0})` },
     { key: "milestones", label: "Milestones" },
     { key: "files", label: `Files (${proofs?.length || 0})` },
+    { key: "audit", label: `Audit (${events.length})` },
   ];
 
   // flatten milestones from all bids (show newest bid first)
@@ -100,6 +156,19 @@ export default async function PublicProjectDetail({
           m,
         }))
       );
+
+  // prefer awarded bid for milestone naming (fallback to first bid)
+  const awardedBid =
+    (project.bids || []).find((b: any) =>
+      ["awarded", "accepted", "winner"].includes(String(b?.status || "").toLowerCase())
+    ) || (project.bids || [])[0];
+
+  const milestoneNames: Record<number, string> = Object.fromEntries(
+    ((awardedBid?.milestones as any[]) || []).map((m: any, i: number) => [
+      i,
+      m?.name || `Milestone ${i + 1}`,
+    ])
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -288,6 +357,16 @@ export default async function PublicProjectDetail({
                   </div>
                 </div>
               ))}
+          </section>
+        )}
+
+        {tab === "audit" && (
+          <section>
+            <AuditPanel
+              events={events}
+              milestoneNames={milestoneNames}
+              initialDays={3}
+            />
           </section>
         )}
       </div>
