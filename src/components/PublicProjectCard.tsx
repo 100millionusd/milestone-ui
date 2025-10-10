@@ -27,10 +27,13 @@ type Project = {
   coverImage?: string | null;
   images?: string[];
   bids?: Bid[];
+  cid?: string | null; // <-- added (public anchor flag in your schema)
 };
 
 type AuditSummary = {
   anchored: boolean;
+  cid?: string | null;       // <-- added
+  ipfsHref?: string | null;  // <-- added
   txHash?: string | null;
   periodId?: string | null;
   contract?: string | null;
@@ -140,10 +143,13 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
   const IPFS_GATEWAY  = process.env.NEXT_PUBLIC_IPFS_GATEWAY  || "https://gateway.pinata.cloud/ipfs";
 
-  const anchorHref =
-    auditSummary?.anchored && auditSummary.txHash && EXPLORER_BASE
-      ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}`
-      : undefined;
+  // --- NEW: anchored logic prefers CID; fall back to tx/anchoredAt
+  const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
+  const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
+
+  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, "")}` : undefined;
+  const explorerHref = auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
+  const anchorHref = ipfsHref || explorerHref;
 
   return (
     <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white shadow-sm">
@@ -168,22 +174,35 @@ export default function PublicProjectCard({ project }: { project: Project }) {
       <div className="p-4">
         <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{project.orgName}</div>
 
-        {/* --- CHANGED: title now includes audit badge (if available) --- */}
+        {/* --- title + audit badge --- */}
         <h2 className="text-lg font-semibold flex items-center gap-2">
           {project.proposalTitle || 'Untitled Project'}
           {auditSummary ? (
-            auditSummary.anchored ? (
-              <a
-                href={anchorHref || '#'}
-                target={anchorHref ? '_blank' : undefined}
-                className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
-                title={anchorHref ? 'View anchor transaction' : 'Anchored'}
-              >
-                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
-                </svg>
-                Anchored
-              </a>
+            anchored ? (
+              anchorHref ? (
+                <a
+                  href={anchorHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:underline"
+                  title={ipfsHref ? 'View IPFS snapshot' : 'View anchor transaction'}
+                >
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
+                  </svg>
+                  Anchored
+                </a>
+              ) : (
+                <span
+                  className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                  title="Anchored"
+                >
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
+                  </svg>
+                  Anchored
+                </span>
+              )
             ) : (
               <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
                 Not anchored yet
@@ -376,7 +395,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                     <div className="flex items-center justify-between">
                       <div className="font-medium">{r.action || 'event'} <span className="text-gray-400">• {ts}</span></div>
                       {cid && (
-                        <a href={ipfsUrl} target="_blank" className="text-xs text-blue-600 hover:underline">
+                        <a href={ipfsUrl} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">
                           IPFS
                         </a>
                       )}
