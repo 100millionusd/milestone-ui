@@ -66,7 +66,7 @@ function normalizeAudit(items: AuditRow[]) {
       actor,
       change,
       details: Array.isArray(a.changedFields) && a.changedFields.length ? `Changed: ${a.changedFields.join(', ')}` : undefined,
-      ipfs: ipfs ? `https://gateway.pinata.cloud/ipfs/${ipfs}` : undefined,
+      ipfs: ipfs ? `${IPFS_GATEWAY}/${ipfs}` : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -175,7 +175,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // envs for links (compile-time)
   const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
-  const IPFS_GATEWAY  = process.env.NEXT_PUBLIC_IPFS_GATEWAY  || "https://gateway.pinata.cloud/ipfs";
+  const IPFS_GATEWAY  = process.env.NEXT_PUBLIC_IPFS_GATEWAY  || "https://sapphire-given-snake-741.mypinata.cloud/ipfs";
 
   // --- NEW: anchored logic prefers CID; fall back to tx/anchoredAt
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
