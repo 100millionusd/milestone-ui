@@ -2,7 +2,8 @@
 
 // Set this to your API origin
 const API_ORIGIN = 'https://milestone-api-production.up.railway.app';
-const LOGIN_PATH = '/auth/login'; // Path to redirect on auth failures
+const FRONTEND_BASE_URL = 'https://lithiumx.netlify.app';
+const LOGIN_PATH = '/login'; // Frontend login page path
 
 // Enhanced token management with refresh support
 function getToken(): string | null {
@@ -50,9 +51,11 @@ function redirectToLogin(): void {
   // Clear any existing tokens
   clearAllTokens();
   
-  // Redirect to login page
+  // Redirect to frontend login page (not API login)
   const currentPath = window.location.pathname + window.location.search;
-  const loginUrl = `${LOGIN_PATH}?redirect=${encodeURIComponent(currentPath)}`;
+  const loginUrl = `${FRONTEND_BASE_URL}${LOGIN_PATH}?redirect=${encodeURIComponent(currentPath)}`;
+  
+  console.log('Redirecting to login:', loginUrl);
   window.location.href = loginUrl;
 }
 
@@ -90,6 +93,11 @@ function redirectToLogin(): void {
         const token = getToken();
         if (token) {
           headers.set('Authorization', `Bearer ${token}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🔒 Injecting Bearer token for API request');
+          }
+        } else {
+          console.warn('No auth token available for API request');
         }
       }
 
@@ -107,15 +115,24 @@ function redirectToLogin(): void {
       
       // Handle authentication errors (401 Unauthorized)
       if (isTargetAPI && response.status === 401 && !isAuthEndpoint) {
-        console.warn('Authentication failed, redirecting to login...');
+        console.warn('Authentication failed (401), redirecting to login...');
+        
+        // Try to get more info from response body for debugging
+        try {
+          const errorData = await response.clone().json();
+          console.warn('Auth error details:', errorData);
+        } catch (e) {
+          // Ignore if response body is not JSON
+        }
+        
         redirectToLogin();
         throw new Error('Authentication required');
       }
 
       // Handle forbidden access (403 Forbidden)
       if (isTargetAPI && response.status === 403) {
-        console.error('Access forbidden');
-        // You could redirect to a "no access" page here
+        console.error('Access forbidden (403)');
+        // You could redirect to a "no access" page here or show a message
       }
 
       return response;
@@ -148,10 +165,25 @@ function redirectToLogin(): void {
     }
   };
 
+  // Add method to manually redirect to login
+  (window as any).redirectToLogin = redirectToLogin;
+
   if (process.env.NODE_ENV !== 'production') {
     console.log('🔒 Enhanced Bearer fetch injector installed for', API_ORIGIN);
-    console.log('💡 Available methods: clearAuth(), getAuthStatus()');
+    console.log('💡 Available methods: clearAuth(), getAuthStatus(), redirectToLogin()');
+    console.log('📍 Frontend base URL:', FRONTEND_BASE_URL);
+    console.log('🔑 Login path:', LOGIN_PATH);
   }
+
+  // Optional: Auto-check auth status on page load
+  setTimeout(() => {
+    const status = (window as any).getAuthStatus();
+    if (!status.isAuthenticated) {
+      console.log('🔐 No active authentication session found');
+    } else {
+      console.log('🔐 Active session found, expires:', status.expiresAt);
+    }
+  }, 1000);
 })();
 
 // Export functions for manual use if needed
@@ -160,3 +192,18 @@ export const authInjector = {
   clearTokens: clearAllTokens,
   redirectToLogin
 };
+
+// Optional: Auto-initialize and check auth status
+if (typeof window !== 'undefined') {
+  // You can also add a global auth state listener
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'lx_token' || event.key === 'token') {
+      console.log('Auth storage changed, rechecking status...');
+      const status = (window as any).getAuthStatus();
+      if (!status.isAuthenticated && !window.location.pathname.includes(LOGIN_PATH)) {
+        console.log('Token removed, redirecting to login...');
+        redirectToLogin();
+      }
+    }
+  });
+}
