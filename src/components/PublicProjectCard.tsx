@@ -53,6 +53,14 @@ type AuditRow = {
   txHash?: string | null;
 };
 
+// envs (module scope, available to everything in this file)
+const EXPLORER_BASE =
+  process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
+
+const IPFS_GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  "https://sapphire-given-snake-741.mypinata.cloud/ipfs";
+
 /** Map card's raw audit rows → AuditPanel's event shape */
 function normalizeAudit(items: AuditRow[]) {
   return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
@@ -172,10 +180,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     { key: 'files' as const, label: `Files (${files.length})` },
     { key: 'audit' as const, label: 'Audit' }, // NEW
   ];
-
-  // envs for links (compile-time)
-  const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
-  const IPFS_GATEWAY  = process.env.NEXT_PUBLIC_IPFS_GATEWAY  || "https://sapphire-given-snake-741.mypinata.cloud/ipfs";
 
   // --- NEW: anchored logic prefers CID; fall back to tx/anchoredAt
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
