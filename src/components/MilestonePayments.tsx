@@ -9,6 +9,7 @@ import {
   saveProofFilesToDb, // POST /api/proofs → persists for Files tab
   type Bid,
   type Milestone,
+  API_BASE, // used to detect admin role
 } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
@@ -87,6 +88,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
   // open change requests grouped by milestone index (for vendor visibility)
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
+  // role gate for cosmetic hiding of admin-only actions
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // -------- helpers --------
   const setText = (i: number, v: string) =>
@@ -197,6 +200,27 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
   }, [resolvedProposalId]);
+
+  // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/auth/role`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const role = String(j?.role || j?.Role || '').toLowerCase();
+          if (!cancelled) setIsAdmin(role === 'admin');
+        }
+      } catch {
+        // default remains vendor (isAdmin=false)
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
@@ -541,7 +565,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     )
                   )}
 
-                  {isDone && !isPaid && (
+                  {isDone && !isPaid && isAdmin && (
                     <div className="mt-3">
                       <button
                         onClick={() => handleReleasePayment(i)}
@@ -552,6 +576,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                       </button>
                     </div>
                   )}
+
+                  {isDone && !isPaid && !isAdmin && (
+                    <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
+                      Awaiting admin to release payment.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -559,10 +589,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })}
       </div>
 
-      {/* Manual Payment Processor (unchanged) */}
-      <div className="mt-6">
-        <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
-      </div>
+      {/* Manual Payment Processor (admin only) */}
+      {isAdmin && (
+        <div className="mt-6">
+          <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
+        </div>
+      )}
     </div>
   );
 };
