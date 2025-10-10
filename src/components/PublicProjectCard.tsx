@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import AuditPanel from '@/components/AuditPanel';
 
 function usd(n: number) {
   try {
@@ -48,7 +49,39 @@ type AuditRow = {
   actorAddress?: string;
   changedFields?: string[];
   ipfsCid?: string | null;
+  milestoneIndex?: number;
+  txHash?: string | null;
 };
+
+/** Map card's raw audit rows → AuditPanel's event shape */
+function normalizeAudit(items: AuditRow[]) {
+  return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
+    const change = String(a.action ?? 'update').toLowerCase().replace(/\s+/g, '_');
+    const at = a.createdAt ?? undefined;
+    const actor = a.actorRole || a.actorAddress || undefined;
+    const ipfs = a.ipfsCid ? String(a.ipfsCid).replace(/^ipfs:\/\//, '') : undefined;
+    return {
+      id: i,
+      at: at ? String(at) : new Date().toISOString(),
+      actor,
+      change,
+      details: Array.isArray(a.changedFields) && a.changedFields.length ? `Changed: ${a.changedFields.join(', ')}` : undefined,
+      ipfs: ipfs ? `https://gateway.pinata.cloud/ipfs/${ipfs}` : undefined,
+      milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
+      txHash: a.txHash || undefined,
+    };
+  });
+}
+
+/** Build milestone names for the panel (prefer approved/awarded bid, else first) */
+function milestoneNamesFromProject(project: Project): Record<number, string> {
+  const awarded =
+    (project?.bids || []).find((b: any) =>
+      ['awarded', 'accepted', 'winner', 'approved'].includes(String(b?.status || '').toLowerCase())
+    ) || (project?.bids || [])[0];
+  const arr = Array.isArray(awarded?.milestones) ? awarded!.milestones : [];
+  return Object.fromEntries(arr.map((m: any, i: number) => [i, m?.name || `Milestone ${i + 1}`]));
+}
 
 export default function PublicProjectCard({ project }: { project: Project }) {
   const [tab, setTab] = useState<'overview'|'bids'|'milestones'|'files'|'audit'>('overview');
@@ -125,6 +158,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
         if (cancelled || !j) return;
+        // Prefer j.events if present; else empty array
         setAuditRows(Array.isArray(j.events) ? j.events : []);
       } catch {}
     })();
@@ -377,7 +411,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             </>
           )}
 
-          {/* --- NEW: Audit tab content --- */}
+          {/* --- NEW: Audit tab content using AuditPanel --- */}
           {tab === 'audit' && (
             <section className="space-y-3 text-sm">
               {!auditRows && (
@@ -386,31 +420,13 @@ export default function PublicProjectCard({ project }: { project: Project }) {
               {auditRows && auditRows.length === 0 && (
                 <div className="text-gray-500">No public audit events yet.</div>
               )}
-              {auditRows && auditRows.map((r, i) => {
-                const ts = r.createdAt ? new Date(r.createdAt).toLocaleString() : '';
-                const cid = r.ipfsCid ? String(r.ipfsCid) : '';
-                const ipfsUrl = cid ? `${IPFS_GATEWAY}/${cid.replace(/^ipfs:\/\//, '')}` : '';
-                return (
-                  <div key={i} className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{r.action || 'event'} <span className="text-gray-400">• {ts}</span></div>
-                      {cid && (
-                        <a href={ipfsUrl} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">
-                          IPFS
-                        </a>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      {r.actorRole ? r.actorRole : ''}{r.actorAddress ? ` • ${r.actorAddress}` : ''}
-                    </div>
-                    {Array.isArray(r.changedFields) && r.changedFields.length > 0 && (
-                      <div className="mt-2 text-xs">
-                        <span className="font-medium">Changed:</span> {r.changedFields.join(', ')}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {auditRows && auditRows.length > 0 && (
+                <AuditPanel
+                  events={normalizeAudit(auditRows)}
+                  milestoneNames={milestoneNamesFromProject(project)}
+                  initialDays={3}
+                />
+              )}
             </section>
           )}
         </div>
