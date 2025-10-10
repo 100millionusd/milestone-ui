@@ -13,10 +13,3 @@
 
 [build.environment]
   NODE_VERSION = "18"
-
-  [[redirects]]
-  from = "/api/*"
-  to = "https://milestone-api-production.up.railway.app/:splat"
-  status = 200
-  force = true
-  headers = { X-Forwarded-Proto = "https" }
