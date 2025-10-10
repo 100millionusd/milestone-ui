@@ -41,22 +41,13 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 
 // ---------- ENV ----------
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-
-// Web3Auth network
 const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
-
-// ANKR / RPC
 const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
 const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
   (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
-
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
-
-// Backend API base (leave empty to use same-origin + Next.js rewrites)
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-// IMPORTANT: when API_BASE is empty, we prefix with /api so Next rewrites can proxy.
-// The auth-injector will rewrite /api/* to the backend host and include credentials.
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
 // ---------- RPC HEALTH ----------
@@ -80,9 +71,7 @@ async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
     return false;
   }
 }
-
 const isBareAnkr = (u: string) => /rpc\.ankr\.com\/eth_sepolia\/?$/.test(u);
-
 async function pickHealthyRpc(): Promise<string> {
   const candidates = [
     envRpc && !isBareAnkr(envRpc) ? envRpc : '',
@@ -96,14 +85,13 @@ async function pickHealthyRpc(): Promise<string> {
   return 'https://rpc.sepolia.org';
 }
 
-// ---------- HELPERS ----------
+// ---------- FETCH HELPERS ----------
 async function getJson(url: string) {
   const r = await fetch(url, { credentials: 'include', mode: 'cors' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const ct = r.headers.get('content-type') || '';
   return ct.includes('application/json') ? r.json() : r.text();
 }
-
 async function postJson(url: string, body: any) {
   const r = await fetch(url, {
     method: 'POST',
@@ -112,29 +100,75 @@ async function postJson(url: string, body: any) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  const txt = await r.text().catch(() => '');
   if (!r.ok) {
-    const txt = await r.text().catch(() => '');
+    // surface backend error text for easier debugging
     throw new Error(txt || `HTTP ${r.status}`);
   }
-  const ct = r.headers.get('content-type') || '';
-  return ct.includes('application/json') ? r.json() : r.text();
+  try {
+    return JSON.parse(txt);
+  } catch {
+    return txt;
+  }
 }
 
-async function signExact(signer: any, message: string, address: string): Promise<string> {
-  // Try signMessage first
+// ---------- SIGNING (verified) ----------
+function normalizeAddr(a: string) {
+  try { return ethers.getAddress(a); } catch { return (a || '').toLowerCase(); }
+}
+async function recoversTo(address: string, message: string, signature: string) {
+  const want = normalizeAddr(address);
+  let got: string | null = null;
   try {
-    return await signer.signMessage(message);
+    // ethers v6
+    got = ethers.verifyMessage(message, signature);
   } catch {
-    // Fallback to personal_sign
-    const provider: any = signer.provider || (signer as any)._provider;
-    if (provider?.request) {
-      // ethers v6 toUtf8Bytes
-      const bytes = new TextEncoder().encode(message);
-      const hex = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      return await provider.request({ method: 'personal_sign', params: [hex, address] });
-    }
-    throw new Error('No signing method available');
+    try {
+      // ethers v5 fallback
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const v5 = require('ethers');
+      got = v5.utils.verifyMessage(message, signature);
+    } catch {}
   }
+  return want === normalizeAddr(got || '');
+}
+async function personalSignWithOrder(
+  signer: any,
+  message: string,
+  address: string,
+  order: 'msgFirst' | 'addrFirst'
+) {
+  const provider: any = signer.provider || (signer as any)._provider;
+  if (!provider?.request) throw new Error('No provider.request() for personal_sign');
+  const bytes = new TextEncoder().encode(message);
+  const hex = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const params = order === 'msgFirst' ? [hex, address] : [address, hex];
+  return await provider.request({ method: 'personal_sign', params });
+}
+/** Sign the exact nonce string; locally verify the signature matches `address`. */
+async function signNonceVerified(signer: any, rawNonce: string, address: string): Promise<string> {
+  const message = String(rawNonce ?? '').trim();
+  if (!message) throw new Error('Empty nonce');
+
+  // A) signMessage
+  try {
+    const sig = await signer.signMessage(message);
+    if (await recoversTo(address, message, sig)) return sig;
+  } catch {}
+
+  // B) personal_sign [msg, address]
+  try {
+    const sig = await personalSignWithOrder(signer, message, address, 'msgFirst');
+    if (await recoversTo(address, message, sig)) return sig;
+  } catch {}
+
+  // C) personal_sign [address, msg]
+  try {
+    const sig = await personalSignWithOrder(signer, message, address, 'addrFirst');
+    if (await recoversTo(address, message, sig)) return sig;
+  } catch {}
+
+  throw new Error('Signature does not match the active wallet address');
 }
 
 // ---------- PROVIDER ----------
@@ -168,7 +202,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
-
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -190,7 +223,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         w3a.configureAdapter(new MetamaskAdapter());
-
         if (wcProjectId) {
           w3a.configureAdapter(
             new WalletConnectV2Adapter({
@@ -264,25 +296,27 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       if (!web3authProvider) throw new Error('No provider from Web3Auth');
       setProvider(web3authProvider);
 
-      // 1) Address (this MUST match the one used for nonce)
+      // 1) Address (the one used to request nonce)
       const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
       const signer = await ethersProvider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
+      // (optional) expose for console debugging
+      try { (window as any).__debugSigner = signer; } catch {}
 
       // 2) Nonce (GET, bound to this address)
       const nonceResp = await getJson(api(`/auth/nonce?address=${encodeURIComponent(addr)}`));
       const nonce = String((nonceResp as any)?.nonce ?? nonceResp ?? '').trim();
       if (!nonce) throw new Error('Empty nonce from server');
 
-      // 3) Sign EXACTLY the nonce string
-      const signature = await signExact(signer, nonce, addr);
+      // 3) Sign EXACT nonce and verify locally
+      const signature = await signNonceVerified(signer, nonce, addr);
 
       // 4) Exchange for cookie/JWT
       const loginResp = await postJson(api('/auth/login'), { address: addr, signature });
 
-      // Optional: store JWT for Authorization header redundancy
+      // Optional: store JWT for Authorization redundancy
       try {
         const token = (loginResp as any)?.token;
         if (token) localStorage.setItem('lx_jwt', token);
@@ -341,7 +375,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         window.location.href = '/vendor/login';
       }
     };
-
     const onChainChanged = () => window.location.reload();
 
     eth.on('accountsChanged', onAccountsChanged);
