@@ -33,12 +33,10 @@ function getSiteOrigin(): string {
 
 // best-effort: load proofs/files from our own Next API
 async function fetchProofs(proposalId: number) {
-  const origin = getSiteOrigin();
-  if (!origin) return [];
   try {
     const r = await fetch(
-      `${origin}/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
-      { cache: "no-store" }
+      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
+      { cache: 'no-store' }
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
@@ -50,16 +48,13 @@ async function fetchProofs(proposalId: number) {
 
 // best-effort: load audit rows from our own Next API (fallback to project.audit)
 async function fetchAudit(proposalId: number) {
-  const origin = getSiteOrigin();
-  if (!origin) return [];
   try {
     const r = await fetch(
-      `${origin}/api/public/audit/${encodeURIComponent(String(proposalId))}?ts=${Date.now()}`,
+      `/api/public/audit/${encodeURIComponent(String(proposalId))}?ts=${Date.now()}`,
       { cache: 'no-store' }
     );
     if (!r.ok) return [];
     const data = await r.json().catch(() => []);
-    // The route may return an array OR an object with events/rows — normalize it:
     const list = Array.isArray(data)
       ? data
       : Array.isArray((data as any).events)
