@@ -9,7 +9,8 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-import { getAuthRole, getVendorProfile } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
+
 
 type Role = 'admin' | 'vendor' | 'guest';
 const normalizeRole = (v: any): Role => {
@@ -41,13 +42,24 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 
 // ---------- ENV ----------
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
-const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
+
+// Web3Auth network: keep devnet by default to avoid 400s (switch with env when allowlisted)
+const WEB3AUTH_NETWORK =
+  process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
+
+// ANKR: either give a full RPC in NEXT_PUBLIC_SEPOLIA_RPC,
+// or set NEXT_PUBLIC_ANKR_API_KEY and we’ll build the URL for you.
 const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
 const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
-  (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
+  (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : ''); // only if key present
+
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
+
+// Backend API base (leave empty to use same-origin + Next.js rewrites)
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+// IMPORTANT: when API_BASE is empty, we prefix with /api so Next rewrites can proxy.
+// This fixes the Safari cookie issue and also your 404s like /auth/role.
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
 // ---------- RPC HEALTH ----------
@@ -71,104 +83,22 @@ async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
     return false;
   }
 }
+
 const isBareAnkr = (u: string) => /rpc\.ankr\.com\/eth_sepolia\/?$/.test(u);
+
 async function pickHealthyRpc(): Promise<string> {
   const candidates = [
-    envRpc && !isBareAnkr(envRpc) ? envRpc : '',
+    envRpc && !isBareAnkr(envRpc) ? envRpc : '', // only use ANKR if key is present
     'https://rpc.sepolia.org',
     'https://1rpc.io/sepolia',
+    // do NOT include bare ankr fallback; it passes chainId but fails later with Unauthorized
   ].filter(Boolean);
   for (const url of candidates) {
     // eslint-disable-next-line no-await-in-loop
     if (await probeRpc(url)) return url;
   }
+  // worst-case
   return 'https://rpc.sepolia.org';
-}
-
-// ---------- FETCH HELPERS ----------
-async function getJson(url: string) {
-  const r = await fetch(url, { credentials: 'include', mode: 'cors' });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const ct = r.headers.get('content-type') || '';
-  return ct.includes('application/json') ? r.json() : r.text();
-}
-async function postJson(url: string, body: any) {
-  const r = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    mode: 'cors',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const txt = await r.text().catch(() => '');
-  if (!r.ok) {
-    // surface backend error text for easier debugging
-    throw new Error(txt || `HTTP ${r.status}`);
-  }
-  try {
-    return JSON.parse(txt);
-  } catch {
-    return txt;
-  }
-}
-
-// ---------- SIGNING (verified) ----------
-function normalizeAddr(a: string) {
-  try { return ethers.getAddress(a); } catch { return (a || '').toLowerCase(); }
-}
-async function recoversTo(address: string, message: string, signature: string) {
-  const want = normalizeAddr(address);
-  let got: string | null = null;
-  try {
-    // ethers v6
-    got = ethers.verifyMessage(message, signature);
-  } catch {
-    try {
-      // ethers v5 fallback
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const v5 = require('ethers');
-      got = v5.utils.verifyMessage(message, signature);
-    } catch {}
-  }
-  return want === normalizeAddr(got || '');
-}
-async function personalSignWithOrder(
-  signer: any,
-  message: string,
-  address: string,
-  order: 'msgFirst' | 'addrFirst'
-) {
-  const provider: any = signer.provider || (signer as any)._provider;
-  if (!provider?.request) throw new Error('No provider.request() for personal_sign');
-  const bytes = new TextEncoder().encode(message);
-  const hex = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-  const params = order === 'msgFirst' ? [hex, address] : [address, hex];
-  return await provider.request({ method: 'personal_sign', params });
-}
-/** Sign the exact nonce string; locally verify the signature matches `address`. */
-async function signNonceVerified(signer: any, rawNonce: string, address: string): Promise<string> {
-  const message = String(rawNonce ?? '').trim();
-  if (!message) throw new Error('Empty nonce');
-
-  // A) signMessage
-  try {
-    const sig = await signer.signMessage(message);
-    if (await recoversTo(address, message, sig)) return sig;
-  } catch {}
-
-  // B) personal_sign [msg, address]
-  try {
-    const sig = await personalSignWithOrder(signer, message, address, 'msgFirst');
-    if (await recoversTo(address, message, sig)) return sig;
-  } catch {}
-
-  // C) personal_sign [address, msg]
-  try {
-    const sig = await personalSignWithOrder(signer, message, address, 'addrFirst');
-    if (await recoversTo(address, message, sig)) return sig;
-  } catch {}
-
-  throw new Error('Signature does not match the active wallet address');
 }
 
 // ---------- PROVIDER ----------
@@ -194,7 +124,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (EOA adapters only)
+  // Init Web3Auth (NO OpenLogin adapter)
   useEffect(() => {
     const init = async () => {
       try {
@@ -202,6 +132,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
+
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -217,12 +148,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         const w3a = new Web3Auth({
           clientId,
-          web3AuthNetwork: WEB3AUTH_NETWORK,
+          web3AuthNetwork: WEB3AUTH_NETWORK, // 'sapphire_devnet' by default
           privateKeyProvider,
           uiConfig: {},
         });
 
+        // Wallet adapters (EOA only)
         w3a.configureAdapter(new MetamaskAdapter());
+
         if (wcProjectId) {
           w3a.configureAdapter(
             new WalletConnectV2Adapter({
@@ -234,8 +167,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
+        // Hide OpenLogin entry to avoid “openlogin is not a valid adapter”
         await w3a.initModal({
-          modalConfig: { [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false } },
+          modalConfig: {
+            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
+          },
         });
 
         setWeb3auth(w3a);
@@ -248,18 +184,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Cookie-based role from server
   const refreshRole = async () => {
-    try {
-      const info = await getAuthRole(); // { role, address? }
-      setRole(info.role);
-      localStorage.setItem('lx_role', info.role);
-      if (info.address) {
-        setAddress(info.address);
-        localStorage.setItem('lx_addr', info.address);
-      }
-    } catch (e) {
-      console.warn('refreshRole failed:', e);
+  try {
+    const info = await getAuthRole(); // { role, address? }
+    setRole(info.role);
+    localStorage.setItem('lx_role', info.role);
+    if (info.address) {
+      setAddress(info.address);
+      localStorage.setItem('lx_addr', info.address);
     }
-  };
+  } catch (e) {
+    console.warn('refreshRole failed:', e);
+  }
+};
 
   const isProfileIncomplete = (p: any) => {
     const hasName = !!(p?.vendorName || p?.companyName);
@@ -270,9 +206,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const postLoginProfileRedirect = async () => {
     try {
       const p = await getVendorProfile().catch(() => null);
+
       const url = new URL(window.location.href);
       const nextParam = url.searchParams.get('next');
       const fallback = pathname || '/';
+
       if (!p || isProfileIncomplete(p)) {
         router.replace(`/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`);
       } else {
@@ -289,63 +227,67 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   }, [mounted]);
 
   const login = async () => {
-    if (!web3auth) return;
-    try {
-      // 0) Connect wallet
-      const web3authProvider = await web3auth.connect();
-      if (!web3authProvider) throw new Error('No provider from Web3Auth');
-      setProvider(web3authProvider);
+  if (!web3auth) return;
+  try {
+    // 0) Connect wallet
+    const web3authProvider = await web3auth.connect();
+    if (!web3authProvider) throw new Error('No provider from Web3Auth');
+    setProvider(web3authProvider);
 
-      // 1) Address (the one used to request nonce)
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-      const signer = await ethersProvider.getSigner();
-      const addr = await signer.getAddress();
-      setAddress(addr);
-      localStorage.setItem('lx_addr', addr);
-      // (optional) expose for console debugging
-      try { (window as any).__debugSigner = signer; } catch {}
+    // 1) Address
+    const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
+    const signer = await ethersProvider.getSigner();
+    const addr = await signer.getAddress();
+    setAddress(addr);
+    localStorage.setItem('lx_addr', addr);
 
-      // 2) Nonce (GET, bound to this address)
-      const nonceResp = await getJson(api(`/auth/nonce?address=${encodeURIComponent(addr)}`));
-      const nonce = String((nonceResp as any)?.nonce ?? nonceResp ?? '').trim();
-      if (!nonce) throw new Error('Empty nonce from server');
+    // 2) Nonce
+    const { nonce } = await postJSON('/auth/nonce', { address: addr });
 
-      // 3) Sign EXACT nonce and verify locally
-      const signature = await signNonceVerified(signer, nonce, addr);
+    // 3) Sign
+    const signature = await signer.signMessage(nonce);
 
-      // 4) Exchange for cookie/JWT
-      const loginResp = await postJson(api('/auth/login'), { address: addr, signature });
+    // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
+    const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      // Optional: store JWT for Authorization redundancy
-      try {
-        const token = (loginResp as any)?.token;
-        if (token) localStorage.setItem('lx_jwt', token);
-        setToken(token || null);
-      } catch {}
+    // 5) Update role locally
+    setRole(srvRole || 'vendor');
+    localStorage.setItem('lx_role', srvRole || 'vendor');
 
-      // 5) Confirm role from server (cookie must be present now)
-      const info = await getAuthRole();
-      setRole(info.role);
-      localStorage.setItem('lx_role', info.role);
-      if (info.address) {
-        setAddress(info.address);
-        localStorage.setItem('lx_addr', info.address);
-      }
-
-      // 6) Redirect based on vendor profile
-      await postLoginProfileRedirect();
-    } catch (e) {
-      console.error('Login error:', e);
-      throw e;
+    // 6) Optional: confirm role from server (works via cookie or Bearer)
+    const info = await getAuthRole();
+    setRole(info.role);
+    if (info.address) {
+      setAddress(info.address);
+      localStorage.setItem('lx_addr', info.address);
     }
-  };
+
+    // 7) Profile redirect using helper (includes Bearer for Safari)
+    try {
+      const p = await getVendorProfile();
+      const url = new URL(window.location.href);
+      const nextParam = url.searchParams.get('next');
+      const fallback = pathname || '/';
+      if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
+        const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
+        router.replace(dest);
+      } else {
+        router.replace(nextParam || '/');
+      }
+    } catch {
+      router.replace('/');
+    }
+  } catch (e) {
+    console.error('Login error:', e);
+  }
+};
 
   const logout = async () => {
     try {
       await web3auth?.logout();
     } catch {}
     try {
-      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include', mode: 'cors' });
+      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
     } catch {}
     setProvider(null);
     setAddress(null);
@@ -364,7 +306,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
-      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include', mode: 'cors' }).catch(() => {}); } finally {
+      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {}); } finally {
         setProvider(null);
         setAddress(null);
         setToken(null);
@@ -375,6 +317,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         window.location.href = '/vendor/login';
       }
     };
+
     const onChainChanged = () => window.location.reload();
 
     eth.on('accountsChanged', onAccountsChanged);
