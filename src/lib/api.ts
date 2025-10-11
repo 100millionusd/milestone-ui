@@ -147,6 +147,25 @@ export const API_BASE = getApiBase();
 const trimSlashEnd = (s: string) => s.replace(/\/+$/, "");
 const isBrowser = typeof window !== "undefined";
 
+// ---- SSR cookie/authorization forwarding (Next.js) ----
+async function getServerForwardHeaders(): Promise<Record<string, string>> {
+  // Dynamically import so this module still works in the browser bundle
+  try {
+    const { cookies, headers } = await import("next/headers");
+    const cookieStr = cookies()
+      .getAll()
+      .map((c) => `${c.name}=${c.value}`)
+      .join("; ");
+    const auth = headers().get("authorization");
+    const out: Record<string, string> = {};
+    if (cookieStr) out["cookie"] = cookieStr;      // <- critical for SSR
+    if (auth) out["authorization"] = auth;         // optional passthrough
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // ---- Site origin helper (SSR + browser) ----
 function getSiteOrigin(): string {
   if (typeof window !== "undefined" && window.location) return window.location.origin;
@@ -319,13 +338,18 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   const isFormData =
     typeof FormData !== "undefined" && options.body instanceof FormData;
 
+    // Forward browser cookies/authorization when running on the server
+  const ssrForward = !isBrowser ? await getServerForwardHeaders() : {};
+
   const headers: Record<string, string> = {
     Accept: "application/json",
     Pragma: "no-cache",
     "Cache-Control": "no-cache",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options.headers as any),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}), // client Bearer, if present
+    ...(options.headers as any),                            // caller overrides
+    ...ssrForward,                                          // ← SSR cookie/authorization (wins last)
   };
+
   if (!callerCT && !isFormData) {
     headers["Content-Type"] = "application/json";
   }
