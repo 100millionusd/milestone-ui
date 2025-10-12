@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
-import PublicGeoBadge from '@/components/PublicGeoBadge';
 
 function usd(n: number) {
   try {
@@ -503,12 +502,6 @@ useEffect(() => {
 {/* Show a plain text label so it's visible even if the overlay is hidden */}
 {p.location?.label && (
   <div className="mt-1 text-xs text-gray-600">📍 {p.location.label}</div>
-)}
-
-{(p?.location || p?.takenAt) && (
-  <div className="mt-1">
-    <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
-  </div>
 )}
 
 {p.publicText && (
