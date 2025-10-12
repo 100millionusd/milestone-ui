@@ -110,13 +110,12 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // progress
   const progress = useMemo(() => {
-    const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
-    const total = fb?.milestones?.length || 0;
-    the:
-    const done = (fb?.milestones || []).filter((m) => !!m.completed).length;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    return { total, done, pct };
-  }, [project.bids, featuredBidId]);
+  const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
+  const total = fb?.milestones?.length || 0;
+  const done  = (fb?.milestones || []).filter((m) => !!m.completed).length;
+  const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+  return { total, done, pct };
+}, [project.bids, featuredBidId]);
 
   // all milestones list
   const allMilestones = useMemo(() => {
