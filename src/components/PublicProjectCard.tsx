@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
-import PublicGeoBadge from "@/components/PublicGeoBadge";
+import PublicGeoBadge from '@/components/PublicGeoBadge';
 
 function usd(n: number) {
   try {
@@ -29,13 +29,13 @@ type Project = {
   coverImage?: string | null;
   images?: string[];
   bids?: Bid[];
-  cid?: string | null; // <-- added (public anchor flag in your schema)
+  cid?: string | null;
 };
 
 type AuditSummary = {
   anchored: boolean;
-  cid?: string | null;       // <-- added
-  ipfsHref?: string | null;  // <-- added
+  cid?: string | null;
+  ipfsHref?: string | null;
   txHash?: string | null;
   periodId?: string | null;
   contract?: string | null;
@@ -54,15 +54,15 @@ type AuditRow = {
   txHash?: string | null;
 };
 
-// envs (module scope, available to everything in this file)
-const EXPLORER_BASE =
-  process.env.NEXT_PUBLIC_EXPLORER_BASE || ""; // e.g. https://basescan.org
-
+// ----- ENV (client-safe) -----
+const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ''; // e.g. https://basescan.org
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  "https://sapphire-given-snake-741.mypinata.cloud/ipfs";
+  'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || 'https://milestone-api-production.up.railway.app';
 
-/** Map card's raw audit rows → AuditPanel's event shape */
+// ----- Helpers -----
 function normalizeAudit(items: AuditRow[]) {
   return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
     const change = String(a.action ?? 'update').toLowerCase().replace(/\s+/g, '_');
@@ -74,7 +74,10 @@ function normalizeAudit(items: AuditRow[]) {
       at: at ? String(at) : new Date().toISOString(),
       actor,
       change,
-      details: Array.isArray(a.changedFields) && a.changedFields.length ? `Changed: ${a.changedFields.join(', ')}` : undefined,
+      details:
+        Array.isArray(a.changedFields) && a.changedFields.length
+          ? `Changed: ${a.changedFields.join(', ')}`
+          : undefined,
       ipfs: ipfs ? `${IPFS_GATEWAY}/${ipfs}` : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
@@ -82,7 +85,6 @@ function normalizeAudit(items: AuditRow[]) {
   });
 }
 
-/** Build milestone names for the panel (prefer approved/awarded bid, else first) */
 function milestoneNamesFromProject(project: Project): Record<number, string> {
   const awarded =
     (project?.bids || []).find((b: any) =>
@@ -93,31 +95,31 @@ function milestoneNamesFromProject(project: Project): Record<number, string> {
 }
 
 export default function PublicProjectCard({ project }: { project: Project }) {
-  const [tab, setTab] = useState<'overview'|'bids'|'milestones'|'files'|'audit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('overview');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  // --- NEW: audit state (badge + tab) ---
+  // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
   const [auditRows, setAuditRows] = useState<AuditRow[] | null>(null);
 
-  // pick the "featured" bid: approved first, else the first
+  // featured bid
   const featuredBidId = useMemo(() => {
     const bids = project.bids || [];
-    const approved = bids.find(b => String(b.status).toLowerCase() === 'approved');
+    const approved = bids.find((b) => String(b.status).toLowerCase() === 'approved');
     return approved?.bidId ?? bids[0]?.bidId ?? null;
   }, [project.bids]);
 
-  // progress from featured bid milestones
+  // progress
   const progress = useMemo(() => {
-    const fb = (project.bids || []).find(b => b.bidId === featuredBidId);
+    const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
     const total = fb?.milestones?.length || 0;
-    const done = (fb?.milestones || []).filter(m => !!m.completed).length;
+    const done = (fb?.milestones || []).filter((m) => !!m.completed).length;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     return { total, done, pct };
   }, [project.bids, featuredBidId]);
 
-  // flatten milestones across bids (newest last for natural order)
+  // all milestones list
   const allMilestones = useMemo(() => {
     const list: Array<{ fromBidId: number; vendor: string; m: any }> = [];
     for (const b of project.bids || []) {
@@ -128,108 +130,124 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     return list;
   }, [project.bids]);
 
-  // lazy load proofs/files count for this proposal (Files tab)
+  // load proofs/files for Files tab
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/proofs?proposalId=${encodeURIComponent(String(project.proposalId))}`, { cache: 'no-store' });
+        const r = await fetch(
+          `/api/proofs?proposalId=${encodeURIComponent(String(project.proposalId))}`,
+          { cache: 'no-store' }
+        );
         if (!r.ok) return;
         const j = await r.json().catch(() => []);
         if (!cancelled && Array.isArray(j)) setFiles(j);
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [project.proposalId]);
 
-// Attach safe public geo to proofs (robust join)
-useEffect(() => {
-  if (!files || files.length === 0) return;
-  let cancelled = false;
+  // attach safe public geo (join by proofId)
+  useEffect(() => {
+    if (!files || files.length === 0) return;
+    let cancelled = false;
 
-  (async () => {
-    try {
-      const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
-      if (bidIds.length === 0) return;
+    (async () => {
+      try {
+        const bidIds = Array.from(new Set((project.bids || []).map((b) => b.bidId).filter(Boolean)));
+        if (bidIds.length === 0) return;
 
-      const resp = await Promise.all(
-        bidIds.map(id =>
- const BASE = process.env.NEXT_PUBLIC_API_BASE || "https://milestone-api-production.up.railway.app";
-fetch(`${BASE}/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
-  .then(r => (r.ok ? r.json() : []))
-  .catch(() => [])
-        )
-      );
+        const resp = await Promise.all(
+          bidIds.map((id) =>
+            fetch(`${API_BASE}/public/geo/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
+              .then((r) => (r.ok ? r.json() : []))
+              .catch(() => [])
+          )
+        );
 
-      // index results by proofId (handle different key spellings)
-      const gByProofId = new Map<number, any>();
-      resp.flat().forEach((g: any) => {
-        const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
-        if (Number.isFinite(pid)) gByProofId.set(pid, g);
-      });
+        const gByProofId = new Map<number, any>();
+        resp.flat().forEach((g: any) => {
+          const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
+          if (Number.isFinite(pid)) gByProofId.set(pid, g);
+        });
 
-      if (cancelled) return;
-      setFiles(prev =>
-        prev.map(p => {
-          const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
-          const hit = Number.isFinite(pid) ? gByProofId.get(pid) : null;
-          if (!hit) return p;
-          return {
-            ...p,
-            location: hit.geoApprox ?? hit.geo_approx ?? null,
-            takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
-          };
-        })
-      );
-    } catch {}
-  })();
+        if (cancelled) return;
+        setFiles((prev) =>
+          prev.map((p) => {
+            const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
+            const hit = Number.isFinite(pid) ? gByProofId.get(pid) : null;
+            if (!hit) return p;
+            return {
+              ...p,
+              location: hit.geoApprox ?? hit.geo_approx ?? null,
+              takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+            };
+          })
+        );
+      } catch {}
+    })();
 
-  return () => { cancelled = true; };
-}, [project.bids, files.length]);
+    return () => {
+      cancelled = true;
+    };
+  }, [project.bids, files.length]);
 
-// TEMP: log to confirm join worked (remove later)
-useEffect(() => {
-  if (files.length) {
-    console.table(
-      files.map((f:any) => ({
-        proofId: f.proofId ?? f.proof_id ?? f.id,
-        hasLocation: !!f.location,
-        label: f.location?.label ?? null
-      }))
-    );
-  }
-}, [files]);
+  // debug join
+  useEffect(() => {
+    if (files.length) {
+      try {
+        console.table(
+          files.map((f: any) => ({
+            proofId: f.proofId ?? f.proof_id ?? f.id,
+            hasLocation: !!f.location,
+            label: f.location?.label ?? null,
+          }))
+        );
+      } catch {}
+    }
+  }, [files]);
 
-  // --- NEW: fetch audit summary early (for badge); fetch rows when Audit tab opened ---
+  // audit badge (summary)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/public/audit/${encodeURIComponent(String(project.proposalId))}`, { cache: 'no-store' });
+        const r = await fetch(
+          `/api/public/audit/${encodeURIComponent(String(project.proposalId))}`,
+          { cache: 'no-store' }
+        );
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
         if (cancelled || !j) return;
         setAuditSummary(j.summary || { anchored: false });
-        // don't set rows yet; load lazily when the Audit tab is viewed
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [project.proposalId]);
 
+  // audit tab rows (lazy)
   useEffect(() => {
     if (tab !== 'audit' || auditRows) return;
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/public/audit/${encodeURIComponent(String(project.proposalId))}`, { cache: 'no-store' });
+        const r = await fetch(
+          `/api/public/audit/${encodeURIComponent(String(project.proposalId))}`,
+          { cache: 'no-store' }
+        );
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
         if (cancelled || !j) return;
-        // Prefer j.events if present; else empty array
         setAuditRows(Array.isArray(j.events) ? j.events : []);
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tab, project.proposalId, auditRows]);
 
   const tabs = [
@@ -237,15 +255,15 @@ useEffect(() => {
     { key: 'bids' as const, label: `Bids (${project.bids?.length || 0})` },
     { key: 'milestones' as const, label: 'Milestones' },
     { key: 'files' as const, label: `Files (${files.length})` },
-    { key: 'audit' as const, label: 'Audit' }, // NEW
+    { key: 'audit' as const, label: 'Audit' },
   ];
 
-  // --- NEW: anchored logic prefers CID; fall back to tx/anchoredAt
+  // anchored badge
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-
-  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, "")}` : undefined;
-  const explorerHref = auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
+  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
+  const explorerHref =
+    auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
 
   return (
@@ -271,7 +289,7 @@ useEffect(() => {
       <div className="p-4">
         <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{project.orgName}</div>
 
-        {/* --- title + audit badge --- */}
+        {/* title + audit badge */}
         <h2 className="text-lg font-semibold flex items-center gap-2">
           {project.proposalTitle || 'Untitled Project'}
           {auditSummary ? (
@@ -285,7 +303,11 @@ useEffect(() => {
                   title={ipfsHref ? 'View IPFS snapshot' : 'View anchor transaction'}
                 >
                   <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                   Anchored
                 </a>
@@ -295,7 +317,11 @@ useEffect(() => {
                   title="Anchored"
                 >
                   <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd"/>
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                   Anchored
                 </span>
@@ -308,15 +334,15 @@ useEffect(() => {
           ) : null}
         </h2>
 
-        {project.summary && (
-          <p className="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{project.summary}</p>
-        )}
+        {project.summary && <p className="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{project.summary}</p>}
 
-        {/* Milestone progress (featured bid) */}
+        {/* Milestone progress */}
         <div className="mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>Milestone progress</span>
-            <span>{progress.done}/{progress.total} completed</span>
+            <span>
+              {progress.done}/{progress.total} completed
+            </span>
           </div>
           <div className="mt-1 h-2 w-full rounded-full bg-gray-200 overflow-hidden">
             <div
@@ -326,16 +352,16 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* inline tabs */}
+        {/* Tabs */}
         <div className="mt-4 border-b border-gray-200">
           <nav className="-mb-px flex gap-5">
-            {tabs.map(t => (
+            {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={
-                  "pb-2 text-sm outline-none " +
-                  (tab === t.key ? "border-b-2 border-black font-medium" : "text-gray-500 hover:text-gray-800")
+                  'pb-2 text-sm outline-none ' +
+                  (tab === t.key ? 'border-b-2 border-black font-medium' : 'text-gray-500 hover:text-gray-800')
                 }
                 type="button"
               >
@@ -345,7 +371,7 @@ useEffect(() => {
           </nav>
         </div>
 
-        {/* tab contents */}
+        {/* Tab contents */}
         <div className="mt-4 space-y-4">
           {tab === 'overview' && (
             <>
@@ -380,7 +406,7 @@ useEffect(() => {
               {(!project.bids || project.bids.length === 0) && (
                 <div className="text-sm text-gray-500">No public bids yet.</div>
               )}
-              {project.bids?.map(b => {
+              {project.bids?.map((b) => {
                 const isFeatured = b.bidId === featuredBidId;
                 const isApproved = String(b.status).toLowerCase() === 'approved';
                 return (
@@ -432,84 +458,76 @@ useEffect(() => {
                     <div className="text-gray-700">{typeof m.amount === 'number' ? usd(m.amount) : ''}</div>
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    {vendor ? `${vendor} • ` : ''}{m.dueDate ? `due ${new Date(m.dueDate).toLocaleDateString()}` : ''}{m.completed ? ' • completed' : ''}
+                    {vendor ? `${vendor} • ` : ''}
+                    {m.dueDate ? `due ${new Date(m.dueDate).toLocaleDateString()}` : ''}
+                    {m.completed ? ' • completed' : ''}
                   </div>
                 </div>
               ))}
             </>
           )}
 
- {tab === 'files' && (
-  <>
-    {files.length === 0 && (
-      <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>
-    )}
+          {tab === 'files' && (
+            <>
+              {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
 
-    {files.map((p, idx) => (
-      <div key={p.proofId || idx} className="rounded-lg border p-3">
-        <div className="text-sm font-medium">
-          Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-        </div>
+              {files.map((p, idx) => (
+                <div key={p.proofId || idx} className="rounded-lg border p-3">
+                  <div className="text-sm font-medium">
+                    Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                  </div>
 
-        {/* Geo + taken-at badge (safe: only renders if we have something) */}
-        {(p?.location || p?.takenAt) && (
-          <div className="mt-1">
-            <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
-          </div>
-        )}
+                  {(p?.location || p?.takenAt) && (
+                    <div className="mt-1">
+                      <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
+                    </div>
+                  )}
 
-        {p.publicText && (
-          <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
-            {p.publicText}
-          </p>
-        )}
+                  {p.publicText && (
+                    <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+                  )}
 
-        {Array.isArray(p.files) && p.files.length > 0 && (
-          <div className="mt-2 grid grid-cols-2 gap-3">
-            {p.files.map((f: any, i: number) => (
-<button
-  key={i}
-  type="button"
-  onClick={() => setLightboxUrl(String(f.url || ''))}
-  className="relative block rounded-lg border overflow-hidden"
-  title="Click to zoom"
->
-  {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-    <img
-      src={f.url}
-      alt={f.name || `file ${i + 1}`}
-      className="w-full aspect-video object-cover"
-      loading="lazy"
-    />
-  ) : (
-    <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-      {f.name || 'file'}
-    </div>
-  )}
+                  {Array.isArray(p.files) && p.files.length > 0 && (
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      {p.files.map((f: any, i: number) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setLightboxUrl(String(f.url || ''))}
+                          className="relative block rounded-lg border overflow-hidden"
+                          title="Click to zoom"
+                        >
+                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                            <img
+                              src={f.url}
+                              alt={f.name || `file ${i + 1}`}
+                              className="w-full aspect-video object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                              {f.name || 'file'}
+                            </div>
+                          )}
 
-  {p.location?.label && (
-    <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-      {p.location.label}
-    </span>
-  )}
-</button>
-            ))}
-          </div>
-        )}
-      </div>
-    ))}
-  </>
-)}
+                          {p.location?.label && (
+                            <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                              {p.location.label}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
 
-          {/* --- NEW: Audit tab content using AuditPanel --- */}
           {tab === 'audit' && (
             <section className="space-y-3 text-sm">
-              {!auditRows && (
-                <div className="text-gray-500">Loading audit…</div>
-              )}
-              {auditRows && auditRows.length === 0 && (
-                <div className="text-gray-500">No public audit events yet.</div>
-              )}
+              {!auditRows && <div className="text-gray-500">Loading audit…</div>}
+              {auditRows && auditRows.length === 0 && <div className="text-gray-500">No public audit events yet.</div>}
               {auditRows && auditRows.length > 0 && (
                 <AuditPanel
                   events={normalizeAudit(auditRows)}
@@ -534,7 +552,7 @@ useEffect(() => {
             src={lightboxUrl}
             alt="Zoomed image"
             className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           />
           <button
             type="button"
