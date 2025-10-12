@@ -154,9 +154,10 @@ useEffect(() => {
 
       const resp = await Promise.all(
         bidIds.map(id =>
-          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
-            .then(r => (r.ok ? r.json() : []))
-            .catch(() => [])
+ const BASE = process.env.NEXT_PUBLIC_API_BASE || "https://milestone-api-production.up.railway.app";
+fetch(`${BASE}/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
+  .then(r => (r.ok ? r.json() : []))
+  .catch(() => [])
         )
       );
 
