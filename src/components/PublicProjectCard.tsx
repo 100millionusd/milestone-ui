@@ -60,6 +60,30 @@ const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
 
+// --- maps + taken-at helpers ---
+function mapsLink(
+  lat?: number | null,
+  lon?: number | null,
+  label?: string | null
+): string | null {
+  if (!Number.isFinite(lat as number) || !Number.isFinite(lon as number)) return null;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isIOS = /iPad|iPhone|iPod/i.test(ua);
+  const qLabel = label ? encodeURIComponent(label) : `${lat},${lon}`;
+
+  // Apple Maps on iOS, Google Maps elsewhere
+  return isIOS
+    ? `https://maps.apple.com/?ll=${lat},${lon}&q=${qLabel}&z=16`
+    : `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+function fmtTakenAt(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 // ----- Helpers -----
 function normalizeAudit(items: AuditRow[]) {
   return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
@@ -508,22 +532,30 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                         </div>
 
                         {/* plain text label above grid, clickable if we have coords */}
-                        {p.location?.label && (
-                          <div className="mt-1 text-xs text-gray-600">
-                            📍 {mapHref ? (
-                              <a
-                                href={mapHref}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline underline-offset-2 hover:no-underline"
-                              >
-                                {p.location.label}
-                              </a>
-                            ) : (
-                              p.location.label
-                            )}
-                          </div>
-                        )}
+ {p.location?.label && (
+  <div className="mt-1 text-xs text-gray-600">
+    <a
+      href={
+        mapsLink(
+          p.location?.approx?.lat as number,
+          p.location?.approx?.lon as number,
+          p.location?.label as string
+        ) ?? '#'
+      }
+      target="_blank"
+      rel="noreferrer"
+      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+      title="Open in map"
+    >
+      📍 {p.location.label}
+    </a>
+    {p.takenAt && (
+      <span className="ml-2 text-gray-400">
+        • Taken {fmtTakenAt(p.takenAt)}
+      </span>
+    )}
+  </div>
+)}
 
                         {p.publicText && (
                           <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
