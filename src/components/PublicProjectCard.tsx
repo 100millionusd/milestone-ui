@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
+import PublicGeoBadge from "@/components/PublicGeoBadge";
 
 function usd(n: number) {
   try {
@@ -380,40 +381,61 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             </>
           )}
 
-          {tab === 'files' && (
-            <>
-              {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
-              {files.map((p, idx) => (
-                <div key={p.proofId || idx} className="rounded-lg border p-3">
-                  <div className="text-sm font-medium">
-                    Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+ {tab === 'files' && (
+  <>
+    {files.length === 0 && (
+      <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>
+    )}
+
+    {files.map((p, idx) => (
+      <div key={p.proofId || idx} className="rounded-lg border p-3">
+        <div className="text-sm font-medium">
+          Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+        </div>
+
+        {/* Geo + taken-at badge (safe: only renders if we have something) */}
+        {(p?.location || p?.takenAt) && (
+          <div className="mt-1">
+            <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
+          </div>
+        )}
+
+        {p.publicText && (
+          <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
+            {p.publicText}
+          </p>
+        )}
+
+        {Array.isArray(p.files) && p.files.length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            {p.files.map((f: any, i: number) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setLightboxUrl(String(f.url || ''))}
+                className="block rounded-lg border overflow-hidden"
+                title="Click to zoom"
+              >
+                {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                  <img
+                    src={f.url}
+                    alt={f.name || `file ${i + 1}`}
+                    className="w-full aspect-video object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                    {f.name || 'file'}
                   </div>
-                  {p.publicText && <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>}
-                  {Array.isArray(p.files) && p.files.length > 0 && (
-                    <div className="mt-2 grid grid-cols-2 gap-3">
-                      {p.files.map((f: any, i: number) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setLightboxUrl(String(f.url || ''))}
-                          className="block rounded-lg border overflow-hidden"
-                          title="Click to zoom"
-                        >
-                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || "")) ? (
-                            <img src={f.url} alt={f.name || `file ${i + 1}`} className="w-full aspect-video object-cover" loading="lazy" />
-                          ) : (
-                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                              {f.name || 'file'}
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    ))}
+  </>
+)}
 
           {/* --- NEW: Audit tab content using AuditPanel --- */}
           {tab === 'audit' && (
