@@ -149,50 +149,58 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     };
   }, [project.proposalId]);
 
-  // attach safe public geo (join by proofId)
-  useEffect(() => {
-    if (!files || files.length === 0) return;
-    let cancelled = false;
+  // Attach safe public geo to proofs (robust join: by proofId, else by bidId+milestoneIndex)
+useEffect(() => {
+  if (!files || files.length === 0) return;
+  let cancelled = false;
 
-    (async () => {
-      try {
-        const bidIds = Array.from(new Set((project.bids || []).map((b) => b.bidId).filter(Boolean)));
-        if (bidIds.length === 0) return;
+  (async () => {
+    try {
+      const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
+      if (bidIds.length === 0) return;
 
-        const resp = await Promise.all(
-          bidIds.map((id) =>
-            fetch(`${API_BASE}/public/geo/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
-              .then((r) => (r.ok ? r.json() : []))
-              .catch(() => [])
-          )
-        );
+      const respArrays = await Promise.all(
+        bidIds.map(id =>
+          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
+            .then(r => (r.ok ? r.json() : []))
+            .catch(() => [])
+        )
+      );
+      const geoRows = respArrays.flat();
 
-        const gByProofId = new Map<number, any>();
-        resp.flat().forEach((g: any) => {
-          const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
-          if (Number.isFinite(pid)) gByProofId.set(pid, g);
-        });
+      // index by proofId and fallback by (bidId:milestoneIndex)
+      const byPid = new Map<number, any>();
+      const byBidMs = new Map<string, any>();
+      for (const g of geoRows) {
+        const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
+        if (Number.isFinite(pid)) byPid.set(pid, g);
+        const bid = Number(g?.bidId ?? g?.bid_id);
+        const ms  = Number(g?.milestoneIndex ?? g?.milestone_index);
+        if (Number.isFinite(bid) && Number.isFinite(ms)) {
+          byBidMs.set(`${bid}:${ms}`, g);
+        }
+      }
 
-        if (cancelled) return;
-        setFiles((prev) =>
-          prev.map((p) => {
-            const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
-            const hit = Number.isFinite(pid) ? gByProofId.get(pid) : null;
-            if (!hit) return p;
-            return {
-              ...p,
-              location: hit.geoApprox ?? hit.geo_approx ?? null,
-              takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
-            };
-          })
-        );
-      } catch {}
-    })();
+      if (cancelled) return;
+      setFiles(prev =>
+        prev.map(p => {
+          const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
+          const bid = Number(p?.bidId ?? p?.bid_id);
+          const ms  = Number(p?.milestoneIndex ?? p?.milestone_index);
+          const hit = (Number.isFinite(pid) && byPid.get(pid)) || byBidMs.get(`${bid}:${ms}`);
+          if (!hit) return p;
+          return {
+            ...p,
+            location: hit.geoApprox ?? hit.geo_approx ?? null,
+            takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+          };
+        })
+      );
+    } catch {/* no-op */}
+  })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [project.bids, files.length]);
+  return () => { cancelled = true; };
+}, [project.bids, files.length]);
 
   // debug join
   useEffect(() => {
@@ -474,18 +482,23 @@ export default function PublicProjectCard({ project }: { project: Project }) {
               {files.map((p, idx) => (
                 <div key={p.proofId || idx} className="rounded-lg border p-3">
                   <div className="text-sm font-medium">
-                    Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-                  </div>
+  Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+</div>
 
-                  {(p?.location || p?.takenAt) && (
-                    <div className="mt-1">
-                      <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
-                    </div>
-                  )}
+{/* Show a plain text label so it's visible even if the overlay is hidden */}
+{p.location?.label && (
+  <div className="mt-1 text-xs text-gray-600">📍 {p.location.label}</div>
+)}
 
-                  {p.publicText && (
-                    <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-                  )}
+{(p?.location || p?.takenAt) && (
+  <div className="mt-1">
+    <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
+  </div>
+)}
+
+{p.publicText && (
+  <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+)}
 
                   {Array.isArray(p.files) && p.files.length > 0 && (
                     <div className="mt-2 grid grid-cols-2 gap-3">
