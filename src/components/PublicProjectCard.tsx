@@ -142,42 +142,62 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     return () => { cancelled = true; };
   }, [project.proposalId]);
 
-  // Attach safe public geo (by bid) to the proofs we already loaded
+// Attach safe public geo to proofs (robust join)
 useEffect(() => {
-  if (files.length === 0) return; // nothing to enrich yet
+  if (!files || files.length === 0) return;
   let cancelled = false;
+
   (async () => {
     try {
-      // call /api/public/geo for each bid shown on this project
-      const bidIds = Array.from(
-        new Set((project.bids || []).map(b => b.bidId).filter(Boolean))
-      );
+      const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
+      if (bidIds.length === 0) return;
 
-      const geoArrays = await Promise.all(
+      const resp = await Promise.all(
         bidIds.map(id =>
-          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
+          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
             .then(r => (r.ok ? r.json() : []))
             .catch(() => [])
         )
       );
 
-      // index by proofId for a clean join
-      const byProofId = new Map<number, any>();
-      geoArrays.flat().forEach((g: any) => {
-        if (g && typeof g.proofId === 'number') byProofId.set(g.proofId, g);
+      // index results by proofId (handle different key spellings)
+      const gByProofId = new Map<number, any>();
+      resp.flat().forEach((g: any) => {
+        const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
+        if (Number.isFinite(pid)) gByProofId.set(pid, g);
       });
 
       if (cancelled) return;
       setFiles(prev =>
         prev.map(p => {
-          const g = byProofId.get(Number(p.proofId));
-          return g ? { ...p, location: g.geoApprox ?? null } : p;
+          const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
+          const hit = Number.isFinite(pid) ? gByProofId.get(pid) : null;
+          if (!hit) return p;
+          return {
+            ...p,
+            location: hit.geoApprox ?? hit.geo_approx ?? null,
+            takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+          };
         })
       );
     } catch {}
   })();
+
   return () => { cancelled = true; };
 }, [project.bids, files.length]);
+
+// TEMP: log to confirm join worked (remove later)
+useEffect(() => {
+  if (files.length) {
+    console.table(
+      files.map((f:any) => ({
+        proofId: f.proofId ?? f.proof_id ?? f.id,
+        hasLocation: !!f.location,
+        label: f.location?.label ?? null
+      }))
+    );
+  }
+}, [files]);
 
   // --- NEW: fetch audit summary early (for badge); fetch rows when Audit tab opened ---
   useEffect(() => {
@@ -446,26 +466,32 @@ useEffect(() => {
         {Array.isArray(p.files) && p.files.length > 0 && (
           <div className="mt-2 grid grid-cols-2 gap-3">
             {p.files.map((f: any, i: number) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setLightboxUrl(String(f.url || ''))}
-                className="block rounded-lg border overflow-hidden"
-                title="Click to zoom"
-              >
-                {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                  <img
-                    src={f.url}
-                    alt={f.name || `file ${i + 1}`}
-                    className="w-full aspect-video object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                    {f.name || 'file'}
-                  </div>
-                )}
-              </button>
+<button
+  key={i}
+  type="button"
+  onClick={() => setLightboxUrl(String(f.url || ''))}
+  className="relative block rounded-lg border overflow-hidden"
+  title="Click to zoom"
+>
+  {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+    <img
+      src={f.url}
+      alt={f.name || `file ${i + 1}`}
+      className="w-full aspect-video object-cover"
+      loading="lazy"
+    />
+  ) : (
+    <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+      {f.name || 'file'}
+    </div>
+  )}
+
+  {p.location?.label && (
+    <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+      {p.location.label}
+    </span>
+  )}
+</button>
             ))}
           </div>
         )}
