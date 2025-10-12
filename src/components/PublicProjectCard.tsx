@@ -149,54 +149,69 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     };
   }, [project.proposalId]);
 
-  // Attach safe public geo to proofs (robust join: by proofId, else by bidId+milestoneIndex)
+ // Attach safe public geo to proofs (robust join: proofId OR (bidId,milestoneIndex))
 useEffect(() => {
   if (!files || files.length === 0) return;
   let cancelled = false;
 
   (async () => {
     try {
+      // all bidIds present on this card (often just one)
       const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
       if (bidIds.length === 0) return;
 
-      const respArrays = await Promise.all(
+      const geoArrays = await Promise.all(
         bidIds.map(id =>
           fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
             .then(r => (r.ok ? r.json() : []))
             .catch(() => [])
         )
       );
-      const geoRows = respArrays.flat();
 
-      // index by proofId and fallback by (bidId:milestoneIndex)
-      const byPid = new Map<number, any>();
-      const byBidMs = new Map<string, any>();
-      for (const g of geoRows) {
-        const pid = Number(g?.proofId ?? g?.proof_id ?? g?.id);
-        if (Number.isFinite(pid)) byPid.set(pid, g);
-        const bid = Number(g?.bidId ?? g?.bid_id);
-        const ms  = Number(g?.milestoneIndex ?? g?.milestone_index);
-        if (Number.isFinite(bid) && Number.isFinite(ms)) {
-          byBidMs.set(`${bid}:${ms}`, g);
+      // Index geos both by proofId and by (bidId,milestoneIndex)
+      const byProofId = new Map<number, any>();
+      const byBidMs   = new Map<string, any>(); // key = `${bidId}:${milestoneIndex}`
+
+      geoArrays.flat().forEach((g: any) => {
+        const pid = Number(g?.proofId ?? g?.proof_id);
+        if (Number.isFinite(pid)) byProofId.set(pid, g);
+
+        const b  = Number(g?.bidId ?? g?.bid_id);
+        const mi = Number(g?.milestoneIndex ?? g?.milestone_index);
+        if (Number.isFinite(b) && Number.isFinite(mi)) {
+          byBidMs.set(`${b}:${mi}`, g);
         }
-      }
+      });
 
       if (cancelled) return;
+
+      // If we only have one bid on the page, use it for the (bidId,milestoneIndex) fallback
+      const singleBidId = bidIds.length === 1 ? bidIds[0] : null;
+
       setFiles(prev =>
-        prev.map(p => {
+        prev.map((p: any) => {
+          // try proofId first
           const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
-          const bid = Number(p?.bidId ?? p?.bid_id);
-          const ms  = Number(p?.milestoneIndex ?? p?.milestone_index);
-          const hit = (Number.isFinite(pid) && byPid.get(pid)) || byBidMs.get(`${bid}:${ms}`);
+          let hit = Number.isFinite(pid) ? byProofId.get(pid) : null;
+
+          // fallback: (bidId,milestoneIndex)
+          if (!hit) {
+            const b  = Number(p?.bidId ?? p?.bid_id ?? singleBidId);
+            const mi = Number(p?.milestoneIndex ?? p?.milestone_index);
+            if (Number.isFinite(b) && Number.isFinite(mi)) {
+              hit = byBidMs.get(`${b}:${mi}`) || null;
+            }
+          }
+
           if (!hit) return p;
           return {
             ...p,
             location: hit.geoApprox ?? hit.geo_approx ?? null,
-            takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+            takenAt:  hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
           };
         })
       );
-    } catch {/* no-op */}
+    } catch {}
   })();
 
   return () => { cancelled = true; };
