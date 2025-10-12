@@ -493,57 +493,95 @@ useEffect(() => {
             <>
               {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
 
-              {files.map((p, idx) => (
-                <div key={p.proofId || idx} className="rounded-lg border p-3">
-                  <div className="text-sm font-medium">
-  Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-</div>
+ {files.map((p, idx) => {
+  // build a Google Maps link if we have coordinates
+  const lat = p?.location?.approx?.lat;
+  const lon = p?.location?.approx?.lon;
+  const mapHref =
+    lat != null && lon != null ? `https://maps.google.com/?q=${lat},${lon}` : null;
 
-{/* Show a plain text label so it's visible even if the overlay is hidden */}
-{p.location?.label && (
-  <div className="mt-1 text-xs text-gray-600">📍 {p.location.label}</div>
-)}
+  return (
+    <div key={p.proofId || idx} className="rounded-lg border p-3">
+      <div className="text-sm font-medium">
+        Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+      </div>
 
-{p.publicText && (
-  <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-)}
-
-                  {Array.isArray(p.files) && p.files.length > 0 && (
-                    <div className="mt-2 grid grid-cols-2 gap-3">
-                      {p.files.map((f: any, i: number) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setLightboxUrl(String(f.url || ''))}
-                          className="relative block rounded-lg border overflow-hidden"
-                          title="Click to zoom"
-                        >
-                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                            <img
-                              src={f.url}
-                              alt={f.name || `file ${i + 1}`}
-                              className="w-full aspect-video object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                              {f.name || 'file'}
-                            </div>
-                          )}
-
-                          {p.location?.label && (
-                            <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                              {p.location.label}
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </>
+      {/* plain text label above grid, now clickable if we have coords */}
+      {p.location?.label && (
+        <div className="mt-1 text-xs text-gray-600">
+          📍 {mapHref ? (
+            <a
+              href={mapHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:no-underline"
+            >
+              {p.location.label}
+            </a>
+          ) : (
+            p.location.label
           )}
+        </div>
+      )}
+
+      {/* keep your badge if you like */}
+      {(p?.location || p?.takenAt) && (
+        <div className="mt-1">
+          <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
+        </div>
+      )}
+
+      {p.publicText && (
+        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+      )}
+
+      {Array.isArray(p.files) && p.files.length > 0 && (
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          {p.files.map((f: any, i: number) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setLightboxUrl(String(f.url || ''))}
+              className="relative block rounded-lg border overflow-hidden"
+              title="Click to zoom"
+            >
+              {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                <img
+                  src={f.url}
+                  alt={f.name || `file ${i + 1}`}
+                  className="w-full aspect-video object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                  {f.name || 'file'}
+                </div>
+              )}
+
+              {/* tiny overlay label on the thumbnail; clickable if we have coords */}
+              {p.location?.label && (
+                mapHref ? (
+                  <a
+                    href={mapHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+                  >
+                    {p.location.label}
+                  </a>
+                ) : (
+                  <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                    {p.location.label}
+                  </span>
+                )
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+})}
 
           {tab === 'audit' && (
             <section className="space-y-3 text-sm">
