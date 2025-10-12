@@ -525,12 +525,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           </div>
                         )}
 
-                        {(p?.location || p?.takenAt) && (
-                          <div className="mt-1">
-                            <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
-                          </div>
-                        )}
-
                         {p.publicText && (
                           <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
                         )}
