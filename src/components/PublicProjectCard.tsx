@@ -142,6 +142,43 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     return () => { cancelled = true; };
   }, [project.proposalId]);
 
+  // Attach safe public geo (by bid) to the proofs we already loaded
+useEffect(() => {
+  if (files.length === 0) return; // nothing to enrich yet
+  let cancelled = false;
+  (async () => {
+    try {
+      // call /api/public/geo for each bid shown on this project
+      const bidIds = Array.from(
+        new Set((project.bids || []).map(b => b.bidId).filter(Boolean))
+      );
+
+      const geoArrays = await Promise.all(
+        bidIds.map(id =>
+          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
+            .then(r => (r.ok ? r.json() : []))
+            .catch(() => [])
+        )
+      );
+
+      // index by proofId for a clean join
+      const byProofId = new Map<number, any>();
+      geoArrays.flat().forEach((g: any) => {
+        if (g && typeof g.proofId === 'number') byProofId.set(g.proofId, g);
+      });
+
+      if (cancelled) return;
+      setFiles(prev =>
+        prev.map(p => {
+          const g = byProofId.get(Number(p.proofId));
+          return g ? { ...p, location: g.geoApprox ?? null } : p;
+        })
+      );
+    } catch {}
+  })();
+  return () => { cancelled = true; };
+}, [project.bids, files.length]);
+
   // --- NEW: fetch audit summary early (for badge); fetch rows when Audit tab opened ---
   useEffect(() => {
     let cancelled = false;
