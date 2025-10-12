@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
+import PublicGeoBadge from '@/components/PublicGeoBadge';
 
 function usd(n: number) {
   try {
@@ -58,8 +59,6 @@ const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ''; // e.g. https
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || 'https://milestone-api-production.up.railway.app';
 
 // ----- Helpers -----
 function normalizeAudit(items: AuditRow[]) {
@@ -113,6 +112,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const progress = useMemo(() => {
     const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
     const total = fb?.milestones?.length || 0;
+    the:
     const done = (fb?.milestones || []).filter((m) => !!m.completed).length;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     return { total, done, pct };
@@ -148,73 +148,73 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     };
   }, [project.proposalId]);
 
- // Attach safe public geo to proofs (robust join: proofId OR (bidId,milestoneIndex))
-useEffect(() => {
-  if (!files || files.length === 0) return;
-  let cancelled = false;
+  // Attach safe public geo to proofs (robust join: proofId OR (bidId,milestoneIndex))
+  useEffect(() => {
+    if (!files || files.length === 0) return;
+    let cancelled = false;
 
-  (async () => {
-    try {
-      // all bidIds present on this card (often just one)
-      const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
-      if (bidIds.length === 0) return;
+    (async () => {
+      try {
+        // all bidIds present on this card (often just one)
+        const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
+        if (bidIds.length === 0) return;
 
-      const geoArrays = await Promise.all(
-        bidIds.map(id =>
-          fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: "no-store" })
-            .then(r => (r.ok ? r.json() : []))
-            .catch(() => [])
-        )
-      );
+        const geoArrays = await Promise.all(
+          bidIds.map(id =>
+            fetch(`/api/public/geo/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
+              .then(r => (r.ok ? r.json() : []))
+              .catch(() => [])
+          )
+        );
 
-      // Index geos both by proofId and by (bidId,milestoneIndex)
-      const byProofId = new Map<number, any>();
-      const byBidMs   = new Map<string, any>(); // key = `${bidId}:${milestoneIndex}`
+        // Index geos both by proofId and by (bidId,milestoneIndex)
+        const byProofId = new Map<number, any>();
+        const byBidMs   = new Map<string, any>(); // key = `${bidId}:${milestoneIndex}`
 
-      geoArrays.flat().forEach((g: any) => {
-        const pid = Number(g?.proofId ?? g?.proof_id);
-        if (Number.isFinite(pid)) byProofId.set(pid, g);
+        geoArrays.flat().forEach((g: any) => {
+          const pid = Number(g?.proofId ?? g?.proof_id);
+          if (Number.isFinite(pid)) byProofId.set(pid, g);
 
-        const b  = Number(g?.bidId ?? g?.bid_id);
-        const mi = Number(g?.milestoneIndex ?? g?.milestone_index);
-        if (Number.isFinite(b) && Number.isFinite(mi)) {
-          byBidMs.set(`${b}:${mi}`, g);
-        }
-      });
-
-      if (cancelled) return;
-
-      // If we only have one bid on the page, use it for the (bidId,milestoneIndex) fallback
-      const singleBidId = bidIds.length === 1 ? bidIds[0] : null;
-
-      setFiles(prev =>
-        prev.map((p: any) => {
-          // try proofId first
-          const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
-          let hit = Number.isFinite(pid) ? byProofId.get(pid) : null;
-
-          // fallback: (bidId,milestoneIndex)
-          if (!hit) {
-            const b  = Number(p?.bidId ?? p?.bid_id ?? singleBidId);
-            const mi = Number(p?.milestoneIndex ?? p?.milestone_index);
-            if (Number.isFinite(b) && Number.isFinite(mi)) {
-              hit = byBidMs.get(`${b}:${mi}`) || null;
-            }
+          const b  = Number(g?.bidId ?? g?.bid_id);
+          const mi = Number(g?.milestoneIndex ?? g?.milestone_index);
+          if (Number.isFinite(b) && Number.isFinite(mi)) {
+            byBidMs.set(`${b}:${mi}`, g);
           }
+        });
 
-          if (!hit) return p;
-          return {
-            ...p,
-            location: hit.geoApprox ?? hit.geo_approx ?? null,
-            takenAt:  hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
-          };
-        })
-      );
-    } catch {}
-  })();
+        if (cancelled) return;
 
-  return () => { cancelled = true; };
-}, [project.bids, files.length]);
+        // If we only have one bid on the page, use it for the (bidId,milestoneIndex) fallback
+        const singleBidId = bidIds.length === 1 ? bidIds[0] : null;
+
+        setFiles(prev =>
+          prev.map((p: any) => {
+            // try proofId first
+            const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
+            let hit = Number.isFinite(pid) ? byProofId.get(pid) : null;
+
+            // fallback: (bidId,milestoneIndex)
+            if (!hit) {
+              const b  = Number(p?.bidId ?? p?.bid_id ?? singleBidId);
+              const mi = Number(p?.milestoneIndex ?? p?.milestone_index);
+              if (Number.isFinite(b) && Number.isFinite(mi)) {
+                hit = byBidMs.get(`${b}:${mi}`) || null;
+              }
+            }
+
+            if (!hit) return p;
+            return {
+              ...p,
+              location: hit.geoApprox ?? hit.geo_approx ?? null,
+              takenAt:  hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+            };
+          })
+        );
+      } catch {}
+    })();
+
+    return () => { cancelled = true; };
+  }, [project.bids, files.length]);
 
   // debug join
   useEffect(() => {
@@ -493,95 +493,100 @@ useEffect(() => {
             <>
               {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
 
- {files.map((p, idx) => {
-  // build a Google Maps link if we have coordinates
-  const lat = p?.location?.approx?.lat;
-  const lon = p?.location?.approx?.lon;
-  const mapHref =
-    lat != null && lon != null ? `https://maps.google.com/?q=${lat},${lon}` : null;
+              {files.length > 0 && (
+                <div className="space-y-3">
+                  {files.map((p, idx) => {
+                    // build a Google Maps link if we have coordinates
+                    const lat = p?.location?.approx?.lat;
+                    const lon = p?.location?.approx?.lon;
+                    const mapHref =
+                      lat != null && lon != null ? `https://maps.google.com/?q=${lat},${lon}` : null;
 
-  return (
-    <div key={p.proofId || idx} className="rounded-lg border p-3">
-      <div className="text-sm font-medium">
-        Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-      </div>
+                    return (
+                      <div key={p.proofId || idx} className="rounded-lg border p-3">
+                        <div className="text-sm font-medium">
+                          Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                        </div>
 
-      {/* plain text label above grid, now clickable if we have coords */}
-      {p.location?.label && (
-        <div className="mt-1 text-xs text-gray-600">
-          📍 {mapHref ? (
-            <a
-              href={mapHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-2 hover:no-underline"
-            >
-              {p.location.label}
-            </a>
-          ) : (
-            p.location.label
-          )}
-        </div>
-      )}
+                        {/* plain text label above grid, clickable if we have coords */}
+                        {p.location?.label && (
+                          <div className="mt-1 text-xs text-gray-600">
+                            📍 {mapHref ? (
+                              <a
+                                href={mapHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline underline-offset-2 hover:no-underline"
+                              >
+                                {p.location.label}
+                              </a>
+                            ) : (
+                              p.location.label
+                            )}
+                          </div>
+                        )}
 
-      {/* keep your badge if you like */}
-      {(p?.location || p?.takenAt) && (
-        <div className="mt-1">
-          <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
-        </div>
-      )}
+                        {(p?.location || p?.takenAt) && (
+                          <div className="mt-1">
+                            <PublicGeoBadge geo={p.location} takenAt={p.takenAt} />
+                          </div>
+                        )}
 
-      {p.publicText && (
-        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-      )}
+                        {p.publicText && (
+                          <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+                        )}
 
-      {Array.isArray(p.files) && p.files.length > 0 && (
-        <div className="mt-2 grid grid-cols-2 gap-3">
-          {p.files.map((f: any, i: number) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setLightboxUrl(String(f.url || ''))}
-              className="relative block rounded-lg border overflow-hidden"
-              title="Click to zoom"
-            >
-              {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                <img
-                  src={f.url}
-                  alt={f.name || `file ${i + 1}`}
-                  className="w-full aspect-video object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                  {f.name || 'file'}
+                        {Array.isArray(p.files) && p.files.length > 0 && (
+                          <div className="mt-2 grid grid-cols-2 gap-3">
+                            {p.files.map((f: any, i: number) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => setLightboxUrl(String(f.url || ''))}
+                                className="relative block rounded-lg border overflow-hidden"
+                                title="Click to zoom"
+                              >
+                                {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                                  <img
+                                    src={f.url}
+                                    alt={f.name || `file ${i + 1}`}
+                                    className="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                                    {f.name || 'file'}
+                                  </div>
+                                )}
+
+                                {/* tiny overlay label on the thumbnail; clickable if we have coords */}
+                                {p.location?.label && (
+                                  mapHref ? (
+                                    <a
+                                      href={mapHref}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+                                    >
+                                      {p.location.label}
+                                    </a>
+                                  ) : (
+                                    <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                                      {p.location.label}
+                                    </span>
+                                  )
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-
-              {/* tiny overlay label on the thumbnail; clickable if we have coords */}
-              {p.location?.label && (
-                mapHref ? (
-                  <a
-                    href={mapHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-                  >
-                    {p.location.label}
-                  </a>
-                ) : (
-                  <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                    {p.location.label}
-                  </span>
-                )
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-})}
+            </>
+          )}
 
           {tab === 'audit' && (
             <section className="space-y-3 text-sm">
