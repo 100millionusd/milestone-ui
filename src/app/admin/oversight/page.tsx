@@ -1,52 +1,9 @@
 'use client';
 import * as React from 'react';
 
-/* =========================
-   Helpers: pick/normalize/format
-   ========================= */
-
-/** Pick the first defined value by key list. */
-function pick<T = any>(obj: any, keys: string[], fallback?: any): T | undefined {
-  for (const k of keys) {
-    if (obj && obj[k] != null) return obj[k];
-  }
-  return fallback;
-}
-
-/** Parse many date shapes: iso, seconds, ms, "YYYY-MM-DD HH:mm:ss". */
-function parseWhen(x: any): Date | null {
-  if (!x && x !== 0) return null;
-  if (x instanceof Date) return isNaN(x.getTime()) ? null : x;
-  if (typeof x === 'number') {
-    const ms = x < 1e12 ? x * 1000 : x; // seconds vs ms
-    const d = new Date(ms);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  if (typeof x === 'string') {
-    let d = new Date(x);
-    if (!isNaN(d.getTime())) return d;
-    // Try space→T
-    d = new Date(x.replace(' ', 'T'));
-    if (!isNaN(d.getTime())) return d;
-    // Try UTC
-    d = new Date(x.replace(' ', 'T') + 'Z');
-    if (!isNaN(d.getTime())) return d;
-  }
-  return null;
-}
-function fmtWhen(x: any): string {
-  const d = parseWhen(x);
-  return d ? d.toLocaleString() : '—';
-}
-
-function pct(n?: number | null): string {
-  if (typeof n !== 'number' || !isFinite(n)) return '—';
-  return `${Math.round(n * 100)}%`;
-}
-
-/* =========================
-   Types (UI-level)
-   ========================= */
+/* ========================
+   Types (UI-side, tolerant)
+======================== */
 interface Summary {
   openProofs: number;
   breachingSLA: number;
@@ -75,7 +32,7 @@ interface AlertItem {
   detail?: string;
   entityType: string;
   entityId: string;
-  createdAt: string | number | Date;
+  createdAt: string;
 }
 interface AuditLog {
   id: string;
@@ -84,7 +41,7 @@ interface AuditLog {
   entityType: string;
   entityId: string;
   meta?: any;
-  createdAt: string | number | Date;
+  createdAt: string;
 }
 interface VendorPerf {
   walletAddress: string;
@@ -109,161 +66,131 @@ interface PayoutItem {
   currency?: string;
   amount?: number;
   txHash?: string | null;
-  createdAt: string | number | Date;
+  createdAt: string;
 }
 
-/* =========================
-   API origin for direct write actions
-   ========================= */
-const API_ORIGIN =
-  (process.env.NEXT_PUBLIC_API_BASE ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    '')!.toString().replace(/\/$/, '');
+/* ========================
+   Small helpers
+======================== */
+const asArray = (x: any): any[] =>
+  Array.isArray(x) ? x :
+  Array.isArray(x?.data) ? x.data :
+  Array.isArray(x?.items) ? x.items :
+  Array.isArray(x?.rows) ? x.rows :
+  Array.isArray(x?.result) ? x.result : [];
 
-/* =========================
-   Normalizers (accept many shapes)
-   ========================= */
-function normalizeSummary(raw: any): Summary {
+const normTs = (ts: any): string => {
+  if (!ts && ts !== 0) return new Date().toISOString();
+  const n = typeof ts === 'number' ? ts : (/^\d+$/.test(String(ts)) ? Number(ts) : NaN);
+  const d = Number.isFinite(n) ? new Date(n) : new Date(ts);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+};
+
+const pick = <T extends Record<string, any>>(o: any, keys: string[], fallback?: any): T[keyof T] =>
+  keys.find((k) => o && o[k] != null) ? o[keys.find((k) => o[k] != null)!] : fallback;
+
+/* ---------- Normalizers (accept multiple shapes) ---------- */
+const normalizeSummary = (raw: any): Summary => {
+  const s = raw?.summary ?? raw ?? {};
   return {
-    openProofs: Number(pick(raw, ['openProofs', 'open_proofs', 'open'], 0)) || 0,
-    breachingSLA: Number(pick(raw, ['breachingSLA', 'sla_breach', 'breaching'], 0)) || 0,
-    pendingPayouts: Number(pick(raw, ['pendingPayouts', 'pending_payouts'], 0)) || 0,
-    escrowsLocked: Number(pick(raw, ['escrowsLocked', 'escrows_locked'], 0)) || 0,
-    cycleTimeHoursP50:
-      Number(pick(raw, ['cycleTimeHoursP50', 'cycle_time_p50_hours', 'p50_cycle_hours'], 0)) || 0,
-    revisionRate: Number(pick(raw, ['revisionRate', 'revision_rate'], 0)) || 0,
+    openProofs: Number(pick(s, ['openProofs', 'open_proofs', 'open'], 0)) || 0,
+    breachingSLA: Number(pick(s, ['breachingSLA', 'breaching_sla', 'sla_breach'], 0)) || 0,
+    pendingPayouts: Number(pick(s, ['pendingPayouts', 'pending_payouts'], 0)) || 0,
+    escrowsLocked: Number(pick(s, ['escrowsLocked', 'escrows_locked'], 0)) || 0,
+    cycleTimeHoursP50: Number(pick(s, ['cycleTimeHoursP50', 'p50_cycle_hours', 'cycle_p50_h'], 0)) || 0,
+    revisionRate: Number(pick(s, ['revisionRate', 'revision_rate'], 0)) || 0,
   };
-}
+};
 
-function normalizeQueue(raw: any): QueueRow[] {
-  const arr = Array.isArray(raw?.queue) ? raw.queue : Array.isArray(raw) ? raw : [];
-  const now = Date.now();
-  return arr.map((r: any, i: number) => {
-    const bidId = Number(pick(r, ['bidId', 'bid_id'], 0)) || 0;
-    const mi = Number(pick(r, ['milestoneIndex', 'milestone_index', 'm'], 0)) || 0;
-    const submitted = pick(r, ['submittedAt', 'createdAt', 'created_at', 'submitted_at', 'ts', 'time']);
-    const submittedMs = parseWhen(submitted)?.getTime() ?? now;
-    const ageH = Math.max(0, Math.round((now - submittedMs) / 36e5));
-    const slaH = Number(pick(r, ['slaDueInHours', 'sla_due_in_hours', 'sla'], 0)) || 0;
-
-    return {
-      id:
-        String(pick(r, ['id', 'proofId', 'proof_id'])) ||
-        `${bidId}-${mi}-${submittedMs}-${i}`,
-      bidId,
-      milestoneIndex: mi,
-      vendor:
-        String(pick(r, ['vendor', 'vendorName', 'vendor_name', 'walletAddress'], '—')) ||
-        '—',
-      project: String(pick(r, ['project', 'proposalTitle', 'proposal_title'], 'Bid #' + bidId)),
-      status:
-        (pick(r, ['status', 'state'], 'pending') as ProofStatus) ?? 'pending',
-      submittedAt: submitted ? String(submitted) : new Date(submittedMs).toISOString(),
-      ageHours: ageH,
-      slaDueInHours: slaH,
-      risk: (pick(r, ['risk', 'risk_level']) as any) || (slaH < 0 ? 'high' : undefined),
-    };
-  });
-}
-
-function normalizeAlerts(raw: any): AlertItem[] {
-  const arr = Array.isArray(raw?.alerts) ? raw.alerts : Array.isArray(raw) ? raw : [];
-  return arr.map((a: any, i: number) => {
-    const type = String(pick(a, ['type', 'kind', 'code'], 'alert'));
-    const title =
-      String(pick(a, ['title', 'message', 'summary'])) ||
-      type.replace(/[_-]/g, ' ');
-    const detail = pick(a, ['detail', 'reason', 'note', 'description']);
-    const created = pick(a, ['createdAt', 'created_at', 'ts', 'time', 'occurredAt', 'occurred_at']);
-    const eType = String(pick(a, ['entityType', 'entity_type', 'objectType', 'entity'], ''));
-    const eId = String(pick(a, ['entityId', 'entity_id', 'objectId', 'object_id'], ''));
-
-    return {
-      id: String(pick(a, ['id', 'alertId', 'uuid'], i)),
-      type,
-      title,
-      detail: typeof detail === 'object' ? JSON.stringify(detail) : detail,
-      entityType: eType,
-      entityId: eId,
-      createdAt: created || new Date().toISOString(),
-    };
-  });
-}
-
-function normalizeAudit(raw: any): AuditLog[] {
-  const arr = Array.isArray(raw?.events) ? raw.events : Array.isArray(raw) ? raw : [];
-  return arr.map((e: any, i: number) => {
-    const created = pick(e, [
-      'createdAt',
-      'created_at',
-      'timestamp',
-      'ts',
-      'time',
-      'occurredAt',
-      'occurred_at',
-      'inserted_at',
-    ]);
-    return {
-      id: String(pick(e, ['id', 'eventId', 'uuid'], i)),
-      actorLabel:
-        pick(e, ['actorLabel', 'actor', 'actor_name', 'user', 'userName', 'user_label'], 'System') ||
-        'System',
-      action: String(pick(e, ['action', 'event', 'type', 'kind'], '')) || '',
-      entityType: String(pick(e, ['entityType', 'entity_type', 'objectType', 'entity'], '')) || '',
-      entityId: String(pick(e, ['entityId', 'entity_id', 'objectId', 'object_id'], '')) || '',
-      meta: pick(e, ['meta', 'metadata', 'details', 'data']),
-      createdAt: created || '',
-    };
-  });
-}
-
-function normalizeVendors(raw: any): VendorPerf[] {
-  const arr = Array.isArray(raw?.vendors) ? raw.vendors : Array.isArray(raw) ? raw : [];
-  return arr.map((v: any) => ({
-    walletAddress: String(pick(v, ['walletAddress', 'wallet_address'], '')) || '',
-    vendorName: String(pick(v, ['vendorName', 'name'], '')) || '',
-    proofsTotal: Number(pick(v, ['proofsTotal', 'proofs_total'], 0)) || 0,
-    approved: Number(pick(v, ['approved'], 0)) || 0,
-    changesRequested: Number(pick(v, ['changesRequested', 'cr_count'], 0)) || 0,
-    approvalRate: Number(pick(v, ['approvalRate', 'approval_rate'], 0)) || 0,
-    bidsCount: Number(pick(v, ['bidsCount', 'bids_count'], 0)) || 0,
-    totalAwardedUSD: Number(pick(v, ['totalAwardedUSD', 'awarded_usd'], 0)) || 0,
-    lastProofAt: pick(v, ['lastProofAt', 'last_proof_at']) || null,
-    lastBidAt: pick(v, ['lastBidAt', 'last_bid_at']) || null,
-    email: pick(v, ['email'], null),
-    phone: pick(v, ['phone'], null),
-    archived: Boolean(pick(v, ['archived'], false)),
+const normalizeQueue = (raw: any): QueueRow[] =>
+  asArray(raw).map((r: any): QueueRow => ({
+    id: String(pick(r, ['id', 'proofId', 'proof_id', 'row_id'], 'row')),
+    bidId: Number(pick(r, ['bidId', 'bid_id'], 0)) || 0,
+    milestoneIndex: Number(pick(r, ['milestoneIndex', 'milestone_index', 'mIndex'], 0)) || 0,
+    vendor: String(pick(r, ['vendor', 'vendorName', 'vendor_name', 'vendor_label'], '—')),
+    project: String(pick(r, ['project', 'projectTitle', 'proposalTitle', 'proposal_title'], '—')),
+    status: (pick(r, ['status', 'state'], 'pending') as ProofStatus),
+    submittedAt: normTs(pick(r, ['submittedAt', 'submitted_at', 'createdAt', 'created_at', 'ts'], Date.now())),
+    ageHours: Math.round(Number(pick(r, ['ageHours', 'age_hours'], 0)) || 0),
+    slaDueInHours: Math.round(Number(pick(r, ['slaDueInHours', 'sla_due_in_hours', 'sla_delta_h'], 0)) || 0),
+    risk: pick(r, ['risk', 'riskLevel', 'risk_level'], undefined),
   }));
-}
 
-function normalizePayouts(raw: any): { pending: PayoutItem[]; recent: PayoutItem[] } {
-  const pending = Array.isArray(raw?.pending) ? raw.pending : Array.isArray(raw?.toPay) ? raw.toPay : [];
-  const recent = Array.isArray(raw?.recent) ? raw.recent : Array.isArray(raw?.paid) ? raw.paid : [];
-  const mapOne = (p: any): PayoutItem => ({
+const normalizeAlerts = (raw: any): AlertItem[] =>
+  asArray(raw).map((a: any): AlertItem => ({
+    id: String(pick(a, ['id', 'alertId', 'alert_id'], `${a?.type || 'alert'}-${a?.createdAt || a?.created_at || Date.now()}`)),
+    type: String(pick(a, ['type', 'alertType', 'category'], 'info')),
+    title: String(pick(a, ['title', 'message', 'summary', 'reason', 'type'], '—')),
+    detail: pick(a, ['detail', 'description', 'note', 'notes'], undefined),
+    entityType: String(pick(a, ['entityType', 'targetType', 'entity', 'object_type'], '')),
+    entityId: String(pick(a, ['entityId', 'targetId', 'object_id'], '')),
+    createdAt: normTs(pick(a, ['createdAt', 'created_at', 'ts', 'timestamp'], Date.now())),
+  }));
+
+const normalizeAudit = (raw: any): AuditLog[] =>
+  asArray(raw).map((l: any): AuditLog => ({
+    id: String(pick(l, ['id', 'audit_id', 'event_id'], `${l?.entityType || l?.object_type || 'evt'}-${l?.createdAt || l?.created_at || Date.now()}`)),
+    actorLabel: pick(l, ['actorLabel', 'actor', 'actor_name', 'user', 'by', 'performedBy'], null),
+    action: String(pick(l, ['action', 'event', 'action_type', 'type', 'metaAction', 'meta?.action'], '—')),
+    entityType: String(pick(l, ['entityType', 'object_type', 'entity', 'targetType'], '')),
+    entityId: String(pick(l, ['entityId', 'object_id', 'targetId'], '')),
+    meta: pick(l, ['meta', 'details', 'extra'], undefined),
+    createdAt: normTs(pick(l, ['createdAt', 'created_at', 'timestamp', 'ts'], Date.now())),
+  }));
+
+const normalizeVendors = (raw: any): VendorPerf[] =>
+  asArray(raw).map((v: any): VendorPerf => {
+    const proofsTotal = Number(pick(v, ['proofsTotal', 'proofs_total', 'proofs'], 0)) || 0;
+    const approved = Number(pick(v, ['approved', 'proofs_approved'], 0)) || 0;
+    const cr = Number(pick(v, ['changesRequested', 'changes_requested', 'cr'], 0)) || 0;
+    return {
+      walletAddress: String(pick(v, ['walletAddress', 'wallet_address', 'wallet'], '')),
+      vendorName: String(pick(v, ['vendorName', 'name', 'label'], '—')),
+      proofsTotal,
+      approved,
+      changesRequested: cr,
+      approvalRate: proofsTotal ? approved / proofsTotal : 0,
+      bidsCount: Number(pick(v, ['bidsCount', 'bids_count'], 0)) || 0,
+      totalAwardedUSD: Number(pick(v, ['totalAwardedUSD', 'awarded_usd'], 0)) || 0,
+      lastProofAt: pick(v, ['lastProofAt', 'last_proof_at'], null) ? normTs(pick(v, ['lastProofAt', 'last_proof_at'], null)) : null,
+      lastBidAt: pick(v, ['lastBidAt', 'last_bid_at'], null) ? normTs(pick(v, ['lastBidAt', 'last_bid_at'], null)) : null,
+      email: pick(v, ['email'], null),
+      phone: pick(v, ['phone'], null),
+      archived: Boolean(pick(v, ['archived', 'is_archived'], false)),
+    };
+  });
+
+const normalizePayouts = (raw: any): { pending: PayoutItem[]; recent: PayoutItem[] } => {
+  const pending = asArray(raw?.pending ?? raw?.awaiting ?? raw?.toPay ?? raw).map((p: any): PayoutItem => ({
     bidId: Number(pick(p, ['bidId', 'bid_id'], 0)) || 0,
     milestoneIndex: Number(pick(p, ['milestoneIndex', 'milestone_index'], 0)) || 0,
-    vendorName: String(pick(p, ['vendorName', 'vendor_name'], '')) || '',
-    walletAddress: String(pick(p, ['walletAddress', 'wallet_address'], '')) || '',
-    currency: pick(p, ['currency'], 'USDC'),
+    vendorName: String(pick(p, ['vendorName', 'vendor_name'], '—')),
+    walletAddress: String(pick(p, ['walletAddress', 'wallet_address'], '')),
+    currency: pick(p, ['currency', 'token'], 'USDC'),
     amount: Number(pick(p, ['amount', 'value'], 0)) || undefined,
-    txHash: pick(p, ['txHash', 'tx_hash', 'hash'], null),
-    createdAt: pick(p, ['createdAt', 'created_at', 'ts', 'time']) || '',
-  });
-  return { pending: pending.map(mapOne), recent: recent.map(mapOne) };
-}
+    txHash: null,
+    createdAt: normTs(pick(p, ['createdAt', 'created_at', 'ts'], Date.now())),
+  }));
 
-/* =========================
-   Component
-   ========================= */
+  const recent = asArray(raw?.recent ?? raw?.paid ?? []).map((p: any): PayoutItem => ({
+    bidId: Number(pick(p, ['bidId', 'bid_id'], 0)) || 0,
+    milestoneIndex: Number(pick(p, ['milestoneIndex', 'milestone_index'], 0)) || 0,
+    vendorName: String(pick(p, ['vendorName', 'vendor_name'], '—')),
+    walletAddress: String(pick(p, ['walletAddress', 'wallet_address'], '')),
+    currency: pick(p, ['currency', 'token'], 'USDC'),
+    amount: Number(pick(p, ['amount', 'value'], 0)) || undefined,
+    txHash: String(pick(p, ['txHash', 'tx_hash', 'hash'], '')) || null,
+    createdAt: normTs(pick(p, ['createdAt', 'created_at', 'paid_at', 'ts'], Date.now())),
+  }));
+
+  return { pending, recent };
+};
+
+/* ========================
+   Page
+======================== */
 export default function AdminOversightPage() {
-  const [summary, setSummary] = React.useState<Summary>({
-    openProofs: 0,
-    breachingSLA: 0,
-    pendingPayouts: 0,
-    escrowsLocked: 0,
-    cycleTimeHoursP50: 0,
-    revisionRate: 0,
-  });
+  const [summary, setSummary] = React.useState<Summary | null>(null);
   const [queue, setQueue] = React.useState<QueueRow[]>([]);
   const [alerts, setAlerts] = React.useState<AlertItem[]>([]);
   const [audit, setAudit] = React.useState<AuditLog[]>([]);
@@ -272,42 +199,33 @@ export default function AdminOversightPage() {
   const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
   const [olderThan, setOlderThan] = React.useState<number>(0);
   const [busy, setBusy] = React.useState<string>('');
-  const [loading, setLoading] = React.useState<boolean>(true);
-  const [error, setError] = React.useState<string | null>(null);
 
-  const j = React.useCallback(async (path: string) => {
-    try {
-      const r = await fetch(path, { credentials: 'include', cache: 'no-store' });
-      const text = await r.text();
-      let data: any = null;
-      try { data = JSON.parse(text); } catch { /* non-json */ }
-      if (!r.ok) throw new Error((data && (data.error || data.message)) || `HTTP ${r.status}`);
+  const fetchJSON = (url: string, init?: RequestInit) =>
+    fetch(url, { credentials: 'include', cache: 'no-store', ...(init || {}) }).then(async (r) => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
+        throw new Error(msg);
+      }
       return data;
-    } catch (e: any) {
-      setError(String(e?.message || e));
-      return null;
-    }
-  }, []);
+    });
 
   const refreshAll = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const [s, q, a, au, v, p] = await Promise.all([
-      j('/api/admin/oversight/summary'),
-      j('/api/admin/oversight/queue'),
-      j('/api/admin/oversight/alerts'),
-      j('/api/audit?take=50'),
-      j('/api/admin/oversight/vendors'),
-      j('/api/admin/oversight/payouts'),
+    const [s, q, a, l, v, p] = await Promise.all([
+      fetchJSON('/api/admin/oversight/summary').catch(() => ({})),
+      fetchJSON('/api/admin/oversight/queue').catch(() => []),
+      fetchJSON('/api/admin/oversight/alerts').catch(() => []),
+      fetchJSON('/api/audit?take=50').catch(() => []),
+      fetchJSON('/api/admin/oversight/vendors').catch(() => []),
+      fetchJSON('/api/admin/oversight/payouts').catch(() => ({ pending: [], recent: [] })),
     ]);
-    if (s) setSummary(normalizeSummary(s));
-    if (q) setQueue(normalizeQueue(q));
-    if (a) setAlerts(normalizeAlerts(a));
-    if (au) setAudit(normalizeAudit(au));
-    if (v) setVendors(normalizeVendors(v));
-    if (p) setPayouts(normalizePayouts(p));
-    setLoading(false);
-  }, [j]);
+    setSummary(normalizeSummary(s));
+    setQueue(normalizeQueue(q));
+    setAlerts(normalizeAlerts(a));
+    setAudit(normalizeAudit(l));
+    setVendors(normalizeVendors(v));
+    setPayouts(normalizePayouts(p));
+  }, []);
 
   React.useEffect(() => {
     refreshAll();
@@ -318,20 +236,17 @@ export default function AdminOversightPage() {
       const qs = new URLSearchParams();
       if (statusFilter !== 'all') qs.set('status', statusFilter);
       if (olderThan) qs.set('olderThanHours', String(olderThan));
-      const data = await j(`/api/admin/oversight/queue?${qs.toString()}`);
-      if (data) setQueue(normalizeQueue(data));
+      const q = await fetchJSON(`/api/admin/oversight/queue?${qs.toString()}`).catch(() => []);
+      setQueue(normalizeQueue(q));
     })();
-  }, [statusFilter, olderThan, j]);
+  }, [statusFilter, olderThan]);
 
-  // ---- Actions (write hits API origin; your auth-injector adds Bearer) ----
+  /* ---------- Quick actions (optimistic + rollback) ---------- */
   async function onApprove(row: QueueRow) {
     try {
       setBusy(`approve-${row.id}`);
       setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'approved' } : x)));
-      const url = API_ORIGIN
-        ? `${API_ORIGIN}/proofs/${row.bidId}/${row.milestoneIndex}/approve`
-        : `/proofs/${row.bidId}/${row.milestoneIndex}/approve`;
-      await fetch(url, { method: 'POST', credentials: 'include' });
+      await fetchJSON(`/proofs/${row.bidId}/${row.milestoneIndex}/approve`, { method: 'POST' });
       await refreshAll();
     } catch (e: any) {
       alert(`Approve failed: ${e?.message || e}`);
@@ -340,18 +255,13 @@ export default function AdminOversightPage() {
       setBusy('');
     }
   }
-
   async function onRequestChanges(row: QueueRow) {
     const reason = prompt('Reason for change request?') || '';
     try {
       setBusy(`request-${row.id}`);
       setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x)));
-      const url = API_ORIGIN
-        ? `${API_ORIGIN}/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`
-        : `/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`;
-      await fetch(url, {
+      await fetchJSON(`/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
@@ -363,17 +273,12 @@ export default function AdminOversightPage() {
       setBusy('');
     }
   }
-
   async function onPay(item: PayoutItem) {
     try {
       setBusy(`pay-${item.bidId}-${item.milestoneIndex}`);
-      setPayouts((p) => ({ ...p, pending: (p?.pending ?? []).filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)) }));
-      const url = API_ORIGIN
-        ? `${API_ORIGIN}/bids/${item.bidId}/pay-milestone`
-        : `/bids/${item.bidId}/pay-milestone`;
-      await fetch(url, {
+      setPayouts((p) => ({ ...p, pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)) }));
+      await fetchJSON(`/bids/${item.bidId}/pay-milestone`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ milestoneIndex: item.milestoneIndex }),
       });
@@ -385,13 +290,11 @@ export default function AdminOversightPage() {
       setBusy('');
     }
   }
-
   async function onArchiveVendor(wallet: string) {
     try {
       setBusy(`arch-${wallet}`);
-      setVendors((vs) => (vs ?? []).map((v) => (v.walletAddress === wallet ? { ...v, archived: true } : v)));
-      const url = API_ORIGIN ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}/archive` : `/admin/vendors/${encodeURIComponent(wallet)}/archive`;
-      await fetch(url, { method: 'POST', credentials: 'include' });
+      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: true } : v)));
+      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/archive`, { method: 'POST' });
     } catch (e: any) {
       alert(`Archive failed: ${e?.message || e}`);
       await refreshAll();
@@ -402,9 +305,8 @@ export default function AdminOversightPage() {
   async function onUnarchiveVendor(wallet: string) {
     try {
       setBusy(`unarch-${wallet}`);
-      setVendors((vs) => (vs ?? []).map((v) => (v.walletAddress === wallet ? { ...v, archived: false } : v)));
-      const url = API_ORIGIN ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}/unarchive` : `/admin/vendors/${encodeURIComponent(wallet)}/unarchive`;
-      await fetch(url, { method: 'POST', credentials: 'include' });
+      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: false } : v)));
+      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, { method: 'POST' });
     } catch (e: any) {
       alert(`Unarchive failed: ${e?.message || e}`);
       await refreshAll();
@@ -416,9 +318,8 @@ export default function AdminOversightPage() {
     if (!confirm('Delete vendor profile? Bids remain.')) return;
     try {
       setBusy(`del-${wallet}`);
-      setVendors((vs) => (vs ?? []).filter((v) => v.walletAddress !== wallet));
-      const url = API_ORIGIN ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}` : `/admin/vendors/${encodeURIComponent(wallet)}`;
-      await fetch(url, { method: 'DELETE', credentials: 'include' });
+      setVendors((vs) => vs.filter((v) => v.walletAddress !== wallet));
+      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}`, { method: 'DELETE' });
     } catch (e: any) {
       alert(`Delete failed: ${e?.message || e}`);
       await refreshAll();
@@ -427,9 +328,7 @@ export default function AdminOversightPage() {
     }
   }
 
-  /* =========================
-     UI
-     ========================= */
+  /* ---------- UI ---------- */
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white p-6">
       <div className="mx-auto max-w-7xl">
@@ -451,41 +350,41 @@ export default function AdminOversightPage() {
           </div>
         </header>
 
-        {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">Oversight load: {error}</div>}
-
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <KPI title="Open proofs" value={summary?.openProofs ?? '—'} />
           <KPI title="Breaching SLA" value={summary?.breachingSLA ?? '—'} tone="danger" />
           <KPI title="Pending payouts" value={summary?.pendingPayouts ?? '—'} />
           <KPI title="Escrows locked" value={summary?.escrowsLocked ?? '—'} />
           <KPI title="P50 cycle (h)" value={summary?.cycleTimeHoursP50 ?? '—'} />
-          <KPI title="Revision rate" value={pct(summary?.revisionRate)} />
+          <KPI title="Revision rate" value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : '—'} />
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Queue */}
           <section className="lg:col-span-2">
             <Card title="Queue health">
               <div className="overflow-hidden rounded-xl border">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <Th>ID</Th><Th>Vendor</Th><Th>Project / Milestone</Th><Th>Age</Th><Th>SLA</Th><Th>Status</Th><Th>Risk</Th><Th>Actions</Th>
+                      <Th>ID</Th>
+                      <Th>Vendor</Th>
+                      <Th>Project / Milestone</Th>
+                      <Th>Age</Th>
+                      <Th>SLA</Th>
+                      <Th>Status</Th>
+                      <Th>Risk</Th>
+                      <Th>Actions</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(queue ?? []).map((q) => (
+                    {queue.map((q) => (
                       <tr key={q.id} className="border-t hover:bg-gray-50">
                         <Td className="font-mono text-[13px]">{q.id}</Td>
-                        <Td>{q.vendor || '—'}</Td>
-                        <Td>{q.project || '—'} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}</Td>
-                        <Td>{q.ageHours ?? '—'}h</Td>
+                        <Td>{q.vendor}</Td>
+                        <Td>{q.project} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}</Td>
+                        <Td>{q.ageHours}h</Td>
                         <Td className={q.slaDueInHours < 0 ? 'text-red-600' : 'text-gray-600'}>
-                          {typeof q.slaDueInHours === 'number'
-                            ? q.slaDueInHours < 0
-                              ? `${-q.slaDueInHours}h over`
-                              : `${q.slaDueInHours}h left`
-                            : '—'}
+                          {q.slaDueInHours < 0 ? `${-q.slaDueInHours}h over` : `${q.slaDueInHours}h left`}
                         </Td>
                         <Td>
                           <span className={
@@ -494,58 +393,69 @@ export default function AdminOversightPage() {
                               : q.status === 'changes_requested' ? 'bg-yellow-100 text-yellow-800'
                               : q.status === 'archived' ? 'bg-gray-200 text-gray-700'
                               : q.status === 'rejected' ? 'bg-red-100 text-red-700'
-                              : 'bg-blue-100 text-blue-700')
-                          }>{q.status}</span>
+                              : 'bg-blue-100 text-blue-700')}
+                          >
+                            {q.status}
+                          </span>
                         </Td>
                         <Td>
                           <span className={
                             'inline-block rounded-full px-2 py-0.5 text-xs ' +
                             (q.risk === 'high' ? 'bg-red-100 text-red-700'
                               : q.risk === 'medium' ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-gray-100 text-gray-700')
-                          }>{q.risk || '—'}</span>
+                              : 'bg-gray-100 text-gray-700')}
+                          >
+                            {q.risk || '—'}
+                          </span>
                         </Td>
                         <Td>
                           <div className="flex gap-2">
-                            <button disabled={busy === `approve-${q.id}`} onClick={() => onApprove(q)}
-                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Approve</button>
-                            <button disabled={busy === `request-${q.id}`} onClick={() => onRequestChanges(q)}
-                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Request</button>
+                            <button disabled={busy === `approve-${q.id}`} onClick={() => onApprove(q)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                              Approve
+                            </button>
+                            <button disabled={busy === `request-${q.id}`} onClick={() => onRequestChanges(q)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                              Request
+                            </button>
                           </div>
                         </Td>
                       </tr>
                     ))}
-                    {!loading && !(queue ?? []).length && (
-                      <tr><Td colSpan={8} className="py-8 text-center text-gray-500">No items</Td></tr>
+                    {!queue.length && (
+                      <tr>
+                        <Td colSpan={8} className="py-8 text-center text-gray-500">No items</Td>
+                      </tr>
                     )}
-                    {loading && <tr><Td colSpan={8} className="py-8 text-center text-gray-400">Loading…</Td></tr>}
                   </tbody>
                 </table>
               </div>
             </Card>
 
-            {/* Vendors */}
             <Card title="Vendor performance">
               <div className="overflow-hidden rounded-xl border">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <Th>Vendor</Th><Th className="hidden md:table-cell">Wallet</Th>
-                      <Th className="text-right">Proofs</Th><Th className="text-right">Approved</Th>
-                      <Th className="text-right">CR</Th><Th className="text-right">Approval %</Th>
-                      <Th className="text-right hidden lg:table-cell">Bids</Th><Th className="text-right hidden lg:table-cell">Awarded USD</Th>
-                      <Th className="hidden md:table-cell">Last activity</Th><Th>Actions</Th>
+                      <Th>Vendor</Th>
+                      <Th className="hidden md:table-cell">Wallet</Th>
+                      <Th className="text-right">Proofs</Th>
+                      <Th className="text-right">Approved</Th>
+                      <Th className="text-right">CR</Th>
+                      <Th className="text-right">Approval %</Th>
+                      <Th className="text-right hidden lg:table-cell">Bids</Th>
+                      <Th className="text-right hidden lg:table-cell">Awarded USD</Th>
+                      <Th className="hidden md:table-cell">Last activity</Th>
+                      <Th>Actions</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(vendors ?? []).map((v) => (
-                      <tr key={v.walletAddress} className="border-t hover:bg-gray-50">
+                    {vendors.map((v) => (
+                      <tr key={v.walletAddress || v.vendorName} className="border-t hover:bg-gray-50">
                         <Td className="font-medium">{v.vendorName || '—'}</Td>
                         <Td className="hidden md:table-cell font-mono text-[12px]">{v.walletAddress || '—'}</Td>
-                        <Td className="text-right">{v.proofsTotal ?? 0}</Td>
-                        <Td className="text-right">{v.approved ?? 0}</Td>
-                        <Td className="text-right">{v.changesRequested ?? 0}</Td>
-                        <Td className="text-right">{pct(v.approvalRate)}</Td>
+                        <Td className="text-right">{v.proofsTotal}</Td>
+                        <Td className="text-right">{v.approved}</Td>
+                        <Td className="text-right">{v.changesRequested}</Td>
+                        <Td className="text-right">{Math.round((v.approvalRate || 0) * 100)}%</Td>
                         <Td className="text-right hidden lg:table-cell">{v.bidsCount ?? '—'}</Td>
                         <Td className="text-right hidden lg:table-cell">
                           {v.totalAwardedUSD
@@ -553,51 +463,55 @@ export default function AdminOversightPage() {
                             : '—'}
                         </Td>
                         <Td className="hidden md:table-cell">
-                          {v.lastProofAt ? fmtWhen(v.lastProofAt) : v.lastBidAt ? fmtWhen(v.lastBidAt) : '—'}
+                          {v.lastProofAt ? new Date(v.lastProofAt).toLocaleString()
+                            : v.lastBidAt ? new Date(v.lastBidAt).toLocaleString()
+                            : '—'}
                         </Td>
                         <Td>
                           <div className="flex gap-2">
                             {!v.archived ? (
-                              <button disabled={busy === `arch-${v.walletAddress}`} onClick={() => onArchiveVendor(v.walletAddress)}
-                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Archive</button>
+                              <button disabled={busy === `arch-${v.walletAddress}`} onClick={() => onArchiveVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                                Archive
+                              </button>
                             ) : (
-                              <button disabled={busy === `unarch-${v.walletAddress}`} onClick={() => onUnarchiveVendor(v.walletAddress)}
-                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Unarchive</button>
+                              <button disabled={busy === `unarch-${v.walletAddress}`} onClick={() => onUnarchiveVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                                Unarchive
+                              </button>
                             )}
-                            <button disabled={busy === `del-${v.walletAddress}`} onClick={() => onDeleteVendor(v.walletAddress)}
-                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Delete</button>
+                            <button disabled={busy === `del-${v.walletAddress}`} onClick={() => onDeleteVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                              Delete
+                            </button>
                           </div>
                         </Td>
                       </tr>
                     ))}
-                    {!loading && !(vendors ?? []).length && (
-                      <tr><Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td></tr>
+                    {!vendors.length && (
+                      <tr>
+                        <Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td>
+                      </tr>
                     )}
-                    {loading && <tr><Td colSpan={10} className="py-8 text-center text-gray-400">Loading…</Td></tr>}
                   </tbody>
                 </table>
               </div>
             </Card>
           </section>
 
-          {/* Alerts + Payouts */}
           <section>
             <Card title="Alerts">
               <ul className="space-y-2">
-                {(alerts ?? []).map((a) => (
+                {alerts.map((a) => (
                   <li key={a.id} className="rounded-lg border bg-white p-3">
-                    <div className="text-xs text-gray-500">{fmtWhen(a.createdAt)}</div>
-                    <div className="font-medium">{a.title || a.type || 'Alert'}</div>
-                    {a.detail ? <div className="text-xs text-gray-600">{a.detail}</div> : null}
+                    <div className="text-xs text-gray-500">{new Date(a.createdAt).toLocaleString()}</div>
+                    <div className="font-medium">{a.title || a.type}</div>
+                    {!!a.detail && <div className="text-xs text-gray-600">{a.detail}</div>}
                     {(a.entityType || a.entityId) && (
                       <div className="mt-1 text-xs text-gray-500">
-                        {a.entityType || 'Entity'}{a.entityId ? ` #${a.entityId}` : ''}
+                        {a.entityType || 'entity'} {a.entityId ? `#${a.entityId}` : ''}
                       </div>
                     )}
                   </li>
                 ))}
-                {!loading && !(alerts ?? []).length && <li className="py-8 text-center text-gray-500">No alerts</li>}
-                {loading && <li className="py-8 text-center text-gray-400">Loading…</li>}
+                {!alerts.length && <li className="py-8 text-center text-gray-500">No alerts</li>}
               </ul>
             </Card>
 
@@ -606,41 +520,48 @@ export default function AdminOversightPage() {
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Pending</div>
                   <ul className="divide-y rounded-lg border">
-                    {(payouts?.pending ?? []).map((p) => (
+                    {payouts.pending.map((p) => (
                       <li key={`p-${p.bidId}-${p.milestoneIndex}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}</div>
-                          <div className="text-xs text-gray-500">{fmtWhen(p.createdAt)}</div>
+                          <div className="font-medium">
+                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
+                          </div>
+                          <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}</div>
-                          <button disabled={busy === `pay-${p.bidId}-${p.milestoneIndex}`} onClick={() => onPay(p)}
-                            className="mt-1 rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">Pay</button>
+                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : (p.currency || '')}</div>
+                          <button
+                            disabled={busy === `pay-${p.bidId}-${p.milestoneIndex}`}
+                            onClick={() => onPay(p)}
+                            className="mt-1 rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Pay
+                          </button>
                         </div>
                       </li>
                     ))}
-                    {!loading && !(payouts?.pending ?? []).length && <li className="p-4 text-center text-gray-500">No pending payouts</li>}
-                    {loading && <li className="p-4 text-center text-gray-400">Loading…</li>}
+                    {!payouts.pending.length && <li className="p-4 text-center text-gray-500">No pending payouts</li>}
                   </ul>
                 </div>
 
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Recent</div>
                   <ul className="divide-y rounded-lg border">
-                    {(payouts?.recent ?? []).map((p) => (
-                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || 'tx'}`} className="flex items-center justify-between p-3 text-sm">
+                    {payouts.recent.map((p) => (
+                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash ?? ''}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}</div>
-                          <div className="text-xs text-gray-500">{fmtWhen(p.createdAt)}</div>
+                          <div className="font-medium">
+                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
+                          </div>
+                          <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}</div>
-                          <div className="text-xs text-gray-500 truncate max-w-[160px]">{p.txHash || ''}</div>
+                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : (p.currency || '')}</div>
+                          {!!p.txHash && <div className="text-xs text-gray-500 truncate max-w-[160px]">{p.txHash}</div>}
                         </div>
                       </li>
                     ))}
-                    {!loading && !(payouts?.recent ?? []).length && <li className="p-4 text-center text-gray-500">No recent payouts</li>}
-                    {loading && <li className="p-4 text-center text-gray-400">Loading…</li>}
+                    {!payouts.recent.length && <li className="p-4 text-center text-gray-500">No recent payouts</li>}
                   </ul>
                 </div>
               </div>
@@ -651,20 +572,19 @@ export default function AdminOversightPage() {
         <section className="mt-6">
           <Card title="Recent activity">
             <ul className="divide-y rounded-xl border bg-white">
-              {(audit ?? []).map((l) => (
+              {audit.map((l) => (
                 <li key={l.id} className="p-3 text-sm">
-                  <div className="text-xs text-gray-500">{fmtWhen(l.createdAt)}</div>
+                  <div className="text-xs text-gray-500">{new Date(l.createdAt).toLocaleString()}</div>
                   <div className="font-medium">{l.actorLabel || 'System'} • {l.action || '—'}</div>
                   {(l.entityType || l.entityId) && (
                     <div className="text-xs text-gray-600">
-                      {l.entityType || 'Entity'}{l.entityId ? ` #${l.entityId}` : ''}
+                      {l.entityType} {l.entityId ? `#${l.entityId}` : ''}
                     </div>
                   )}
-                  {l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
+                  {!!l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
                 </li>
               ))}
-              {!loading && !(audit ?? []).length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
-              {loading && <li className="p-6 text-center text-gray-400">Loading…</li>}
+              {!audit.length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
             </ul>
           </Card>
         </section>
@@ -673,9 +593,9 @@ export default function AdminOversightPage() {
   );
 }
 
-/* =========================
+/* ========================
    Tiny UI helpers
-   ========================= */
+======================== */
 function KPI({ title, value, tone }: { title: string; value: React.ReactNode; tone?: 'danger' | 'ok' }) {
   const toneCls = tone === 'danger' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white';
   return (
