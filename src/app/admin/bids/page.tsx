@@ -204,15 +204,24 @@ export default function AdminBidsPage() {
 
   return (
     <div className="max-w-screen-xl mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Admin - Bids Management</h1>
-        <Link
-          href="/admin/proposals"
-          className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700"
-        >
-          Back to Proposals
-        </Link>
-      </div>
+<div className="flex justify-between items-center mb-6">
+  <h1 className="text-2xl font-bold">Admin - Bids Management</h1>
+
+  <div className="flex gap-2">
+    <Link
+      href="/admin/oversight"
+      className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+    >
+      Oversight
+    </Link>
+    <Link
+      href="/admin/proposals"
+      className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700"
+    >
+      Back to Proposals
+    </Link>
+  </div>
+</div>
 
       {/* Tabs + Search */}
       <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
