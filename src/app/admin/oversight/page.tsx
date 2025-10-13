@@ -3,15 +3,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // ------------------------------------------------------------
-// Admin Oversight — polished
+// Admin Oversight — polished + deep links + sparklines
 // - Pure React + Tailwind (no external UI packages)
-// - Drop into app/admin/page.tsx or pages/admin.tsx
-// - Uses NEXT_PUBLIC_API_BASE_URL to call /admin/oversight (server) or /api/admin/oversight (Next API)
-// - Adds: auto‑refresh, keyboard shortcuts, CSV export, sticky headers, a11y, sorting, toasts, persisted tab/query
+// - Works in App or Pages Router
+// - Adds: auto‑refresh, keyboard shortcuts, CSV export, sticky headers, a11y, sorting,
+//         toasts, persisted tab/query, **URL deep links**, optional **sparklines**
 // ------------------------------------------------------------
 
 // —— Types that match your /api/admin/oversight payload ——
-// (unchanged; mirror server output)
+// (Added optional vendor.trend for sparkline — safe to omit on server)
 
 type Oversight = {
   tiles: {
@@ -41,6 +41,8 @@ type Oversight = {
     approvalPct: number;
     bids: number;
     lastActivity: string;
+    // Optional: last 12 approval percentages or comparable KPI for sparkline (0..100)
+    trend?: number[];
   }>;
   alerts: Array<{
     type: string;
@@ -105,6 +107,9 @@ const Icon = {
   Copy: (props: React.SVGProps<SVGSVGElement>) => (
     <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" stroke="currentColor" aria-hidden="true" {...props}><rect x="9" y="9" width="13" height="13" rx="2"/><rect x="2" y="2" width="13" height="13" rx="2"/></svg>
   ),
+  Link: (props: React.SVGProps<SVGSVGElement>) => (
+    <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" stroke="currentColor" aria-hidden="true" {...props}><path strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 1 1-7-7l1-1"/></svg>
+  ),
 };
 
 // —— Helpers ——
@@ -118,6 +123,21 @@ const humanTime = (s: string) => dt(s).toLocaleString();
 const changeLabel = (changes: Record<string, any>) => (Object.keys(changes)[0] || "").replaceAll("_", " ");
 const copy = async (t: string, onDone?: () => void) => { try { await navigator.clipboard.writeText(t); onDone?.(); } catch { /* ignore */ } };
 
+// URL helpers (deep links)
+function readQuery(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const u = new URL(window.location.href);
+  const out: Record<string, string> = {};
+  u.searchParams.forEach((v, k) => { out[k] = v; });
+  return out;
+}
+function writeQuery(next: Record<string, string | undefined>) {
+  if (typeof window === "undefined") return;
+  const u = new URL(window.location.href);
+  Object.entries(next).forEach(([k, v]) => { if (v == null || v === "") u.searchParams.delete(k); else u.searchParams.set(k, v); });
+  window.history.replaceState({}, "", u.toString());
+}
+
 // —— Tiny primitives ——
 function Progress({ value }: { value: number }) {
   const v = Math.max(0, Math.min(100, value || 0));
@@ -125,6 +145,25 @@ function Progress({ value }: { value: number }) {
     <div className="w-full h-2 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden" aria-valuemin={0} aria-valuemax={100} aria-valuenow={v}>
       <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400" style={{ width: `${v}%` }} />
     </div>
+  );
+}
+
+function Sparkline({ values, w = 84, h = 24 }: { values?: number[]; w?: number; h?: number }) {
+  if (!values || values.length === 0) {
+    return <div className="w-[84px] h-[24px] rounded bg-neutral-100 dark:bg-neutral-800" aria-hidden />;
+  }
+  const xs = values.map(v => Math.max(0, Math.min(100, v)));
+  const max = 100, min = 0;
+  const step = w / Math.max(1, xs.length - 1);
+  const points = xs.map((v, i) => {
+    const x = i * step;
+    const y = h - ((v - min) / (max - min)) * h;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden>
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }
 
@@ -256,8 +295,13 @@ export default function AdminOversightPage() {
   const [data, setData] = useState<Oversight | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = usePersistentState<string>("oversight.tab", "overview");
-  const [query, setQuery] = usePersistentState<string>("oversight.query", "");
+
+  // read URL on first mount for deep link (fallback to localStorage)
+  const initialQuery = (() => { const q = readQuery(); return q.q ?? ""; })();
+  const initialTab = (() => { const q = readQuery(); return q.tab ?? "overview"; })();
+
+  const [tab, setTab] = usePersistentState<string>("oversight.tab", initialTab);
+  const [query, setQuery] = usePersistentState<string>("oversight.query", initialQuery);
   const [autoRefresh, setAutoRefresh] = usePersistentState<boolean>("oversight.autoRefresh", true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -265,6 +309,28 @@ export default function AdminOversightPage() {
   // sorting
   const [queueSort, setQueueSort] = usePersistentState<{ key: keyof Oversight["queue"][number]; dir: "asc"|"desc" }>("oversight.queue.sort", { key: "ageHours", dir: "desc" });
   const [vendorSort, setVendorSort] = usePersistentState<{ key: keyof Oversight["vendors"][number]; dir: "asc"|"desc" }>("oversight.vendors.sort", { key: "approvalPct", dir: "desc" });
+
+  // keep URL in sync when tab/query changes (debounced 150ms)
+  const syncTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (syncTimer.current) window.clearTimeout(syncTimer.current);
+    syncTimer.current = window.setTimeout(() => {
+      writeQuery({ tab, q: query });
+    }, 150);
+    return () => { if (syncTimer.current) window.clearTimeout(syncTimer.current); };
+  }, [tab, query]);
+
+  // back/forward support: update state from URL
+  useEffect(() => {
+    const onPop = () => {
+      const q = readQuery();
+      if (q.tab) setTab(q.tab);
+      if (q.q !== undefined) setQuery(q.q);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [setTab, setQuery]);
 
   const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
   const PATH = API_BASE ? "/admin/oversight" : "/api/admin/oversight";
@@ -292,7 +358,6 @@ export default function AdminOversightPage() {
     const ctr = new AbortController();
     load(ctr.signal);
     return () => ctr.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // auto refresh
@@ -401,9 +466,11 @@ export default function AdminOversightPage() {
       ...rows.map((r) => cols.map((c: any) => {
         const v = r[c];
         const s = v == null ? "" : String(v).replaceAll('"', '""');
-        return s.includes(",") || s.includes("\n") ? `"${s}"` : s;
+        return s.includes(",") || s.includes("
+") ? `"${s}"` : s;
       }).join(","))
-    ].join("\n");
+    ].join("
+");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -412,6 +479,11 @@ export default function AdminOversightPage() {
   }
 
   const lastUpdatedLabel = lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "—";
+
+  // shareable deep-link helper
+  function copyShareLink() {
+    copy(window.location.href, () => setToast("Link copied"));
+  }
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-neutral-50 to-white dark:from-neutral-950 dark:to-neutral-900 text-neutral-900 dark:text-neutral-100">
@@ -435,6 +507,9 @@ export default function AdminOversightPage() {
             <button onClick={() => setAutoRefresh(!autoRefresh)} className={cls("inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm", autoRefresh ? "border-emerald-400/70 bg-emerald-50/60 dark:bg-emerald-900/20" : "border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800")} aria-pressed={autoRefresh} aria-label="Toggle auto refresh">
               {autoRefresh ? <Icon.Stop className="h-4 w-4"/> : <Icon.Play className="h-4 w-4"/>}
               {autoRefresh ? "Auto" : "Manual"}
+            </button>
+            <button onClick={copyShareLink} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm" aria-label="Copy shareable link">
+              <Icon.Link className="h-4 w-4"/> Share
             </button>
             <div className="hidden md:block text-xs text-neutral-500">Updated {lastUpdatedLabel}</div>
           </div>
@@ -530,12 +605,13 @@ export default function AdminOversightPage() {
                           <Th onClick={() => toggleSort(vendorSort, setVendorSort, "approvalPct")} sorted={vendorSort.key === "approvalPct"} dir={vendorSort.dir}>Approval %</Th>
                           <Th onClick={() => toggleSort(vendorSort, setVendorSort, "bids")} sorted={vendorSort.key === "bids"} dir={vendorSort.dir}>Bids</Th>
                           <Th onClick={() => toggleSort(vendorSort, setVendorSort, "lastActivity")} sorted={vendorSort.key === "lastActivity"} dir={vendorSort.dir}>Last Activity</Th>
+                          <Th className="text-right">Trend</Th>
                         </tr>
                       </thead>
                       <tbody>
-                        {loading && <RowPlaceholder cols={7} />}
+                        {loading && <RowPlaceholder cols={8} />}
                         {!loading && sortedVendors.length === 0 && (
-                          <tr><td className="p-6 text-center text-neutral-500" colSpan={7}>No vendors yet</td></tr>
+                          <tr><td className="p-6 text-center text-neutral-500" colSpan={8}>No vendors yet</td></tr>
                         )}
                         {sortedVendors.slice(0, 8).map((v) => (
                           <tr key={v.wallet} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
@@ -550,6 +626,7 @@ export default function AdminOversightPage() {
                             <Td className="min-w-[120px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums">{fmtPct(v.approvalPct)}</span></div></Td>
                             <Td>{v.bids}</Td>
                             <Td>{humanTime(v.lastActivity)}</Td>
+                            <Td className="text-right"><Sparkline values={v.trend} /></Td>
                           </tr>
                         ))}
                       </tbody>
@@ -617,12 +694,13 @@ export default function AdminOversightPage() {
                     <Th onClick={() => toggleSort(vendorSort, setVendorSort, "approvalPct")} sorted={vendorSort.key === "approvalPct"} dir={vendorSort.dir}>Approval %</Th>
                     <Th onClick={() => toggleSort(vendorSort, setVendorSort, "bids")} sorted={vendorSort.key === "bids"} dir={vendorSort.dir}>Bids</Th>
                     <Th onClick={() => toggleSort(vendorSort, setVendorSort, "lastActivity")} sorted={vendorSort.key === "lastActivity"} dir={vendorSort.dir}>Last Activity</Th>
+                    <Th className="text-right">Trend</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <RowPlaceholder cols={7} />}
+                  {loading && <RowPlaceholder cols={8} />}
                   {!loading && sortedVendors.length === 0 && (
-                    <tr><td className="p-6 text-center text-neutral-500" colSpan={7}>No vendors yet</td></tr>
+                    <tr><td className="p-6 text-center text-neutral-500" colSpan={8}>No vendors yet</td></tr>
                   )}
                   {sortedVendors.map((v) => (
                     <tr key={v.wallet} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
@@ -633,6 +711,7 @@ export default function AdminOversightPage() {
                       <Td className="min-w-[140px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums">{fmtPct(v.approvalPct)}</span></div></Td>
                       <Td>{v.bids}</Td>
                       <Td>{humanTime(v.lastActivity)}</Td>
+                      <Td className="text-right"><Sparkline values={v.trend} /></Td>
                     </tr>
                   ))}
                 </tbody>
