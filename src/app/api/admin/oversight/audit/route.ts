@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// accept API_BASE, NEXT_PUBLIC_API_BASE, or NEXT_PUBLIC_API_BASE_URL
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const API = (
   process.env.API_BASE ??
   process.env.NEXT_PUBLIC_API_BASE ??
@@ -21,16 +24,10 @@ export async function GET(req: NextRequest) {
       credentials: "include",
       cache: "no-store",
     });
-
-    // bubble up upstream info so 500s are actionable
     const text = await r.text();
-    const body = safeJson(text);
-    return NextResponse.json(body, { status: r.status });
+    return NextResponse.json(safe(text), { status: r.status });
   } catch (e: any) {
     return NextResponse.json({ error: "fetch_failed", message: String(e) }, { status: 500 });
   }
 }
-
-function safeJson(s: string) {
-  try { return JSON.parse(s); } catch { return { raw: s }; }
-}
+function safe(s: string) { try { return JSON.parse(s); } catch { return { raw: s }; } }
