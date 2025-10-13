@@ -1,3 +1,4 @@
+// src/app/api/audit/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -12,22 +13,46 @@ const API = (
 ).replace(/\/$/, "");
 
 export async function GET(req: NextRequest) {
-  if (!API) return NextResponse.json({ error: "API_BASE missing" }, { status: 500 });
+  if (!API) {
+    return NextResponse.json({ error: "API_BASE missing" }, { status: 500 });
+  }
 
   const take = req.nextUrl.searchParams.get("take") || "50";
-  try {
-    const r = await fetch(`${API}/admin/audit/recent?take=${encodeURIComponent(take)}`, {
-      headers: {
-        cookie: req.headers.get("cookie") || "",
-        authorization: req.headers.get("authorization") || "",
-      },
-      credentials: "include",
-      cache: "no-store",
-    });
-    const text = await r.text();
-    return NextResponse.json(safe(text), { status: r.status });
-  } catch (e: any) {
-    return NextResponse.json({ error: "fetch_failed", message: String(e) }, { status: 500 });
+
+  const r = await fetch(`${API}/admin/audit/recent?take=${encodeURIComponent(take)}`, {
+    headers: {
+      cookie: req.headers.get("cookie") || "",
+      authorization: req.headers.get("authorization") || "",
+    },
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  const raw = await r.json().catch(() => ([]));
+  // Some backends return {items: [...]}, some return [...]
+  const list: any[] = Array.isArray(raw) ? raw : (raw.items || []);
+
+  const normalized = list.map((e: any) => {
+    const createdAt =
+      e.createdAt || e.created_at || e.timestamp || e.time || null;
+
+    return {
+      id: String(e.id ?? e.event_id ?? e.uuid ?? cryptoRandom()),
+      actorLabel: e.actorLabel ?? e.actor_label ?? e.actor ?? "System",
+      action: e.action ?? e.event ?? e.type ?? "—",
+      entityType: e.entityType ?? e.entity_type ?? e.entity ?? "",
+      entityId: String(
+        e.entityId ?? e.entity_id ?? e.target_id ?? e.subject_id ?? ""
+      ),
+      meta: e.meta ?? e.payload ?? e.details ?? null,
+      createdAt,
+    };
+  });
+
+  return NextResponse.json(normalized, { status: r.status });
+
+  function cryptoRandom() {
+    // very small helper so map() never throws if id missing
+    return Math.random().toString(36).slice(2);
   }
 }
-function safe(s: string) { try { return JSON.parse(s); } catch { return { raw: s }; } }
