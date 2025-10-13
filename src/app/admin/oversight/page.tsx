@@ -146,8 +146,9 @@ export default function AdminOversightPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-  const url = `${API_BASE}/api/admin/oversight`;
+  const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+  const PATH = API_BASE ? "/admin/oversight" : "/api/admin/oversight";
+  const url = `${API_BASE}${PATH}`;
 
   async function load() {
     try {
