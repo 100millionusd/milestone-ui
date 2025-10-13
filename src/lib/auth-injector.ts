@@ -51,13 +51,15 @@ function getToken(): string | null {
   const origFetch = window.fetch.bind(window);
 
   window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
+    // Normalize to absolute URL
     let href = typeof input === 'string' ? input : (input as Request).url;
-    try { href = new URL(href, location.href).href; } catch {}
+    let u: URL;
+    try { u = new URL(href, location.href); } catch { return origFetch(input as any, init); }
 
-    let origin = '';
-    try { origin = new URL(href).origin; } catch {}
+    const isRailwayAPI = u.origin === API_ORIGIN;
+    const isNextProxy  = u.origin === location.origin && u.pathname.startsWith('/api/');
 
-    if (origin === API_ORIGIN) {
+    if (isRailwayAPI || isNextProxy) {
       // Start with headers from Request object (if any)...
       const headers = new Headers(typeof input !== 'string' ? (input as Request).headers : undefined);
       // ...then merge any incoming init.headers on top
@@ -68,7 +70,6 @@ function getToken(): string | null {
         if (tok) headers.set('authorization', `Bearer ${tok}`);
       }
 
-      // Preserve caller’s mode/credentials; just replace headers
       init = { ...init, headers };
     }
 
@@ -76,6 +77,6 @@ function getToken(): string | null {
   };
 
   if (process.env.NODE_ENV !== 'production') {
-    console.log('🔒 Bearer fetch injector active for', API_ORIGIN);
+    console.log('🔒 Bearer fetch injector active for', { API_ORIGIN, nextProxyOrigin: location.origin });
   }
 })();
