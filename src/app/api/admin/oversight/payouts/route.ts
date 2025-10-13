@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+const API = ((process.env.API_BASE ?? process.env.NEXT_PUBLIC_API_BASE) || "").replace(/\/$/, "");
+
 export async function GET(req: NextRequest) {
-  const API = process.env.NEXT_PUBLIC_API_BASE!;
+  if (!API) return NextResponse.json({ error: "API_BASE missing" }, { status: 500 });
   const r = await fetch(`${API}/vendor/payments`, {
-    headers: { cookie: req.headers.get("cookie") || "" },
+    headers: {
+      cookie: req.headers.get("cookie") || "",
+      authorization: req.headers.get("authorization") || "",
+    },
     credentials: "include",
     cache: "no-store",
   });
-  return NextResponse.json(await r.json(), { status: r.status });
+  const body = await r.json().catch(() => ({}));
+  return NextResponse.json(body, { status: r.status });
 }

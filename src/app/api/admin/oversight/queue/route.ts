@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(req: NextRequest) {
-  const API = process.env.NEXT_PUBLIC_API_BASE;
-  if (!API) return NextResponse.json({ error: "NEXT_PUBLIC_API_BASE missing" }, { status: 500 });
+const API = ((process.env.API_BASE ?? process.env.NEXT_PUBLIC_API_BASE) || "").replace(/\/$/, "");
 
-  const status = req.nextUrl.searchParams.get("status") || "";
-  const olderThanHours = Number(req.nextUrl.searchParams.get("olderThanHours") || "0");
+export async function GET(req: NextRequest) {
+  if (!API) return NextResponse.json({ error: "API_BASE missing" }, { status: 500 });
+
   const r = await fetch(`${API}/proofs`, {
     headers: {
       cookie: req.headers.get("cookie") || "",
@@ -14,10 +13,11 @@ export async function GET(req: NextRequest) {
     credentials: "include",
     cache: "no-store",
   });
-
   if (!r.ok) return NextResponse.json(await r.json().catch(() => ({})), { status: r.status });
-  const proofs = await r.json();
 
+  const proofs = await r.json();
+  const status = req.nextUrl.searchParams.get("status") || "";
+  const olderThanHours = Number(req.nextUrl.searchParams.get("olderThanHours") || "0");
   const SLA_HOURS = Number(process.env.NEXT_PUBLIC_SLA_REVIEW_HOURS || "48");
   const cutoff = olderThanHours ? Date.now() - olderThanHours * 3600_000 : 0;
 
