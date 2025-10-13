@@ -73,44 +73,89 @@ interface PayoutItem {
   createdAt: string;
 }
 
+// Use your public API origin for direct writes (auth-injector will attach Bearer)
+const API_ORIGIN =
+  (process.env.NEXT_PUBLIC_API_BASE ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    '')!.toString().replace(/\/$/, '');
+
 // ---------- Page ----------
 export default function AdminOversightPage() {
-  const [summary, setSummary] = React.useState<Summary | null>(null);
+  // --- state (safe defaults) ---
+  const [summary, setSummary] = React.useState<Summary>({
+    openProofs: 0,
+    breachingSLA: 0,
+    pendingPayouts: 0,
+    escrowsLocked: 0,
+    cycleTimeHoursP50: 0,
+    revisionRate: 0,
+  });
   const [queue, setQueue] = React.useState<QueueRow[]>([]);
   const [alerts, setAlerts] = React.useState<AlertItem[]>([]);
   const [audit, setAudit] = React.useState<AuditLog[]>([]);
   const [vendors, setVendors] = React.useState<VendorPerf[]>([]);
-  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({ pending: [], recent: [] });
+  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({
+    pending: [],
+    recent: [],
+  });
   const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
   const [olderThan, setOlderThan] = React.useState<number>(0);
   const [busy, setBusy] = React.useState<string>('');
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState<boolean>(true);
 
-  const fetchJSON = (url: string, init?: RequestInit) =>
-    fetch(url, { credentials: 'include', cache: 'no-store', ...(init || {}) }).then(async (r) => {
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
-        throw new Error(msg);
+  // --- resilient fetcher that never throws; always returns parsed JSON or null
+  const j = React.useCallback(async (path: string) => {
+    try {
+      const r = await fetch(path, { credentials: 'include', cache: 'no-store' });
+      const text = await r.text();
+      try {
+        const data = JSON.parse(text);
+        return r.ok ? data : data; // surface body for non-200 too
+      } catch {
+        return null;
       }
-      return data;
-    });
+    } catch {
+      return null;
+    }
+  }, []);
 
   const refreshAll = React.useCallback(async () => {
-    const [s, q, a, l, v, p] = await Promise.all([
-      fetchJSON('/api/admin/oversight/summary'),
-      fetchJSON('/api/admin/oversight/queue'),
-      fetchJSON('/api/admin/oversight/alerts'),
-      fetchJSON('/api/audit?take=50'),
-      fetchJSON('/api/admin/oversight/vendors'),
-      fetchJSON('/api/admin/oversight/payouts'),
-    ]);
-    setSummary(s);
-    setQueue(q);
-    setAlerts(a);
-    setAudit(l);
-    setVendors(v);
-    setPayouts(p);
-  }, []);
+    setLoading(true);
+    setError(null);
+    try {
+      const [s, q, a, au, v, p] = await Promise.all([
+        j('/api/admin/oversight/summary'),
+        j('/api/admin/oversight/queue'),
+        j('/api/admin/oversight/alerts'),
+        j('/api/audit?take=50'),
+        j('/api/admin/oversight/vendors'),
+        j('/api/admin/oversight/payouts'),
+      ]);
+
+      setSummary({
+        openProofs: s?.openProofs ?? 0,
+        breachingSLA: s?.breachingSLA ?? 0,
+        pendingPayouts: s?.pendingPayouts ?? 0,
+        escrowsLocked: s?.escrowsLocked ?? 0,
+        cycleTimeHoursP50: s?.cycleTimeHoursP50 ?? 0,
+        revisionRate: s?.revisionRate ?? 0,
+      });
+
+      setQueue(Array.isArray(q) ? (q as QueueRow[]) : []);
+      setAlerts(Array.isArray(a) ? (a as AlertItem[]) : []);
+      setAudit(Array.isArray(au?.events) ? (au.events as AuditLog[]) : Array.isArray(au) ? (au as AuditLog[]) : []);
+      setVendors(Array.isArray(v?.vendors) ? (v.vendors as VendorPerf[]) : Array.isArray(v) ? (v as VendorPerf[]) : []);
+      setPayouts({
+        pending: Array.isArray(p?.pending) ? (p.pending as PayoutItem[]) : [],
+        recent: Array.isArray(p?.recent) ? (p.recent as PayoutItem[]) : [],
+      });
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }, [j]);
 
   React.useEffect(() => {
     refreshAll();
@@ -121,17 +166,21 @@ export default function AdminOversightPage() {
       const qs = new URLSearchParams();
       if (statusFilter !== 'all') qs.set('status', statusFilter);
       if (olderThan) qs.set('olderThanHours', String(olderThan));
-      const q = await fetchJSON(`/api/admin/oversight/queue?${qs.toString()}`);
-      setQueue(q);
+      const data = await j(`/api/admin/oversight/queue?${qs.toString()}`);
+      setQueue(Array.isArray(data) ? (data as QueueRow[]) : []);
     })();
-  }, [statusFilter, olderThan]);
+  }, [statusFilter, olderThan, j]);
 
   // ---------- Quick actions (optimistic + rollback) ----------
+  // Note: we call the API origin directly for writes.
   async function onApprove(row: QueueRow) {
     try {
       setBusy(`approve-${row.id}`);
       setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'approved' } : x)));
-      await fetchJSON(`/proofs/${row.bidId}/${row.milestoneIndex}/approve`, { method: 'POST' });
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/proofs/${row.bidId}/${row.milestoneIndex}/approve`
+        : `/proofs/${row.bidId}/${row.milestoneIndex}/approve`;
+      await fetch(url, { method: 'POST', credentials: 'include' });
       await refreshAll();
     } catch (e: any) {
       alert(`Approve failed: ${e?.message || e}`);
@@ -146,8 +195,12 @@ export default function AdminOversightPage() {
     try {
       setBusy(`request-${row.id}`);
       setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x)));
-      await fetchJSON(`/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`, {
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`
+        : `/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`;
+      await fetch(url, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
@@ -165,10 +218,14 @@ export default function AdminOversightPage() {
       setBusy(`pay-${item.bidId}-${item.milestoneIndex}`);
       setPayouts((p) => ({
         ...p,
-        pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)),
+        pending: (p?.pending ?? []).filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)),
       }));
-      await fetchJSON(`/bids/${item.bidId}/pay-milestone`, {
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/bids/${item.bidId}/pay-milestone`
+        : `/bids/${item.bidId}/pay-milestone`;
+      await fetch(url, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ milestoneIndex: item.milestoneIndex }),
       });
@@ -184,8 +241,11 @@ export default function AdminOversightPage() {
   async function onArchiveVendor(wallet: string) {
     try {
       setBusy(`arch-${wallet}`);
-      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: true } : v)));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/archive`, { method: 'POST' });
+      setVendors((vs) => (vs ?? []).map((v) => (v.walletAddress === wallet ? { ...v, archived: true } : v)));
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}/archive`
+        : `/admin/vendors/${encodeURIComponent(wallet)}/archive`;
+      await fetch(url, { method: 'POST', credentials: 'include' });
     } catch (e: any) {
       alert(`Archive failed: ${e?.message || e}`);
       await refreshAll();
@@ -196,8 +256,11 @@ export default function AdminOversightPage() {
   async function onUnarchiveVendor(wallet: string) {
     try {
       setBusy(`unarch-${wallet}`);
-      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: false } : v)));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, { method: 'POST' });
+      setVendors((vs) => (vs ?? []).map((v) => (v.walletAddress === wallet ? { ...v, archived: false } : v)));
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`
+        : `/admin/vendors/${encodeURIComponent(wallet)}/unarchive`;
+      await fetch(url, { method: 'POST', credentials: 'include' });
     } catch (e: any) {
       alert(`Unarchive failed: ${e?.message || e}`);
       await refreshAll();
@@ -209,8 +272,11 @@ export default function AdminOversightPage() {
     if (!confirm('Delete vendor profile? Bids remain.')) return;
     try {
       setBusy(`del-${wallet}`);
-      setVendors((vs) => vs.filter((v) => v.walletAddress !== wallet));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}`, { method: 'DELETE' });
+      setVendors((vs) => (vs ?? []).filter((v) => v.walletAddress !== wallet));
+      const url = API_ORIGIN
+        ? `${API_ORIGIN}/admin/vendors/${encodeURIComponent(wallet)}`
+        : `/admin/vendors/${encodeURIComponent(wallet)}`;
+      await fetch(url, { method: 'DELETE', credentials: 'include' });
     } catch (e: any) {
       alert(`Delete failed: ${e?.message || e}`);
       await refreshAll();
@@ -245,6 +311,13 @@ export default function AdminOversightPage() {
           </div>
         </header>
 
+        {/* Error banner */}
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Oversight data load issue: {error}
+          </div>
+        )}
+
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <KPI title="Open proofs" value={summary?.openProofs ?? '—'} />
           <KPI title="Breaching SLA" value={summary?.breachingSLA ?? '—'} tone="danger" />
@@ -253,7 +326,7 @@ export default function AdminOversightPage() {
           <KPI title="P50 cycle (h)" value={summary?.cycleTimeHoursP50 ?? '—'} />
           <KPI
             title="Revision rate"
-            value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : '—'}
+            value={typeof summary?.revisionRate === 'number' ? `${Math.round((summary?.revisionRate ?? 0) * 100)}%` : '—'}
           />
         </section>
 
@@ -275,7 +348,7 @@ export default function AdminOversightPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {queue.map((q) => (
+                    {(queue ?? []).map((q) => (
                       <tr key={q.id} className="border-t hover:bg-gray-50">
                         <Td className="font-mono text-[13px]">{q.id}</Td>
                         <Td>{q.vendor}</Td>
@@ -338,10 +411,17 @@ export default function AdminOversightPage() {
                         </Td>
                       </tr>
                     ))}
-                    {!queue.length && (
+                    {!loading && !(queue ?? []).length && (
                       <tr>
                         <Td colSpan={8} className="py-8 text-center text-gray-500">
                           No items
+                        </Td>
+                      </tr>
+                    )}
+                    {loading && (
+                      <tr>
+                        <Td colSpan={8} className="py-8 text-center text-gray-400">
+                          Loading…
                         </Td>
                       </tr>
                     )}
@@ -368,14 +448,14 @@ export default function AdminOversightPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {vendors.map((v) => (
+                    {(vendors ?? []).map((v) => (
                       <tr key={v.walletAddress} className="border-t hover:bg-gray-50">
                         <Td className="font-medium">{v.vendorName || '—'}</Td>
                         <Td className="hidden md:table-cell font-mono text-[12px]">{v.walletAddress || '—'}</Td>
                         <Td className="text-right">{v.proofsTotal}</Td>
                         <Td className="text-right">{v.approved}</Td>
                         <Td className="text-right">{v.changesRequested}</Td>
-                        <Td className="text-right">{Math.round(v.approvalRate * 100)}%</Td>
+                        <Td className="text-right">{Math.round((v.approvalRate ?? 0) * 100)}%</Td>
                         <Td className="text-right hidden lg:table-cell">{v.bidsCount ?? '—'}</Td>
                         <Td className="text-right hidden lg:table-cell">
                           {v.totalAwardedUSD
@@ -385,7 +465,11 @@ export default function AdminOversightPage() {
                             : '—'}
                         </Td>
                         <Td className="hidden md:table-cell">
-                          {v.lastProofAt ? new Date(v.lastProofAt).toLocaleString() : v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
+                          {v.lastProofAt
+                            ? new Date(v.lastProofAt).toLocaleString()
+                            : v.lastBidAt
+                            ? new Date(v.lastBidAt).toLocaleString()
+                            : '—'}
                         </Td>
                         <Td>
                           <div className="flex gap-2">
@@ -417,10 +501,17 @@ export default function AdminOversightPage() {
                         </Td>
                       </tr>
                     ))}
-                    {!vendors.length && (
+                    {!loading && !(vendors ?? []).length && (
                       <tr>
                         <Td colSpan={10} className="py-8 text-center text-gray-500">
                           No vendor activity
+                        </Td>
+                      </tr>
+                    )}
+                    {loading && (
+                      <tr>
+                        <Td colSpan={10} className="py-8 text-center text-gray-400">
+                          Loading…
                         </Td>
                       </tr>
                     )}
@@ -433,7 +524,7 @@ export default function AdminOversightPage() {
           <section>
             <Card title="Alerts">
               <ul className="space-y-2">
-                {alerts.map((a) => (
+                {(alerts ?? []).map((a) => (
                   <li key={a.id} className="rounded-lg border bg-white p-3">
                     <div className="text-xs text-gray-500">{new Date(a.createdAt).toLocaleString()}</div>
                     <div className="font-medium">{a.title}</div>
@@ -443,7 +534,8 @@ export default function AdminOversightPage() {
                     </div>
                   </li>
                 ))}
-                {!alerts.length && <li className="py-8 text-center text-gray-500">No alerts</li>}
+                {!loading && !(alerts ?? []).length && <li className="py-8 text-center text-gray-500">No alerts</li>}
+                {loading && <li className="py-8 text-center text-gray-400">Loading…</li>}
               </ul>
             </Card>
 
@@ -452,7 +544,7 @@ export default function AdminOversightPage() {
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Pending</div>
                   <ul className="divide-y rounded-lg border">
-                    {payouts.pending.map((p) => (
+                    {(payouts?.pending ?? []).map((p) => (
                       <li key={`p-${p.bidId}-${p.milestoneIndex}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
                           <div className="font-medium">
@@ -472,15 +564,16 @@ export default function AdminOversightPage() {
                         </div>
                       </li>
                     ))}
-                    {!payouts.pending.length && <li className="p-4 text-center text-gray-500">No pending payouts</li>}
+                    {!loading && !(payouts?.pending ?? []).length && <li className="p-4 text-center text-gray-500">No pending payouts</li>}
+                    {loading && <li className="p-4 text-center text-gray-400">Loading…</li>}
                   </ul>
                 </div>
 
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Recent</div>
                   <ul className="divide-y rounded-lg border">
-                    {payouts.recent.map((p) => (
-                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash}`} className="flex items-center justify-between p-3 text-sm">
+                    {(payouts?.recent ?? []).map((p) => (
+                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || 'tx'}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
                           <div className="font-medium">
                             {p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}
@@ -493,7 +586,8 @@ export default function AdminOversightPage() {
                         </div>
                       </li>
                     ))}
-                    {!payouts.recent.length && <li className="p-4 text-center text-gray-500">No recent payouts</li>}
+                    {!loading && !(payouts?.recent ?? []).length && <li className="p-4 text-center text-gray-500">No recent payouts</li>}
+                    {loading && <li className="p-4 text-center text-gray-400">Loading…</li>}
                   </ul>
                 </div>
               </div>
@@ -504,7 +598,7 @@ export default function AdminOversightPage() {
         <section className="mt-6">
           <Card title="Recent activity">
             <ul className="divide-y rounded-xl border bg-white">
-              {audit.map((l) => (
+              {(audit ?? []).map((l) => (
                 <li key={l.id} className="p-3 text-sm">
                   <div className="text-xs text-gray-500">{new Date(l.createdAt).toLocaleString()}</div>
                   <div className="font-medium">{l.actorLabel || 'System'} • {l.action}</div>
@@ -514,7 +608,8 @@ export default function AdminOversightPage() {
                   {l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
                 </li>
               ))}
-              {!audit.length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
+              {!loading && !(audit ?? []).length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
+              {loading && <li className="p-6 text-center text-gray-400">Loading…</li>}
             </ul>
           </Card>
         </section>
