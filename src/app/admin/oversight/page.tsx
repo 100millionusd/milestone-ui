@@ -1,46 +1,8 @@
 'use client';
 import * as React from 'react';
+import { getBids, getProposals } from '@/lib/api'; // fallback aggregation
 
-/** ====== CONFIG ======
- * Read the public base from env at build-time, otherwise fall back
- * to your live Railway URL.
- */
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://milestone-api-production.up.railway.app';
-
-/** ====== TOKEN HELPERS (client only) ====== */
-function b64urlDecode(s: string) {
-  s = s.replace(/-/g, '+').replace(/_/g, '/');
-  while (s.length % 4) s += '=';
-  return typeof atob !== 'undefined' ? atob(s) : s;
-}
-function getToken(): string | null {
-  try {
-    const keys = ['lx_jwt', 'lx_token', 'token'];
-    for (const k of keys) {
-      const t = localStorage.getItem(k);
-      if (!t) continue;
-      try {
-        const payload = JSON.parse(b64urlDecode(t.split('.')[1] || ''));
-        if (payload?.exp && Date.now() > payload.exp * 1000) {
-          localStorage.removeItem(k);
-          continue;
-        }
-      } catch {}
-      return t;
-    }
-    const anyJwt = Object.values(localStorage).find(
-      (v) => typeof v === 'string' && v.split('.').length === 3 && (v as string).length > 40
-    );
-    return (anyJwt as string) || null;
-  } catch {
-    return null;
-  }
-}
-
-/** ====== TYPES ====== */
+// ---------- Types ----------
 interface Summary {
   openProofs: number;
   breachingSLA: number;
@@ -65,20 +27,21 @@ interface QueueRow {
 interface AlertItem {
   id: string;
   type: string;
-  title: string;
+  title?: string;
   detail?: string;
-  entityType: string;
-  entityId: string;
-  createdAt: string;
+  entityType?: string;
+  entityId?: string | number;
+  createdAt?: string;
 }
 interface AuditLog {
   id: string;
   actorLabel?: string | null;
-  action: string;
-  entityType: string;
-  entityId: string;
+  action?: string | null;
+  entityType?: string | null;
+  entityId?: string | number | null;
+  createdAt?: string | number | null;
+  timestamp?: string | number | null; // some APIs use timestamp
   meta?: any;
-  createdAt: string;
 }
 interface VendorPerf {
   walletAddress: string;
@@ -106,89 +69,123 @@ interface PayoutItem {
   createdAt: string;
 }
 
-/** ====== PAGE ====== */
+// ---------- Utils ----------
+const safeDate = (v: any) => {
+  if (v == null) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  const d = isNaN(n) ? new Date(String(v)) : new Date(n);
+  return isNaN(d.getTime()) ? null : d;
+};
+const fmt = (v: any) => {
+  const d = safeDate(v);
+  return d ? d.toLocaleString() : '—';
+};
+const nonEmpty = <T,>(a: T[] | undefined | null): T[] => (Array.isArray(a) ? a : []);
+
+// ---------- Page ----------
 export default function AdminOversightPage() {
   const [summary, setSummary] = React.useState<Summary | null>(null);
   const [queue, setQueue] = React.useState<QueueRow[]>([]);
   const [alerts, setAlerts] = React.useState<AlertItem[]>([]);
   const [audit, setAudit] = React.useState<AuditLog[]>([]);
   const [vendors, setVendors] = React.useState<VendorPerf[]>([]);
-  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({
-    pending: [],
-    recent: [],
-  });
-  const [statusFilter, setStatusFilter] =
-    React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
+  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({ pending: [], recent: [] });
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
   const [olderThan, setOlderThan] = React.useState<number>(0);
   const [busy, setBusy] = React.useState<string>('');
-  const [authError, setAuthError] = React.useState<string>('');
 
-  /** Plain client fetch → Railway, always with Bearer if present */
-  const fetchJSON = React.useCallback(
-    async (path: string, init?: RequestInit) => {
-      const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
-      const headers = new Headers(init?.headers || {});
-      if (!headers.has('authorization')) {
-        const tok = getToken();
-        if (tok) headers.set('authorization', `Bearer ${tok}`);
-      }
-      const resp = await fetch(url, {
-        ...init,
-        headers,
-        credentials: 'include',
-        cache: 'no-store',
-        mode: 'cors',
-      });
-      let data: any = null;
-      try {
-        data = await resp.json();
-      } catch {}
-      if (!resp.ok) {
-        const msg = (data && (data.error || data.message)) || `HTTP ${resp.status}`;
-        if (resp.status === 401) setAuthError('You are not authenticated as admin.');
+  const fetchJSON = (url: string, init?: RequestInit) =>
+    fetch(url, { credentials: 'include', cache: 'no-store', ...(init || {}) }).then(async (r) => {
+      const text = await r.text();
+      let data: any;
+      try { data = text ? JSON.parse(text) : (Array.isArray(text) ? text : {}); } catch { data = {}; }
+      if (!r.ok) {
+        const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
         throw new Error(msg);
       }
       return data;
-    },
-    []
-  );
+    });
 
-  /** Load all panels */
+  // Fallback: build vendor perf from bids if API returns empty
+  const buildVendorsFromBids = async (): Promise<VendorPerf[]> => {
+    try {
+      const [bids, proposals] = await Promise.all([getBids(), getProposals()]);
+      const titleById = new Map<number, string>();
+      for (const p of nonEmpty(proposals)) titleById.set(Number(p.proposalId), p.title || `Project #${p.proposalId}`);
+
+      const map = new Map<string, VendorPerf>();
+      for (const b of nonEmpty(bids)) {
+        const wallet = b.walletAddress || '';
+        const key = wallet || (b.vendorName || 'unknown');
+        const cur = map.get(key) || {
+          walletAddress: wallet,
+          vendorName: b.vendorName || '—',
+          proofsTotal: 0,
+          approved: 0,
+          changesRequested: 0,
+          approvalRate: 0,
+          bidsCount: 0,
+          totalAwardedUSD: 0,
+          lastBidAt: null,
+          lastProofAt: null,
+          email: null,
+          phone: null,
+          archived: false,
+        };
+        cur.bidsCount = (cur.bidsCount || 0) + 1;
+        if (b.status === 'approved' || b.status === 'completed') {
+          cur.totalAwardedUSD = (cur.totalAwardedUSD || 0) + (Number(b.priceUSD) || 0);
+        }
+        map.set(key, cur);
+      }
+      return [...map.values()];
+    } catch {
+      return [];
+    }
+  };
+
   const refreshAll = React.useCallback(async () => {
-    setAuthError('');
-    const qs = new URLSearchParams();
-    if (statusFilter !== 'all') qs.set('status', statusFilter);
-    if (olderThan) qs.set('olderThanHours', String(olderThan));
-
-    const [
-      s,
-      q,
-      a,
-      l,
-      v,
-      p,
-    ] = await Promise.all([
-      fetchJSON('/admin/oversight/summary'),
-      fetchJSON(`/admin/oversight/queue?${qs.toString()}`),
-      fetchJSON('/admin/oversight/alerts'),
-      fetchJSON('/admin/audit/recent?take=50'),
-      fetchJSON('/admin/oversight/vendors'),
-      fetchJSON('/admin/oversight/payouts'),
+    const [s, q, a, l, v, p] = await Promise.allSettled([
+      fetchJSON('/api/admin/oversight/summary'),
+      fetchJSON('/api/admin/oversight/queue'),
+      fetchJSON('/api/admin/oversight/alerts'),
+      fetchJSON('/api/audit?take=50'),
+      fetchJSON('/api/admin/oversight/vendors'),
+      fetchJSON('/api/admin/oversight/payouts'),
     ]);
 
-    setSummary(s || null);
-    setQueue(Array.isArray(q) ? q : []);
-    setAlerts(Array.isArray(a) ? a.map(normalizeAlert) : []);
-    setAudit(Array.isArray(l) ? l.map(normalizeAudit) : []);
-    setVendors(Array.isArray(v) ? v : []);
-    setPayouts(p && typeof p === 'object' ? p : { pending: [], recent: [] });
-  }, [fetchJSON, statusFilter, olderThan]);
+    if (s.status === 'fulfilled') setSummary(s.value as Summary);
+    if (q.status === 'fulfilled') setQueue(nonEmpty<QueueRow>(q.value));
+    if (a.status === 'fulfilled') setAlerts(nonEmpty<AlertItem>(a.value));
+    if (l.status === 'fulfilled') setAudit(nonEmpty<AuditLog>(l.value));
+    if (p.status === 'fulfilled') setPayouts({ pending: nonEmpty<PayoutItem>(p.value?.pending), recent: nonEmpty<PayoutItem>(p.value?.recent) });
+
+    if (v.status === 'fulfilled' && nonEmpty<VendorPerf>(v.value).length) {
+      setVendors(v.value);
+    } else {
+      // 🔁 fallback if oversight/vendors not implemented or empty
+      const fallback = await buildVendorsFromBids();
+      setVendors(fallback);
+    }
+  }, []);
+
+  React.useEffect(() => { refreshAll(); }, [refreshAll]);
 
   React.useEffect(() => {
-    refreshAll().catch((e) => console.error('Oversight load failed:', e));
-  }, [refreshAll]);
+    (async () => {
+      const qs = new URLSearchParams();
+      if (statusFilter !== 'all') qs.set('status', statusFilter);
+      if (olderThan) qs.set('olderThanHours', String(olderThan));
+      try {
+        const q = await fetchJSON(`/api/admin/oversight/queue?${qs.toString()}`);
+        setQueue(nonEmpty<QueueRow>(q));
+      } catch {
+        // leave queue as-is
+      }
+    })();
+  }, [statusFilter, olderThan]);
 
-  /** ---------- Actions (client → Railway) ---------- */
+  // ---------- Quick actions ----------
   async function onApprove(row: QueueRow) {
     try {
       setBusy(`approve-${row.id}`);
@@ -198,17 +195,13 @@ export default function AdminOversightPage() {
     } catch (e: any) {
       alert(`Approve failed: ${e?.message || e}`);
       await refreshAll();
-    } finally {
-      setBusy('');
-    }
+    } finally { setBusy(''); }
   }
   async function onRequestChanges(row: QueueRow) {
     const reason = prompt('Reason for change request?') || '';
     try {
       setBusy(`request-${row.id}`);
-      setQueue((q) =>
-        q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x))
-      );
+      setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x)));
       await fetchJSON(`/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -218,17 +211,12 @@ export default function AdminOversightPage() {
     } catch (e: any) {
       alert(`Request failed: ${e?.message || e}`);
       await refreshAll();
-    } finally {
-      setBusy('');
-    }
+    } finally { setBusy(''); }
   }
   async function onPay(item: PayoutItem) {
     try {
       setBusy(`pay-${item.bidId}-${item.milestoneIndex}`);
-      setPayouts((p) => ({
-        ...p,
-        pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)),
-      }));
+      setPayouts((p) => ({ ...p, pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)) }));
       await fetchJSON(`/bids/${item.bidId}/pay-milestone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -238,49 +226,10 @@ export default function AdminOversightPage() {
     } catch (e: any) {
       alert(`Pay failed: ${e?.message || e}`);
       await refreshAll();
-    } finally {
-      setBusy('');
-    }
-  }
-  async function onArchiveVendor(wallet: string) {
-    try {
-      setBusy(`arch-${wallet}`);
-      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: true } : v)));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/archive`, { method: 'POST' });
-    } catch (e: any) {
-      alert(`Archive failed: ${e?.message || e}`);
-      await refreshAll();
-    } finally {
-      setBusy('');
-    }
-  }
-  async function onUnarchiveVendor(wallet: string) {
-    try {
-      setBusy(`unarch-${wallet}`);
-      setVendors((vs) => vs.map((v) => (v.walletAddress === wallet ? { ...v, archived: false } : v)));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, { method: 'POST' });
-    } catch (e: any) {
-      alert(`Unarchive failed: ${e?.message || e}`);
-      await refreshAll();
-    } finally {
-      setBusy('');
-    }
-  }
-  async function onDeleteVendor(wallet: string) {
-    if (!confirm('Delete vendor profile? Bids remain.')) return;
-    try {
-      setBusy(`del-${wallet}`);
-      setVendors((vs) => vs.filter((v) => v.walletAddress !== wallet));
-      await fetchJSON(`/admin/vendors/${encodeURIComponent(wallet)}`, { method: 'DELETE' });
-    } catch (e: any) {
-      alert(`Delete failed: ${e?.message || e}`);
-      await refreshAll();
-    } finally {
-      setBusy('');
-    }
+    } finally { setBusy(''); }
   }
 
-  /** ---------- UI ---------- */
+  // ---------- UI ----------
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white p-6">
       <div className="mx-auto max-w-7xl">
@@ -297,11 +246,7 @@ export default function AdminOversightPage() {
               <option value="changes_requested">Changes requested</option>
               <option value="approved">Approved</option>
             </select>
-            <select
-              className="rounded-md border px-2 py-1 text-sm"
-              value={olderThan}
-              onChange={(e) => setOlderThan(Number(e.target.value))}
-            >
+            <select className="rounded-md border px-2 py-1 text-sm" value={olderThan} onChange={(e) => setOlderThan(Number(e.target.value))}>
               <option value={0}>Any age</option>
               <option value={24}>&gt; 24h</option>
               <option value={48}>&gt; 48h</option>
@@ -309,13 +254,6 @@ export default function AdminOversightPage() {
             </select>
           </div>
         </header>
-
-        {authError && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {authError} — open DevTools ▶ Network and confirm the requests to <span className="font-mono">{API_BASE}</span> have an
-            <span className="font-mono"> Authorization: Bearer …</span> header.
-          </div>
-        )}
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <KPI title="Open proofs" value={summary?.openProofs ?? '—'} />
@@ -325,7 +263,7 @@ export default function AdminOversightPage() {
           <KPI title="P50 cycle (h)" value={summary?.cycleTimeHoursP50 ?? '—'} />
           <KPI
             title="Revision rate"
-            value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : '—'}
+            value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : (summary ? '0%' : '—')}
           />
         </section>
 
@@ -347,16 +285,14 @@ export default function AdminOversightPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {queue.map((q) => (
+                    {nonEmpty(queue).length ? nonEmpty(queue).map((q) => (
                       <tr key={q.id} className="border-t hover:bg-gray-50">
                         <Td className="font-mono text-[13px]">{q.id}</Td>
-                        <Td>{q.vendor}</Td>
-                        <Td>
-                          {q.project} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}
-                        </Td>
-                        <Td>{q.ageHours}h</Td>
+                        <Td>{q.vendor || '—'}</Td>
+                        <Td>{q.project || '—'} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}</Td>
+                        <Td>{Math.max(0, Math.round(q.ageHours))}h</Td>
                         <Td className={q.slaDueInHours < 0 ? 'text-red-600' : 'text-gray-600'}>
-                          {q.slaDueInHours < 0 ? `${-q.slaDueInHours}h over` : `${q.slaDueInHours}h left`}
+                          {q.slaDueInHours < 0 ? `${-Math.round(q.slaDueInHours)}h over` : `${Math.round(q.slaDueInHours)}h left`}
                         </Td>
                         <Td>
                           <span
@@ -409,13 +345,8 @@ export default function AdminOversightPage() {
                           </div>
                         </Td>
                       </tr>
-                    ))}
-                    {!queue.length && (
-                      <tr>
-                        <Td colSpan={8} className="py-8 text-center text-gray-500">
-                          No items
-                        </Td>
-                      </tr>
+                    )) : (
+                      <tr><Td colSpan={8} className="py-8 text-center text-gray-500">No items</Td></tr>
                     )}
                   </tbody>
                 </table>
@@ -440,67 +371,31 @@ export default function AdminOversightPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {vendors.map((v) => (
-                      <tr key={v.walletAddress} className="border-t hover:bg-gray-50">
+                    {nonEmpty(vendors).length ? nonEmpty(vendors).map((v) => (
+                      <tr key={v.walletAddress || v.vendorName} className="border-t hover:bg-gray-50">
                         <Td className="font-medium">{v.vendorName || '—'}</Td>
                         <Td className="hidden md:table-cell font-mono text-[12px]">{v.walletAddress || '—'}</Td>
-                        <Td className="text-right">{v.proofsTotal}</Td>
-                        <Td className="text-right">{v.approved}</Td>
-                        <Td className="text-right">{v.changesRequested}</Td>
-                        <Td className="text-right">{Math.round((v.approvalRate || 0) * 100)}%</Td>
+                        <Td className="text-right">{v.proofsTotal ?? 0}</Td>
+                        <Td className="text-right">{v.approved ?? 0}</Td>
+                        <Td className="text-right">{v.changesRequested ?? 0}</Td>
+                        <Td className="text-right">{Math.round((v.approvalRate ?? 0) * 100)}%</Td>
                         <Td className="text-right hidden lg:table-cell">{v.bidsCount ?? '—'}</Td>
                         <Td className="text-right hidden lg:table-cell">
-                          {v.totalAwardedUSD
-                            ? Intl.NumberFormat(undefined, {
-                                style: 'currency',
-                                currency: 'USD',
-                                maximumFractionDigits: 0,
-                              }).format(v.totalAwardedUSD)
+                          {v.totalAwardedUSD != null
+                            ? Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(
+                                Number(v.totalAwardedUSD || 0)
+                              )
                             : '—'}
                         </Td>
                         <Td className="hidden md:table-cell">
-                          {v.lastProofAt
-                            ? new Date(v.lastProofAt).toLocaleString()
-                            : v.lastBidAt
-                            ? new Date(v.lastBidAt).toLocaleString()
-                            : '—'}
+                          {v.lastProofAt ? fmt(v.lastProofAt) : v.lastBidAt ? fmt(v.lastBidAt) : '—'}
                         </Td>
                         <Td>
-                          <div className="flex gap-2">
-                            {!v.archived ? (
-                              <button
-                                disabled={busy === `arch-${v.walletAddress}`}
-                                onClick={() => onArchiveVendor(v.walletAddress)}
-                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
-                              >
-                                Archive
-                              </button>
-                            ) : (
-                              <button
-                                disabled={busy === `unarch-${v.walletAddress}`}
-                                onClick={() => onUnarchiveVendor(v.walletAddress)}
-                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
-                              >
-                                Unarchive
-                              </button>
-                            )}
-                            <button
-                              disabled={busy === `del-${v.walletAddress}`}
-                              onClick={() => onDeleteVendor(v.walletAddress)}
-                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                          <div className="flex gap-2 opacity-60"><span className="text-xs">—</span></div>
                         </Td>
                       </tr>
-                    ))}
-                    {!vendors.length && (
-                      <tr>
-                        <Td colSpan={10} className="py-8 text-center text-gray-500">
-                          No vendor activity
-                        </Td>
-                      </tr>
+                    )) : (
+                      <tr><Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td></tr>
                     )}
                   </tbody>
                 </table>
@@ -511,17 +406,18 @@ export default function AdminOversightPage() {
           <section>
             <Card title="Alerts">
               <ul className="space-y-2">
-                {alerts.map((a) => (
+                {nonEmpty(alerts).length ? nonEmpty(alerts).map((a) => (
                   <li key={a.id} className="rounded-lg border bg-white p-3">
-                    <div className="text-xs text-gray-500">{a.createdAt ? new Date(a.createdAt).toLocaleString() : '—'}</div>
-                    <div className="font-medium">{a.title || a.type}</div>
-                    {a.detail && <div className="text-xs text-gray-600">{a.detail}</div>}
-                    <div className="mt-1 text-xs text-gray-500">
-                      {a.entityType} #{a.entityId}
-                    </div>
+                    <div className="text-xs text-gray-500">{fmt(a.createdAt)}</div>
+                    <div className="font-medium">{a.title || a.type || '—'}</div>
+                    <div className="text-xs text-gray-600">{a.detail}</div>
+                    {(a.entityType || a.entityId) && (
+                      <div className="mt-1 text-xs text-gray-500">
+                        {a.entityType || 'entity'} #{String(a.entityId ?? '')}
+                      </div>
+                    )}
                   </li>
-                ))}
-                {!alerts.length && <li className="py-8 text-center text-gray-500">No alerts</li>}
+                )) : <li className="py-8 text-center text-gray-500">No alerts</li>}
               </ul>
             </Card>
 
@@ -530,18 +426,14 @@ export default function AdminOversightPage() {
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Pending</div>
                   <ul className="divide-y rounded-lg border">
-                    {payouts.pending.map((p) => (
+                    {nonEmpty(payouts.pending).length ? payouts.pending.map((p) => (
                       <li key={`p-${p.bidId}-${p.milestoneIndex}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}
-                          </div>
-                          <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
+                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}</div>
+                          <div className="text-xs text-gray-500">{fmt(p.createdAt)}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">
-                            {p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}
-                          </div>
+                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}</div>
                           <button
                             disabled={busy === `pay-${p.bidId}-${p.milestoneIndex}`}
                             onClick={() => onPay(p)}
@@ -551,34 +443,25 @@ export default function AdminOversightPage() {
                           </button>
                         </div>
                       </li>
-                    ))}
-                    {!payouts.pending.length && <li className="p-4 text-center text-gray-500">No pending payouts</li>}
+                    )) : <li className="p-4 text-center text-gray-500">No pending payouts</li>}
                   </ul>
                 </div>
 
                 <div>
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Recent</div>
                   <ul className="divide-y rounded-lg border">
-                    {payouts.recent.map((p) => (
-                      <li
-                        key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || 'na'}`}
-                        className="flex items-center justify-between p-3 text-sm"
-                      >
+                    {nonEmpty(payouts.recent).length ? payouts.recent.map((p) => (
+                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || Math.random()}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}
-                          </div>
-                          <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
+                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}</div>
+                          <div className="text-xs text-gray-500">{fmt(p.createdAt)}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">
-                            {p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}
-                          </div>
+                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}</div>
                           <div className="text-xs text-gray-500 truncate max-w-[160px]">{p.txHash || ''}</div>
                         </div>
                       </li>
-                    ))}
-                    {!payouts.recent.length && <li className="p-4 text-center text-gray-500">No recent payouts</li>}
+                    )) : <li className="p-4 text-center text-gray-500">No recent payouts</li>}
                   </ul>
                 </div>
               </div>
@@ -589,23 +472,21 @@ export default function AdminOversightPage() {
         <section className="mt-6">
           <Card title="Recent activity">
             <ul className="divide-y rounded-xl border bg-white">
-              {audit.map((l) => (
-                <li key={l.id} className="p-3 text-sm">
-                  <div className="text-xs text-gray-500">
-                    {l.createdAt ? new Date(l.createdAt).toLocaleString() : '—'}
-                  </div>
-                  <div className="font-medium">{l.actorLabel || 'System'} • {l.action || '—'}</div>
-                  <div className="text-xs text-gray-600">
-                    {l.entityType} #{l.entityId}
-                  </div>
-                  {l.meta && (
-                    <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">
-                      {JSON.stringify(l.meta, null, 2)}
-                    </pre>
-                  )}
-                </li>
-              ))}
-              {!audit.length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
+              {nonEmpty(audit).length ? nonEmpty(audit).map((l) => {
+                const when = l.timestamp ?? l.createdAt;
+                return (
+                  <li key={String(l.id)} className="p-3 text-sm">
+                    <div className="text-xs text-gray-500">{fmt(when)}</div>
+                    <div className="font-medium">{l.actorLabel || 'System'} • {l.action || '—'}</div>
+                    {(l.entityType || l.entityId) && (
+                      <div className="text-xs text-gray-600">
+                        {l.entityType || 'entity'} #{String(l.entityId ?? '')}
+                      </div>
+                    )}
+                    {l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
+                  </li>
+                );
+              }) : <li className="p-6 text-center text-gray-500">No recent activity</li>}
             </ul>
           </Card>
         </section>
@@ -614,7 +495,7 @@ export default function AdminOversightPage() {
   );
 }
 
-/** ====== SMALL UI HELPERS ====== */
+// ---------- Small UI helpers ----------
 function KPI({ title, value, tone }: { title: string; value: React.ReactNode; tone?: 'danger' | 'ok' }) {
   const toneCls = tone === 'danger' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white';
   return (
@@ -638,37 +519,5 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
   return <th className={`px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-600 ${className || ''}`}>{children}</th>;
 }
 function Td({ children, className, colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
-  return (
-    <td colSpan={colSpan} className={`px-3 py-2 ${className || ''}`}>
-      {children}
-    </td>
-  );
-}
-
-/** ====== NORMALIZERS (defensive) ====== */
-function normalizeAlert(a: any): AlertItem {
-  const type = a.type ?? a.key ?? a.code ?? 'alert';
-  const title =
-    a.title ??
-    (typeof type === 'string' ? type.replace(/_/g, ' ') : 'Alert');
-  return {
-    id: String(a.id ?? a.alert_id ?? a.uuid ?? `${type}-${a.createdAt || ''}`),
-    type,
-    title,
-    detail: a.detail ?? a.message ?? (a.cid ? `CID ${a.cid}` : ''),
-    entityType: a.entityType ?? a.entity_type ?? a.scope ?? '',
-    entityId: String(a.entityId ?? a.entity_id ?? a.target_id ?? ''),
-    createdAt: a.createdAt ?? a.created_at ?? a.time ?? '',
-  };
-}
-function normalizeAudit(e: any): AuditLog {
-  return {
-    id: String(e.id ?? e.event_id ?? e.uuid ?? Math.random().toString(36).slice(2)),
-    actorLabel: e.actorLabel ?? e.actor_label ?? e.actor ?? 'System',
-    action: e.action ?? e.event ?? e.type ?? '—',
-    entityType: e.entityType ?? e.entity_type ?? e.entity ?? '',
-    entityId: String(e.entityId ?? e.entity_id ?? e.target_id ?? e.subject_id ?? ''),
-    meta: e.meta ?? e.payload ?? e.details ?? null,
-    createdAt: e.createdAt ?? e.created_at ?? e.timestamp ?? e.time ?? '',
-  };
+  return <td colSpan={colSpan} className={`px-3 py-2 ${className || ''}`}>{children}</td>;
 }
