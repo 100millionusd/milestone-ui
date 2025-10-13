@@ -4,45 +4,61 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Helper to hit sibling API routes on the same origin and forward auth/cookies
-async function pass(req: NextRequest, path: string) {
-  const proto = (req.headers.get("x-forwarded-proto") || "https").split(",")[0].trim();
-  const host = (req.headers.get("x-forwarded-host") || req.headers.get("host") || "").split(",")[0].trim();
-  const base = `${proto}://${host}`;
-  const r = await fetch(`${base}${path}`, {
+const API = (
+  process.env.API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  ""
+).replace(/\/$/, "");
+
+async function go(path: string, auth: string) {
+  if (!API) throw new Error("API_BASE (or NEXT_PUBLIC_API_BASE[_URL]) is not set");
+  const r = await fetch(`${API}${path}`, {
     headers: {
-      cookie: req.headers.get("cookie") || "",
-      authorization: req.headers.get("authorization") || "",
+      authorization: auth || "",
     },
     credentials: "include",
     cache: "no-store",
   });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => "");
-    throw new Error(`${path} -> ${r.status} ${msg || r.statusText}`);
-  }
-  return r.json();
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${path} -> ${r.status} ${data?.error || r.statusText}`);
+  return data;
 }
 
 export async function GET(req: NextRequest) {
+  const auth = req.headers.get("authorization") || "";
+
   try {
-    const [summary, queue, alerts, audit, vendors, payouts] = await Promise.all([
-      pass(req, "/api/admin/oversight/summary"),
-      pass(req, "/api/admin/oversight/queue"),
-      pass(req, "/api/admin/oversight/alerts"),
-      pass(req, "/api/audit?take=50"),
-      pass(req, "/api/admin/oversight/vendors"),
-      pass(req, "/api/admin/oversight/payouts"),
+    const results = await Promise.allSettled([
+      go("/admin/oversight/summary", auth),
+      go("/admin/oversight/queue", auth),
+      go("/admin/oversight/alerts", auth),
+      go("/admin/audit/recent?take=50", auth),
+      go("/admin/oversight/vendors", auth),
+      go("/admin/oversight/payouts", auth),
     ]);
 
-    return NextResponse.json({
-      summary,
-      queue,
-      alerts,
-      audit,
-      vendors,
-      payouts,
-    });
+    const [summary, queue, alerts, audit, vendors, payouts] = results.map((r) =>
+      r.status === "fulfilled" ? r.value : null
+    );
+
+    // Return partial data instead of 500 if one subcall fails
+    const errors = results
+      .map((r, i) => (r.status === "rejected" ? { part: i, error: String(r.reason) } : null))
+      .filter(Boolean);
+
+    return NextResponse.json(
+      {
+        summary,
+        queue: queue ?? [],
+        alerts: alerts ?? [],
+        audit: audit ?? [],
+        vendors: vendors ?? [],
+        payouts: payouts ?? { pending: [], recent: [] },
+        _errors: errors,
+      },
+      { status: 200 }
+    );
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Oversight aggregation failed" }, { status: 500 });
   }

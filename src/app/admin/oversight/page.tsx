@@ -1,6 +1,7 @@
 'use client';
 import * as React from 'react';
 
+// ---------- Types ----------
 type ProofStatus = 'pending' | 'changes_requested' | 'approved' | 'archived' | 'rejected';
 
 interface Summary {
@@ -11,7 +12,6 @@ interface Summary {
   cycleTimeHoursP50: number;
   revisionRate?: number;
 }
-
 interface QueueRow {
   id: string;
   bidId: number;
@@ -24,7 +24,6 @@ interface QueueRow {
   slaDueInHours: number;
   risk?: 'low' | 'medium' | 'high';
 }
-
 interface AlertItem {
   id: string;
   type?: string;
@@ -34,7 +33,6 @@ interface AlertItem {
   entityId?: string | number;
   createdAt?: string;
 }
-
 interface AuditLog {
   id: string | number;
   actorLabel?: string | null;
@@ -44,7 +42,6 @@ interface AuditLog {
   meta?: any;
   createdAt?: string;
 }
-
 interface VendorPerf {
   walletAddress: string;
   vendorName: string;
@@ -58,7 +55,6 @@ interface VendorPerf {
   lastBidAt?: string | null;
   archived?: boolean;
 }
-
 interface PayoutItem {
   bidId: number;
   milestoneIndex: number;
@@ -70,6 +66,37 @@ interface PayoutItem {
   createdAt: string;
 }
 
+// --- read token from localStorage and attach to /api/admin/oversight call
+function b64urlDecode(s: string) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return atob(s);
+}
+function getToken(): string | null {
+  try {
+    const keys = ['lx_jwt', 'lx_token', 'token'];
+    for (const k of keys) {
+      const t = localStorage.getItem(k);
+      if (!t) continue;
+      try {
+        const payload = JSON.parse(b64urlDecode(t.split('.')[1] || ''));
+        if (payload?.exp && Date.now() > payload.exp * 1000) {
+          localStorage.removeItem(k);
+          continue;
+        }
+      } catch {}
+      return t;
+    }
+    const anyJwt = Object.values(localStorage).find(
+      (v) => typeof v === 'string' && v.split('.').length === 3 && (v as string).length > 40
+    );
+    return (anyJwt as string) || null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- Page ----------
 export default function AdminOversightPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -85,11 +112,18 @@ export default function AdminOversightPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch('/api/admin/oversight', { credentials: 'include', cache: 'no-store' });
+      const headers: HeadersInit = {};
+      const tok = getToken();
+      if (tok) headers['authorization'] = `Bearer ${tok}`;
+
+      const r = await fetch('/api/admin/oversight', {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
 
-      // Harden against missing keys
       setSummary(data.summary ?? null);
       setQueue(Array.isArray(data.queue) ? data.queue : []);
       setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
@@ -150,20 +184,14 @@ export default function AdminOversightPage() {
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Queue */}
           <section className="lg:col-span-2">
             <Card title="Queue health">
               <div className="overflow-hidden rounded-xl border">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <Th>ID</Th>
-                      <Th>Vendor</Th>
-                      <Th>Project / Milestone</Th>
-                      <Th>Age</Th>
-                      <Th>SLA</Th>
-                      <Th>Status</Th>
-                      <Th>Risk</Th>
+                      <Th>ID</Th><Th>Vendor</Th><Th>Project / Milestone</Th>
+                      <Th>Age</Th><Th>SLA</Th><Th>Status</Th><Th>Risk</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -183,16 +211,13 @@ export default function AdminOversightPage() {
                       </tr>
                     ))}
                     {!queue?.length && (
-                      <tr>
-                        <Td colSpan={7} className="py-8 text-center text-gray-500">No items</Td>
-                      </tr>
+                      <tr><Td colSpan={7} className="py-8 text-center text-gray-500">No items</Td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
             </Card>
 
-            {/* Vendors */}
             <Card title="Vendor performance">
               <div className="overflow-hidden rounded-xl border">
                 <table className="w-full text-sm">
@@ -219,22 +244,15 @@ export default function AdminOversightPage() {
                         <Td className="text-right">{v.changesRequested}</Td>
                         <Td className="text-right">{Math.round((v.approvalRate || 0) * 100)}%</Td>
                         <Td className="text-right hidden lg:table-cell">{v.bidsCount ?? '—'}</Td>
-                        <Td className="text-right hidden lg:table-cell">
-                          {v.totalAwardedUSD != null ? usd(v.totalAwardedUSD) : '—'}
-                        </Td>
+                        <Td className="text-right hidden lg:table-cell">{v.totalAwardedUSD != null ? usd(v.totalAwardedUSD) : '—'}</Td>
                         <Td className="hidden md:table-cell">
-                          {v.lastProofAt
-                            ? new Date(v.lastProofAt).toLocaleString()
-                            : v.lastBidAt
-                            ? new Date(v.lastBidAt).toLocaleString()
-                            : '—'}
+                          {v.lastProofAt ? new Date(v.lastProofAt).toLocaleString()
+                           : v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
                         </Td>
                       </tr>
                     ))}
                     {!vendors?.length && (
-                      <tr>
-                        <Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td>
-                      </tr>
+                      <tr><Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td></tr>
                     )}
                   </tbody>
                 </table>
@@ -242,7 +260,6 @@ export default function AdminOversightPage() {
             </Card>
           </section>
 
-          {/* Alerts + Payouts */}
           <section>
             <Card title="Alerts">
               <ul className="space-y-2">
@@ -272,9 +289,7 @@ export default function AdminOversightPage() {
                     {(payouts.pending || []).map((p) => (
                       <li key={`p-${p.bidId}-${p.milestoneIndex}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
-                          </div>
+                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}</div>
                           <div className="text-xs text-gray-500">{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</div>
                         </div>
                         <div className="text-right">
@@ -294,9 +309,7 @@ export default function AdminOversightPage() {
                     {(payouts.recent || []).map((p) => (
                       <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || Math.random()}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
-                          <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
-                          </div>
+                          <div className="font-medium">{p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}</div>
                           <div className="text-xs text-gray-500">{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</div>
                         </div>
                         <div className="text-right">
@@ -315,7 +328,6 @@ export default function AdminOversightPage() {
           </section>
         </div>
 
-        {/* Audit */}
         <section className="mt-6">
           <Card title="Recent activity">
             <ul className="divide-y rounded-xl border bg-white">
@@ -324,17 +336,11 @@ export default function AdminOversightPage() {
                   <div className="text-xs text-gray-500">
                     {l.createdAt ? new Date(l.createdAt).toLocaleString() : '—'}
                   </div>
-                  <div className="font-medium">
-                    {l.actorLabel || 'System'} • {l.action || '—'}
-                  </div>
+                  <div className="font-medium">{l.actorLabel || 'System'} • {l.action || '—'}</div>
                   <div className="text-xs text-gray-600">
                     {(l.entityType || 'entity')} #{l.entityId ?? '—'}
                   </div>
-                  {l.meta && (
-                    <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">
-                      {JSON.stringify(l.meta, null, 2)}
-                    </pre>
-                  )}
+                  {l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
                 </li>
               ))}
               {!audit?.length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
@@ -346,7 +352,7 @@ export default function AdminOversightPage() {
   );
 }
 
-/* ---------- tiny UI helpers ---------- */
+// ---------- Small UI helpers ----------
 function fmt(v: any) {
   return (v == null || Number.isNaN(v)) ? '—' : String(v);
 }
