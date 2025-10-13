@@ -1,9 +1,46 @@
 'use client';
 import * as React from 'react';
 
-/* ========================
-   Types (UI-side, tolerant)
-======================== */
+/** ====== CONFIG ======
+ * Read the public base from env at build-time, otherwise fall back
+ * to your live Railway URL.
+ */
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  'https://milestone-api-production.up.railway.app';
+
+/** ====== TOKEN HELPERS (client only) ====== */
+function b64urlDecode(s: string) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return typeof atob !== 'undefined' ? atob(s) : s;
+}
+function getToken(): string | null {
+  try {
+    const keys = ['lx_jwt', 'lx_token', 'token'];
+    for (const k of keys) {
+      const t = localStorage.getItem(k);
+      if (!t) continue;
+      try {
+        const payload = JSON.parse(b64urlDecode(t.split('.')[1] || ''));
+        if (payload?.exp && Date.now() > payload.exp * 1000) {
+          localStorage.removeItem(k);
+          continue;
+        }
+      } catch {}
+      return t;
+    }
+    const anyJwt = Object.values(localStorage).find(
+      (v) => typeof v === 'string' && v.split('.').length === 3 && (v as string).length > 40
+    );
+    return (anyJwt as string) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** ====== TYPES ====== */
 interface Summary {
   openProofs: number;
   breachingSLA: number;
@@ -69,179 +106,89 @@ interface PayoutItem {
   createdAt: string;
 }
 
-/* ========================
-   Small helpers
-======================== */
-const asArray = (x: any): any[] =>
-  Array.isArray(x) ? x :
-  Array.isArray(x?.data) ? x.data :
-  Array.isArray(x?.items) ? x.items :
-  Array.isArray(x?.rows) ? x.rows :
-  Array.isArray(x?.result) ? x.result : [];
-
-const normTs = (ts: any): string => {
-  if (!ts && ts !== 0) return new Date().toISOString();
-  const n = typeof ts === 'number' ? ts : (/^\d+$/.test(String(ts)) ? Number(ts) : NaN);
-  const d = Number.isFinite(n) ? new Date(n) : new Date(ts);
-  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-};
-
-const pick = <T extends Record<string, any>>(o: any, keys: string[], fallback?: any): T[keyof T] =>
-  keys.find((k) => o && o[k] != null) ? o[keys.find((k) => o[k] != null)!] : fallback;
-
-/* ---------- Normalizers (accept multiple shapes) ---------- */
-const normalizeSummary = (raw: any): Summary => {
-  const s = raw?.summary ?? raw ?? {};
-  return {
-    openProofs: Number(pick(s, ['openProofs', 'open_proofs', 'open'], 0)) || 0,
-    breachingSLA: Number(pick(s, ['breachingSLA', 'breaching_sla', 'sla_breach'], 0)) || 0,
-    pendingPayouts: Number(pick(s, ['pendingPayouts', 'pending_payouts'], 0)) || 0,
-    escrowsLocked: Number(pick(s, ['escrowsLocked', 'escrows_locked'], 0)) || 0,
-    cycleTimeHoursP50: Number(pick(s, ['cycleTimeHoursP50', 'p50_cycle_hours', 'cycle_p50_h'], 0)) || 0,
-    revisionRate: Number(pick(s, ['revisionRate', 'revision_rate'], 0)) || 0,
-  };
-};
-
-const normalizeQueue = (raw: any): QueueRow[] =>
-  asArray(raw).map((r: any): QueueRow => ({
-    id: String(pick(r, ['id', 'proofId', 'proof_id', 'row_id'], 'row')),
-    bidId: Number(pick(r, ['bidId', 'bid_id'], 0)) || 0,
-    milestoneIndex: Number(pick(r, ['milestoneIndex', 'milestone_index', 'mIndex'], 0)) || 0,
-    vendor: String(pick(r, ['vendor', 'vendorName', 'vendor_name', 'vendor_label'], '—')),
-    project: String(pick(r, ['project', 'projectTitle', 'proposalTitle', 'proposal_title'], '—')),
-    status: (pick(r, ['status', 'state'], 'pending') as ProofStatus),
-    submittedAt: normTs(pick(r, ['submittedAt', 'submitted_at', 'createdAt', 'created_at', 'ts'], Date.now())),
-    ageHours: Math.round(Number(pick(r, ['ageHours', 'age_hours'], 0)) || 0),
-    slaDueInHours: Math.round(Number(pick(r, ['slaDueInHours', 'sla_due_in_hours', 'sla_delta_h'], 0)) || 0),
-    risk: pick(r, ['risk', 'riskLevel', 'risk_level'], undefined),
-  }));
-
-const normalizeAlerts = (raw: any): AlertItem[] =>
-  asArray(raw).map((a: any): AlertItem => ({
-    id: String(pick(a, ['id', 'alertId', 'alert_id'], `${a?.type || 'alert'}-${a?.createdAt || a?.created_at || Date.now()}`)),
-    type: String(pick(a, ['type', 'alertType', 'category'], 'info')),
-    title: String(pick(a, ['title', 'message', 'summary', 'reason', 'type'], '—')),
-    detail: pick(a, ['detail', 'description', 'note', 'notes'], undefined),
-    entityType: String(pick(a, ['entityType', 'targetType', 'entity', 'object_type'], '')),
-    entityId: String(pick(a, ['entityId', 'targetId', 'object_id'], '')),
-    createdAt: normTs(pick(a, ['createdAt', 'created_at', 'ts', 'timestamp'], Date.now())),
-  }));
-
-const normalizeAudit = (raw: any): AuditLog[] =>
-  asArray(raw).map((l: any): AuditLog => ({
-    id: String(pick(l, ['id', 'audit_id', 'event_id'], `${l?.entityType || l?.object_type || 'evt'}-${l?.createdAt || l?.created_at || Date.now()}`)),
-    actorLabel: pick(l, ['actorLabel', 'actor', 'actor_name', 'user', 'by', 'performedBy'], null),
-    action: String(pick(l, ['action', 'event', 'action_type', 'type', 'metaAction', 'meta?.action'], '—')),
-    entityType: String(pick(l, ['entityType', 'object_type', 'entity', 'targetType'], '')),
-    entityId: String(pick(l, ['entityId', 'object_id', 'targetId'], '')),
-    meta: pick(l, ['meta', 'details', 'extra'], undefined),
-    createdAt: normTs(pick(l, ['createdAt', 'created_at', 'timestamp', 'ts'], Date.now())),
-  }));
-
-const normalizeVendors = (raw: any): VendorPerf[] =>
-  asArray(raw).map((v: any): VendorPerf => {
-    const proofsTotal = Number(pick(v, ['proofsTotal', 'proofs_total', 'proofs'], 0)) || 0;
-    const approved = Number(pick(v, ['approved', 'proofs_approved'], 0)) || 0;
-    const cr = Number(pick(v, ['changesRequested', 'changes_requested', 'cr'], 0)) || 0;
-    return {
-      walletAddress: String(pick(v, ['walletAddress', 'wallet_address', 'wallet'], '')),
-      vendorName: String(pick(v, ['vendorName', 'name', 'label'], '—')),
-      proofsTotal,
-      approved,
-      changesRequested: cr,
-      approvalRate: proofsTotal ? approved / proofsTotal : 0,
-      bidsCount: Number(pick(v, ['bidsCount', 'bids_count'], 0)) || 0,
-      totalAwardedUSD: Number(pick(v, ['totalAwardedUSD', 'awarded_usd'], 0)) || 0,
-      lastProofAt: pick(v, ['lastProofAt', 'last_proof_at'], null) ? normTs(pick(v, ['lastProofAt', 'last_proof_at'], null)) : null,
-      lastBidAt: pick(v, ['lastBidAt', 'last_bid_at'], null) ? normTs(pick(v, ['lastBidAt', 'last_bid_at'], null)) : null,
-      email: pick(v, ['email'], null),
-      phone: pick(v, ['phone'], null),
-      archived: Boolean(pick(v, ['archived', 'is_archived'], false)),
-    };
-  });
-
-const normalizePayouts = (raw: any): { pending: PayoutItem[]; recent: PayoutItem[] } => {
-  const pending = asArray(raw?.pending ?? raw?.awaiting ?? raw?.toPay ?? raw).map((p: any): PayoutItem => ({
-    bidId: Number(pick(p, ['bidId', 'bid_id'], 0)) || 0,
-    milestoneIndex: Number(pick(p, ['milestoneIndex', 'milestone_index'], 0)) || 0,
-    vendorName: String(pick(p, ['vendorName', 'vendor_name'], '—')),
-    walletAddress: String(pick(p, ['walletAddress', 'wallet_address'], '')),
-    currency: pick(p, ['currency', 'token'], 'USDC'),
-    amount: Number(pick(p, ['amount', 'value'], 0)) || undefined,
-    txHash: null,
-    createdAt: normTs(pick(p, ['createdAt', 'created_at', 'ts'], Date.now())),
-  }));
-
-  const recent = asArray(raw?.recent ?? raw?.paid ?? []).map((p: any): PayoutItem => ({
-    bidId: Number(pick(p, ['bidId', 'bid_id'], 0)) || 0,
-    milestoneIndex: Number(pick(p, ['milestoneIndex', 'milestone_index'], 0)) || 0,
-    vendorName: String(pick(p, ['vendorName', 'vendor_name'], '—')),
-    walletAddress: String(pick(p, ['walletAddress', 'wallet_address'], '')),
-    currency: pick(p, ['currency', 'token'], 'USDC'),
-    amount: Number(pick(p, ['amount', 'value'], 0)) || undefined,
-    txHash: String(pick(p, ['txHash', 'tx_hash', 'hash'], '')) || null,
-    createdAt: normTs(pick(p, ['createdAt', 'created_at', 'paid_at', 'ts'], Date.now())),
-  }));
-
-  return { pending, recent };
-};
-
-/* ========================
-   Page
-======================== */
+/** ====== PAGE ====== */
 export default function AdminOversightPage() {
   const [summary, setSummary] = React.useState<Summary | null>(null);
   const [queue, setQueue] = React.useState<QueueRow[]>([]);
   const [alerts, setAlerts] = React.useState<AlertItem[]>([]);
   const [audit, setAudit] = React.useState<AuditLog[]>([]);
   const [vendors, setVendors] = React.useState<VendorPerf[]>([]);
-  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({ pending: [], recent: [] });
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
+  const [payouts, setPayouts] = React.useState<{ pending: PayoutItem[]; recent: PayoutItem[] }>({
+    pending: [],
+    recent: [],
+  });
+  const [statusFilter, setStatusFilter] =
+    React.useState<'all' | 'pending' | 'changes_requested' | 'approved'>('all');
   const [olderThan, setOlderThan] = React.useState<number>(0);
   const [busy, setBusy] = React.useState<string>('');
+  const [authError, setAuthError] = React.useState<string>('');
 
-  const fetchJSON = (url: string, init?: RequestInit) =>
-    fetch(url, { credentials: 'include', cache: 'no-store', ...(init || {}) }).then(async (r) => {
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
+  /** Plain client fetch → Railway, always with Bearer if present */
+  const fetchJSON = React.useCallback(
+    async (path: string, init?: RequestInit) => {
+      const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+      const headers = new Headers(init?.headers || {});
+      if (!headers.has('authorization')) {
+        const tok = getToken();
+        if (tok) headers.set('authorization', `Bearer ${tok}`);
+      }
+      const resp = await fetch(url, {
+        ...init,
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+        mode: 'cors',
+      });
+      let data: any = null;
+      try {
+        data = await resp.json();
+      } catch {}
+      if (!resp.ok) {
+        const msg = (data && (data.error || data.message)) || `HTTP ${resp.status}`;
+        if (resp.status === 401) setAuthError('You are not authenticated as admin.');
         throw new Error(msg);
       }
       return data;
-    });
+    },
+    []
+  );
 
+  /** Load all panels */
   const refreshAll = React.useCallback(async () => {
-    const [s, q, a, l, v, p] = await Promise.all([
-      fetchJSON('/api/admin/oversight/summary').catch(() => ({})),
-      fetchJSON('/api/admin/oversight/queue').catch(() => []),
-      fetchJSON('/api/admin/oversight/alerts').catch(() => []),
-      fetchJSON('/api/audit?take=50').catch(() => []),
-      fetchJSON('/api/admin/oversight/vendors').catch(() => []),
-      fetchJSON('/api/admin/oversight/payouts').catch(() => ({ pending: [], recent: [] })),
+    setAuthError('');
+    const qs = new URLSearchParams();
+    if (statusFilter !== 'all') qs.set('status', statusFilter);
+    if (olderThan) qs.set('olderThanHours', String(olderThan));
+
+    const [
+      s,
+      q,
+      a,
+      l,
+      v,
+      p,
+    ] = await Promise.all([
+      fetchJSON('/admin/oversight/summary'),
+      fetchJSON(`/admin/oversight/queue?${qs.toString()}`),
+      fetchJSON('/admin/oversight/alerts'),
+      fetchJSON('/admin/audit/recent?take=50'),
+      fetchJSON('/admin/oversight/vendors'),
+      fetchJSON('/admin/oversight/payouts'),
     ]);
-    setSummary(normalizeSummary(s));
-    setQueue(normalizeQueue(q));
-    setAlerts(normalizeAlerts(a));
-    setAudit(normalizeAudit(l));
-    setVendors(normalizeVendors(v));
-    setPayouts(normalizePayouts(p));
-  }, []);
+
+    setSummary(s || null);
+    setQueue(Array.isArray(q) ? q : []);
+    setAlerts(Array.isArray(a) ? a.map(normalizeAlert) : []);
+    setAudit(Array.isArray(l) ? l.map(normalizeAudit) : []);
+    setVendors(Array.isArray(v) ? v : []);
+    setPayouts(p && typeof p === 'object' ? p : { pending: [], recent: [] });
+  }, [fetchJSON, statusFilter, olderThan]);
 
   React.useEffect(() => {
-    refreshAll();
+    refreshAll().catch((e) => console.error('Oversight load failed:', e));
   }, [refreshAll]);
 
-  React.useEffect(() => {
-    (async () => {
-      const qs = new URLSearchParams();
-      if (statusFilter !== 'all') qs.set('status', statusFilter);
-      if (olderThan) qs.set('olderThanHours', String(olderThan));
-      const q = await fetchJSON(`/api/admin/oversight/queue?${qs.toString()}`).catch(() => []);
-      setQueue(normalizeQueue(q));
-    })();
-  }, [statusFilter, olderThan]);
-
-  /* ---------- Quick actions (optimistic + rollback) ---------- */
+  /** ---------- Actions (client → Railway) ---------- */
   async function onApprove(row: QueueRow) {
     try {
       setBusy(`approve-${row.id}`);
@@ -259,7 +206,9 @@ export default function AdminOversightPage() {
     const reason = prompt('Reason for change request?') || '';
     try {
       setBusy(`request-${row.id}`);
-      setQueue((q) => q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x)));
+      setQueue((q) =>
+        q.map((x) => (x.id === row.id ? { ...x, status: 'changes_requested' } : x))
+      );
       await fetchJSON(`/bids/${row.bidId}/milestones/${row.milestoneIndex}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -276,7 +225,10 @@ export default function AdminOversightPage() {
   async function onPay(item: PayoutItem) {
     try {
       setBusy(`pay-${item.bidId}-${item.milestoneIndex}`);
-      setPayouts((p) => ({ ...p, pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)) }));
+      setPayouts((p) => ({
+        ...p,
+        pending: p.pending.filter((x) => !(x.bidId === item.bidId && x.milestoneIndex === item.milestoneIndex)),
+      }));
       await fetchJSON(`/bids/${item.bidId}/pay-milestone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -328,20 +280,28 @@ export default function AdminOversightPage() {
     }
   }
 
-  /* ---------- UI ---------- */
+  /** ---------- UI ---------- */
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white p-6">
       <div className="mx-auto max-w-7xl">
         <header className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Admin Oversight</h1>
           <div className="flex gap-2">
-            <select className="rounded-md border px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+            <select
+              className="rounded-md border px-2 py-1 text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+            >
               <option value="all">All statuses</option>
               <option value="pending">Pending</option>
               <option value="changes_requested">Changes requested</option>
               <option value="approved">Approved</option>
             </select>
-            <select className="rounded-md border px-2 py-1 text-sm" value={olderThan} onChange={(e) => setOlderThan(Number(e.target.value))}>
+            <select
+              className="rounded-md border px-2 py-1 text-sm"
+              value={olderThan}
+              onChange={(e) => setOlderThan(Number(e.target.value))}
+            >
               <option value={0}>Any age</option>
               <option value={24}>&gt; 24h</option>
               <option value={48}>&gt; 48h</option>
@@ -350,13 +310,23 @@ export default function AdminOversightPage() {
           </div>
         </header>
 
+        {authError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {authError} — open DevTools ▶ Network and confirm the requests to <span className="font-mono">{API_BASE}</span> have an
+            <span className="font-mono"> Authorization: Bearer …</span> header.
+          </div>
+        )}
+
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <KPI title="Open proofs" value={summary?.openProofs ?? '—'} />
           <KPI title="Breaching SLA" value={summary?.breachingSLA ?? '—'} tone="danger" />
           <KPI title="Pending payouts" value={summary?.pendingPayouts ?? '—'} />
           <KPI title="Escrows locked" value={summary?.escrowsLocked ?? '—'} />
           <KPI title="P50 cycle (h)" value={summary?.cycleTimeHoursP50 ?? '—'} />
-          <KPI title="Revision rate" value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : '—'} />
+          <KPI
+            title="Revision rate"
+            value={summary && typeof summary.revisionRate === 'number' ? `${Math.round(summary.revisionRate * 100)}%` : '—'}
+          />
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -381,39 +351,59 @@ export default function AdminOversightPage() {
                       <tr key={q.id} className="border-t hover:bg-gray-50">
                         <Td className="font-mono text-[13px]">{q.id}</Td>
                         <Td>{q.vendor}</Td>
-                        <Td>{q.project} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}</Td>
+                        <Td>
+                          {q.project} • M{Number.isFinite(q.milestoneIndex) ? q.milestoneIndex : '—'}
+                        </Td>
                         <Td>{q.ageHours}h</Td>
                         <Td className={q.slaDueInHours < 0 ? 'text-red-600' : 'text-gray-600'}>
                           {q.slaDueInHours < 0 ? `${-q.slaDueInHours}h over` : `${q.slaDueInHours}h left`}
                         </Td>
                         <Td>
-                          <span className={
-                            'inline-block rounded-full px-2 py-0.5 text-xs ' +
-                            (q.status === 'approved' ? 'bg-green-100 text-green-700'
-                              : q.status === 'changes_requested' ? 'bg-yellow-100 text-yellow-800'
-                              : q.status === 'archived' ? 'bg-gray-200 text-gray-700'
-                              : q.status === 'rejected' ? 'bg-red-100 text-red-700'
-                              : 'bg-blue-100 text-blue-700')}
+                          <span
+                            className={
+                              'inline-block rounded-full px-2 py-0.5 text-xs ' +
+                              (q.status === 'approved'
+                                ? 'bg-green-100 text-green-700'
+                                : q.status === 'changes_requested'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : q.status === 'archived'
+                                ? 'bg-gray-200 text-gray-700'
+                                : q.status === 'rejected'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-blue-100 text-blue-700')
+                            }
                           >
                             {q.status}
                           </span>
                         </Td>
                         <Td>
-                          <span className={
-                            'inline-block rounded-full px-2 py-0.5 text-xs ' +
-                            (q.risk === 'high' ? 'bg-red-100 text-red-700'
-                              : q.risk === 'medium' ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-gray-100 text-gray-700')}
+                          <span
+                            className={
+                              'inline-block rounded-full px-2 py-0.5 text-xs ' +
+                              (q.risk === 'high'
+                                ? 'bg-red-100 text-red-700'
+                                : q.risk === 'medium'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-700')
+                            }
                           >
                             {q.risk || '—'}
                           </span>
                         </Td>
                         <Td>
                           <div className="flex gap-2">
-                            <button disabled={busy === `approve-${q.id}`} onClick={() => onApprove(q)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                            <button
+                              disabled={busy === `approve-${q.id}`}
+                              onClick={() => onApprove(q)}
+                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
                               Approve
                             </button>
-                            <button disabled={busy === `request-${q.id}`} onClick={() => onRequestChanges(q)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                            <button
+                              disabled={busy === `request-${q.id}`}
+                              onClick={() => onRequestChanges(q)}
+                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
                               Request
                             </button>
                           </div>
@@ -422,7 +412,9 @@ export default function AdminOversightPage() {
                     ))}
                     {!queue.length && (
                       <tr>
-                        <Td colSpan={8} className="py-8 text-center text-gray-500">No items</Td>
+                        <Td colSpan={8} className="py-8 text-center text-gray-500">
+                          No items
+                        </Td>
                       </tr>
                     )}
                   </tbody>
@@ -449,7 +441,7 @@ export default function AdminOversightPage() {
                   </thead>
                   <tbody>
                     {vendors.map((v) => (
-                      <tr key={v.walletAddress || v.vendorName} className="border-t hover:bg-gray-50">
+                      <tr key={v.walletAddress} className="border-t hover:bg-gray-50">
                         <Td className="font-medium">{v.vendorName || '—'}</Td>
                         <Td className="hidden md:table-cell font-mono text-[12px]">{v.walletAddress || '—'}</Td>
                         <Td className="text-right">{v.proofsTotal}</Td>
@@ -459,26 +451,44 @@ export default function AdminOversightPage() {
                         <Td className="text-right hidden lg:table-cell">{v.bidsCount ?? '—'}</Td>
                         <Td className="text-right hidden lg:table-cell">
                           {v.totalAwardedUSD
-                            ? Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v.totalAwardedUSD)
+                            ? Intl.NumberFormat(undefined, {
+                                style: 'currency',
+                                currency: 'USD',
+                                maximumFractionDigits: 0,
+                              }).format(v.totalAwardedUSD)
                             : '—'}
                         </Td>
                         <Td className="hidden md:table-cell">
-                          {v.lastProofAt ? new Date(v.lastProofAt).toLocaleString()
-                            : v.lastBidAt ? new Date(v.lastBidAt).toLocaleString()
+                          {v.lastProofAt
+                            ? new Date(v.lastProofAt).toLocaleString()
+                            : v.lastBidAt
+                            ? new Date(v.lastBidAt).toLocaleString()
                             : '—'}
                         </Td>
                         <Td>
                           <div className="flex gap-2">
                             {!v.archived ? (
-                              <button disabled={busy === `arch-${v.walletAddress}`} onClick={() => onArchiveVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                              <button
+                                disabled={busy === `arch-${v.walletAddress}`}
+                                onClick={() => onArchiveVendor(v.walletAddress)}
+                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              >
                                 Archive
                               </button>
                             ) : (
-                              <button disabled={busy === `unarch-${v.walletAddress}`} onClick={() => onUnarchiveVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                              <button
+                                disabled={busy === `unarch-${v.walletAddress}`}
+                                onClick={() => onUnarchiveVendor(v.walletAddress)}
+                                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              >
                                 Unarchive
                               </button>
                             )}
-                            <button disabled={busy === `del-${v.walletAddress}`} onClick={() => onDeleteVendor(v.walletAddress)} className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50">
+                            <button
+                              disabled={busy === `del-${v.walletAddress}`}
+                              onClick={() => onDeleteVendor(v.walletAddress)}
+                              className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
                               Delete
                             </button>
                           </div>
@@ -487,7 +497,9 @@ export default function AdminOversightPage() {
                     ))}
                     {!vendors.length && (
                       <tr>
-                        <Td colSpan={10} className="py-8 text-center text-gray-500">No vendor activity</Td>
+                        <Td colSpan={10} className="py-8 text-center text-gray-500">
+                          No vendor activity
+                        </Td>
                       </tr>
                     )}
                   </tbody>
@@ -501,14 +513,12 @@ export default function AdminOversightPage() {
               <ul className="space-y-2">
                 {alerts.map((a) => (
                   <li key={a.id} className="rounded-lg border bg-white p-3">
-                    <div className="text-xs text-gray-500">{new Date(a.createdAt).toLocaleString()}</div>
+                    <div className="text-xs text-gray-500">{a.createdAt ? new Date(a.createdAt).toLocaleString() : '—'}</div>
                     <div className="font-medium">{a.title || a.type}</div>
-                    {!!a.detail && <div className="text-xs text-gray-600">{a.detail}</div>}
-                    {(a.entityType || a.entityId) && (
-                      <div className="mt-1 text-xs text-gray-500">
-                        {a.entityType || 'entity'} {a.entityId ? `#${a.entityId}` : ''}
-                      </div>
-                    )}
+                    {a.detail && <div className="text-xs text-gray-600">{a.detail}</div>}
+                    <div className="mt-1 text-xs text-gray-500">
+                      {a.entityType} #{a.entityId}
+                    </div>
                   </li>
                 ))}
                 {!alerts.length && <li className="py-8 text-center text-gray-500">No alerts</li>}
@@ -524,12 +534,14 @@ export default function AdminOversightPage() {
                       <li key={`p-${p.bidId}-${p.milestoneIndex}`} className="flex items-center justify-between p-3 text-sm">
                         <div>
                           <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
+                            {p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}
                           </div>
                           <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : (p.currency || '')}</div>
+                          <div className="font-medium">
+                            {p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}
+                          </div>
                           <button
                             disabled={busy === `pay-${p.bidId}-${p.milestoneIndex}`}
                             onClick={() => onPay(p)}
@@ -548,16 +560,21 @@ export default function AdminOversightPage() {
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">Recent</div>
                   <ul className="divide-y rounded-lg border">
                     {payouts.recent.map((p) => (
-                      <li key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash ?? ''}`} className="flex items-center justify-between p-3 text-sm">
+                      <li
+                        key={`r-${p.bidId}-${p.milestoneIndex}-${p.txHash || 'na'}`}
+                        className="flex items-center justify-between p-3 text-sm"
+                      >
                         <div>
                           <div className="font-medium">
-                            {p.vendorName || '—'} • Bid {p.bidId} • M{(p.milestoneIndex ?? 0) + 1}
+                            {p.vendorName || '—'} • Bid {p.bidId} • M{p.milestoneIndex + 1}
                           </div>
                           <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleString()}</div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">{p.amount ? `${p.amount} ${p.currency || 'USDC'}` : (p.currency || '')}</div>
-                          {!!p.txHash && <div className="text-xs text-gray-500 truncate max-w-[160px]">{p.txHash}</div>}
+                          <div className="font-medium">
+                            {p.amount ? `${p.amount} ${p.currency || 'USDC'}` : p.currency || ''}
+                          </div>
+                          <div className="text-xs text-gray-500 truncate max-w-[160px]">{p.txHash || ''}</div>
                         </div>
                       </li>
                     ))}
@@ -574,14 +591,18 @@ export default function AdminOversightPage() {
             <ul className="divide-y rounded-xl border bg-white">
               {audit.map((l) => (
                 <li key={l.id} className="p-3 text-sm">
-                  <div className="text-xs text-gray-500">{new Date(l.createdAt).toLocaleString()}</div>
+                  <div className="text-xs text-gray-500">
+                    {l.createdAt ? new Date(l.createdAt).toLocaleString() : '—'}
+                  </div>
                   <div className="font-medium">{l.actorLabel || 'System'} • {l.action || '—'}</div>
-                  {(l.entityType || l.entityId) && (
-                    <div className="text-xs text-gray-600">
-                      {l.entityType} {l.entityId ? `#${l.entityId}` : ''}
-                    </div>
+                  <div className="text-xs text-gray-600">
+                    {l.entityType} #{l.entityId}
+                  </div>
+                  {l.meta && (
+                    <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">
+                      {JSON.stringify(l.meta, null, 2)}
+                    </pre>
                   )}
-                  {!!l.meta && <pre className="mt-2 overflow-auto rounded bg-gray-50 p-2 text-xs">{JSON.stringify(l.meta, null, 2)}</pre>}
                 </li>
               ))}
               {!audit.length && <li className="p-6 text-center text-gray-500">No recent activity</li>}
@@ -593,9 +614,7 @@ export default function AdminOversightPage() {
   );
 }
 
-/* ========================
-   Tiny UI helpers
-======================== */
+/** ====== SMALL UI HELPERS ====== */
 function KPI({ title, value, tone }: { title: string; value: React.ReactNode; tone?: 'danger' | 'ok' }) {
   const toneCls = tone === 'danger' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white';
   return (
@@ -624,4 +643,32 @@ function Td({ children, className, colSpan }: { children: React.ReactNode; class
       {children}
     </td>
   );
+}
+
+/** ====== NORMALIZERS (defensive) ====== */
+function normalizeAlert(a: any): AlertItem {
+  const type = a.type ?? a.key ?? a.code ?? 'alert';
+  const title =
+    a.title ??
+    (typeof type === 'string' ? type.replace(/_/g, ' ') : 'Alert');
+  return {
+    id: String(a.id ?? a.alert_id ?? a.uuid ?? `${type}-${a.createdAt || ''}`),
+    type,
+    title,
+    detail: a.detail ?? a.message ?? (a.cid ? `CID ${a.cid}` : ''),
+    entityType: a.entityType ?? a.entity_type ?? a.scope ?? '',
+    entityId: String(a.entityId ?? a.entity_id ?? a.target_id ?? ''),
+    createdAt: a.createdAt ?? a.created_at ?? a.time ?? '',
+  };
+}
+function normalizeAudit(e: any): AuditLog {
+  return {
+    id: String(e.id ?? e.event_id ?? e.uuid ?? Math.random().toString(36).slice(2)),
+    actorLabel: e.actorLabel ?? e.actor_label ?? e.actor ?? 'System',
+    action: e.action ?? e.event ?? e.type ?? '—',
+    entityType: e.entityType ?? e.entity_type ?? e.entity ?? '',
+    entityId: String(e.entityId ?? e.entity_id ?? e.target_id ?? e.subject_id ?? ''),
+    meta: e.meta ?? e.payload ?? e.details ?? null,
+    createdAt: e.createdAt ?? e.created_at ?? e.timestamp ?? e.time ?? '',
+  };
 }
