@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   getBids,
+  getProofBids,
   payMilestone,
   completeMilestone,
   rejectMilestoneProof,
