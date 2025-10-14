@@ -68,13 +68,13 @@ export default function Navigation() {
         label: 'Admin',
         roles: ['admin'],
         children: [
-          { href: '/admin/oversight', label: 'Oversight' },          // ← add this
-          { href: '/admin/proposals', label: 'Proposals' },
-          { href: '/admin/bids', label: 'Bids' },
-          { href: '/admin/proofs', label: 'Proofs' },
-          { href: '/admin/entities', label: 'Entities' },
-          { href: '/admin/oversight?tab=vendors', label: 'Vendors' }, // ← point Vendors to this page's Vendors tab
-        ],
+  { href: '/admin/oversight', label: 'Oversight' },  // NEW: this page
+  { href: '/admin/proposals', label: 'Proposals' },
+  { href: '/admin/bids', label: 'Bids' },
+  { href: '/admin/proofs', label: 'Proofs' },
+  { href: '/admin/entities', label: 'Entities' },
+  { href: '/admin/vendors', label: 'Vendors' },      // FIX: back to the Vendors page
+]
       },
       { href: '/vendor/dashboard', label: 'Vendors' },
     ],
