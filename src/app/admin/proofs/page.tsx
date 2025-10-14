@@ -3,11 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  getProofBids,
+  getBids,
   payMilestone,
   completeMilestone,
   rejectMilestoneProof,
-  // NEW: server-backed archive helpers (must exist in '@/lib/api')
   getMilestoneArchive,
   archiveMilestone,
   unarchiveMilestone,
@@ -19,19 +18,17 @@ import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 const TABS = [
   { key: 'all', label: 'All' },
   { key: 'needs-approval', label: 'Needs Approval' }, // has proof, not completed
-  { key: 'ready-to-pay', label: 'Ready to Pay' },     // completed, not yet paid (and not pending)
+  { key: 'ready-to-pay', label: 'Ready to Pay' },     // completed, not yet paid
   { key: 'paid', label: 'Paid' },                     // paymentTxHash present
   { key: 'no-proof', label: 'No Proof' },             // no proof and not completed
-  { key: 'archived', label: 'Archived' },             // NEW: Archived items (server)
+  { key: 'archived', label: 'Archived' },             // Archived items (server)
 ] as const;
 type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
 
-// key helpers
+// key helper
 const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
-const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
-const mkPMKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 type ArchiveInfo = {
   archived: boolean;
@@ -47,6 +44,7 @@ export default function AdminProofsPage() {
 
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
+  const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
   // Tabs + search
   const [tab, setTab] = useState<TabKey>('all');
@@ -55,33 +53,32 @@ export default function AdminProofsPage() {
   // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // client-side "payment in progress" flags
-  const [payPending, setPayPending] = useState<Set<string>>(new Set());
+  // local "payment pending" while we poll the server after clicking Pay
+  const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadProofs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // listen for archive/unarchive from anywhere (admin page, project page, other tab)
+  // listen for archive/unarchive from anywhere
   useMilestonesUpdated(loadProofs);
 
   async function loadProofs() {
-  setLoading(true);
-  setError(null);
-  try {
-    const rows = await getProofBids(); // enriched with paymentPending/paymentTxHash
-    const safeRows = Array.isArray(rows) ? rows : [];
-    setBids(safeRows);
-    // Fetch archive status for all milestones we see
-    await hydrateArchiveStatuses(safeRows);
-  } catch (e: any) {
-    console.error('Error fetching proofs:', e);
-    setError(e?.message || 'Failed to load proofs');
-  } finally {
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const allBids = await getBids(); // keep all, filter in UI
+      const rows = Array.isArray(allBids) ? allBids : [];
+      setBids(rows);
+      await hydrateArchiveStatuses(rows);
+    } catch (e: any) {
+      console.error('Error fetching proofs:', e);
+      setError(e?.message || 'Failed to load proofs');
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
@@ -95,7 +92,6 @@ export default function AdminProofsPage() {
         tasks.push(
           (async () => {
             try {
-              // Supports both: { ok, milestone: {...} } and { archived, ... }
               const j = await getMilestoneArchive(bid.bidId, i);
               const mi = j?.milestone ?? j;
               nextMap[key] = {
@@ -132,8 +128,8 @@ export default function AdminProofsPage() {
   }
 
   function isCompleted(m: any): boolean {
-    // "completed" means approved
-    return !!m?.completed;
+    // "approved/completed" state (NOT payment)
+    return !!(m?.completed || m?.approved || m?.approved_at || m?.approvedAt);
   }
 
   function isPaid(m: any): boolean {
@@ -141,16 +137,7 @@ export default function AdminProofsPage() {
     return !!(m?.paymentTxHash || m?.paidAt || m?.paid || m?.isPaid || m?.status === 'paid');
   }
 
-  function isPaymentPending(bidId: number, idx: number, m?: any): boolean {
-    // local pending flag while server is releasing payment
-    if (payPending.has(mkPMKey(bidId, idx))) return true;
-    // tolerate server-side signals if you add them later
-    if (m && (m.paymentPending || m.status === 'payment-pending' || m.paymentTxHash === 'pending')) return true;
-    return false;
-  }
-
   function isReadyToPay(m: any): boolean {
-    // "ready" == approved but not paid; pending handled separately where we render
     return isCompleted(m) && !isPaid(m);
   }
 
@@ -168,8 +155,7 @@ export default function AdminProofsPage() {
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        // exclude items currently pending payout
-        return isReadyToPay(m) && !isPaymentPending(bidId, idx, m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx));
       case 'paid':
         return isPaid(m);
       case 'no-proof':
@@ -184,7 +170,8 @@ export default function AdminProofsPage() {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     const hay =
-      `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
+      `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`
+        .toLowerCase();
     const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
       .some((m: any) => (m?.name || '').toLowerCase().includes(q));
     return hay.includes(q) || msMatch;
@@ -201,18 +188,47 @@ export default function AdminProofsPage() {
       .filter(bidMatchesSearch)
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-        const withIdx = ms.map((m: any, idx: number) => ({ m, idx })); // <-- keep original idx
+        const withIdx = ms.map((m: any, idx: number) => ({ m, idx })); // keep original idx
 
         const visibleWithIdx =
           tab === 'all'
             ? withIdx.filter(({ idx }) => !isArchived(bid.bidId, idx))
             : withIdx.filter(({ m, idx }) => milestoneMatchesTab(m, bid.bidId, idx));
 
-        // store both (we'll render from _withIdxVisible)
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
-  }, [bids, tab, query, archMap]);
+  }, [bids, tab, query, archMap, pendingPay]);
+
+  // ---- Polling after Pay (local only, doesn't depend on server pending flag) ----
+  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 12, intervalMs = 2500) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const all = await getBids();
+        const target = (all || []).find((b: any) => b.bidId === bidId);
+        const m = target?.milestones?.[milestoneIndex];
+        if (m && (m.paymentTxHash || m.paidAt || m.paid || m.isPaid || m.status === 'paid')) {
+          setPendingPay(prev => {
+            const next = new Set(prev);
+            next.delete(mkKey(bidId, milestoneIndex));
+            return next;
+          });
+          await loadProofs();
+          return;
+        }
+      } catch (e) {
+        // ignore and keep polling
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+    // Timed out — clear the pill and refresh to reflect whatever server has
+    setPendingPay(prev => {
+      const next = new Set(prev);
+      next.delete(mkKey(bidId, milestoneIndex));
+      return next;
+    });
+    await loadProofs();
+  }
 
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
@@ -231,37 +247,30 @@ export default function AdminProofsPage() {
 
   const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
-    const key = mkPMKey(bidId, milestoneIndex);
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
 
-      // mark as pending immediately so the green button hides and a "pending" pill appears
-      setPayPending(prev => { const n = new Set(prev); n.add(key); return n; });
-
-      // kick the API (server returns 202 quickly)
+      // Fire the payment request (server returns 202 fast)
       await payMilestone(bidId, milestoneIndex);
 
-      // optimistically reflect "pending" in the visible item too
-      setBids(prev =>
-        (prev || []).map(b =>
-          b.bidId !== bidId
-            ? b
-            : {
-                ...b,
-                milestones: (Array.isArray(b.milestones) ? b.milestones : []).map((m: any, i: number) =>
-                  i === milestoneIndex ? { ...m, paymentPending: true } : m
-                ),
-              }
-        )
-      );
+      // Show local "Payment Pending" immediately and hide Pay button
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.add(mkKey(bidId, milestoneIndex));
+        return next;
+      });
 
-      // soft refresh to pick up tx hash when backend flips it to paid
-      setTimeout(() => { loadProofs().catch(() => {}); }, 4000);
+      // Start polling for the tx hash / paid state
+      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
       console.error('Error paying milestone:', e);
       alert(e?.message || 'Payment failed');
-      // undo pending on failure
-      setPayPending(prev => { const n = new Set(prev); n.delete(key); return n; });
+      // Safety: ensure pending is cleared if request failed
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.delete(mkKey(bidId, milestoneIndex));
+        return next;
+      });
     } finally {
       setProcessing(null);
     }
@@ -564,10 +573,10 @@ export default function AdminProofsPage() {
 
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
-                  const pending = isPaymentPending(bid.bidId, origIdx, m);
-                  const showApprove = hasProof(m) && !isCompleted(m);
-                  const showPay = isReadyToPay(m) && !pending;
                   const archived = isArchived(bid.bidId, origIdx);
+                  const key = mkKey(bid.bidId, origIdx);
+                  const showApprove = hasProof(m) && !isCompleted(m);
+                  const showPay = isReadyToPay(m) && !pendingPay.has(key);
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -588,7 +597,7 @@ export default function AdminProofsPage() {
                               </span>
                             )}
 
-                            {pending && (
+                            {pendingPay.has(key) && !isPaid(m) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
                                 Payment Pending
                               </span>
@@ -634,9 +643,9 @@ export default function AdminProofsPage() {
                               )}
 
                               {hasProof(m) && !isCompleted(m) && (() => {
-                                const key = mkRejectKey(bid.bidId, origIdx);
+                                const rKey = mkRejectKey(bid.bidId, origIdx);
                                 const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
-                                const isLocked = rejectedLocal.has(key);
+                                const isLocked = rejectedLocal.has(rKey);
                                 const disabled = isProcessing || isLocked;
 
                                 return (
