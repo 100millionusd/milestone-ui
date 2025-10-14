@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  getBids,
   getProofBids,
   payMilestone,
   completeMilestone,
@@ -68,34 +67,21 @@ export default function AdminProofsPage() {
   useMilestonesUpdated(loadProofs);
 
   async function loadProofs() {
-    setLoading(true);
-    setError(null);
-    try {
-      const allBids = await getBids(); // keep all, filter in UI
-      const rows = Array.isArray(allBids) ? allBids : [];
-      setBids(rows);
-
-      // clear pending flags for any milestones that are now paid on the server
-      setPayPending(prev => {
-        const next = new Set(prev);
-        for (const bid of rows) {
-          const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-          ms.forEach((m: any, i: number) => {
-            if (isPaid(m)) next.delete(mkPMKey(bid.bidId, i));
-          });
-        }
-        return next;
-      });
-
-      // Fetch archive status for all milestones we see
-      await hydrateArchiveStatuses(rows);
-    } catch (e: any) {
-      console.error('Error fetching proofs:', e);
-      setError(e?.message || 'Failed to load proofs');
-    } finally {
-      setLoading(false);
-    }
+  setLoading(true);
+  setError(null);
+  try {
+    const rows = await getProofBids(); // enriched with paymentPending/paymentTxHash
+    const safeRows = Array.isArray(rows) ? rows : [];
+    setBids(safeRows);
+    // Fetch archive status for all milestones we see
+    await hydrateArchiveStatuses(safeRows);
+  } catch (e: any) {
+    console.error('Error fetching proofs:', e);
+    setError(e?.message || 'Failed to load proofs');
+  } finally {
+    setLoading(false);
   }
+}
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
