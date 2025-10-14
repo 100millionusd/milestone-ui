@@ -128,7 +128,7 @@ useMilestonesUpdated(loadProofs);
   }
 
   function isCompleted(m: any): boolean {
-    return !!m?.completed;
+    return !!m?.paymentPending;
   }
 
   function isPaid(m: any): boolean {
@@ -137,8 +137,8 @@ useMilestonesUpdated(loadProofs);
 }
 
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !isPaid(m);
-  }
+  return isCompleted(m) && !isPaid(m) && !isPaymentPending(m);
+}
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
@@ -220,29 +220,27 @@ const filtered = useMemo(() => {
   try {
     setProcessing(`pay-${bidId}-${milestoneIndex}`);
 
-    // Call the API
-    const res = await payMilestone(bidId, milestoneIndex);
-    const txHash =
-      res?.txHash || res?.paymentTxHash || res?.hash || null;
+    // Server returns 202 quickly; do not rely on it for final state here.
+    await payMilestone(bidId, milestoneIndex);
 
-    // Optimistically mark as paid so the green button disappears immediately
+    // Optimistically mark this milestone as *pending* so the green button hides instantly
     setBids(prev =>
       (prev || []).map(b =>
         b.bidId !== bidId
           ? b
           : {
               ...b,
-              milestones: (b.milestones || []).map((m: any, i: number) =>
-                i === milestoneIndex
-                  ? { ...m, paymentTxHash: txHash || m.paymentTxHash || 'paid' }
-                  : m
+              milestones: (Array.isArray(b.milestones) ? b.milestones : []).map((m: any, i: number) =>
+                i === milestoneIndex ? { ...m, paymentPending: true } : m
               ),
             }
       )
     );
 
-    // Then refetch from server to get the final tx hash / state
-    await loadProofs();
+    // Optional: soft refresh later to pick up tx hash when backend marks it paid.
+    setTimeout(() => {
+      loadProofs().catch(() => {});
+    }, 4000);
   } catch (e: any) {
     console.error('Error paying milestone:', e);
     alert(e?.message || 'Payment failed');
@@ -557,24 +555,33 @@ const filtered = useMemo(() => {
                   <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
                     <div className="flex justify-between items-start gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{m.name}</p>
-                          {archived && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
-                              Archived
-                            </span>
-                          )}
-                          {isCompleted(m) && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
-                              Approved
-                            </span>
-                          )}
-                          {isPaid(m) && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                              Paid
-                            </span>
-                          )}
-                        </div>
+ <div className="flex items-center gap-2">
+  <p className="font-medium">{m.name}</p>
+
+  {archived && (
+    <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
+      Archived
+    </span>
+  )}
+
+  {isCompleted(m) && (
+    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
+      Approved
+    </span>
+  )}
+
+  {isPaymentPending(m) && (
+    <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+      Payment Pending
+    </span>
+  )}
+
+  {isPaid(m) && (
+    <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+      Paid
+    </span>
+  )}
+</div>
 
                         <p className="text-sm text-gray-600">
                           Amount: ${m.amount} | Due: {m.dueDate}
