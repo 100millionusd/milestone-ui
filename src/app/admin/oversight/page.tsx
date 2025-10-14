@@ -409,6 +409,12 @@ useEffect(() => {
 }, [filteredVendors, vendorSort]);
 
   const tiles = data?.tiles;
+  const releasedUsd = useMemo(() => {
+  const list = data?.payouts?.recent ?? [];
+  let sum = 0;
+  for (const r of list) sum += Number(r?.amount_usd ?? 0);
+  return sum;
+}, [data?.payouts?.recent]);
 
   function toggleSort<T extends { key: any; dir: "asc"|"desc" }>(state: T, set: (v: T) => void, key: any) {
     if (state.key === key) set({ ...state, dir: state.dir === "asc" ? "desc" : "asc" });
