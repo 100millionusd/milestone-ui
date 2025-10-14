@@ -132,8 +132,9 @@ useMilestonesUpdated(loadProofs);
   }
 
   function isPaid(m: any): boolean {
-    return !!m?.paymentTxHash;
-  }
+  // accept several server shapes so the UI flips reliably
+  return !!(m?.paymentTxHash || m?.paidAt || m?.paid || m?.isPaid || m?.status === 'paid');
+}
 
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
@@ -215,18 +216,40 @@ const filtered = useMemo(() => {
   };
 
   const handlePay = async (bidId: number, milestoneIndex: number) => {
-    if (!confirm('Release payment for this milestone?')) return;
-    try {
-      setProcessing(`pay-${bidId}-${milestoneIndex}`);
-      await payMilestone(bidId, milestoneIndex);
-      await loadProofs();
-    } catch (e: any) {
-      console.error('Error paying milestone:', e);
-      alert(e?.message || 'Payment failed');
-    } finally {
-      setProcessing(null);
-    }
-  };
+  if (!confirm('Release payment for this milestone?')) return;
+  try {
+    setProcessing(`pay-${bidId}-${milestoneIndex}`);
+
+    // Call the API
+    const res = await payMilestone(bidId, milestoneIndex);
+    const txHash =
+      res?.txHash || res?.paymentTxHash || res?.hash || null;
+
+    // Optimistically mark as paid so the green button disappears immediately
+    setBids(prev =>
+      (prev || []).map(b =>
+        b.bidId !== bidId
+          ? b
+          : {
+              ...b,
+              milestones: (b.milestones || []).map((m: any, i: number) =>
+                i === milestoneIndex
+                  ? { ...m, paymentTxHash: txHash || m.paymentTxHash || 'paid' }
+                  : m
+              ),
+            }
+      )
+    );
+
+    // Then refetch from server to get the final tx hash / state
+    await loadProofs();
+  } catch (e: any) {
+    console.error('Error paying milestone:', e);
+    alert(e?.message || 'Payment failed');
+  } finally {
+    setProcessing(null);
+  }
+};
 
   const handleReject = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Reason for rejection (optional):') || '';
@@ -561,7 +584,7 @@ const filtered = useMemo(() => {
 
                         {m.paymentTxHash && (
                           <p className="text-sm text-green-600 mt-2 break-all">
-                            Paid ✅ Tx: {m.paymentTxHash}
+                            Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}
                           </p>
                         )}
                         {!hasProof(m) && !isCompleted(m) && (
