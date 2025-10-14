@@ -147,27 +147,61 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       setError(null);
       const list = await getProofs(); // admin list from your Railway API
 
-      let filtered = list;
+      // --- REPLACE THIS WHOLE BLOCK ---
 
-      // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
-      if (Array.isArray(bidIds) && bidIds.length) {
-        const set = new Set(bidIds.map((x) => Number(x)));
-        filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
-      } else if (Number.isFinite(proposalId as number)) {
-        // Secondary filter: try proposalId if your backend supplies it
-        const idNum = Number(proposalId);
-        filtered = list.filter((p: any) => {
-          const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
-          return candidates.some((v) => Number(v) === idNum);
-        });
-        if (!filtered.length) {
-          console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
-          filtered = list;
-        }
-      }
+let filtered = list;
 
-      setProofs(filtered);
-      await hydrateArchiveStatuses(filtered);
+// 1) sanitize bidIds (keep only finite numbers)
+const cleanBidIds = Array.isArray(bidIds)
+  ? Array.from(
+      new Set(
+        bidIds
+          .map((x: any) => Number(x))
+          .filter((n: number) => Number.isFinite(n))
+      )
+    )
+  : [];
+
+// 2) infer bidIds from `bids` prop if caller passed the wrong thing
+const inferredBidIds = Array.isArray(bids)
+  ? Array.from(
+      new Set(
+        bids
+          .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
+          .filter((n: number) => Number.isFinite(n))
+      )
+    )
+  : [];
+
+// tiny guardrail: if bidIds was provided but unusable, log and fall back
+if ((Array.isArray(bidIds) && bidIds.length) && cleanBidIds.length === 0 && inferredBidIds.length > 0) {
+  console.warn('[AdminProofs] Ignoring invalid bidIds prop; using inferred bidIds from `bids` instead:', inferredBidIds);
+}
+
+// 3) choose which ids to use
+const useBidIds = cleanBidIds.length > 0 ? cleanBidIds : inferredBidIds;
+
+// 4) apply filtering by bidId if we have good ids
+if (useBidIds.length > 0) {
+  const idset = new Set(useBidIds);
+  filtered = list.filter((p: any) => idset.has(Number((p as any)?.bidId)));
+} else if (Number.isFinite(proposalId as number)) {
+  // Secondary filter: try proposalId ONLY if rows actually carry it
+  const idNum = Number(proposalId);
+  const byProposal = list.filter((p: any) => {
+    const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
+    return candidates.some((v) => Number(v) === idNum);
+  });
+  if (byProposal.length) {
+    filtered = byProposal;
+  } else {
+    // do NOT wipe to empty when nothing matches; keep full list visible
+    console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
+  }
+}
+
+setProofs(filtered);
+await hydrateArchiveStatuses(filtered);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load proofs');
     } finally {
