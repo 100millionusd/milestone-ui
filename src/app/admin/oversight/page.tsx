@@ -471,6 +471,7 @@ export default function AdminOversightPage() {
 
             {/* Overview split: Queue & Vendors quick views */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="xl:col-span-3">
               <Card title={`Queue (${data?.queue?.length ?? 0})`} subtitle="Oldest first">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -512,8 +513,9 @@ export default function AdminOversightPage() {
                   </table>
                 </div>
               </Card>
+              </div>
 
-              <div className="xl:col-span-2">
+              <div className="xl:col-span-3">
                 <Card title={`Vendors (${data?.vendors?.length ?? 0})`} subtitle="Performance" right={
                   <button onClick={() => downloadCSV(`vendors-${new Date().toISOString().slice(0,10)}.csv`, sortedVendors)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800">
                     <Icon.Download className="h-4 w-4"/> CSV
