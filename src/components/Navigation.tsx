@@ -53,9 +53,12 @@ export default function Navigation() {
     return (web3Role as Role) || serverRole || 'guest';
   }, [serverRole, web3Role]);
 
-  const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
+  const isActive = (path: string) => {
+    const clean = path.split('?')[0];
+    return pathname === clean || pathname.startsWith(clean + '/');
+  };
 
-  const navItems: NavItem[] = useMemo(
+    const navItems: NavItem[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects' },
@@ -65,11 +68,12 @@ export default function Navigation() {
         label: 'Admin',
         roles: ['admin'],
         children: [
+          { href: '/admin/oversight', label: 'Oversight' },          // ← add this
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
-          { href: '/admin/entities', label: 'Entities' }, // ✅ restored
-          { href: '/admin/dashboard?tab=vendors', label: 'Vendors' },
+          { href: '/admin/entities', label: 'Entities' },
+          { href: '/admin/oversight?tab=vendors', label: 'Vendors' }, // ← point Vendors to this page's Vendors tab
         ],
       },
       { href: '/vendor/dashboard', label: 'Vendors' },
