@@ -486,7 +486,20 @@ useEffect(() => {
               <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "warning" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Pending Payouts" value={loading?"—":fmtInt(tiles?.pendingPayouts?.count||0)} icon={<Icon.Ticket className="h-5 w-5"/>} />
               <StatCard label="Pending USD" value={loading ? "—" : fmtUSD0(tiles?.pendingPayouts?.totalUSD || 0)} icon={<Icon.Dollar className="h-5 w-5"/>} />
-              <StatCard label="Payouts USD" value={loading ? "—" : fmtUSD0(releasedUsd)} icon={<Icon.Dollar className="h-5 w-5"/>} />
+              <StatCard
+  label="Payouts USD"
+  value={
+    loading
+      ? "—"
+      : fmtUSD0(
+          (data?.payouts?.recent ?? []).reduce(
+            (sum, r) => sum + Number(r?.amount_usd ?? 0),
+            0
+          )
+        )
+  }
+  icon={<Icon.Dollar className="h-5 w-5"/>}
+/>
               <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} />
               <StatCard label="P50 Cycle (h)" value={loading?"—":fmtInt(tiles?.p50CycleHours||0)} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Revision Rate" value={loading?"—":fmtPct(tiles?.revisionRatePct||0)} icon={<Icon.Check className="h-5 w-5"/>} />
