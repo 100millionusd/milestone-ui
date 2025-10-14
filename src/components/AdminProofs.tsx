@@ -4,7 +4,6 @@
 import { useEffect, useState } from 'react';
 
 import {
-  getProofs,
   // approveProof, // replaced by direct API call below
   rejectProof,
   analyzeProof,
@@ -142,38 +141,55 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   async function loadProofs() {
-    try {
-      setLoading(true);
-      setError(null);
-      const list = await getProofs(); // admin list from your Railway API
+  try {
+    setLoading(true);
+    setError(null);
 
-      let filtered = list;
+    // 1) Determine the correct bidId (robust)
+    const cleanBidIds = Array.isArray(bidIds)
+      ? Array.from(new Set(bidIds.map(Number).filter(Number.isFinite)))
+      : [];
 
-      // Prefer filtering by bidIds (since /proofs rows often lack proposalId)
-      if (Array.isArray(bidIds) && bidIds.length) {
-        const set = new Set(bidIds.map((x) => Number(x)));
-        filtered = list.filter((p) => set.has(Number((p as any)?.bidId)));
-      } else if (Number.isFinite(proposalId as number)) {
-        // Secondary filter: try proposalId if your backend supplies it
-        const idNum = Number(proposalId);
-        filtered = list.filter((p: any) => {
-          const candidates = [p?.proposalId, p?.proposal_id, p?.proposalID];
-          return candidates.some((v) => Number(v) === idNum);
-        });
-        if (!filtered.length) {
-          console.warn('[AdminProofs] No rows matched proposalId; showing all to avoid empty list.');
-          filtered = list;
-        }
-      }
+    const inferredBidIds = Array.isArray(bids)
+      ? Array.from(
+          new Set(
+            (bids as any[])
+              .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
+              .filter(Number.isFinite)
+          )
+        )
+      : [];
 
-      setProofs(filtered);
-      await hydrateArchiveStatuses(filtered);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load proofs');
-    } finally {
-      setLoading(false);
+    const useBidId = cleanBidIds[0] ?? inferredBidIds[0];
+
+    // 2) Build upstream URL (Railway Express). Server resolves proposalId→bidId if needed.
+    const params = new URLSearchParams();
+    if (Number.isFinite(useBidId)) {
+      params.set('bidId', String(useBidId));
+    } else if (Number.isFinite(proposalId as number)) {
+      params.set('proposalId', String(Number(proposalId)));
     }
+
+    const url = `${API_BASE}/proofs${params.toString() ? `?${params}` : ''}`;
+
+    // 3) Fetch directly from JSON API (avoid Next route / Prisma)
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
+      throw new Error(msg);
+    }
+    const list = await res.json();
+    const arr = Array.isArray(list) ? list : [];
+
+    setProofs(arr);
+    await hydrateArchiveStatuses(arr);
+  } catch (err: any) {
+    setError(err?.message || 'Failed to load proofs');
+  } finally {
+    setLoading(false);
   }
+}
 
   async function hydrateArchiveStatuses(currentProofs: any[]) {
     const next: Record<string, ArchiveInfo> = { ...archMap };
