@@ -128,9 +128,10 @@ export default function AdminProofsPage() {
   }
 
   function isCompleted(m: any): boolean {
-    // "approved/completed" state (NOT payment)
-    return !!(m?.completed || m?.approved || m?.approved_at || m?.approvedAt);
-  }
+  // milestone is approved/completed (NOT payment)
+  // Only trust boolean flags; don't read timestamps/strings here.
+  return m?.completed === true || m?.approved === true || m?.status === 'completed';
+}
 
   function isPaid(m: any): boolean {
     // accept several server shapes so the UI flips reliably
