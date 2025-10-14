@@ -107,6 +107,26 @@ const Icon = {
   ),
 };
 
+// generic comparable for sort
+function cmpVal(v: any, key: string) {
+  if (key === "lastActivity" || key.endsWith("At") || key.endsWith("_at") || key === "created_at") {
+    const t = Date.parse(v ?? "");
+    return isNaN(t) ? -Infinity : t;
+  }
+  if (typeof v === "string") return v.toLowerCase();
+  return v;
+}
+function sortBy<T>(arr: T[], key: keyof T, dir: "asc"|"desc") {
+  const m = dir === "asc" ? 1 : -1;
+  return arr.sort((a: any, b: any) => {
+    const av = cmpVal(a[key as string], key as string);
+    const bv = cmpVal(b[key as string], key as string);
+    if (av < bv) return -1 * m;
+    if (av > bv) return  1 * m;
+    return 0;
+  });
+}
+
 // —— Helpers ——
 const cls = (...s: (string | false | undefined)[]) => s.filter(Boolean).join(" ");
 const fmtInt = (n: number) => new Intl.NumberFormat().format(Math.round(n ?? 0));
@@ -114,7 +134,11 @@ const fmtUSD0 = (n: number) => new Intl.NumberFormat(undefined, { style: "curren
 const fmtPct = (n: number) => `${Math.round(n ?? 0)}%`;
 const shortAddr = (w: string) => (w?.length > 12 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w);
 const dt = (s: string) => new Date(s);
-const humanTime = (s: string) => dt(s).toLocaleString();
+const humanTime = (s: string) => {
+  if (!s) return "—";
+  const d = dt(s);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+};
 const changeLabel = (changes: Record<string, any>) => (Object.keys(changes)[0] || "").replaceAll("_", " ");
 const copy = async (t: string, onDone?: () => void) => { try { await navigator.clipboard.writeText(t); onDone?.(); } catch { /* ignore */ } };
 
@@ -261,6 +285,12 @@ export default function AdminOversightPage() {
   const [autoRefresh, setAutoRefresh] = usePersistentState<boolean>("oversight.autoRefresh", true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // auto-dismiss toast
+useEffect(() => {
+  if (!toast) return;
+  const id = setTimeout(() => setToast(null), 1400);
+  return () => clearTimeout(id);
+}, [toast]);
 
   // sorting
   const [queueSort, setQueueSort] = usePersistentState<{ key: keyof Oversight["queue"][number]; dir: "asc"|"desc" }>("oversight.queue.sort", { key: "ageHours", dir: "desc" });
@@ -275,7 +305,7 @@ export default function AdminOversightPage() {
       setError(null);
       setLoading(true);
       const res = await fetch(url, { cache: "no-store", credentials: "include", headers: { Accept: "application/json" }, signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}`);
       const json = (await res.json()) as Oversight;
       setData(json);
       setLastUpdated(Date.now());
@@ -367,24 +397,12 @@ export default function AdminOversightPage() {
 
   // sorting
   const sortedQueue = useMemo(() => {
-    const arr = [...filteredQueue];
-    return arr.sort((a, b) => {
-      const k = queueSort.key as any;
-      const av = (a as any)[k]; const bv = (b as any)[k];
-      const cmp = typeof av === "string" ? av.localeCompare(bv) : (av as number) - (bv as number);
-      return queueSort.dir === "asc" ? cmp : -cmp;
-    });
-  }, [filteredQueue, queueSort]);
+  return sortBy([...filteredQueue], queueSort.key, queueSort.dir);
+}, [filteredQueue, queueSort]);
 
   const sortedVendors = useMemo(() => {
-    const arr = [...filteredVendors];
-    return arr.sort((a, b) => {
-      const k = vendorSort.key as any;
-      const av = (a as any)[k]; const bv = (b as any)[k];
-      const cmp = typeof av === "string" ? av.localeCompare(bv) : (av as number) - (bv as number);
-      return vendorSort.dir === "asc" ? cmp : -cmp;
-    });
-  }, [filteredVendors, vendorSort]);
+  return sortBy([...filteredVendors], vendorSort.key, vendorSort.dir);
+}, [filteredVendors, vendorSort]);
 
   const tiles = data?.tiles;
 
@@ -517,9 +535,18 @@ export default function AdminOversightPage() {
 
               <div className="xl:col-span-3">
                 <Card title={`Vendors (${data?.vendors?.length ?? 0})`} subtitle="Performance" right={
-                  <button onClick={() => downloadCSV(`vendors-${new Date().toISOString().slice(0,10)}.csv`, sortedVendors)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800">
-                    <Icon.Download className="h-4 w-4"/> CSV
-                  </button>
+                  <button
+  onClick={() =>
+    downloadCSV(
+      `vendors-${new Date().toISOString().slice(0,10)}.csv`,
+      sortedVendors,
+      ["vendor", "wallet", "approved", "proofs", "cr", "approvalPct", "bids", "lastActivity"]
+    )
+  }
+  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+>
+  <Icon.Download className="h-4 w-4"/> CSV
+</button>
                 }>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -606,7 +633,18 @@ export default function AdminOversightPage() {
         {tab === "vendors" && (
           <Card title={`Vendors (${sortedVendors.length})`} subtitle="Performance" right={<>
             <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter vendors…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"/>
-            <button onClick={() => downloadCSV(`vendors-${new Date().toISOString().slice(0,10)}.csv`, sortedVendors)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"><Icon.Download className="h-4 w-4"/> CSV</button>
+            <button
+  onClick={() =>
+    downloadCSV(
+      `vendors-${new Date().toISOString().slice(0,10)}.csv`,
+      sortedVendors,
+      ["vendor", "wallet", "approved", "proofs", "cr", "approvalPct", "bids", "lastActivity"]
+    )
+  }
+  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+>
+  <Icon.Download className="h-4 w-4"/> CSV
+</button>
           </>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -678,7 +716,19 @@ export default function AdminOversightPage() {
 
         {tab === "payouts" && (
           <Card title={`Recent Payouts (${data?.payouts?.recent?.length ?? 0})`} right={
-            <button onClick={() => data?.payouts?.recent && downloadCSV(`payouts-${new Date().toISOString().slice(0,10)}.csv`, data.payouts.recent)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"><Icon.Download className="h-4 w-4"/> CSV</button>
+           <button
+  onClick={() =>
+    data?.payouts?.recent &&
+    downloadCSV(
+      `payouts-${new Date().toISOString().slice(0,10)}.csv`,
+      data.payouts.recent,
+      ["id", "bid_id", "milestone_index", "amount_usd", "released_at"]
+    )
+  }
+  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+>
+  <Icon.Download className="h-4 w-4"/> CSV
+</button>
           }>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -753,14 +803,13 @@ export default function AdminOversightPage() {
         )}
 
         {/* Toast */}
-        {toast && (
-          <div className="fixed right-4 bottom-4 z-50">
-            <div className="rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-800/60 dark:border-neutral-200/60 shadow-lg px-3 py-2 text-sm">
-              {toast}
-            </div>
-            {setTimeout(() => setToast(null), 1400) && null}
-          </div>
-        )}
+{toast && (
+  <div className="fixed right-4 bottom-4 z-50">
+    <div className="rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-800/60 dark:border-neutral-200/60 shadow-lg px-3 py-2 text-sm">
+      {toast}
+    </div>
+  </div>
+)}
       </div>
     </div>
   );
