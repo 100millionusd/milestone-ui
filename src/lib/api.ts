@@ -656,6 +656,18 @@ export async function getBids(proposalId?: number): Promise<Bid[]> {
   }
 }
 
+// Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
+export async function getProofBids(): Promise<any[]> {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+  const r = await fetch(`${base}/admin/proofs-bids`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!r.ok) throw new Error(`getProofBids failed: ${r.status}`);
+  return r.json(); // same shape as /bids but milestones include paymentPending/tx
+}
+
 export async function getBid(id: number): Promise<Bid> {
   const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}`);
   return toBid(b);
@@ -747,30 +759,6 @@ export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
     body: JSON.stringify(body),
   });
   return toBid(b);
-}
-
-// ---- Bids ----
-export async function getBids(proposalId?: number): Promise<Bid[]> {
-  const q = Number.isFinite(proposalId as number) ? `?proposalId=${proposalId}` : "";
-  try {
-    const rows = await apiFetch(`/bids${q}`);
-    return (Array.isArray(rows) ? rows : []).map(toBid);
-  } catch (e) {
-    if (isAuthError(e)) return [];
-    throw e;
-  }
-}
-
-// Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
-export async function getProofBids(): Promise<any[]> {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-  const r = await fetch(`${base}/admin/proofs-bids`, {
-    method: 'GET',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!r.ok) throw new Error(`getProofBids failed: ${r.status}`);
-  return r.json(); // same shape as /bids but milestones include paymentPending/tx
 }
 
 // ---- Vendor ----
