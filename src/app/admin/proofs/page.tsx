@@ -1,6 +1,3 @@
-Here’s the **complete working file**. Paste it over your current `src/app/admin/proofs/page.tsx`:
-
-```tsx
 // src/app/admin/proofs/page.tsx
 'use client';
 
@@ -762,4 +759,3 @@ export default function AdminProofsPage() {
     </div>
   );
 }
-```
