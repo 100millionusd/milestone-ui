@@ -725,6 +725,12 @@ export async function archiveBid(id: number): Promise<Bid> {
   return toBid(b);
 }
 
+export async function deleteBid(id: number): Promise<boolean> {
+  if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
+  await apiFetch(`/bids/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+  return true;
+}
+
 export async function updateBidMilestones(id: number, milestones: Milestone[]): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
   const body = { milestones: milestones.map(m => ({
@@ -1417,6 +1423,7 @@ export default {
   analyzeBid,
   archiveBid,
   updateBid,
+  deleteBid,
 
   // vendor/admin
   getVendorProfile,
