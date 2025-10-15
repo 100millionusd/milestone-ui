@@ -318,135 +318,90 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
   // No last response captured (pure network failures across all bases)
   throw new Error("Network request failed");
 }
-
 // ---- JSON Fetch helper ----
-// ---- GET helper (no-cache) ----
-export async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
+// Single source of truth for API calls.
+// Adds cache-busting on GET, robust error handling, and returns JSON (or null for empty bodies).
+
+export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
-  const r = await fetch(`${base}${path}`, {
-    credentials: 'include',
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
+  // Normalize method
+  const method = (options.method || 'GET').toString().toUpperCase();
 
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`${path} ${r.status}: ${text || r.statusText}`);
-  }
-
-  const ct = r.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) {
-    // allow 204/empty, treat as null
-    return null as any;
-  }
-
-  return (await r.json()) as T;
-}
-
-  // Bust caches on GETs
+  // Cache-bust GETs
   let fullPath = path;
-  if (method === "GET") {
-    const sep = path.includes("?") ? "&" : "?";
+  if (method === 'GET') {
+    const sep = path.includes('?') ? '&' : '?';
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
-  // Auth/header prep
-  const token = getJwt();
-  const callerCT =
-    (options.headers as any)?.["Content-Type"] ||
-    (options.headers as any)?.["content-type"];
-  const isFormData =
-    typeof FormData !== "undefined" && options.body instanceof FormData;
-
-    // Forward browser cookies/authorization when running on the server
-  const ssrForward = !isBrowser ? await getServerForwardHeaders() : {};
-
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    Pragma: "no-cache",
-    "Cache-Control": "no-cache",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}), // client Bearer, if present
-    ...(options.headers as any),                            // caller overrides
-    ...ssrForward,                                          // ← SSR cookie/authorization (wins last)
-  };
-
-  if (!callerCT && !isFormData) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  const init: RequestInit = {
+  const r = await fetch(`${base}${fullPath}`, {
+    credentials: 'include',
+    cache: 'no-store',
+    redirect: 'follow',
     ...options,
-    cache: "no-store",
-    mode: "cors",
-    redirect: "follow",
-    credentials: "include",
-    headers,
-  };
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache',
+      // Let callers override content-type (e.g., FormData)
+      ...(options.headers || {}),
+    },
+  });
 
-  const r = await fetchWithFallback(fullPath, init);
-
-  // Unauthorized → clear token + redirect (client side)
+  // Unauthorized guard (surface as error for callers to handle)
   if (r.status === 401 || r.status === 403) {
-    setJwt(null);
-    if (typeof window !== "undefined") {
-      const next = location.pathname + location.search;
-      if (!/\/login\b/.test(next)) {
-        location.assign(`/login?next=${encodeURIComponent(next)}`);
-      }
-    }
     throw new Error(`HTTP ${r.status}`);
   }
 
-  // Robust error handling (avoid JSON-parse crashes)
+  // Non-2xx → build a useful message
   if (!r.ok) {
     const status = r.status;
-    const ct = r.headers.get("content-type") || "";
+    const ct = r.headers.get('content-type') || '';
     let msg = `HTTP ${status}`;
 
-    // Prefer raw text first (covers HTML error pages, stack traces, DB errors)
     try {
       const text = await r.clone().text();
-      if (text && text.trim()) {
-        msg = text.slice(0, 400);
-      }
+      if (text && text.trim()) msg = text.slice(0, 400);
     } catch {}
 
-    // Only parse JSON when server says it's JSON
-    if (ct.includes("application/json")) {
+    if (ct.includes('application/json')) {
       try {
         const j = await r.clone().json();
         if (j && (j.error || j.message)) {
           msg = String(j.error || j.message);
         }
-      } catch {
-        // Swallow JSON parse errors (e.g., "unsupported Unicode escape sequence")
-      }
+      } catch {}
     }
 
     throw new Error(msg);
   }
 
   // Success path
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) return null;
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    // allow 204/empty bodies
+    return null as any;
+  }
 
   try {
-    return await r.json();
+    return (await r.json()) as T;
   } catch {
-    return null;
+    return null as any;
   }
 }
 
 // ---- POST helper ----
-export const postJSON = async <T = any>(path: string, data: any): Promise<T> => {
-  return apiFetch(path, { method: "POST", body: JSON.stringify(data) });
-};
+export async function postJSON<T = any>(path: string, data: any, options: RequestInit = {}): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(data ?? {}),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
+}
 
 // ---- Auth ----
 export async function getAuthRole(): Promise<AuthInfo> {
