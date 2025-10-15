@@ -185,9 +185,16 @@ export default function AdminProofsPage() {
   }
 
   function isPaid(m: any): boolean {
-    // accept several server shapes so the UI flips reliably
-    return !!(m?.paymentTxHash || m?.paidAt || m?.paid || m?.isPaid || m?.status === 'paid');
-  }
+  return !!(
+    m?.paymentTxHash ||   // your server sets this
+    m?.paymentDate ||     // your server sets this
+    m?.txHash ||          // some stacks use txHash
+    m?.paidAt ||          // timestamp form
+    m?.paid === true ||   // boolean form
+    m?.isPaid === true || // alt boolean
+    m?.status === 'paid'  // status form
+  );
+}
 
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
@@ -252,8 +259,12 @@ const archivedCount = useMemo(
 );
 
   // ---- Polling after Pay (local only, doesn't depend on server pending flag) ----
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 12, intervalMs = 2500) {
-    for (let i = 0; i < tries; i++) {
+  async function pollUntilPaid(
+  bidId: number,
+  milestoneIndex: number,
+  tries = 40,        // was 12
+  intervalMs = 2000  // ~80 seconds total
+) {
       try {
         const all = await getBids();
         const target = (all || []).find((b: any) => b.bidId === bidId);

@@ -320,8 +320,26 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 }
 
 // ---- JSON Fetch helper ----
-async function apiFetch(path: string, options: RequestInit = {}) {
-  const method = (options.method || "GET").toUpperCase();
+export async function apiFetch(path: string, init?: RequestInit) {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+  const r = await fetch(`${base}${path}`, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store', // <— important
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache', // <— help bust caches
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`${path} ${r.status}: ${msg || r.statusText}`);
+  }
+  return r.json();
+}
 
   // Bust caches on GETs
   let fullPath = path;
