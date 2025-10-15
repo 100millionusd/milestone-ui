@@ -377,42 +377,26 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           {/* tab content */}
           <div className="mt-6">
             {tab === 'overview' && (
-              <section className="space-y-4">
-                {project.summary && (
-                  <div>
-                    <h2 className="text-lg font-semibold mb-2">Project Description</h2>
-                    {/* Scrollable description (tabbed) */}
-                    <div
-                      className="max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
-                      tabIndex={0}
-                      aria-label="Project description (scrollable)"
-                    >
-                      <div className="p-3">
-                        <p className="whitespace-pre-wrap text-gray-700">{project.summary}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {Array.isArray(project.images) && project.images.length > 1 && (
-                  <div>
-                    <h3 className="text-sm font-medium mb-2">More images</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {project.images.slice(1, 10).map((u: string, i: number) => (
-                        <img
-                          key={i}
-                          src={u}
-                          alt={`image ${i + 1}`}
-                          className="w-full aspect-video object-cover rounded-lg border"
-                          loading="lazy"
-                          onClick={() => setLightboxUrl(u)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
+  <>
+    {Array.isArray(project.images) && project.images.length > 1 && (
+      <div>
+        <h3 className="text-sm font-medium mb-2">More images</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {project.images.slice(1, 10).map((u: string, i: number) => (
+            <img
+              key={i}
+              src={u}
+              alt={`image ${i + 1}`}
+              className="w-full aspect-video object-cover rounded-lg border"
+              loading="lazy"
+              onClick={() => setLightboxUrl(u)}
+            />
+          ))}
+        </div>
+      </div>
+    )}
+  </>
+)}
 
             {tab === 'bids' && (
               <>
