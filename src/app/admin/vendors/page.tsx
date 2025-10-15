@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { API_BASE, getAuthRole } from '@/lib/api';
+import { API_BASE, getAuthRole, archiveBid, deleteBid } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest';
 
@@ -76,6 +76,7 @@ export default function AdminVendorsPage() {
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
   const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
+  const [mutatingBidId, setMutatingBidId] = useState<string | null>(null); // bid-level busy state
 
   // sync URL
   useEffect(() => {
@@ -201,6 +202,20 @@ export default function AdminVendorsPage() {
       createdAt: String(b.createdAt ?? new Date().toISOString()),
     }));
   }
+
+  // refresh the expanded vendor row after archive/delete
+async function refreshVendorRow(rowKey: string, wallet?: string) {
+  setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: true, error: null, bids: [] } }));
+  try {
+    const bids = await loadBidsForWallet(wallet);
+    setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: null, bids } }));
+  } catch (e: any) {
+    setBidsByVendor(prev => ({
+      ...prev,
+      [rowKey]: { loading: false, error: e?.message || "Failed to load bids", bids: [] }
+    }));
+  }
+}
 
   const toggleOpen = async (rowKey: string, walletAddress?: string) => {
     setRowsOpen(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
@@ -371,12 +386,41 @@ export default function AdminVendorsPage() {
                       </td>
                     </tr>
                     {open && (
-                      <tr className="bg-slate-50 border-b">
-                        <td colSpan={8} className="px-3 py-3">
-                          <VendorBidsPanel state={bidsState} />
-                        </td>
-                      </tr>
-                    )}
+  <tr className="bg-slate-50 border-b">
+    <td colSpan={8} className="px-3 py-3">
+      <VendorBidsPanel
+        state={bidsState}
+        busyId={mutatingBidId}
+        onArchive={async (bidId) => {
+          if (!confirm("Archive this bid?")) return;
+          try {
+            setMutatingBidId(bidId);
+            await archiveBid(Number(bidId));
+            await refreshVendorRow(rowKey, v.walletAddress); // refresh the expanded list
+            await fetchList(); // refresh top-level counts/totals
+          } catch (e: any) {
+            alert(e?.message || "Failed to archive bid");
+          } finally {
+            setMutatingBidId(null);
+          }
+        }}
+        onDelete={async (bidId) => {
+          if (!confirm("PERMANENTLY delete this bid? This cannot be undone.")) return;
+          try {
+            setMutatingBidId(bidId);
+            await deleteBid(Number(bidId));
+            await refreshVendorRow(rowKey, v.walletAddress);
+            await fetchList();
+          } catch (e: any) {
+            alert(e?.message || "Failed to delete bid");
+          } finally {
+            setMutatingBidId(null);
+          }
+        }}
+      />
+    </td>
+  </tr>
+)}
                   </>
                 );
               })}
@@ -433,7 +477,17 @@ function KycChip({ value }: { value?: VendorLite['kycStatus'] }) {
   return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
 }
 
-function VendorBidsPanel({ state }: { state?: { loading: boolean; error: string | null; bids: VendorBid[] } }) {
+function VendorBidsPanel({
+  state,
+  busyId,
+  onArchive,
+  onDelete,
+}: {
+  state?: { loading: boolean; error: string | null; bids: VendorBid[] };
+  busyId?: string | null;
+  onArchive?: (bidId: string) => void;
+  onDelete?: (bidId: string) => void;
+}) {
   if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
   if (state.error) return <div className="text-rose-700 text-sm">{state.error}</div>;
@@ -449,25 +503,53 @@ function VendorBidsPanel({ state }: { state?: { loading: boolean; error: string 
             <th className="py-2 pr-3">Status</th>
             <th className="py-2 pr-3">Date</th>
             <th className="py-2 pr-3">Open</th>
+            <th className="py-2 pr-3 text-right">Actions</th> {/* NEW */}
           </tr>
         </thead>
         <tbody>
-          {state.bids.map((b) => (
-            <tr key={b.bidId} className="border-b last:border-0">
-              <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
-              <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
-              <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
-              <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
-              <td className="py-2 pr-3">
-                <Link
-                  href={`/projects/${encodeURIComponent(b.projectId)}`}
-                  className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                >
-                  Open project
-                </Link>
-              </td>
-            </tr>
-          ))}
+          {state.bids.map((b) => {
+            const busy = busyId === b.bidId;
+            return (
+              <tr key={b.bidId} className="border-b last:border-0">
+                <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
+                <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
+                <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
+                <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
+                <td className="py-2 pr-3">
+                  <Link
+                    href={`/projects/${encodeURIComponent(b.projectId)}`}
+                    className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                  >
+                    Open project
+                  </Link>
+                </td>
+                <td className="py-2 pr-3">
+                  <div className="flex gap-2 justify-end">
+                    {onArchive && (
+                      <button
+                        onClick={() => onArchive(b.bidId)}
+                        disabled={busy}
+                        className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                        title="Archive bid"
+                      >
+                        {busy ? 'Working…' : 'Archive'}
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(b.bidId)}
+                        disabled={busy}
+                        className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
+                        title="Delete bid"
+                      >
+                        {busy ? 'Working…' : 'Delete'}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
