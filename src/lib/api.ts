@@ -320,25 +320,33 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 }
 
 // ---- JSON Fetch helper ----
-export async function apiFetch(path: string, init?: RequestInit) {
+// ---- GET helper (no-cache) ----
+export async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+
   const r = await fetch(`${base}${path}`, {
-    method: 'GET',
     credentials: 'include',
-    cache: 'no-store', // <— important
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache', // <— help bust caches
+      'Cache-Control': 'no-cache',
       ...(init?.headers || {}),
     },
     ...init,
   });
 
   if (!r.ok) {
-    const msg = await r.text().catch(() => '');
-    throw new Error(`${path} ${r.status}: ${msg || r.statusText}`);
+    const text = await r.text().catch(() => '');
+    throw new Error(`${path} ${r.status}: ${text || r.statusText}`);
   }
-  return r.json();
+
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    // allow 204/empty, treat as null
+    return null as any;
+  }
+
+  return (await r.json()) as T;
 }
 
   // Bust caches on GETs

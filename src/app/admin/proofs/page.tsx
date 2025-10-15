@@ -185,16 +185,17 @@ export default function AdminProofsPage() {
   }
 
   function isPaid(m: any): boolean {
-  return !!(
-    m?.paymentTxHash ||   // your server sets this
-    m?.paymentDate ||     // your server sets this
-    m?.txHash ||          // some stacks use txHash
-    m?.paidAt ||          // timestamp form
-    m?.paid === true ||   // boolean form
-    m?.isPaid === true || // alt boolean
-    m?.status === 'paid'  // status form
-  );
-}
+    // accept several server shapes so the UI flips reliably
+    return !!(
+      m?.paymentTxHash ||
+      m?.paymentDate ||  // include this
+      m?.txHash ||
+      m?.paidAt ||
+      m?.paid === true ||
+      m?.isPaid === true ||
+      m?.status === 'paid'
+    );
+  }
 
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
@@ -234,6 +235,11 @@ export default function AdminProofsPage() {
     return hay.includes(q) || msMatch;
   }
 
+  const archivedCount = useMemo(
+    () => Object.values(archMap).filter(v => v.archived).length,
+    [archMap]
+  );
+
   // Build a filtered view (preserve original milestone indexes)
   const filtered = useMemo(() => {
     return (bids || [])
@@ -252,24 +258,14 @@ export default function AdminProofsPage() {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  // Count archived milestones for the badge/pill
-const archivedCount = useMemo(
-  () => Object.values(archMap).filter(v => v.archived).length,
-  [archMap]
-);
-
   // ---- Polling after Pay (local only, doesn't depend on server pending flag) ----
-  async function pollUntilPaid(
-  bidId: number,
-  milestoneIndex: number,
-  tries = 40,        // was 12
-  intervalMs = 2000  // ~80 seconds total
-) {
+  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 40, intervalMs = 2000) {
+    for (let i = 0; i < tries; i++) {
       try {
         const all = await getBids();
         const target = (all || []).find((b: any) => b.bidId === bidId);
         const m = target?.milestones?.[milestoneIndex];
-        if (m && (m.paymentTxHash || m.paidAt || m.paid || m.isPaid || m.status === 'paid')) {
+        if (m && isPaid(m)) {
           removePending(mkKey(bidId, milestoneIndex));
           await loadProofs();
           return;
