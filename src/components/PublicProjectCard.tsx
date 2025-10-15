@@ -464,113 +464,137 @@ export default function PublicProjectCard({ project }: { project: Project }) {
               </>
             )}
 
-            {tab === 'files' && (
-              <>
-                {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
-
-                {files.length > 0 && (
-                  <div className="space-y-3">
-                    {files.map((p, idx) => {
-  // Choose a base location: proof-level, otherwise first file with location
-  const fileWithLoc = Array.isArray(p?.files)
-    ? p.files.find((f: any) => f?.location?.label || (f?.location?.approx?.lat != null && f?.location?.approx?.lon != null))
-    : null;
-  const baseLoc   = p?.location || fileWithLoc?.location || null;
-  const baseLabel = baseLoc?.label || null;
-  const baseLat   = baseLoc?.approx?.lat ?? null;
-  const baseLon   = baseLoc?.approx?.lon ?? null;
-  const mapHref   = baseLat != null && baseLon != null ? mapsLink(baseLat, baseLon, baseLabel || undefined) : null;
-
-  return (
-    <div key={p.proofId || idx} className="rounded-lg border p-3">
-                        <div key={p.proofId || idx} className="rounded-lg border p-3">
-                          <div className="text-sm font-medium">
-                            Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-                          </div>
-
-                          {/* label above grid */}
-                          {baseLabel && (
-  <div className="mt-1 text-xs text-gray-600">
-    {mapHref ? (
-      <a
-        href={mapHref}
-        target="_blank"
-        rel="noreferrer"
-        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-        title="Open in map"
-      >
-        📍 {baseLabel}
-      </a>
-    ) : (
-      <span>📍 {baseLabel}</span>
+   {tab === 'files' && (
+  <>
+    {files.length === 0 && (
+      <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>
     )}
-    {p.takenAt && <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
-  </div>
+
+    {files.length > 0 && (
+      <div className="space-y-3">
+        {files.map((p, idx) => {
+          // Choose a base location: proof-level, otherwise first file with location
+          const fileWithLoc = Array.isArray(p?.files)
+            ? p.files.find(
+                (f: any) =>
+                  f?.location?.label ||
+                  (f?.location?.approx?.lat != null &&
+                    f?.location?.approx?.lon != null)
+              )
+            : null;
+          const baseLoc = p?.location || fileWithLoc?.location || null;
+          const baseLabel = baseLoc?.label || null;
+          const baseLat = baseLoc?.approx?.lat ?? null;
+          const baseLon = baseLoc?.approx?.lon ?? null;
+          const mapHref =
+            baseLat != null && baseLon != null
+              ? mapsLink(baseLat, baseLon, baseLabel || undefined)
+              : null;
+
+          return (
+            <div key={p.proofId || idx} className="rounded-lg border p-3">
+              <div className="text-sm font-medium">
+                Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+              </div>
+
+              {/* label above grid */}
+              {baseLabel && (
+                <div className="mt-1 text-xs text-gray-600">
+                  {mapHref ? (
+                    <a
+                      href={mapHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                      title="Open in map"
+                    >
+                      📍 {baseLabel}
+                    </a>
+                  ) : (
+                    <span>📍 {baseLabel}</span>
+                  )}
+                  {p.takenAt && (
+                    <span className="ml-2 text-gray-400">
+                      • Taken {fmtTakenAt(p.takenAt)}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {p.publicText && (
+                <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
+                  {p.publicText}
+                </p>
+              )}
+
+              {Array.isArray(p.files) && p.files.length > 0 && (
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {p.files.map((f: any, i: number) => {
+                    // Prefer file location; fall back to baseLoc
+                    const floc = (f as any)?.location || baseLoc;
+                    const fLabel = floc?.label || null;
+                    const fLat = floc?.approx?.lat ?? null;
+                    const fLon = floc?.approx?.lon ?? null;
+                    const fMapHref =
+                      fLat != null && fLon != null
+                        ? mapsLink(fLat, fLon, fLabel || undefined)
+                        : mapHref;
+
+                    return (
+                      <div
+                        key={i}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setLightboxUrl(String(f.url || ''))}
+                        onKeyDown={(e) =>
+                          (e.key === 'Enter' || e.key === ' ') &&
+                          setLightboxUrl(String(f.url || ''))
+                        }
+                        className="relative rounded-lg border overflow-hidden cursor-zoom-in"
+                        title="Click to zoom"
+                      >
+                        {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                          <img
+                            src={f.url}
+                            alt={f.name || `file ${i + 1}`}
+                            className="w-full aspect-video object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                            {f.name || 'file'}
+                          </div>
+                        )}
+
+                        {fLabel ? (
+                          fMapHref ? (
+                            <a
+                              href={fMapHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+                            >
+                              {fLabel}
+                            </a>
+                          ) : (
+                            <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                              {fLabel}
+                            </span>
+                          )
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </>
 )}
 
-                          {p.publicText && (
-                            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-                          )}
-
-                          {Array.isArray(p.files) && p.files.length > 0 && (
-                            <div className="mt-2 grid grid-cols-2 gap-3">
-                              {p.files.map((f: any, i: number) => (
-                                <div
-                                  key={i}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={() => setLightboxUrl(String(f.url || ''))}
-                                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-                                  className="relative rounded-lg border overflow-hidden cursor-zoom-in"
-                                  title="Click to zoom"
-                                >
-                                  {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                                    <img
-                                      src={f.url}
-                                      alt={f.name || `file ${i + 1}`}
-                                      className="w-full aspect-video object-cover"
-                                      loading="lazy"
-                                    />
-                                  ) : (
-                                    <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                                      {f.name || 'file'}
-                                    </div>
-                                  )}
-  {(() => {
-  const floc     = (f as any)?.location || baseLoc;
-  const fLabel   = floc?.label || null;
-  const fLat     = floc?.approx?.lat ?? null;
-  const fLon     = floc?.approx?.lon ?? null;
-  const fMapHref = fLat != null && fLon != null ? mapsLink(fLat, fLon, fLabel || undefined) : mapHref;
-
-  return fLabel ? (
-    fMapHref ? (
-      <a
-        href={fMapHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-      >
-        {fLabel}
-      </a>
-    ) : (
-      <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-        {fLabel}
-      </span>
-    )
-  ) : null;
-})()}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
 
             {tab === 'audit' && (
               <section className="space-y-3 text-sm">
