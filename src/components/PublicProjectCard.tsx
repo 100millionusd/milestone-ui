@@ -531,14 +531,14 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                 <div className="mt-2 grid grid-cols-2 gap-3">
                   {p.files.map((f: any, i: number) => {
                     // Prefer file location; fall back to baseLoc
-                    const floc = (f as any)?.location || baseLoc;
-                    const fLabel = floc?.label || null;
-                    const fLat = floc?.approx?.lat ?? null;
-                    const fLon = floc?.approx?.lon ?? null;
-                    const fMapHref =
-                      fLat != null && fLon != null
-                        ? mapsLink(fLat, fLon, fLabel || undefined)
-                        : mapHref;
+ const floc = (f as any)?.location || null;
+const fLat = floc?.approx?.lat ?? null;
+const fLon = floc?.approx?.lon ?? null;
+const hasFileCoords = fLat != null && fLon != null;
+
+// Only show overlay if THIS file has its own GPS
+const fLabel  = hasFileCoords ? (floc?.label || baseLabel || 'Location') : null;
+const fMapHref = hasFileCoords ? mapsLink(fLat, fLon, fLabel || undefined) : null;
 
                     return (
                       <div
