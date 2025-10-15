@@ -379,7 +379,17 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           ) : null}
         </h2>
 
-        {project.summary && <p className="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{project.summary}</p>}
+        {project.summary && (
+  <div
+    className="mt-2 max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
+    tabIndex={0}
+    aria-label="Project description (scrollable)"
+  >
+    <div className="p-3">
+      <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.summary}</p>
+    </div>
+  </div>
+)}
 
         {/* Milestone progress */}
         <div className="mt-3">
