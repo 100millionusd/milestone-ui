@@ -82,6 +82,15 @@ function fmtTakenAt(iso?: string | null): string | null {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+// ---- Proof status helper ----
+function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' | 'submitted' | string {
+  const s = String(p?.status ?? p?.proof_status ?? '').toLowerCase();
+  if (s.includes('approve')) return 'approved';
+  if (s.includes('reject')) return 'rejected';
+  if (s.includes('change')) return 'changes_requested';
+  return s || 'submitted';
+}
+
 // ----- Helpers -----
 function normalizeAudit(items: AuditRow[]) {
   return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
@@ -118,6 +127,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('overview');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [approvedOnly, setApprovedOnly] = useState(true);
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
@@ -464,137 +474,165 @@ export default function PublicProjectCard({ project }: { project: Project }) {
               </>
             )}
 
-   {tab === 'files' && (
+ {tab === 'files' && (
   <>
-    {files.length === 0 && (
-      <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>
-    )}
+    {/* tiny toggle */}
+    <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+      <span className="mr-1">Show:</span>
+      <button
+        type="button"
+        aria-pressed={approvedOnly}
+        onClick={() => setApprovedOnly(true)}
+        className={'rounded-full px-2 py-0.5 border ' + (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')}
+      >
+        Approved only
+      </button>
+      <button
+        type="button"
+        aria-pressed={!approvedOnly}
+        onClick={() => setApprovedOnly(false)}
+        className={'rounded-full px-2 py-0.5 border ' + (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')}
+      >
+        All
+      </button>
+    </div>
 
-    {files.length > 0 && (
-      <div className="space-y-3">
-        {files.map((p, idx) => {
-          // Choose a base location: proof-level, otherwise first file with location
-          const fileWithLoc = Array.isArray(p?.files)
-            ? p.files.find(
-                (f: any) =>
-                  f?.location?.label ||
-                  (f?.location?.approx?.lat != null &&
-                    f?.location?.approx?.lon != null)
-              )
-            : null;
-          const baseLoc = p?.location || fileWithLoc?.location || null;
-          const baseLabel = baseLoc?.label || null;
-          const baseLat = baseLoc?.approx?.lat ?? null;
-          const baseLon = baseLoc?.approx?.lon ?? null;
-          const mapHref =
-            baseLat != null && baseLon != null
-              ? mapsLink(baseLat, baseLon, baseLabel || undefined)
+    {(() => {
+      const proofsToShow = approvedOnly ? files.filter((p) => getProofStatus(p) === 'approved') : files;
+
+      if (!proofsToShow.length) {
+        return (
+          <div className="text-sm text-gray-500">
+            {approvedOnly ? 'No approved proofs yet.' : 'No public milestones/proofs yet.'}
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-3">
+          {proofsToShow.map((p, idx) => {
+            // Choose a base location: proof-level, otherwise first file with location
+            const fileWithLoc = Array.isArray(p?.files)
+              ? p.files.find(
+                  (f: any) =>
+                    f?.location?.label ||
+                    (f?.location?.approx?.lat != null && f?.location?.approx?.lon != null)
+                )
               : null;
+            const baseLoc   = p?.location || fileWithLoc?.location || null;
+            const baseLabel = baseLoc?.label || null;
+            const baseLat   = baseLoc?.approx?.lat ?? null;
+            const baseLon   = baseLoc?.approx?.lon ?? null;
+            const mapHref   = baseLat != null && baseLon != null ? mapsLink(baseLat, baseLon, baseLabel || undefined) : null;
 
-          return (
-            <div key={p.proofId || idx} className="rounded-lg border p-3">
-              <div className="text-sm font-medium">
-                Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-              </div>
+            const st = getProofStatus(p);
+            const badgeCls =
+              st === 'approved'
+                ? 'bg-emerald-100 text-emerald-700'
+                : st === 'rejected'
+                ? 'bg-rose-100 text-rose-700'
+                : st === 'changes_requested'
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-gray-100 text-gray-600';
 
-              {/* label above grid */}
-              {baseLabel && (
-                <div className="mt-1 text-xs text-gray-600">
-                  {mapHref ? (
-                    <a
-                      href={mapHref}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                      title="Open in map"
-                    >
-                      📍 {baseLabel}
-                    </a>
-                  ) : (
-                    <span>📍 {baseLabel}</span>
-                  )}
-                  {p.takenAt && (
-                    <span className="ml-2 text-gray-400">
-                      • Taken {fmtTakenAt(p.takenAt)}
-                    </span>
-                  )}
+            return (
+              <div key={p.proofId || idx} className="rounded-lg border p-3">
+                <div className="text-sm font-medium flex items-center justify-between">
+                  <div>
+                    Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeCls}`}>
+                    {st.replace('_', ' ')}
+                  </span>
                 </div>
-              )}
 
-              {p.publicText && (
-                <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
-                  {p.publicText}
-                </p>
-              )}
-
-              {Array.isArray(p.files) && p.files.length > 0 && (
-                <div className="mt-2 grid grid-cols-2 gap-3">
-                  {p.files.map((f: any, i: number) => {
-                    // Prefer file location; fall back to baseLoc
- const floc = (f as any)?.location || null;
-const fLat = floc?.approx?.lat ?? null;
-const fLon = floc?.approx?.lon ?? null;
-const hasFileCoords = fLat != null && fLon != null;
-
-// Only show overlay if THIS file has its own GPS
-const fLabel  = hasFileCoords ? (floc?.label || baseLabel || 'Location') : null;
-const fMapHref = hasFileCoords ? mapsLink(fLat, fLon, fLabel || undefined) : null;
-
-                    return (
-                      <div
-                        key={i}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setLightboxUrl(String(f.url || ''))}
-                        onKeyDown={(e) =>
-                          (e.key === 'Enter' || e.key === ' ') &&
-                          setLightboxUrl(String(f.url || ''))
-                        }
-                        className="relative rounded-lg border overflow-hidden cursor-zoom-in"
-                        title="Click to zoom"
+                {/* label above grid */}
+                {baseLabel && (
+                  <div className="mt-1 text-xs text-gray-600">
+                    {mapHref ? (
+                      <a
+                        href={mapHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                        title="Open in map"
                       >
-                        {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                          <img
-                            src={f.url}
-                            alt={f.name || `file ${i + 1}`}
-                            className="w-full aspect-video object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                            {f.name || 'file'}
-                          </div>
-                        )}
+                        📍 {baseLabel}
+                      </a>
+                    ) : (
+                      <span>📍 {baseLabel}</span>
+                    )}
+                    {p.takenAt && <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
+                  </div>
+                )}
 
-                        {fLabel ? (
-                          fMapHref ? (
-                            <a
-                              href={fMapHref}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-                            >
-                              {fLabel}
-                            </a>
+                {p.publicText && (
+                  <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+                )}
+
+                {Array.isArray(p.files) && p.files.length > 0 && (
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    {p.files.map((f: any, i: number) => {
+                      // Only show overlay if THIS file has its own GPS
+                      const floc = (f as any)?.location || null;
+                      const fLat = floc?.approx?.lat ?? null;
+                      const fLon = floc?.approx?.lon ?? null;
+                      const hasFileCoords = fLat != null && fLon != null;
+                      const fLabel = hasFileCoords ? (floc?.label || baseLabel || 'Location') : null;
+                      const fMapHref = hasFileCoords ? mapsLink(fLat, fLon, fLabel || undefined) : null;
+
+                      return (
+                        <div
+                          key={i}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setLightboxUrl(String(f.url || ''))}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                          className="relative rounded-lg border overflow-hidden cursor-zoom-in"
+                          title="Click to zoom"
+                        >
+                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                            <img
+                              src={f.url}
+                              alt={f.name || `file ${i + 1}`}
+                              className="w-full aspect-video object-cover"
+                              loading="lazy"
+                            />
                           ) : (
-                            <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                              {fLabel}
-                            </span>
-                          )
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    )}
+                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                              {f.name || 'file'}
+                            </div>
+                          )}
+
+                          {fLabel ? (
+                            fMapHref ? (
+                              <a
+                                href={fMapHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+                              >
+                                {fLabel}
+                              </a>
+                            ) : (
+                              <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                                {fLabel}
+                              </span>
+                            )
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    })()}
   </>
 )}
-
 
             {tab === 'audit' && (
               <section className="space-y-3 text-sm">
