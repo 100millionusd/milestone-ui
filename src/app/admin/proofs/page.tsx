@@ -65,7 +65,7 @@ const [processing, setProcessing] = useState<string | null>(null);
 
 const [lightbox, setLightbox] = useState<LightboxState>(null);
 const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
-const mkRejectKey = (bidId: number, idx: number) => ${bidId}-${idx};
+const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // Tabs + search
 const [tab, setTab] = useState<TabKey>('all');
@@ -225,20 +225,13 @@ switch (tab) {
 }
 
 function bidMatchesSearch(bid: any): boolean {
-const q = query.trim().toLowerCase();
-if (!q) return true;
-const hay =
-${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}
-.toLowerCase();
-const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
-.some((m: any) => (m?.name || '').toLowerCase().includes(q));
-return hay.includes(q) || msMatch;
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
+  const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
+    .some((m: any) => (m?.name || '').toLowerCase().includes(q));
+  return hay.includes(q) || msMatch;
 }
-
-const archivedCount = useMemo(
-() => Object.values(archMap).filter(v => v.archived).length,
-[archMap]
-);
 
 // Build a filtered view (preserve original milestone indexes)
 const filtered = useMemo(() => {
