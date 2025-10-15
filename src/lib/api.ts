@@ -395,19 +395,6 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
   });
 }
 
-// ---- POST helper ----
-export async function postJSON<T = any>(path: string, data: any, options: RequestInit = {}): Promise<T> {
-  return apiFetch<T>(path, {
-    method: 'POST',
-    body: JSON.stringify(data ?? {}),
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-}
-
 // ---- Auth ----
 export async function getAuthRole(): Promise<AuthInfo> {
   try {
