@@ -318,14 +318,10 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
   // No last response captured (pure network failures across all bases)
   throw new Error("Network request failed");
 }
-// ---- JSON Fetch helper ----
-// Single source of truth for API calls.
-// Adds cache-busting on GET, robust error handling, and returns JSON (or null for empty bodies).
 
+// ---- JSON Fetch helper ----
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-
-  // Normalize method
   const method = (options.method || 'GET').toString().toUpperCase();
 
   // Cache-bust GETs
@@ -335,59 +331,68 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
     fullPath = `${path}${sep}_ts=${Date.now()}`;
   }
 
+  // Only set Content-Type for JSON bodies (never for FormData)
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const hasCallerCT =
+    !!(options.headers as any)?.['Content-Type'] ||
+    !!(options.headers as any)?.['content-type'];
+
   const r = await fetch(`${base}${fullPath}`, {
     credentials: 'include',
     cache: 'no-store',
     redirect: 'follow',
     ...options,
     headers: {
-      'Accept': 'application/json',
+      Accept: 'application/json',
       'Cache-Control': 'no-cache',
-      // Let callers override content-type (e.g., FormData)
+      ...(options.body && !isFormData && !hasCallerCT ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
     },
   });
 
-  // Unauthorized guard (surface as error for callers to handle)
   if (r.status === 401 || r.status === 403) {
     throw new Error(`HTTP ${r.status}`);
   }
 
-  // Non-2xx → build a useful message
   if (!r.ok) {
     const status = r.status;
     const ct = r.headers.get('content-type') || '';
     let msg = `HTTP ${status}`;
-
     try {
       const text = await r.clone().text();
       if (text && text.trim()) msg = text.slice(0, 400);
     } catch {}
-
     if (ct.includes('application/json')) {
       try {
         const j = await r.clone().json();
-        if (j && (j.error || j.message)) {
-          msg = String(j.error || j.message);
-        }
+        if (j && (j.error || j.message)) msg = String(j.error || j.message);
       } catch {}
     }
-
     throw new Error(msg);
   }
 
-  // Success path
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
-    // allow 204/empty bodies
-    return null as any;
+    return null as any; // allow 204/empty
   }
-
   try {
     return (await r.json()) as T;
   } catch {
     return null as any;
   }
+}
+
+// ---- POST helper ----
+export async function postJSON<T = any>(path: string, data: any, options: RequestInit = {}): Promise<T> {
+  return apiFetch<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(data ?? {}),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
 }
 
 // ---- POST helper ----
