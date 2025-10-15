@@ -28,7 +28,7 @@ type TabKey = typeof TABS[number]['key'];
 type LightboxState = { urls: string[]; index: number } | null;
 
 // key helper
-const mkKey = (bidId: number, idx: number) => ${bidId}-${idx};
+const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 type ArchiveInfo = {
 archived: boolean;
