@@ -476,26 +476,34 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
  {tab === 'files' && (
   <>
-    {/* tiny toggle */}
-    <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
-      <span className="mr-1">Show:</span>
-      <button
-        type="button"
-        aria-pressed={approvedOnly}
-        onClick={() => setApprovedOnly(true)}
-        className={'rounded-full px-2 py-0.5 border ' + (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')}
-      >
-        Approved only
-      </button>
-      <button
-        type="button"
-        aria-pressed={!approvedOnly}
-        onClick={() => setApprovedOnly(false)}
-        className={'rounded-full px-2 py-0.5 border ' + (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')}
-      >
-        All
-      </button>
-    </div>
+    {/* Toggle (optional): hide if everything is approved */}
+    {files.some((p) => getProofStatus(p) !== 'approved') && (
+      <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+        <span className="mr-1">Show:</span>
+        <button
+          type="button"
+          aria-pressed={approvedOnly}
+          onClick={() => setApprovedOnly(true)}
+          className={
+            'rounded-full px-2 py-0.5 border ' +
+            (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+          }
+        >
+          Approved only
+        </button>
+        <button
+          type="button"
+          aria-pressed={!approvedOnly}
+          onClick={() => setApprovedOnly(false)}
+          className={
+            'rounded-full px-2 py-0.5 border ' +
+            (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+          }
+        >
+          All
+        </button>
+      </div>
+    )}
 
     {(() => {
       const proofsToShow = approvedOnly ? files.filter((p) => getProofStatus(p) === 'approved') : files;
@@ -511,20 +519,40 @@ export default function PublicProjectCard({ project }: { project: Project }) {
       return (
         <div className="space-y-3">
           {proofsToShow.map((p, idx) => {
-            // Choose a base location: proof-level, otherwise first file with location
-            const fileWithLoc = Array.isArray(p?.files)
-              ? p.files.find(
-                  (f: any) =>
-                    f?.location?.label ||
-                    (f?.location?.approx?.lat != null && f?.location?.approx?.lon != null)
-                )
-              : null;
-            const baseLoc   = p?.location || fileWithLoc?.location || null;
-            const baseLabel = baseLoc?.label || null;
-            const baseLat   = baseLoc?.approx?.lat ?? null;
-            const baseLon   = baseLoc?.approx?.lon ?? null;
-            const mapHref   = baseLat != null && baseLon != null ? mapsLink(baseLat, baseLon, baseLabel || undefined) : null;
+            // ===== Collect ALL file GPS points & dedupe (for the header list) =====
+            const rawPts = Array.isArray(p?.files)
+              ? p.files
+                  .map((f: any) => {
+                    const lat = f?.location?.approx?.lat;
+                    const lon = f?.location?.approx?.lon;
+                    if (lat == null || lon == null) return null;
+                    return {
+                      lat: Number(lat),
+                      lon: Number(lon),
+                      label: f?.location?.label || null,
+                    };
+                  })
+                  .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>
+              : [];
 
+            // If no file has GPS, fallback to the proof-level location (so you still see something)
+            if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
+              rawPts.push({
+                lat: Number(p.location.approx.lat),
+                lon: Number(p.location.approx.lon),
+                label: p.location.label || null,
+              });
+            }
+
+            const seen = new Set<string>();
+            const points = rawPts.filter((pt) => {
+              const key = `${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+
+            // Proof status badge
             const st = getProofStatus(p);
             const badgeCls =
               st === 'approved'
@@ -546,23 +574,29 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   </span>
                 </div>
 
-                {/* label above grid */}
-                {baseLabel && (
-                  <div className="mt-1 text-xs text-gray-600">
-                    {mapHref ? (
-                      <a
-                        href={mapHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                        title="Open in map"
-                      >
-                        📍 {baseLabel}
-                      </a>
-                    ) : (
-                      <span>📍 {baseLabel}</span>
-                    )}
-                    {p.takenAt && <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
+                {/* ===== Header shows ALL distinct locations across files ===== */}
+                {points.length > 0 && (
+                  <div className="mt-1 text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {points.map((pt, i) => {
+                      const lbl = pt.label || `${pt.lat.toFixed(5)}, ${pt.lon.toFixed(5)}`;
+                      const href = mapsLink(pt.lat, pt.lon, lbl);
+                      return (
+                        <a
+                          key={i}
+                          href={href || '#'}
+                          target={href ? '_blank' : undefined}
+                          rel={href ? 'noreferrer' : undefined}
+                          className={
+                            'underline decoration-dotted underline-offset-2 hover:decoration-solid ' +
+                            (href ? '' : 'pointer-events-none')
+                          }
+                          title="Open in map"
+                        >
+                          📍 {lbl}
+                        </a>
+                      );
+                    })}
+                    {p.takenAt && <span className="text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
                   </div>
                 )}
 
@@ -570,16 +604,17 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
                 )}
 
+                {/* ===== Grid of files: badge ONLY on photos that have their own GPS ===== */}
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
                     {p.files.map((f: any, i: number) => {
-                      // Only show overlay if THIS file has its own GPS
                       const floc = (f as any)?.location || null;
-                      const fLat = floc?.approx?.lat ?? null;
-                      const fLon = floc?.approx?.lon ?? null;
-                      const hasFileCoords = fLat != null && fLon != null;
-                      const fLabel = hasFileCoords ? (floc?.label || baseLabel || 'Location') : null;
-                      const fMapHref = hasFileCoords ? mapsLink(fLat, fLon, fLabel || undefined) : null;
+                      const lat = floc?.approx?.lat ?? null;
+                      const lon = floc?.approx?.lon ?? null;
+                      const hasGPS = lat != null && lon != null;
+                      const label = hasGPS
+                        ? floc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`
+                        : null;
 
                       return (
                         <div
@@ -587,7 +622,9 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           role="button"
                           tabIndex={0}
                           onClick={() => setLightboxUrl(String(f.url || ''))}
-                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                          onKeyDown={(e) =>
+                            (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))
+                          }
                           className="relative rounded-lg border overflow-hidden cursor-zoom-in"
                           title="Click to zoom"
                         >
@@ -604,21 +641,10 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             </div>
                           )}
 
-                          {fLabel ? (
-                            fMapHref ? (
-                              <a
-                                href={fMapHref}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-                              >
-                                {fLabel}
-                              </a>
-                            ) : (
-                              <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                                {fLabel}
-                              </span>
-                            )
+                          {hasGPS && label ? (
+                            <span className="absolute left-2 top-2 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur">
+                              📍 {label}
+                            </span>
                           ) : null}
                         </div>
                       );
