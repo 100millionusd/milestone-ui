@@ -536,7 +536,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                                       {f.name || 'file'}
                                     </div>
                                   )}
-
   {(() => {
   const floc     = (f as any)?.location || baseLoc;
   const fLabel   = floc?.label || null;
