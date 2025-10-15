@@ -1,27 +1,57 @@
-// src/app/public/page.tsx
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+'use client';
 
-import { getPublicProjects } from "@/lib/api";
-import PublicProjectsGrid from "@/components/PublicProjectsGrid";
+import { useEffect, useState } from 'react';
+import { getPublicProjects } from '@/lib/api';
+import PublicProjectsGrid from '@/components/PublicProjectsGrid';
 
-export default async function PublicProjectsPage() {
-  const items = await getPublicProjects();
-  const list = Array.isArray(items) ? items.slice() : [];
+export default function PublicProjectsPage() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  // newest first
-  list.sort((a: any, b: any) =>
-    String(b?.updatedAt || "").localeCompare(String(a?.updatedAt || ""))
-  );
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await getPublicProjects();
+      const list = Array.isArray(rows) ? rows.slice() : [];
+      list.sort((a: any, b: any) =>
+        String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || ''))
+      );
+      setItems(list);
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <h1 className="text-3xl font-bold mb-6">Projects</h1>
 
-      {list.length === 0 ? (
+      {loading && <p className="text-sm text-gray-500">Loading public projects…</p>}
+
+      {!loading && err && (
+        <div className="space-y-3">
+          <p className="text-sm text-red-600">{err}</p>
+          <button
+            onClick={load}
+            className="inline-flex items-center px-3 py-1.5 rounded bg-slate-900 text-white text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !err && items.length === 0 && (
         <p className="text-sm text-gray-500">No public projects yet.</p>
-      ) : (
-        <PublicProjectsGrid items={list} initialPageSize={8} />
+      )}
+
+      {!loading && !err && items.length > 0 && (
+        <PublicProjectsGrid items={items} initialPageSize={8} />
       )}
     </div>
   );
