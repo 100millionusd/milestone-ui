@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
-import PublicGeoBadge from '@/components/PublicGeoBadge';
 
 function usd(n: number) {
   try {
@@ -55,7 +54,7 @@ type AuditRow = {
 };
 
 // ----- ENV (client-safe) -----
-const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || ''; // e.g. https://basescan.org
+const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
@@ -70,8 +69,6 @@ function mapsLink(
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isIOS = /iPad|iPhone|iPod/i.test(ua);
   const qLabel = label ? encodeURIComponent(label) : `${lat},${lon}`;
-
-  // Apple Maps on iOS, Google Maps elsewhere
   return isIOS
     ? `https://maps.apple.com/?ll=${lat},${lon}&q=${qLabel}&z=16`
     : `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
@@ -134,12 +131,12 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // progress
   const progress = useMemo(() => {
-  const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
-  const total = fb?.milestones?.length || 0;
-  const done  = (fb?.milestones || []).filter((m) => !!m.completed).length;
-  const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
-  return { total, done, pct };
-}, [project.bids, featuredBidId]);
+    const fb = (project.bids || []).find((b) => b.bidId === featuredBidId);
+    const total = fb?.milestones?.length || 0;
+    const done  = (fb?.milestones || []).filter((m) => !!m.completed).length;
+    const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, done, pct };
+  }, [project.bids, featuredBidId]);
 
   // all milestones list
   const allMilestones = useMemo(() => {
@@ -171,14 +168,13 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     };
   }, [project.proposalId]);
 
-  // Attach safe public geo to proofs (robust join: proofId OR (bidId,milestoneIndex))
+  // Attach safe public geo to proofs
   useEffect(() => {
     if (!files || files.length === 0) return;
     let cancelled = false;
 
     (async () => {
       try {
-        // all bidIds present on this card (often just one)
         const bidIds = Array.from(new Set((project.bids || []).map(b => b.bidId).filter(Boolean)));
         if (bidIds.length === 0) return;
 
@@ -190,41 +186,29 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           )
         );
 
-        // Index geos both by proofId and by (bidId,milestoneIndex)
         const byProofId = new Map<number, any>();
-        const byBidMs   = new Map<string, any>(); // key = `${bidId}:${milestoneIndex}`
-
+        const byBidMs   = new Map<string, any>();
         geoArrays.flat().forEach((g: any) => {
           const pid = Number(g?.proofId ?? g?.proof_id);
           if (Number.isFinite(pid)) byProofId.set(pid, g);
-
           const b  = Number(g?.bidId ?? g?.bid_id);
           const mi = Number(g?.milestoneIndex ?? g?.milestone_index);
-          if (Number.isFinite(b) && Number.isFinite(mi)) {
-            byBidMs.set(`${b}:${mi}`, g);
-          }
+          if (Number.isFinite(b) && Number.isFinite(mi)) byBidMs.set(`${b}:${mi}`, g);
         });
 
         if (cancelled) return;
 
-        // If we only have one bid on the page, use it for the (bidId,milestoneIndex) fallback
         const singleBidId = bidIds.length === 1 ? bidIds[0] : null;
 
         setFiles(prev =>
           prev.map((p: any) => {
-            // try proofId first
             const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
             let hit = Number.isFinite(pid) ? byProofId.get(pid) : null;
-
-            // fallback: (bidId,milestoneIndex)
             if (!hit) {
               const b  = Number(p?.bidId ?? p?.bid_id ?? singleBidId);
               const mi = Number(p?.milestoneIndex ?? p?.milestone_index);
-              if (Number.isFinite(b) && Number.isFinite(mi)) {
-                hit = byBidMs.get(`${b}:${mi}`) || null;
-              }
+              if (Number.isFinite(b) && Number.isFinite(mi)) hit = byBidMs.get(`${b}:${mi}`) || null;
             }
-
             if (!hit) return p;
             return {
               ...p,
@@ -238,21 +222,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
     return () => { cancelled = true; };
   }, [project.bids, files.length]);
-
-  // debug join
-  useEffect(() => {
-    if (files.length) {
-      try {
-        console.table(
-          files.map((f: any) => ({
-            proofId: f.proofId ?? f.proof_id ?? f.id,
-            hasLocation: !!f.location,
-            label: f.location?.label ?? null,
-          }))
-        );
-      } catch {}
-    }
-  }, [files]);
 
   // audit badge (summary)
   useEffect(() => {
@@ -269,9 +238,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         setAuditSummary(j.summary || { anchored: false });
       } catch {}
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [project.proposalId]);
 
   // audit tab rows (lazy)
@@ -290,9 +257,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         setAuditRows(Array.isArray(j.events) ? j.events : []);
       } catch {}
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [tab, project.proposalId, auditRows]);
 
   const tabs = [
@@ -303,357 +268,330 @@ export default function PublicProjectCard({ project }: { project: Project }) {
     { key: 'audit' as const, label: 'Audit' },
   ];
 
-  // anchored badge
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
   const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
-  const explorerHref =
-    auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
+  const explorerHref = auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
 
+  // ---------- RENDER ----------
   return (
-    <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-      {/* cover with lightbox */}
-      <button
-        type="button"
-        className="relative aspect-[16/9] bg-gray-50 w-full"
-        onClick={() => project.coverImage && setLightboxUrl(project.coverImage!)}
-      >
-        {project.coverImage ? (
-          <img
-            src={project.coverImage}
-            alt={project.proposalTitle || 'cover'}
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
-        )}
-      </button>
+    <>
+      <div className="rounded-2xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+        {/* cover with lightbox */}
+        <button
+          type="button"
+          className="relative aspect-[16/9] bg-gray-50 w-full"
+          onClick={() => project.coverImage && setLightboxUrl(project.coverImage!)}
+        >
+          {project.coverImage ? (
+            <img
+              src={project.coverImage}
+              alt={project.proposalTitle || 'cover'}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
+          )}
+        </button>
 
-      <div className="p-4">
-        <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{project.orgName}</div>
+        <div className="p-4">
+          <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">{project.orgName}</div>
 
-        {/* title + audit badge */}
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          {project.proposalTitle || 'Untitled Project'}
-          {auditSummary ? (
-            anchored ? (
-              anchorHref ? (
-                <a
-                  href={anchorHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:underline"
-                  title={ipfsHref ? 'View IPFS snapshot' : 'View anchor transaction'}
-                >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Anchored
-                </a>
+          {/* title + audit badge */}
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            {project.proposalTitle || 'Untitled Project'}
+            {auditSummary ? (
+              anchored ? (
+                anchorHref ? (
+                  <a
+                    href={anchorHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:underline"
+                    title={ipfsHref ? 'View IPFS snapshot' : 'View anchor transaction'}
+                  >
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Anchored
+                  </a>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700" title="Anchored">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Anchored
+                  </span>
+                )
               ) : (
-                <span
-                  className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
-                  title="Anchored"
-                >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 mr-1">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Anchored
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                  Not anchored yet
                 </span>
               )
-            ) : (
-              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                Not anchored yet
-              </span>
-            )
-          ) : null}
-        </h2>
+            ) : null}
+          </h2>
 
-        {project.summary && (
-  <div
-    className="mt-2 max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
-    tabIndex={0}
-    aria-label="Project description (scrollable)"
-  >
-    <div className="p-3">
-      <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.summary}</p>
-    </div>
-  </div>
-)}
-
-        {/* Milestone progress */}
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>Milestone progress</span>
-            <span>
-              {progress.done}/{progress.total} completed
-            </span>
-          </div>
-          <div className="mt-1 h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+          {/* TOP scrollable description */}
+          {project.summary && (
             <div
-              className="h-full bg-black transition-[width] duration-300"
-              style={{ width: `${Math.min(100, Math.max(0, progress.pct))}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="mt-4 border-b border-gray-200">
-          <nav className="-mb-px flex gap-5">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={
-                  'pb-2 text-sm outline-none ' +
-                  (tab === t.key ? 'border-b-2 border-black font-medium' : 'text-gray-500 hover:text-gray-800')
-                }
-                type="button"
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        {/* tab content */}
-<div className="mt-6">
-  {tab === "overview" && (
-    <>
-      <section className="space-y-4">
-        {project.summary && (
-          <div>
-            <h2 className="text-lg font-semibold mb-2">Project Description</h2>
-
-            {/* Scrollable description */}
-            <div
-              className="max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
+              className="mt-2 max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
               tabIndex={0}
               aria-label="Project description (scrollable)"
             >
               <div className="p-3">
-                <p className="whitespace-pre-wrap text-gray-700">{project.summary}</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.summary}</p>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {Array.isArray(project.images) && project.images.length > 1 && (
-          <div>
-            <h3 className="text-sm font-medium mb-2">More images</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {project.images.slice(1, 10).map((u: string, i: number) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={u}
-                  alt={`image ${i + 1}`}
-                  className="w-full aspect-video object-cover rounded-lg border"
-                  loading="lazy"
-                />
-              ))}
+          {/* Milestone progress */}
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span>Milestone progress</span>
+              <span>{progress.done}/{progress.total} completed</span>
+            </div>
+            <div className="mt-1 h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+              <div className="h-full bg-black transition-[width] duration-300" style={{ width: `${Math.min(100, Math.max(0, progress.pct))}%` }} />
             </div>
           </div>
-        )}
-      </section>
-    </>
-  )}
-</div>
 
-          {tab === 'bids' && (
-            <>
-              {(!project.bids || project.bids.length === 0) && (
-                <div className="text-sm text-gray-500">No public bids yet.</div>
-              )}
-              {project.bids?.map((b) => {
-                const isFeatured = b.bidId === featuredBidId;
-                const isApproved = String(b.status).toLowerCase() === 'approved';
-                return (
-                  <div key={b.bidId} className="rounded-xl border border-gray-200 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <div className="font-medium">{b.vendorName || 'Vendor'}</div>
-                        {isFeatured && isApproved && (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                            approved
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-sm text-gray-700">{usd(b.priceUSD)}</div>
-                    </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {b.days ? `${b.days} days` : null} {b.status ? `• ${b.status}` : null}
-                    </div>
-                    {b.milestones?.length ? (
-                      <div className="mt-2">
-                        <div className="text-xs font-medium text-gray-700 mb-1">Milestones</div>
-                        <ol className="space-y-1">
-                          {b.milestones.map((m, i) => (
-                            <li key={i} className="text-xs text-gray-700">
-                              <span className="font-medium">{m.name || `Milestone ${i + 1}`}</span>
-                              {typeof m.amount === 'number' && <> — {usd(m.amount)}</>}
-                              {m.dueDate && <> • due {new Date(m.dueDate).toLocaleDateString()}</>}
-                              {m.completed && <> • completed</>}
-                            </li>
-                          ))}
-                        </ol>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </>
-          )}
-
-          {tab === 'milestones' && (
-            <>
-              {allMilestones.length === 0 && <div className="text-sm text-gray-500">No public milestones yet.</div>}
-              {allMilestones.map(({ fromBidId, vendor, m }, i) => (
-                <div key={i} className="rounded-lg border p-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">
-                      {m.name || `Milestone`} <span className="text-gray-400">• bid #{fromBidId}</span>
-                    </div>
-                    <div className="text-gray-700">{typeof m.amount === 'number' ? usd(m.amount) : ''}</div>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {vendor ? `${vendor} • ` : ''}
-                    {m.dueDate ? `due ${new Date(m.dueDate).toLocaleDateString()}` : ''}
-                    {m.completed ? ' • completed' : ''}
-                  </div>
-                </div>
+          {/* Tabs */}
+          <div className="mt-4 border-b border-gray-200">
+            <nav className="-mb-px flex gap-5">
+              {tabs.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={'pb-2 text-sm outline-none ' + (tab === t.key ? 'border-b-2 border-black font-medium' : 'text-gray-500 hover:text-gray-800')}
+                  type="button"
+                >
+                  {t.label}
+                </button>
               ))}
-            </>
-          )}
+            </nav>
+          </div>
 
-          {tab === 'files' && (
-            <>
-              {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
-
-              {files.length > 0 && (
-                <div className="space-y-3">
-                  {files.map((p, idx) => {
-                    // build a Google Maps link if we have coordinates
-                    const lat = p?.location?.approx?.lat;
-                    const lon = p?.location?.approx?.lon;
-                    const mapHref =
-                      lat != null && lon != null ? `https://maps.google.com/?q=${lat},${lon}` : null;
-
-                    return (
-                      <div key={p.proofId || idx} className="rounded-lg border p-3">
-                        <div className="text-sm font-medium">
-                          Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-                        </div>
-
-                        {/* plain text label above grid, clickable if we have coords */}
- {p.location?.label && (
-  <div className="mt-1 text-xs text-gray-600">
-    <a
-      href={
-        mapsLink(
-          p.location?.approx?.lat as number,
-          p.location?.approx?.lon as number,
-          p.location?.label as string
-        ) ?? '#'
-      }
-      target="_blank"
-      rel="noreferrer"
-      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-      title="Open in map"
-    >
-      📍 {p.location.label}
-    </a>
-    {p.takenAt && (
-      <span className="ml-2 text-gray-400">
-        • Taken {fmtTakenAt(p.takenAt)}
-      </span>
-    )}
-  </div>
-)}
-
-                        {p.publicText && (
-                          <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-                        )}
-
-                        {Array.isArray(p.files) && p.files.length > 0 && (
-                          <div className="mt-2 grid grid-cols-2 gap-3">
-                            {p.files.map((f: any, i: number) => (
-                              <button
-                                key={i}
-                                type="button"
-                                onClick={() => setLightboxUrl(String(f.url || ''))}
-                                className="relative block rounded-lg border overflow-hidden"
-                                title="Click to zoom"
-                              >
-                                {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                                  <img
-                                    src={f.url}
-                                    alt={f.name || `file ${i + 1}`}
-                                    className="w-full aspect-video object-cover"
-                                    loading="lazy"
-                                  />
-                                ) : (
-                                  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                                    {f.name || 'file'}
-                                  </div>
-                                )}
-
-                                {/* tiny overlay label on the thumbnail; clickable if we have coords */}
-                                {p.location?.label && (
-                                  mapHref ? (
-                                    <a
-                                      href={mapHref}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-                                    >
-                                      {p.location.label}
-                                    </a>
-                                  ) : (
-                                    <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                                      {p.location.label}
-                                    </span>
-                                  )
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
+          {/* tab content */}
+          <div className="mt-6">
+            {tab === 'overview' && (
+              <section className="space-y-4">
+                {project.summary && (
+                  <div>
+                    <h2 className="text-lg font-semibold mb-2">Project Description</h2>
+                    {/* Scrollable description (tabbed) */}
+                    <div
+                      className="max-h-96 md:max-h-[28rem] overflow-y-auto pr-2 rounded-lg border border-gray-200/70 bg-white"
+                      tabIndex={0}
+                      aria-label="Project description (scrollable)"
+                    >
+                      <div className="p-3">
+                        <p className="whitespace-pre-wrap text-gray-700">{project.summary}</p>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
+                    </div>
+                  </div>
+                )}
 
-          {tab === 'audit' && (
-            <section className="space-y-3 text-sm">
-              {!auditRows && <div className="text-gray-500">Loading audit…</div>}
-              {auditRows && auditRows.length === 0 && <div className="text-gray-500">No public audit events yet.</div>}
-              {auditRows && auditRows.length > 0 && (
-                <AuditPanel
-                  events={normalizeAudit(auditRows)}
-                  milestoneNames={milestoneNamesFromProject(project)}
-                  initialDays={3}
-                />
-              )}
-            </section>
-          )}
+                {Array.isArray(project.images) && project.images.length > 1 && (
+                  <div>
+                    <h3 className="text-sm font-medium mb-2">More images</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {project.images.slice(1, 10).map((u: string, i: number) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={i}
+                          src={u}
+                          alt={`image ${i + 1}`}
+                          className="w-full aspect-video object-cover rounded-lg border"
+                          loading="lazy"
+                          onClick={() => setLightboxUrl(u)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {tab === 'bids' && (
+              <>
+                {(!project.bids || project.bids.length === 0) && (
+                  <div className="text-sm text-gray-500">No public bids yet.</div>
+                )}
+                {project.bids?.map((b) => {
+                  const isFeatured = b.bidId === featuredBidId;
+                  const isApproved = String(b.status).toLowerCase() === 'approved';
+                  return (
+                    <div key={b.bidId} className="rounded-xl border border-gray-200 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium">{b.vendorName || 'Vendor'}</div>
+                          {isFeatured && isApproved && (
+                            <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                              approved
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-700">{usd(b.priceUSD)}</div>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {b.days ? `${b.days} days` : null} {b.status ? `• ${b.status}` : null}
+                      </div>
+                      {b.milestones?.length ? (
+                        <div className="mt-2">
+                          <div className="text-xs font-medium text-gray-700 mb-1">Milestones</div>
+                          <ol className="space-y-1">
+                            {b.milestones.map((m, i) => (
+                              <li key={i} className="text-xs text-gray-700">
+                                <span className="font-medium">{m.name || `Milestone ${i + 1}`}</span>
+                                {typeof m.amount === 'number' && <> — {usd(m.amount)}</>}
+                                {m.dueDate && <> • due {new Date(m.dueDate).toLocaleDateString()}</>}
+                                {m.completed && <> • completed</>}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {tab === 'milestones' && (
+              <>
+                {allMilestones.length === 0 && <div className="text-sm text-gray-500">No public milestones yet.</div>}
+                {allMilestones.map(({ fromBidId, vendor, m }, i) => (
+                  <div key={i} className="rounded-lg border p-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">
+                        {m.name || `Milestone`} <span className="text-gray-400">• bid #{fromBidId}</span>
+                      </div>
+                      <div className="text-gray-700">{typeof m.amount === 'number' ? usd(m.amount) : ''}</div>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {vendor ? `${vendor} • ` : ''}
+                      {m.dueDate ? `due ${new Date(m.dueDate).toLocaleDateString()}` : ''}
+                      {m.completed ? ' • completed' : ''}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {tab === 'files' && (
+              <>
+                {files.length === 0 && <div className="text-sm text-gray-500">No public milestones/proofs yet.</div>}
+
+                {files.length > 0 && (
+                  <div className="space-y-3">
+                    {files.map((p, idx) => {
+                      const lat = p?.location?.approx?.lat;
+                      const lon = p?.location?.approx?.lon;
+                      const mapHref = lat != null && lon != null ? mapsLink(lat, lon, p?.location?.label) : null;
+
+                      return (
+                        <div key={p.proofId || idx} className="rounded-lg border p-3">
+                          <div className="text-sm font-medium">
+                            Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                          </div>
+
+                          {/* label above grid */}
+                          {p.location?.label && (
+                            <div className="mt-1 text-xs text-gray-600">
+                              {mapHref ? (
+                                <a
+                                  href={mapHref}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                  title="Open in map"
+                                >
+                                  📍 {p.location.label}
+                                </a>
+                              ) : (
+                                <span>📍 {p.location.label}</span>
+                              )}
+                              {p.takenAt && (
+                                <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>
+                              )}
+                            </div>
+                          )}
+
+                          {p.publicText && (
+                            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+                          )}
+
+                          {Array.isArray(p.files) && p.files.length > 0 && (
+                            <div className="mt-2 grid grid-cols-2 gap-3">
+                              {p.files.map((f: any, i: number) => (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => setLightboxUrl(String(f.url || ''))}
+                                  className="relative block rounded-lg border overflow-hidden"
+                                  title="Click to zoom"
+                                >
+                                  {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                                    <img
+                                      src={f.url}
+                                      alt={f.name || `file ${i + 1}`}
+                                      className="w-full aspect-video object-cover"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                                      {f.name || 'file'}
+                                    </div>
+                                  )}
+
+                                  {p.location?.label && (
+                                    mapHref ? (
+                                      <a
+                                        href={mapHref}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+                                      >
+                                        {p.location.label}
+                                      </a>
+                                    ) : (
+                                      <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+                                        {p.location.label}
+                                      </span>
+                                    )
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {tab === 'audit' && (
+              <section className="space-y-3 text-sm">
+                {!auditRows && <div className="text-gray-500">Loading audit…</div>}
+                {auditRows && auditRows.length === 0 && <div className="text-gray-500">No public audit events yet.</div>}
+                {auditRows && auditRows.length > 0 && (
+                  <AuditPanel
+                    events={normalizeAudit(auditRows)}
+                    milestoneNames={milestoneNamesFromProject(project)}
+                    initialDays={3}
+                  />
+                )}
+              </section>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Lightbox modal */}
+      {/* Lightbox modal (sibling of the card root) */}
       {lightboxUrl && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
@@ -676,6 +614,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
