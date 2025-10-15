@@ -471,37 +471,42 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                 {files.length > 0 && (
                   <div className="space-y-3">
                     {files.map((p, idx) => {
-                      const lat = p?.location?.approx?.lat;
-                      const lon = p?.location?.approx?.lon;
-                      const mapHref = lat != null && lon != null ? mapsLink(lat, lon, p?.location?.label) : null;
+  // Choose a base location: proof-level, otherwise first file with location
+  const fileWithLoc = Array.isArray(p?.files)
+    ? p.files.find((f: any) => f?.location?.label || (f?.location?.approx?.lat != null && f?.location?.approx?.lon != null))
+    : null;
+  const baseLoc   = p?.location || fileWithLoc?.location || null;
+  const baseLabel = baseLoc?.label || null;
+  const baseLat   = baseLoc?.approx?.lat ?? null;
+  const baseLon   = baseLoc?.approx?.lon ?? null;
+  const mapHref   = baseLat != null && baseLon != null ? mapsLink(baseLat, baseLon, baseLabel || undefined) : null;
 
-                      return (
+  return (
+    <div key={p.proofId || idx} className="rounded-lg border p-3">
                         <div key={p.proofId || idx} className="rounded-lg border p-3">
                           <div className="text-sm font-medium">
                             Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
                           </div>
 
                           {/* label above grid */}
-                          {p.location?.label && (
-                            <div className="mt-1 text-xs text-gray-600">
-                              {mapHref ? (
-                                <a
-                                  href={mapHref}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                                  title="Open in map"
-                                >
-                                  📍 {p.location.label}
-                                </a>
-                              ) : (
-                                <span>📍 {p.location.label}</span>
-                              )}
-                              {p.takenAt && (
-                                <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>
-                              )}
-                            </div>
-                          )}
+                          {baseLabel && (
+  <div className="mt-1 text-xs text-gray-600">
+    {mapHref ? (
+      <a
+        href={mapHref}
+        target="_blank"
+        rel="noreferrer"
+        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+        title="Open in map"
+      >
+        📍 {baseLabel}
+      </a>
+    ) : (
+      <span>📍 {baseLabel}</span>
+    )}
+    {p.takenAt && <span className="ml-2 text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
+  </div>
+)}
 
                           {p.publicText && (
                             <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
@@ -532,22 +537,30 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                                     </div>
                                   )}
 
-                                  {p.location?.label && (
-                                    mapHref ? (
-                                      <a
-                                        href={mapHref}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
-                                      >
-                                        {p.location.label}
-                                      </a>
-                                    ) : (
-                                      <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
-                                        {p.location.label}
-                                      </span>
-                                    )
-                                  )}
+  {(() => {
+  const floc     = (f as any)?.location || baseLoc;
+  const fLabel   = floc?.label || null;
+  const fLat     = floc?.approx?.lat ?? null;
+  const fLon     = floc?.approx?.lon ?? null;
+  const fMapHref = fLat != null && fLon != null ? mapsLink(fLat, fLon, fLabel || undefined) : mapHref;
+
+  return fLabel ? (
+    fMapHref ? (
+      <a
+        href={fMapHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5 hover:bg-black/70"
+      >
+        {fLabel}
+      </a>
+    ) : (
+      <span className="absolute left-1.5 bottom-1.5 rounded bg-black/60 text-[10px] leading-tight text-white px-1.5 py-0.5">
+        {fLabel}
+      </span>
+    )
+  ) : null;
+})()}
                                 </div>
                               ))}
                             </div>
