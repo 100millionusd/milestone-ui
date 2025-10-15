@@ -268,24 +268,41 @@ export default function AdminOversightPage() {
 
   const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
   const PATH = API_BASE ? "/admin/oversight" : "/api/admin/oversight";
-  const url = `${API_BASE}${PATH}`;
+  const baseUrl = `${API_BASE}${PATH}`;
 
   async function load(signal?: AbortSignal) {
-    try {
-      setError(null);
-      setLoading(true);
-      const res = await fetch(url, { cache: "no-store", credentials: "include", headers: { Accept: "application/json" }, signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as Oversight;
-      setData(json);
-      setLastUpdated(Date.now());
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setError(e?.message || "Failed to load");
-    } finally {
-      setLoading(false);
+  try {
+    setError(null);
+    setLoading(true);
+
+    // cache-buster so we ALWAYS get fresh data
+    const res = await fetch(`${baseUrl}?t=${Date.now()}`, {
+      cache: "no-store",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+      signal,
+    });
+
+    if (!res.ok) {
+      // try to surface server error text if available
+      let msg = `HTTP ${res.status}`;
+      try {
+        const err = await res.text();
+        if (err) msg += ` — ${err.slice(0, 300)}`;
+      } catch {}
+      throw new Error(msg);
     }
+
+    const json = (await res.json()) as Oversight;
+    setData(json);
+    setLastUpdated(Date.now());
+  } catch (e: any) {
+    if (e?.name === "AbortError") return;
+    setError(e?.message || "Failed to load");
+  } finally {
+    setLoading(false);
   }
+}
 
   // initial load + abort on unmount
   useEffect(() => {
@@ -297,6 +314,7 @@ export default function AdminOversightPage() {
 
   // auto refresh
   useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 30000 : null);
+  useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 15000 : null);
 
   // keyboard shortcuts: "/" focus search, "r" refresh, "[" prev tab, "]" next tab
   const searchRef = useRef<HTMLInputElement | null>(null);
