@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -398,7 +399,6 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                     <h3 className="text-sm font-medium mb-2">More images</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           key={i}
                           src={u}
@@ -526,11 +526,13 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           {Array.isArray(p.files) && p.files.length > 0 && (
                             <div className="mt-2 grid grid-cols-2 gap-3">
                               {p.files.map((f: any, i: number) => (
-                                <button
+                                <div
                                   key={i}
-                                  type="button"
+                                  role="button"
+                                  tabIndex={0}
                                   onClick={() => setLightboxUrl(String(f.url || ''))}
-                                  className="relative block rounded-lg border overflow-hidden"
+                                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                                  className="relative rounded-lg border overflow-hidden cursor-zoom-in"
                                   title="Click to zoom"
                                 >
                                   {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
@@ -562,7 +564,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                                       </span>
                                     )
                                   )}
-                                </button>
+                                </div>
                               ))}
                             </div>
                           )}
