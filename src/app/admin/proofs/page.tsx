@@ -245,6 +245,12 @@ export default function AdminProofsPage() {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
+  // Count archived milestones for the badge/pill
+const archivedCount = useMemo(
+  () => Object.values(archMap).filter(v => v.archived).length,
+  [archMap]
+);
+
   // ---- Polling after Pay (local only, doesn't depend on server pending flag) ----
   async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 12, intervalMs = 2500) {
     for (let i = 0; i < tries; i++) {
