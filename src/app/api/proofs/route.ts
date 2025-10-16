@@ -57,21 +57,41 @@ export async function GET(req: Request) {
       include: { files: true },
     });
 
-    const out = rows.map((p: any) => ({
-      proposalId: p.proposalId,
-      milestoneIndex: p.milestoneIndex,
-      note: p.note || undefined,
-      files: (p.files || []).map((f: any) => ({
-        url: f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined),
-        cid: f.cid || undefined,
-        name: f.name || undefined,
-      })),
-    }));
-    return NextResponse.json(out);
-  } catch (e: any) {
-    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
-  }
-}
+ const out = rows.map((p: any) => ({
+  proposalId: p.proposalId,
+  milestoneIndex: p.milestoneIndex,
+  note: p.note || undefined,
+  files: (p.files || []).map((f: any) => {
+    const url =
+      f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
+    const exif = f.exif ?? undefined;
+
+    const lat =
+      typeof f.lat === 'number'
+        ? f.lat
+        : typeof exif?.gpsLatitude === 'number'
+        ? exif.gpsLatitude
+        : null;
+
+    const lon =
+      typeof f.lon === 'number'
+        ? f.lon
+        : typeof exif?.gpsLongitude === 'number'
+        ? exif.gpsLongitude
+        : null;
+
+    return {
+      url,
+      cid: f.cid || undefined,
+      name: f.name || undefined,
+      exif,   // passes through if you have it in DB
+      lat,    // null unless real GPS exists
+      lon,    // null unless real GPS exists
+    };
+  }),
+}));
+
+return NextResponse.json(out);
 
 export async function POST(req: Request) {
   try {
