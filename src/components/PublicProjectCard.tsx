@@ -154,7 +154,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('overview');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [approvedOnly, setApprovedOnly] = useState(true);
+  const [approvedOnly, setApprovedOnly] = useState(false); // default to "All" so content shows
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
