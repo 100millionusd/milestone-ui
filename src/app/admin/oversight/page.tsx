@@ -111,6 +111,13 @@ const Icon = {
 const cls = (...s: (string | false | undefined)[]) => s.filter(Boolean).join(" ");
 const fmtInt = (n: number) => new Intl.NumberFormat().format(Math.round(n ?? 0));
 const fmtUSD0 = (n: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(n ?? 0));
+const fmtUSDcompact = (n: number) =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number(n ?? 0));
 const fmtPct = (n: number) => `${Math.round(n ?? 0)}%`;
 const shortAddr = (w: string) => (w?.length > 12 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w);
 const dt = (s: string) => new Date(s);
@@ -213,7 +220,9 @@ function StatCard({ label, value, sub, tone = "neutral", icon }: { label: string
         {icon && <div className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">{icon}</div>}
         <div className="flex-1">
           <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
-          <div className="mt-0.5 text-2xl font-semibold tracking-tight">{value}</div>
+          <div className="mt-0.5 font-semibold tracking-tight leading-tight">
+  <div className="text-xl sm:text-2xl max-w-full min-w-0 truncate">{value}</div>
+</div>
           {sub && <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>}
         </div>
       </div>
@@ -515,7 +524,7 @@ export default function AdminOversightPage() {
               <StatCard label="Open Proofs" value={loading?"—":fmtInt(tiles?.openProofs||0)} icon={<Icon.Proof className="h-5 w-5"/>} />
               <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "warning" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Pending Payouts" value={loading ? "—" : fmtInt(pending.count)} icon={<Icon.Ticket className="h-5 w-5"/>} />
-              <StatCard label="Pending USD"     value={loading ? "—" : fmtUSD0(pending.usd)}  icon={<Icon.Dollar className="h-5 w-5"/>} />
+              <StatCard label="Pending USD" value={loading ? "—" : (<><span className="sm:hidden">{fmtUSDcompact(pending.usd)}</span><span className="hidden sm:inline">{fmtUSD0(pending.usd)}</span></>)} icon={<Icon.Dollar className="h
               <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} />
               <StatCard label="P50 Cycle (h)" value={loading?"—":fmtInt(tiles?.p50CycleHours||0)} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Revision Rate" value={loading?"—":fmtPct(tiles?.revisionRatePct||0)} icon={<Icon.Check className="h-5 w-5"/>} />
