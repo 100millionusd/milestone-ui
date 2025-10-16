@@ -51,7 +51,6 @@ const IMAGE_EXT_RE = /\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i;
 const gpsCache = new Map<string, { lat: number; lon: number } | null>();
 
 async function getExifr(): Promise<any> {
-  // dynamic import avoids type issues if no @types/exifr
   const mod = await import('exifr');
   // @ts-ignore - exifr default export
   return mod.default || mod;
@@ -60,23 +59,51 @@ async function getExifr(): Promise<any> {
 async function gpsFromUrl(url?: string) {
   if (!url) return null;
   const key = url.split('?')[0];
-  if (!IMAGE_EXT_RE.test(key)) return null; // only try images
+  if (!IMAGE_EXT_RE.test(key)) return null;        // only try images
   if (gpsCache.has(key)) return gpsCache.get(key)!;
 
   try {
-    const res = await fetch(key, { cache: 'no-store' });
+    // Some gateways reject bare fetches; send headers.
+    const res = await fetch(key, {
+      cache: 'no-store',
+      headers: {
+        'Accept': 'image/*',
+        // any non-empty UA helps with certain gateways/CDNs
+        'User-Agent': 'MilestoneProofs/1.0 (+support@yourdomain)'
+      }
+    });
     if (!res.ok) {
+      // console.warn('[proofs] fetch failed', res.status, key);
       gpsCache.set(key, null);
       return null;
     }
+
     const ab = await res.arrayBuffer();
     const exifr = await getExifr();
-    const g: any = await exifr.gps(ab).catch(() => null);
-    const lat = g?.latitude;
-    const lon = g?.longitude;
-    const val = Number.isFinite(lat) && Number.isFinite(lon)
-      ? { lat: Number(lat), lon: Number(lon) }
-      : null;
+
+    // Fast path
+    let g: any = await exifr.gps(ab).catch(() => null);
+
+    // Fallback: some files expose GPS under different names/IFDs
+    if (!g) {
+      const meta: any = await exifr
+        .parse(ab, { tiff: true, ifd0: true, exif: true, gps: true })
+        .catch(() => null);
+      if (meta) {
+        g = {
+          latitude:  meta?.GPSLatitude  ?? meta?.latitude  ?? meta?.lat  ?? null,
+          longitude: meta?.GPSLongitude ?? meta?.longitude ?? meta?.lon  ?? null,
+        };
+      }
+    }
+
+    const lat = Number.isFinite(g?.latitude)  ? Number(g.latitude)  : null;
+    const lon = Number.isFinite(g?.longitude) ? Number(g.longitude) : null;
+
+    const val = (lat != null && lon != null) ? { lat, lon } : null;
+    if (!val) {
+      // console.warn('[proofs] no GPS in EXIF', key);
+    }
     gpsCache.set(key, val);
     return val;
   } catch {
