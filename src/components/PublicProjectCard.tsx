@@ -320,63 +320,75 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const anchorHref = ipfsHref || explorerHref;
 
   // ---------- FILES TAB RENDERER ----------
-  function renderFilesTab() {
-    const hasAnyNonApproved = files.some((p) => getProofStatus(p) !== 'approved');
-    const proofsToShow = approvedOnly ? files.filter((p) => getProofStatus(p) === 'approved') : files;
+function renderFilesTab() {
+  const hasAnyNonApproved = files.some((p) => getProofStatus(p) !== 'approved');
+  const proofsToShow = approvedOnly ? files.filter((p) => getProofStatus(p) === 'approved') : files;
 
-    if (!proofsToShow.length) {
-      return (
-        <div className="text-sm text-gray-500">
-          {approvedOnly ? 'No approved proofs yet.' : 'No public milestones/proofs yet.'}
+  return (
+    <>
+      {/* Always show the toggle (if there exist any non-approved proofs) */}
+      {hasAnyNonApproved && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+          <span className="mr-1">Show:</span>
+          <button
+            type="button"
+            aria-pressed={approvedOnly}
+            onClick={() => setApprovedOnly(true)}
+            className={
+              'rounded-full px-2 py-0.5 border ' +
+              (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+            }
+          >
+            Approved only
+          </button>
+          <button
+            type="button"
+            aria-pressed={!approvedOnly}
+            onClick={() => setApprovedOnly(false)}
+            className={
+              'rounded-full px-2 py-0.5 border ' +
+              (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+            }
+          >
+            All
+          </button>
         </div>
-      );
-    }
+      )}
 
-    return (
-      <>
-        {hasAnyNonApproved && (
-          <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
-            <span className="mr-1">Show:</span>
-            <button
-              type="button"
-              aria-pressed={approvedOnly}
-              onClick={() => setApprovedOnly(true)}
-              className={
-                'rounded-full px-2 py-0.5 border ' +
-                (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-              }
-            >
-              Approved only
-            </button>
-            <button
-              type="button"
-              aria-pressed={!approvedOnly}
-              onClick={() => setApprovedOnly(false)}
-              className={
-                'rounded-full px-2 py-0.5 border ' +
-                (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-              }
-            >
-              All
-            </button>
-          </div>
-        )}
-
+      {/* Empty state OR grid */}
+      {proofsToShow.length === 0 ? (
+        <div className="text-sm text-gray-500">
+          {approvedOnly ? (
+            <>
+              No approved proofs yet.{` `}
+              {hasAnyNonApproved && (
+                <button
+                  type="button"
+                  onClick={() => setApprovedOnly(false)}
+                  className="underline underline-offset-2 ml-1"
+                >
+                  Show all
+                </button>
+              )}
+            </>
+          ) : (
+            'No public milestones/proofs yet.'
+          )}
+        </div>
+      ) : (
         <div className="space-y-3">
           {proofsToShow.map((p, idx) => {
             // Collect ALL file GPS points & dedupe for the header list
             const rawPts = Array.isArray(p?.files)
-              ? (p.files
-                  .map((f: any) => fileCoords(f))
-                  .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>)
+              ? (p.files.map((f: any) => fileCoords(f)).filter(Boolean) as Array<{
+                  lat: number;
+                  lon: number;
+                  label?: string | null;
+                }>)
               : [];
 
-            // If none on files, fallback to proof-level location
-            if (
-              rawPts.length === 0 &&
-              p?.location?.approx?.lat != null &&
-              p?.location?.approx?.lon != null
-            ) {
+            // Fallback to proof-level location if none per-file
+            if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
               rawPts.push({
                 lat: Number(p.location.approx.lat),
                 lon: Number(p.location.approx.lon),
@@ -408,9 +420,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   <div>
                     Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
                   </div>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeCls}`}
-                  >
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeCls}`}>
                     {st.replace('_', ' ')}
                   </span>
                 </div>
@@ -441,19 +451,15 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   </div>
                 )}
 
-                {p.publicText && (
-                  <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-                )}
+                {p.publicText && <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>}
 
-                {/* Grid: show GPS label inside each photo that has its own coordinates */}
+                {/* Grid: GPS label inside each photo that has coordinates */}
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
                     {p.files.map((f: any, i: number) => {
                       const gps = fileCoords(f);
                       const hasGPS = !!gps;
-                      const label = hasGPS
-                        ? gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`
-                        : null;
+                      const label = hasGPS ? gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}` : null;
                       const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
 
                       return (
@@ -462,9 +468,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           role="button"
                           tabIndex={0}
                           onClick={() => setLightboxUrl(String(f.url || ''))}
-                          onKeyDown={(e) =>
-                            (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))
-                          }
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
                           className={
                             'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
                             (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
@@ -472,12 +476,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           title={hoverTitle}
                         >
                           {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                            <img
-                              src={f.url}
-                              alt={f.name || `file ${i + 1}`}
-                              className="w-full aspect-video object-cover"
-                              loading="lazy"
-                            />
+                            <img src={f.url} alt={f.name || `file ${i + 1}`} className="w-full aspect-video object-cover" loading="lazy" />
                           ) : (
                             <div className="h-24 flex items-center justify-center text-xs text-gray-500">
                               {f.name || 'file'}
@@ -498,9 +497,10 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             );
           })}
         </div>
-      </>
-    );
-  }
+      )}
+    </>
+  );
+}
 
   // ---------- RENDER ----------
   return (
