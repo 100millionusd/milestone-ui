@@ -215,18 +215,18 @@ function StatCard({ label, value, sub, tone = "neutral", icon }: { label: string
     warning: "shadow-[0_0_40px_-10px_rgba(245,158,11,0.35)]",
   }[tone];
   return (
-    <div className={cls("relative rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur p-4 ring-1", toneRing, toneGlow)}>
-      <div className="flex items-center gap-3">
-        {icon && <div className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">{icon}</div>}
-        <div className="flex-1">
-          <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
-          <div className="mt-0.5 font-semibold tracking-tight leading-tight">
-  <div className="text-xl sm:text-2xl max-w-full min-w-0 truncate">{value}</div>
-</div>
-          {sub && <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>}
-        </div>
+ <div className={cls("relative rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur p-4 ring-1", toneRing, toneGlow)}>
+  <div className="flex items-center gap-3">
+    {icon && <div className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 shrink-0">{icon}</div>}
+    <div className="flex-1 min-w-0"> {/* ← allow shrink so truncate works */}
+      <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
+      <div className="mt-0.5 font-semibold leading-tight">
+        <div className="text-xl sm:text-2xl whitespace-nowrap truncate tabular-nums">{value}</div>
       </div>
+      {sub && <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>}
     </div>
+  </div>
+</div>
   );
 }
 
