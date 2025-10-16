@@ -491,54 +491,62 @@ function ProofCard(props: ProofCardProps) {
   }
 
   // APPROVE — hit API_BASE JSON endpoint; if 404/400 or HTML, fallback to adminCompleteMilestone
-  async function handleApprove() {
-    setErr(null);
-    setBusyApprove(true);
-    try {
-      if (typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId)) {
-        try {
-          console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
-          await approveViaApi(proof.proofId);
-        } catch (e: any) {
-          const msg = String(e?.message || '');
-          const shouldFallback =
-            /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
+  // APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
+async function handleApprove() {
+  setErr(null);
+  setBusyApprove(true);
+  try {
+    const hasProofId = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
+    const hasMs = Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex);
 
-          if (
-            shouldFallback &&
-            Number.isFinite(proof.bidId) &&
-            Number.isFinite(proof.milestoneIndex)
-          ) {
-            console.debug('[approve→fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
-            await adminCompleteMilestone(
-              Number(proof.bidId),
-              Number(proof.milestoneIndex),
-              'Approved by admin'
-            );
-          } else {
-            const clean = isProbablyHtml(msg) ? 'Action failed (server returned HTML — check login / endpoint).' : msg;
-            throw new Error(clean || 'Approve failed');
-          }
+    if (!hasProofId && !hasMs) {
+      throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
+    }
+
+    // 1) Approve the proof (Express)
+    if (hasProofId) {
+      try {
+        console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
+        await approveViaApi(proof.proofId as number);
+      } catch (e: any) {
+        const msg = String(e?.message || '');
+        const shouldFallback =
+          /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
+
+        if (!(shouldFallback && hasMs)) {
+          const clean = /<!doctype html|<html[\s>]/i.test(msg)
+            ? 'Action failed (server returned HTML — check login / endpoint).'
+            : msg || 'Approve failed';
+          throw new Error(clean);
         }
-      } else if (Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex)) {
-        console.debug('[approve-fallback] bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
+
+        // Proof not found/JSON mismatch → fall back to milestone completion
+        console.debug('[approve→fallback] proof missing; will complete milestone bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
+      }
+    }
+
+    // 2) ALWAYS complete the milestone (Express) so the project page reflects the change
+    if (hasMs) {
+      try {
         await adminCompleteMilestone(
           Number(proof.bidId),
           Number(proof.milestoneIndex),
           'Approved by admin'
         );
-      } else {
-        throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
+      } catch (e: any) {
+        // Don’t block the UI if milestone is already completed/approved; log and move on
+        console.warn('[approve] milestone completion failed (proof may still be approved):', e?.message || e);
       }
-
-      await onRefresh();
-    } catch (e: any) {
-      const msg = String(e?.message || '');
-      setErr(isProbablyHtml(msg) ? 'Approve failed (unexpected HTML from server).' : msg || 'Approve failed');
-    } finally {
-      setBusyApprove(false);
     }
+
+    await onRefresh();
+  } catch (e: any) {
+    const msg = String(e?.message || '');
+    setErr(/<!doctype html|<html[\s>]/i.test(msg) ? 'Approve failed (unexpected HTML from server).' : msg || 'Approve failed');
+  } finally {
+    setBusyApprove(false);
   }
+}
 
   // REJECT — the legacy route that already worked for you
   async function handleReject() {
