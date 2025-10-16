@@ -420,10 +420,21 @@ export default function AdminOversightPage() {
   }, [filteredVendors, vendorSort]);
 
   const tiles = data?.tiles;
-  const pending = useMemo(
-  () => normalizePending(tiles?.pendingPayouts),
-  [tiles?.pendingPayouts]
-);
+  const pending = useMemo(() => {
+  // normalize the summary shape first
+  const fromTiles = normalizePending(tiles?.pendingPayouts);
+  if (fromTiles.count || fromTiles.usd) return fromTiles;
+
+  // fallback: compute from the pending payouts list
+  const list = data?.payouts?.pending || [];
+  const count = Array.isArray(list) ? list.length : 0;
+  const usd = (Array.isArray(list) ? list : []).reduce((sum, p: any) => {
+    const v = p?.amount_usd ?? p?.amountUsd ?? p?.usd ?? p?.usdCents?./100 ?? 0;
+    const n = typeof v === "string" ? Number(v.replace(/[^0-9.]/g, "")) : Number(v);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+  return { count, usd };
+}, [tiles?.pendingPayouts, data?.payouts?.pending]);
 
   function toggleSort<T extends { key: any; dir: "asc"|"desc" }>(state: T, set: (v: T) => void, key: any) {
     if (state.key === key) set({ ...state, dir: state.dir === "asc" ? "desc" : "asc" });
