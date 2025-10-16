@@ -25,7 +25,7 @@ function normalizeFiles(
   const gw = gatewayBase();
   const bad = (s: string) => s.includes('<gw>') || s.includes('<CID') || s.includes('>') || /^\s*$/.test(s);
   const isCid = (s: string) => /^[A-Za-z0-9]+$/.test(s) && !/^https?:\/\//i.test(s);
-  const fixProtocol = (s: string) => /^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//, '')}`;
+  const fixProtocol = (s: string) => (/^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//, '')}`);
 
   return (Array.isArray(input) ? input : []).flatMap((f: InFile) => {
     if (typeof f === 'string') {
@@ -51,7 +51,7 @@ const IMAGE_EXT_RE = /\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i;
 const gpsCache = new Map<string, { lat: number; lon: number } | null>();
 
 async function getExifr(): Promise<any> {
-  // dynamic import avoids TS type issues if no @types/exifr
+  // dynamic import avoids type issues if no @types/exifr
   const mod = await import('exifr');
   // @ts-ignore - exifr default export
   return mod.default || mod;
@@ -65,13 +65,16 @@ async function gpsFromUrl(url?: string) {
 
   try {
     const res = await fetch(key, { cache: 'no-store' });
-    if (!res.ok) { gpsCache.set(key, null); return null; }
+    if (!res.ok) {
+      gpsCache.set(key, null);
+      return null;
+    }
     const ab = await res.arrayBuffer();
     const exifr = await getExifr();
     const g: any = await exifr.gps(ab).catch(() => null);
     const lat = g?.latitude;
     const lon = g?.longitude;
-    const val = (Number.isFinite(lat) && Number.isFinite(lon))
+    const val = Number.isFinite(lat) && Number.isFinite(lon)
       ? { lat: Number(lat), lon: Number(lon) }
       : null;
     gpsCache.set(key, val);
@@ -122,7 +125,10 @@ export async function GET(req: Request) {
 
             if ((lat == null || lon == null) && url) {
               const g = await gpsFromUrl(url);
-              if (g) { lat = g.lat; lon = g.lon; }
+              if (g) {
+                lat = g.lat;
+                lon = g.lon;
+              }
             }
 
             return {
@@ -166,7 +172,7 @@ export async function POST(req: Request) {
 
     // NEW: support replace mode (default = append)
     const mode: 'append' | 'replace' =
-      (body?.mode === 'replace' || body?.replaceExisting === true) ? 'replace' : 'append';
+      body?.mode === 'replace' || body?.replaceExisting === true ? 'replace' : 'append';
 
     if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
       return NextResponse.json(
@@ -193,9 +199,10 @@ export async function POST(req: Request) {
         where: { id: existing.id },
         data: {
           note: note ?? existing.note,
-          files: mode === 'replace'
-            ? { deleteMany: {}, create: files }  // wipe then add
-            : { create: files },                  // append only
+          files:
+            mode === 'replace'
+              ? { deleteMany: {}, create: files } // wipe then add
+              : { create: files }, // append only
         },
         include: { files: true },
       });
@@ -212,7 +219,10 @@ export async function POST(req: Request) {
 
         if ((lat == null || lon == null) && url) {
           const g = await gpsFromUrl(url);
-          if (g) { lat = g.lat; lon = g.lon; }
+          if (g) {
+            lat = g.lat;
+            lon = g.lon;
+          }
         }
 
         return {
