@@ -156,6 +156,45 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [approvedOnly, setApprovedOnly] = useState(false); // default to "All" so content shows
 
+
+  // client-side GPS cache (EXIF fallback)
+const [gpsByUrl, setGpsByUrl] = useState<Record<string, { lat: number; lon: number }>>({});
+
+useEffect(() => {
+  const want: string[] = [];
+  for (const pr of files || []) {
+    const fileList = Array.isArray(pr?.files) ? pr.files : [];
+    for (const f of fileList) {
+      const u = String(f?.url || '');
+      if (!u) continue;
+      if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
+
+      const hasFromApi =
+        f?.lat != null || f?.lon != null ||
+        (typeof f?.exif?.gpsLatitude === 'number' && typeof f?.exif?.gpsLongitude === 'number');
+
+      if (!hasFromApi && !gpsByUrl[u]) want.push(u);
+    }
+  }
+  if (want.length === 0) return;
+
+  let cancelled = false;
+  (async () => {
+    const exifr = (await import('exifr')).default as any;
+    for (const u of want) {
+      try {
+        const g = await exifr.gps(u).catch(() => null);
+        const lat = g?.latitude, lon = g?.longitude;
+        if (!cancelled && Number.isFinite(lat) && Number.isFinite(lon)) {
+          setGpsByUrl(m => ({ ...m, [u]: { lat: Number(lat), lon: Number(lon) } }));
+        }
+      } catch {}
+    }
+  })();
+
+  return () => { cancelled = true; };
+}, [files, gpsByUrl]);
+
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
   const [auditRows, setAuditRows] = useState<AuditRow[] | null>(null);
@@ -457,17 +496,19 @@ function renderFilesTab() {
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
  {p.files.map((f: any, i: number) => {
-  // ⬅️ STRICT: only mark if THIS file has GPS (no proof-level fallback)
-  const gps = fileCoords(f);
-  const hasGPS =
-    !!gps &&
-    Number.isFinite(gps.lat as number) &&
-    Number.isFinite(gps.lon as number);
+  // 1) try what the API already gave us
+  let gps = fileCoords(f);
 
-  const label = hasGPS
-    ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`)
-    : null;
+  // 2) strict fallback: only use client-extracted GPS for THIS file (no proof-level fallback)
+  if (!gps) {
+    const hit = gpsByUrl[String(f?.url || '')];
+    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+      gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
+    }
+  }
 
+  const hasGPS = !!gps;
+  const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
   const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
 
   return (
@@ -489,6 +530,7 @@ function renderFilesTab() {
           alt={f.name || `file ${i + 1}`}
           className="w-full aspect-video object-cover"
           loading="lazy"
+          crossOrigin="anonymous"
         />
       ) : (
         <div className="h-24 flex items-center justify-center text-xs text-gray-500">
