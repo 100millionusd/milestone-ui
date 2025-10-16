@@ -520,20 +520,38 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         <div className="space-y-3">
           {proofsToShow.map((p, idx) => {
             // ===== Collect ALL file GPS points & dedupe (for the header list) =====
-            const rawPts = Array.isArray(p?.files)
-              ? p.files
-                  .map((f: any) => {
-                    const lat = f?.location?.approx?.lat;
-                    const lon = f?.location?.approx?.lon;
-                    if (lat == null || lon == null) return null;
-                    return {
-                      lat: Number(lat),
-                      lon: Number(lon),
-                      label: f?.location?.label || null,
-                    };
-                  })
-                  .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>
-              : [];
+ const rawPts = Array.isArray(p?.files)
+  ? p.files
+      .map((f: any) => {
+        const loc =
+          f?.location ??
+          f?.geoApprox ??
+          f?.geo_approx ??
+          null;
+
+        const lat =
+          loc?.approx?.lat ??
+          loc?.lat ??
+          f?.exif?.gpsLatitude ??
+          f?.gps?.lat ??
+          null;
+
+        const lon =
+          loc?.approx?.lon ??
+          loc?.lon ??
+          f?.exif?.gpsLongitude ??
+          f?.gps?.lon ??
+          null;
+
+        if (lat == null || lon == null) return null;
+        return {
+          lat: Number(lat),
+          lon: Number(lon),
+          label: loc?.label || null,
+        };
+      })
+      .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>
+  : [];
 
             // If no file has GPS, fallback to the proof-level location (so you still see something)
             if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
@@ -608,13 +626,28 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
                     {p.files.map((f: any, i: number) => {
-                      const floc = (f as any)?.location || null;
-                      const lat = floc?.approx?.lat ?? null;
-                      const lon = floc?.approx?.lon ?? null;
-                      const hasGPS = lat != null && lon != null;
-                      const label = hasGPS
-                        ? floc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`
-                        : null;
+ const loc =
+  f?.location ??
+  f?.geoApprox ??
+  f?.geo_approx ??
+  null;
+
+const lat =
+  loc?.approx?.lat ??
+  loc?.lat ??
+  f?.exif?.gpsLatitude ??
+  f?.gps?.lat ??
+  null;
+
+const lon =
+  loc?.approx?.lon ??
+  loc?.lon ??
+  f?.exif?.gpsLongitude ??
+  f?.gps?.lon ??
+  null;
+
+const hasGPS = lat != null && lon != null;
+const label = hasGPS ? (loc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : null;
 
                       return (
                         <div
@@ -642,7 +675,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           )}
 
                           {hasGPS && label ? (
-                            <span className="absolute left-2 top-2 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur">
+                           <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur">
                               📍 {label}
                             </span>
                           ) : null}
