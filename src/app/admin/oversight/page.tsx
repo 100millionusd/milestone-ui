@@ -524,7 +524,7 @@ export default function AdminOversightPage() {
               <StatCard label="Open Proofs" value={loading?"—":fmtInt(tiles?.openProofs||0)} icon={<Icon.Proof className="h-5 w-5"/>} />
               <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "warning" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Pending Payouts" value={loading ? "—" : fmtInt(pending.count)} icon={<Icon.Ticket className="h-5 w-5"/>} />
-              <StatCard label="Pending USD" value={loading ? "—" : (<><span className="sm:hidden">{fmtUSDcompact(pending.usd)}</span><span className="hidden sm:inline">{fmtUSD0(pending.usd)}</span></>)} icon={<Icon.Dollar className="h
+              <StatCard label="Pending USD" value={loading ? "—" : (<><span className="sm:hidden">{fmtUSDcompact(pending.usd)}</span><span className="hidden sm:inline">{fmtUSD0(pending.usd)}</span></>)} icon={<Icon.Dollar className="h-5 w-5" />} />
               <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} />
               <StatCard label="P50 Cycle (h)" value={loading?"—":fmtInt(tiles?.p50CycleHours||0)} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Revision Rate" value={loading?"—":fmtPct(tiles?.revisionRatePct||0)} icon={<Icon.Check className="h-5 w-5"/>} />
