@@ -80,16 +80,6 @@ function toMilestones(raw: any): any[] {
   return [];
 }
 
-// Latest-first comparator for proofs
-function cmpLatest(a: any, b: any) {
-  const tb = Date.parse(b?.updated_at ?? b?.updatedAt ?? b?.submitted_at ?? b?.submittedAt ?? 0);
-  const ta = Date.parse(a?.updated_at ?? a?.updatedAt ?? a?.submitted_at ?? a?.submittedAt ?? 0);
-  if (tb !== ta) return tb - ta;
-  const ib = Number(b?.proofId ?? b?.id ?? 0);
-  const ia = Number(a?.proofId ?? a?.id ?? 0);
-  return ib - ia;
-}
-
 // ---------- Archive helpers (server-backed, milestone-level) ----------
 type AdminView = 'active' | 'archived';
 type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
@@ -112,14 +102,10 @@ function msKeyFromProof(p: any): string {
 }
 
 // Dedupe a list to one row per milestone
-// Dedupe a list to one (newest) row per milestone
 function uniqByMilestone(list: any[]): any[] {
   const seen = new Set<string>();
   const out: any[] = [];
-
-  // ensure newest proof per milestone "wins"
-  const sorted = [...(list || [])].sort(cmpLatest); // newest first
-  for (const p of sorted) {
+  for (const p of list || []) {
     const k = msKeyFromProof(p);
     if (seen.has(k)) continue;
     seen.add(k);
@@ -604,13 +590,11 @@ function ProofCard(props: ProofCardProps) {
   }
 
   const statusChip =
-  proof.status === 'paid'
-    ? 'bg-green-100 text-green-700'
-    : proof.status === 'approved'
-    ? 'bg-green-100 text-green-700'
-    : proof.status === 'rejected'
-    ? 'bg-red-100 text-red-700'
-    : 'bg-yellow-100 text-yellow-700';
+    proof.status === 'approved'
+      ? 'bg-green-100 text-green-700'
+      : proof.status === 'rejected'
+      ? 'bg-red-100 text-red-700'
+      : 'bg-yellow-100 text-yellow-700';
 
   return (
     <div className="bg-white rounded-lg shadow border p-6">
