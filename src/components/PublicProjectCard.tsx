@@ -456,46 +456,54 @@ function renderFilesTab() {
                 {/* Grid: GPS label inside each photo that has coordinates */}
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
-                    {p.files.map((f: any, i: number) => {
-  const gps = fileCoords(f); // ⬅️ Only use GPS if it's in the image itself
-const hasGPS = !!gps;
-const label = hasGPS ? gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}` : null;
-const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
+ {p.files.map((f: any, i: number) => {
+  // ⬅️ STRICT: only mark if THIS file has GPS (no proof-level fallback)
+  const gps = fileCoords(f);
+  const hasGPS =
+    !!gps &&
+    Number.isFinite(gps.lat as number) &&
+    Number.isFinite(gps.lon as number);
 
-return (
-  <div
-    key={i}
-    role="button"
-    tabIndex={0}
-    onClick={() => setLightboxUrl(String(f.url || ''))}
-    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-    className={
-      'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
-      (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
-    }
-    title={hoverTitle}
-  >
-    {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-      <img
-        src={f.url}
-        alt={f.name || `file ${i + 1}`}
-        className="w-full aspect-video object-cover"
-        loading="lazy"
-      />
-    ) : (
-      <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-        {f.name || 'file'}
-      </div>
-    )}
+  const label = hasGPS
+    ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`)
+    : null;
 
-    {hasGPS && label ? (
-      <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
-        📍 {label}
-      </span>
-    ) : null}
-  </div>
-);
-                    })}
+  const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
+
+  return (
+    <div
+      key={i}
+      role="button"
+      tabIndex={0}
+      onClick={() => setLightboxUrl(String(f.url || ''))}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+      className={
+        'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+        (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+      }
+      title={hoverTitle}
+    >
+      {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+        <img
+          src={f.url}
+          alt={f.name || `file ${i + 1}`}
+          className="w-full aspect-video object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+          {f.name || 'file'}
+        </div>
+      )}
+
+      {hasGPS && label ? (
+        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
+          📍 {label}
+        </span>
+      ) : null}
+    </div>
+  );
+})}
                   </div>
                 )}
               </div>
