@@ -43,12 +43,16 @@ function normalizeFiles(input: InFile[]): { url?: string|null; cid?: string|null
   });
 }
 
+/** GET /api/proofs?proposalId=123 */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const proposalId = Number(searchParams.get('proposalId'));
     if (!Number.isFinite(proposalId)) {
-      return NextResponse.json({ error: 'bad_request', details: 'proposalId is required and must be a number' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'bad_request', details: 'proposalId is required and must be a number' },
+        { status: 400 }
+      );
     }
 
     const rows = await prisma.proof.findMany({
@@ -57,42 +61,50 @@ export async function GET(req: Request) {
       include: { files: true },
     });
 
- const out = rows.map((p: any) => ({
-  proposalId: p.proposalId,
-  milestoneIndex: p.milestoneIndex,
-  note: p.note || undefined,
-  files: (p.files || []).map((f: any) => {
-    const url =
-      f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
-    const exif = f.exif ?? undefined;
+    // IMPORTANT: keep return INSIDE the GET function. Also pass through EXIF/GPS.
+    const out = rows.map((p: any) => ({
+      proposalId: p.proposalId,
+      milestoneIndex: p.milestoneIndex,
+      note: p.note || undefined,
+      files: (p.files || []).map((f: any) => {
+        const url = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
+        const exif = f.exif ?? undefined;
 
-    const lat =
-      typeof f.lat === 'number'
-        ? f.lat
-        : typeof exif?.gpsLatitude === 'number'
-        ? exif.gpsLatitude
-        : null;
+        const lat =
+          typeof f.lat === 'number'
+            ? f.lat
+            : typeof exif?.gpsLatitude === 'number'
+            ? exif.gpsLatitude
+            : null;
 
-    const lon =
-      typeof f.lon === 'number'
-        ? f.lon
-        : typeof exif?.gpsLongitude === 'number'
-        ? exif.gpsLongitude
-        : null;
+        const lon =
+          typeof f.lon === 'number'
+            ? f.lon
+            : typeof exif?.gpsLongitude === 'number'
+            ? exif.gpsLongitude
+            : null;
 
-    return {
-      url,
-      cid: f.cid || undefined,
-      name: f.name || undefined,
-      exif,   // passes through if you have it in DB
-      lat,    // null unless real GPS exists
-      lon,    // null unless real GPS exists
-    };
-  }),
-}));
+        return {
+          url,
+          cid: f.cid || undefined,
+          name: f.name || undefined,
+          exif, // if present in DB
+          lat,  // null unless real GPS exists
+          lon,  // null unless real GPS exists
+        };
+      }),
+    }));
 
-return NextResponse.json(out);
+    return NextResponse.json(out);
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: 'db_error', message: String(e?.message || e) },
+      { status: 500 }
+    );
+  }
+}
 
+/** POST /api/proofs */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -102,10 +114,14 @@ export async function POST(req: Request) {
     const filesInput = Array.isArray(body.files) ? (body.files as InFile[]) : [];
 
     // NEW: support replace mode (default = append)
-    const mode: 'append' | 'replace' = (body?.mode === 'replace' || body?.replaceExisting === true) ? 'replace' : 'append';
+    const mode: 'append' | 'replace' =
+      (body?.mode === 'replace' || body?.replaceExisting === true) ? 'replace' : 'append';
 
     if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
-      return NextResponse.json({ error: 'bad_request', details: 'proposalId and milestoneIndex (>=0) are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'bad_request', details: 'proposalId and milestoneIndex (>=0) are required' },
+        { status: 400 }
+      );
     }
 
     const files = normalizeFiles(filesInput);
@@ -140,13 +156,38 @@ export async function POST(req: Request) {
       proposalId: saved.proposalId,
       milestoneIndex: saved.milestoneIndex,
       note: saved.note || undefined,
-      files: (saved.files || []).map((f: any) => ({
-        url: f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined),
-        cid: f.cid || undefined,
-        name: f.name || undefined,
-      })),
+      files: (saved.files || []).map((f: any) => {
+        const url = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
+        const exif = f.exif ?? undefined;
+
+        const lat =
+          typeof f.lat === 'number'
+            ? f.lat
+            : typeof exif?.gpsLatitude === 'number'
+            ? exif.gpsLatitude
+            : null;
+
+        const lon =
+          typeof f.lon === 'number'
+            ? f.lon
+            : typeof exif?.gpsLongitude === 'number'
+            ? exif.gpsLongitude
+            : null;
+
+        return {
+          url,
+          cid: f.cid || undefined,
+          name: f.name || undefined,
+          exif,
+          lat,
+          lon,
+        };
+      }),
     }, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json({ error: 'db_error', message: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'db_error', message: String(e?.message || e) },
+      { status: 500 }
+    );
   }
 }
