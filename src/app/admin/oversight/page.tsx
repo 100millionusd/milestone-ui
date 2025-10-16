@@ -429,7 +429,11 @@ export default function AdminOversightPage() {
   const list = data?.payouts?.pending || [];
   const count = Array.isArray(list) ? list.length : 0;
   const usd = (Array.isArray(list) ? list : []).reduce((sum, p: any) => {
-    const v = p?.amount_usd ?? p?.amountUsd ?? p?.usd ?? p?.usdCents?./100 ?? 0;
+    const v =
+  p?.amount_usd ??
+  p?.amountUsd ??
+  p?.usd ??
+  ((p?.usdCents != null) ? p.usdCents / 100 : 0);
     const n = typeof v === "string" ? Number(v.replace(/[^0-9.]/g, "")) : Number(v);
     return sum + (Number.isFinite(n) ? n : 0);
   }, 0);
