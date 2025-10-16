@@ -118,6 +118,21 @@ const humanTime = (s: string) => dt(s).toLocaleString();
 const changeLabel = (changes: Record<string, any>) => (Object.keys(changes)[0] || "").replaceAll("_", " ");
 const copy = async (t: string, onDone?: () => void) => { try { await navigator.clipboard.writeText(t); onDone?.(); } catch { /* ignore */ } };
 
+function normalizePending(p: any) {
+  // allow number or object, accept many key names
+  const count =
+    (typeof p === "number" ? p : Number(p?.count)) || 0;
+
+  const usd =
+    Number(
+      typeof p === "number"
+        ? 0
+        : p?.totalUSD ?? p?.usd ?? (p?.usdCents != null ? p.usdCents / 100 : 0)
+    ) || 0;
+
+  return { count, usd };
+}
+
 // —— Tiny primitives ——
 function Progress({ value }: { value: number }) {
   const v = Math.max(0, Math.min(100, value || 0));
@@ -405,6 +420,10 @@ export default function AdminOversightPage() {
   }, [filteredVendors, vendorSort]);
 
   const tiles = data?.tiles;
+  const pending = useMemo(
+  () => normalizePending(tiles?.pendingPayouts),
+  [tiles?.pendingPayouts]
+);
 
   function toggleSort<T extends { key: any; dir: "asc"|"desc" }>(state: T, set: (v: T) => void, key: any) {
     if (state.key === key) set({ ...state, dir: state.dir === "asc" ? "desc" : "asc" });
@@ -480,8 +499,8 @@ export default function AdminOversightPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
               <StatCard label="Open Proofs" value={loading?"—":fmtInt(tiles?.openProofs||0)} icon={<Icon.Proof className="h-5 w-5"/>} />
               <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "warning" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
-              <StatCard label="Pending Payouts" value={loading?"—":fmtInt(tiles?.pendingPayouts?.count||0)} icon={<Icon.Ticket className="h-5 w-5"/>} />
-              <StatCard label="Pending USD" value={loading?"—":fmtUSD0(tiles?.pendingPayouts?.totalUSD||0)} icon={<Icon.Dollar className="h-5 w-5"/>} />
+              <StatCard label="Pending Payouts" value={loading ? "—" : fmtInt(pending.count)} icon={<Icon.Ticket className="h-5 w-5"/>} />
+              <StatCard label="Pending USD"     value={loading ? "—" : fmtUSD0(pending.usd)}  icon={<Icon.Dollar className="h-5 w-5"/>} />
               <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} />
               <StatCard label="P50 Cycle (h)" value={loading?"—":fmtInt(tiles?.p50CycleHours||0)} icon={<Icon.Clock className="h-5 w-5"/>} />
               <StatCard label="Revision Rate" value={loading?"—":fmtPct(tiles?.revisionRatePct||0)} icon={<Icon.Check className="h-5 w-5"/>} />
