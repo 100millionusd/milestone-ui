@@ -457,7 +457,7 @@ function renderFilesTab() {
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
                     {p.files.map((f: any, i: number) => {
-                      const gps = fileCoords(f) ?? fileCoords(p); // fallback to proof-level location
+                      const gps = fileCoords(f);
                       const hasGPS = !!gps;
                       const label = hasGPS ? gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}` : null;
                       const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
