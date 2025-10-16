@@ -91,6 +91,33 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   return s || 'submitted';
 }
 
+// Per-file GPS detector
+function fileCoords(f: any): { lat: number; lon: number; label?: string | null } | null {
+  const loc = f?.location ?? f?.geoApprox ?? f?.geo_approx ?? null;
+
+  const lat =
+    loc?.approx?.lat ??
+    loc?.lat ??
+    f?.exif?.gpsLatitude ??
+    f?.gps?.lat ??
+    f?.latitude ??
+    f?.lat ??
+    null;
+
+  const lon =
+    loc?.approx?.lon ??
+    loc?.lon ??
+    f?.exif?.gpsLongitude ??
+    f?.gps?.lon ??
+    f?.longitude ??
+    f?.lng ??
+    f?.lon ??
+    null;
+
+  if (lat == null || lon == null) return null;
+  return { lat: Number(lat), lon: Number(lon), label: loc?.label || null };
+}
+
 // ----- Helpers -----
 function normalizeAudit(items: AuditRow[]) {
   return (Array.isArray(items) ? items : []).map((a: AuditRow, i: number) => {
@@ -622,117 +649,74 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
                 )}
 
-                {/* ===== Grid of files: badge ONLY on photos that have their own GPS ===== */}
-                {Array.isArray(p.files) && p.files.length > 0 && (
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    {p.files.map((f: any, i: number) => {
- const loc =
-  f?.location ??
-  f?.geoApprox ??
-  f?.geo_approx ??
-  null;
+ {/* ===== Grid of files: mark only photos that have their own GPS ===== */}
+{Array.isArray(p.files) && p.files.length > 0 && (
+  <div className="mt-2 grid grid-cols-2 gap-3">
+    {p.files.map((f: any, i: number) => {
+      const loc =
+        f?.location ??
+        f?.geoApprox ??
+        f?.geo_approx ??
+        null;
 
-const lat =
-  loc?.approx?.lat ??
-  loc?.lat ??
-  f?.exif?.gpsLatitude ??
-  f?.gps?.lat ??
-  null;
+      const lat =
+        loc?.approx?.lat ??
+        loc?.lat ??
+        f?.exif?.gpsLatitude ??
+        f?.gps?.lat ??
+        f?.latitude ??
+        f?.lat ??
+        null;
 
-const lon =
-  loc?.approx?.lon ??
-  loc?.lon ??
-  f?.exif?.gpsLongitude ??
-  f?.gps?.lon ??
-  null;
+      const lon =
+        loc?.approx?.lon ??
+        loc?.lon ??
+        f?.exif?.gpsLongitude ??
+        f?.gps?.lon ??
+        f?.longitude ??
+        f?.lng ??
+        f?.lon ??
+        null;
 
-const hasGPS = lat != null && lon != null;
-const label = hasGPS ? (loc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : null;
+      const hasGPS = lat != null && lon != null;
+      const label = hasGPS ? (loc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : null;
+      const hoverTitle = hasGPS
+        ? (label || `GPS: ${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`)
+        : 'Click to zoom';
 
-                      return (
-                        <div
-                          key={i}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setLightboxUrl(String(f.url || ''))}
-                          onKeyDown={(e) =>
-                            (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))
-                          }
-                          className="relative rounded-lg border overflow-hidden cursor-zoom-in"
-                          title="Click to zoom"
-                        >
-                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                            <img
-                              src={f.url}
-                              alt={f.name || `file ${i + 1}`}
-                              className="w-full aspect-video object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                              {f.name || 'file'}
-                            </div>
-                          )}
+      return (
+        <div
+          key={i}
+          role="button"
+          tabIndex={0}
+          onClick={() => setLightboxUrl(String(f.url || ''))}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+          className={
+            'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+            (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+          }
+          title={hoverTitle}
+        >
+          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+            <img
+              src={f.url}
+              alt={f.name || `file ${i + 1}`}
+              className="w-full aspect-video object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+              {f.name || 'file'}
+            </div>
+          )}
 
-                          {hasGPS && label ? (
-                           <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur">
-                              📍 {label}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {hasGPS && (
+            <span className="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center justify-center rounded-full bg-black/70 text-white w-6 h-6 text-[13px] shadow">
+              📍
+            </span>
+          )}
         </div>
       );
-    })()}
-  </>
+    })}
+  </div>
 )}
-
-            {tab === 'audit' && (
-              <section className="space-y-3 text-sm">
-                {!auditRows && <div className="text-gray-500">Loading audit…</div>}
-                {auditRows && auditRows.length === 0 && <div className="text-gray-500">No public audit events yet.</div>}
-                {auditRows && auditRows.length > 0 && (
-                  <AuditPanel
-                    events={normalizeAudit(auditRows)}
-                    milestoneNames={milestoneNamesFromProject(project)}
-                    initialDays={3}
-                  />
-                )}
-              </section>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Lightbox modal (sibling of the card root) */}
-      {lightboxUrl && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => setLightboxUrl(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <img
-            src={lightboxUrl}
-            alt="Zoomed image"
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            type="button"
-            className="absolute top-4 right-4 rounded-full bg-white/90 px-3 py-1 text-sm font-medium shadow"
-            onClick={() => setLightboxUrl(null)}
-          >
-            Close
-          </button>
-        </div>
-      )}
-    </>
-  );
-}
