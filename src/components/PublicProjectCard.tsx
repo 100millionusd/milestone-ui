@@ -503,7 +503,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
  {tab === 'files' && (
   <>
-    {/* Toggle (optional): hide if everything is approved */}
+    {/* Toggle (hide if all already approved) */}
     {files.some((p) => getProofStatus(p) !== 'approved') && (
       <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
         <span className="mr-1">Show:</span>
@@ -547,40 +547,34 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         <div className="space-y-3">
           {proofsToShow.map((p, idx) => {
             // ===== Collect ALL file GPS points & dedupe (for the header list) =====
- const rawPts = Array.isArray(p?.files)
-  ? p.files
-      .map((f: any) => {
-        const loc =
-          f?.location ??
-          f?.geoApprox ??
-          f?.geo_approx ??
-          null;
+            const rawPts = Array.isArray(p?.files)
+              ? p.files
+                  .map((f: any) => {
+                    const loc = f?.location ?? f?.geoApprox ?? f?.geo_approx ?? null;
+                    const lat =
+                      loc?.approx?.lat ??
+                      loc?.lat ??
+                      f?.exif?.gpsLatitude ??
+                      f?.gps?.lat ??
+                      f?.latitude ??
+                      f?.lat ??
+                      null;
+                    const lon =
+                      loc?.approx?.lon ??
+                      loc?.lon ??
+                      f?.exif?.gpsLongitude ??
+                      f?.gps?.lon ??
+                      f?.longitude ??
+                      f?.lng ??
+                      f?.lon ??
+                      null;
+                    if (lat == null || lon == null) return null;
+                    return { lat: Number(lat), lon: Number(lon), label: loc?.label || null };
+                  })
+                  .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>
+              : [];
 
-        const lat =
-          loc?.approx?.lat ??
-          loc?.lat ??
-          f?.exif?.gpsLatitude ??
-          f?.gps?.lat ??
-          null;
-
-        const lon =
-          loc?.approx?.lon ??
-          loc?.lon ??
-          f?.exif?.gpsLongitude ??
-          f?.gps?.lon ??
-          null;
-
-        if (lat == null || lon == null) return null;
-        return {
-          lat: Number(lat),
-          lon: Number(lon),
-          label: loc?.label || null,
-        };
-      })
-      .filter(Boolean) as Array<{ lat: number; lon: number; label?: string | null }>
-  : [];
-
-            // If no file has GPS, fallback to the proof-level location (so you still see something)
+            // If no file has GPS, fallback to proof-level location
             if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
               rawPts.push({
                 lat: Number(p.location.approx.lat),
@@ -645,78 +639,76 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                   </div>
                 )}
 
-                {p.publicText && (
-                  <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+                {p.publicText && <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>}
+
+                {/* ===== Grid of files: mark only photos that have their own GPS ===== */}
+                {Array.isArray(p.files) && p.files.length > 0 && (
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    {p.files.map((f: any, i: number) => {
+                      const loc = f?.location ?? f?.geoApprox ?? f?.geo_approx ?? null;
+                      const lat =
+                        loc?.approx?.lat ??
+                        loc?.lat ??
+                        f?.exif?.gpsLatitude ??
+                        f?.gps?.lat ??
+                        f?.latitude ??
+                        f?.lat ??
+                        null;
+                      const lon =
+                        loc?.approx?.lon ??
+                        loc?.lon ??
+                        f?.exif?.gpsLongitude ??
+                        f?.gps?.lon ??
+                        f?.longitude ??
+                        f?.lng ??
+                        f?.lon ??
+                        null;
+
+                      const hasGPS = lat != null && lon != null;
+                      const label = hasGPS ? (loc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : null;
+                      const hoverTitle = hasGPS ? (label || `GPS: ${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : 'Click to zoom';
+
+                      return (
+                        <div
+                          key={i}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setLightboxUrl(String(f.url || ''))}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                          className={
+                            'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+                            (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+                          }
+                          title={hoverTitle}
+                        >
+                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                            <img
+                              src={f.url}
+                              alt={f.name || `file ${i + 1}`}
+                              className="w-full aspect-video object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                              {f.name || 'file'}
+                            </div>
+                          )}
+
+                          {hasGPS && (
+                            <span className="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center justify-center rounded-full bg-black/70 text-white w-6 h-6 text-[13px] shadow">
+                              📍
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
-
- {/* ===== Grid of files: mark only photos that have their own GPS ===== */}
-{Array.isArray(p.files) && p.files.length > 0 && (
-  <div className="mt-2 grid grid-cols-2 gap-3">
-    {p.files.map((f: any, i: number) => {
-      const loc =
-        f?.location ??
-        f?.geoApprox ??
-        f?.geo_approx ??
-        null;
-
-      const lat =
-        loc?.approx?.lat ??
-        loc?.lat ??
-        f?.exif?.gpsLatitude ??
-        f?.gps?.lat ??
-        f?.latitude ??
-        f?.lat ??
-        null;
-
-      const lon =
-        loc?.approx?.lon ??
-        loc?.lon ??
-        f?.exif?.gpsLongitude ??
-        f?.gps?.lon ??
-        f?.longitude ??
-        f?.lng ??
-        f?.lon ??
-        null;
-
-      const hasGPS = lat != null && lon != null;
-      const label = hasGPS ? (loc?.label || `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`) : null;
-      const hoverTitle = hasGPS
-        ? (label || `GPS: ${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`)
-        : 'Click to zoom';
-
-      return (
-        <div
-          key={i}
-          role="button"
-          tabIndex={0}
-          onClick={() => setLightboxUrl(String(f.url || ''))}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-          className={
-            'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
-            (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
-          }
-          title={hoverTitle}
-        >
-          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-            <img
-              src={f.url}
-              alt={f.name || `file ${i + 1}`}
-              className="w-full aspect-video object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-              {f.name || 'file'}
-            </div>
-          )}
-
-          {hasGPS && (
-            <span className="pointer-events-none absolute right-2 top-2 z-10 inline-flex items-center justify-center rounded-full bg-black/70 text-white w-6 h-6 text-[13px] shadow">
-              📍
-            </span>
-          )}
+              </div>
+            );
+          })}
         </div>
       );
-    })}
-  </div>
+    })()}
+  </>
 )}
