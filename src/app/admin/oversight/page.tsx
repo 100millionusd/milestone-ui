@@ -66,6 +66,27 @@ type Oversight = {
     changes: Record<string, any>;
   }>;
 };
+// ——— Lightweight rows for new tabs ———
+type ProposalRow = {
+  id: number;
+  title?: string;
+  status?: string;
+  owner_wallet?: string | null;
+  owner_email?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type BidRow = {
+  id: number;
+  proposal_id?: number;
+  vendor_name?: string | null;
+  status?: string;
+  amount_usd?: number | string | null;
+  amount?: number | string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 
 // —— Small inline icon set (no deps) ——
 const Icon = {
@@ -285,6 +306,32 @@ export default function AdminOversightPage() {
   const [autoRefresh, setAutoRefresh] = usePersistentState<boolean>("oversight.autoRefresh", true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // ——— Proposals & Bids state ———
+const [proposals, setProposals] = useState<ProposalRow[] | null>(null);
+const [bids, setBids] = useState<BidRow[] | null>(null);
+const [pbLoading, setPbLoading] = useState(false);
+const [pbError, setPbError] = useState<string | null>(null);
+
+// Sorting prefs for new tabs
+const [proposalSort, setProposalSort] = usePersistentState<{ key: keyof ProposalRow; dir: "asc"|"desc" }>(
+  "oversight.proposals.sort",
+  { key: "created_at", dir: "desc" }
+);
+const [bidSort, setBidSort] = usePersistentState<{ key: keyof BidRow; dir: "asc"|"desc" }>(
+  "oversight.bids.sort",
+  { key: "created_at", dir: "desc" }
+);
+
+// API path helper (mirrors your BASE logic)
+const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+
+// Numeric parser tolerant to "$1,234.56"
+const toNumber = (v: unknown) => {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  if (typeof v === "string") return Number(v.replace(/[^0-9.-]/g, "")) || 0;
+  return 0;
+};
 
   // sorting
   const [queueSort, setQueueSort] = usePersistentState<{ key: keyof Oversight["queue"][number]; dir: "asc"|"desc" }>("oversight.queue.sort", { key: "ageHours", dir: "desc" });
@@ -353,14 +400,53 @@ export default function AdminOversightPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tab]);
 
+  // ——— Lazy fetch for proposals/bids when tabs opened ———
+useEffect(() => {
+  const needProposals = tab === "proposals" && proposals == null;
+  const needBids = tab === "bids" && bids == null;
+  if (!needProposals && !needBids) return;
+
+  let aborted = false;
+  (async () => {
+    try {
+      setPbError(null);
+      setPbLoading(true);
+
+      const [pRes, bRes] = await Promise.all([
+        needProposals ? fetch(`${api("/proposals")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
+        needBids ? fetch(`${api("/bids")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
+      ]);
+
+      if (!aborted && pRes) {
+        const pj = await pRes.json();
+        setProposals(pj?.proposals ?? pj ?? []);
+      }
+      if (!aborted && bRes) {
+        const bj = await bRes.json();
+        setBids(bj?.bids ?? bj ?? []);
+      }
+    } catch (e: any) {
+      if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
+    } finally {
+      if (!aborted) setPbLoading(false);
+    }
+  })();
+
+  return () => { aborted = true; };
+}, [tab, proposals, bids]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const tabs = useMemo(() => [
-    { key: "overview", label: "Overview" },
-    { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
-    { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
-    { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
-    { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
-    { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
-  ], [data]);
+  { key: "overview", label: "Overview" },
+  { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
+  { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
+  // NEW
+  { key: "proposals", label: "Proposals", count: proposals?.length ?? 0 },
+  { key: "bids", label: "Bids", count: bids?.length ?? 0 },
+  // /NEW
+  { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
+  { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
+  { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
+], [data, proposals, bids]);
 
   function stepTab(delta: number) {
     const idx = tabs.findIndex(t => t.key === tab);
@@ -427,6 +513,63 @@ export default function AdminOversightPage() {
       return vendorSort.dir === "asc" ? cmp : -cmp;
     });
   }, [filteredVendors, vendorSort]);
+
+  // ——— PROPOSALS ———
+const filteredProposals = useMemo(() => {
+  const list = proposals ?? [];
+  if (!query) return list;
+  const q = query.toLowerCase();
+  return list.filter(p =>
+    String(p.id).includes(q) ||
+    (p.title ?? "").toLowerCase().includes(q) ||
+    (p.status ?? "").toLowerCase().includes(q) ||
+    (p.owner_wallet ?? "").toLowerCase().includes(q) ||
+    (p.owner_email ?? "").toLowerCase().includes(q)
+  );
+}, [proposals, query]);
+
+const sortedProposals = useMemo(() => {
+  const arr = [...filteredProposals];
+  const k = proposalSort.key as keyof ProposalRow;
+  return arr.sort((a, b) => {
+    const av = (a as any)[k];
+    const bv = (b as any)[k];
+    const cmp =
+      k === "created_at" || k === "updated_at" || typeof av === "string"
+        ? String(av ?? "").localeCompare(String(bv ?? ""))
+        : (toNumber(av) - toNumber(bv));
+    return proposalSort.dir === "asc" ? cmp : -cmp;
+  });
+}, [filteredProposals, proposalSort]);
+
+// ——— BIDS ———
+const filteredBids = useMemo(() => {
+  const list = bids ?? [];
+  if (!query) return list;
+  const q = query.toLowerCase();
+  return list.filter(b =>
+    String(b.id).includes(q) ||
+    String(b.proposal_id ?? "").includes(q) ||
+    (b.vendor_name ?? "").toLowerCase().includes(q) ||
+    (b.status ?? "").toLowerCase().includes(q)
+  );
+}, [bids, query]);
+
+const sortedBids = useMemo(() => {
+  const arr = [...filteredBids];
+  const k = bidSort.key as keyof BidRow;
+  return arr.sort((a, b) => {
+    const av = (a as any)[k];
+    const bv = (b as any)[k];
+    const cmp =
+      k === "amount" || k === "amount_usd"
+        ? (toNumber(av) - toNumber(bv))
+        : (typeof av === "string"
+            ? String(av ?? "").localeCompare(String(bv ?? ""))
+            : (toNumber(av) - toNumber(bv)));
+    return bidSort.dir === "asc" ? cmp : -cmp;
+  });
+}, [filteredBids, bidSort]);
 
   const tiles = data?.tiles;
   const pending = useMemo(() => {
@@ -703,6 +846,123 @@ export default function AdminOversightPage() {
             </div>
           </Card>
         )}
+
+        {tab === "proposals" && (
+  <Card
+    title={`Proposals (${proposals?.length ?? 0})`}
+    subtitle="Newest first (click headers to sort)"
+    right={
+      <>
+        <input
+          ref={searchRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter proposals…"
+          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+        />
+        <button
+          onClick={() => sortedProposals && downloadCSV(`proposals-${new Date().toISOString().slice(0,10)}.csv`, sortedProposals)}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+        >
+          <Icon.Download className="h-4 w-4" /> CSV
+        </button>
+      </>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "id")} sorted={proposalSort.key==="id"} dir={proposalSort.dir}>ID</Th>
+            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "title")} sorted={proposalSort.key==="title"} dir={proposalSort.dir}>Title</Th>
+            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "status")} sorted={proposalSort.key==="status"} dir={proposalSort.dir}>Status</Th>
+            <Th>Owner</Th>
+            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "created_at")} sorted={proposalSort.key==="created_at"} dir={proposalSort.dir}>Created</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {(loading || pbLoading) && <RowPlaceholder cols={5} />}
+          {pbError && (
+            <tr><td colSpan={5} className="p-4 text-rose-600">{pbError}</td></tr>
+          )}
+          {!pbLoading && (sortedProposals.length === 0) && (
+            <tr><td colSpan={5} className="p-6 text-center text-neutral-500">No proposals</td></tr>
+          )}
+          {sortedProposals.map(p => (
+            <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+              <Td>#{p.id}</Td>
+              <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
+              <Td><Badge tone={p.status === "approved" ? "success" : p.status === "pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
+              <Td className="font-mono text-xs">{shortAddr(p.owner_wallet ?? "") || (p.owner_email ?? "—")}</Td>
+              <Td>{p.created_at ? humanTime(p.created_at) : "—"}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
+
+{tab === "bids" && (
+  <Card
+    title={`Bids (${bids?.length ?? 0})`}
+    subtitle="Newest first (click headers to sort)"
+    right={
+      <>
+        <input
+          ref={searchRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter bids…"
+          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+        />
+        <button
+          onClick={() => sortedBids && downloadCSV(`bids-${new Date().toISOString().slice(0,10)}.csv`, sortedBids)}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+        >
+          <Icon.Download className="h-4 w-4" /> CSV
+        </button>
+      </>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "id")} sorted={bidSort.key==="id"} dir={bidSort.dir}>ID</Th>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "proposal_id")} sorted={bidSort.key==="proposal_id"} dir={bidSort.dir}>Proposal</Th>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "vendor_name")} sorted={bidSort.key==="vendor_name"} dir={bidSort.dir}>Vendor</Th>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "status")} sorted={bidSort.key==="status"} dir={bidSort.dir}>Status</Th>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "amount_usd")} sorted={bidSort.key==="amount_usd"} dir={bidSort.dir}>USD</Th>
+            <Th onClick={() => toggleSort(bidSort, setBidSort, "created_at")} sorted={bidSort.key==="created_at"} dir={bidSort.dir}>Created</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {(loading || pbLoading) && <RowPlaceholder cols={6} />}
+          {pbError && (
+            <tr><td colSpan={6} className="p-4 text-rose-600">{pbError}</td></tr>
+          )}
+          {!pbLoading && (sortedBids.length === 0) && (
+            <tr><td colSpan={6} className="p-6 text-center text-neutral-500">No bids</td></tr>
+          )}
+          {sortedBids.map(b => {
+            const amt = toNumber(b.amount_usd ?? b.amount);
+            return (
+              <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+                <Td>#{b.id}</Td>
+                <Td>#{b.proposal_id ?? "—"}</Td>
+                <Td className="max-w-[260px] truncate" title={b.vendor_name || ""}>{b.vendor_name ?? "—"}</Td>
+                <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
+                <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
+                <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
 
         {tab === "alerts" && (
           <Card title={`Alerts (${filteredAlerts.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter alerts…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2"/>} subtitle="Newest first">
