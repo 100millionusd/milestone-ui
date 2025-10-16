@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 const prisma = new PrismaClient();
 
+// ----------------- helpers -----------------
 function gatewayBase(): string {
   const gw = process.env.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
@@ -18,11 +19,13 @@ function gatewayBase(): string {
 
 type InFile = { url?: string; cid?: string; name?: string; path?: string } | string;
 
-function normalizeFiles(input: InFile[]): { url?: string|null; cid?: string|null; name?: string|null; path?: string|null }[] {
+function normalizeFiles(
+  input: InFile[]
+): { url?: string | null; cid?: string | null; name?: string | null; path?: string | null }[] {
   const gw = gatewayBase();
   const bad = (s: string) => s.includes('<gw>') || s.includes('<CID') || s.includes('>') || /^\s*$/.test(s);
   const isCid = (s: string) => /^[A-Za-z0-9]+$/.test(s) && !/^https?:\/\//i.test(s);
-  const fixProtocol = (s: string) => /^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//,'')}`;
+  const fixProtocol = (s: string) => /^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//, '')}`;
 
   return (Array.isArray(input) ? input : []).flatMap((f: InFile) => {
     if (typeof f === 'string') {
@@ -43,6 +46,50 @@ function normalizeFiles(input: InFile[]): { url?: string|null; cid?: string|null
   });
 }
 
+// -------- exifr GPS (on-the-fly) ----------
+const IMAGE_EXT_RE = /\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i;
+const gpsCache = new Map<string, { lat: number; lon: number } | null>();
+
+async function getExifr(): Promise<any> {
+  // dynamic import avoids TS type issues if no @types/exifr
+  const mod = await import('exifr');
+  // @ts-ignore - exifr default export
+  return mod.default || mod;
+}
+
+async function gpsFromUrl(url?: string) {
+  if (!url) return null;
+  const key = url.split('?')[0];
+  if (!IMAGE_EXT_RE.test(key)) return null; // only try images
+  if (gpsCache.has(key)) return gpsCache.get(key)!;
+
+  try {
+    const res = await fetch(key, { cache: 'no-store' });
+    if (!res.ok) { gpsCache.set(key, null); return null; }
+    const ab = await res.arrayBuffer();
+    const exifr = await getExifr();
+    const g: any = await exifr.gps(ab).catch(() => null);
+    const lat = g?.latitude;
+    const lon = g?.longitude;
+    const val = (Number.isFinite(lat) && Number.isFinite(lon))
+      ? { lat: Number(lat), lon: Number(lon) }
+      : null;
+    gpsCache.set(key, val);
+    return val;
+  } catch {
+    gpsCache.set(key, null);
+    return null;
+  }
+}
+
+function preferNumber(...vals: any[]) {
+  for (const v of vals) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v as number;
+  }
+  return null;
+}
+
+// --------------- GET ----------------------
 /** GET /api/proofs?proposalId=123 */
 export async function GET(req: Request) {
   try {
@@ -61,41 +108,44 @@ export async function GET(req: Request) {
       include: { files: true },
     });
 
-    // IMPORTANT: keep return INSIDE the GET function. Also pass through EXIF/GPS.
-    const out = rows.map((p: any) => ({
-      proposalId: p.proposalId,
-      milestoneIndex: p.milestoneIndex,
-      note: p.note || undefined,
-      files: (p.files || []).map((f: any) => {
-        const url = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
-        const exif = f.exif ?? undefined;
+    // Build response and inject per-file lat/lon, reading EXIF if needed.
+    const out = await Promise.all(
+      rows.map(async (p: any) => {
+        const files = await Promise.all(
+          (p.files || []).map(async (f: any) => {
+            const url: string | undefined = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
+            const exif = f.exif ?? undefined;
 
-        const lat =
-          typeof f.lat === 'number'
-            ? f.lat
-            : typeof exif?.gpsLatitude === 'number'
-            ? exif.gpsLatitude
-            : null;
+            // Prefer DB-provided values if present, otherwise try exifr
+            let lat = preferNumber(f.lat, exif?.gpsLatitude);
+            let lon = preferNumber(f.lon, exif?.gpsLongitude);
 
-        const lon =
-          typeof f.lon === 'number'
-            ? f.lon
-            : typeof exif?.gpsLongitude === 'number'
-            ? exif.gpsLongitude
-            : null;
+            if ((lat == null || lon == null) && url) {
+              const g = await gpsFromUrl(url);
+              if (g) { lat = g.lat; lon = g.lon; }
+            }
+
+            return {
+              url,
+              cid: f.cid || undefined,
+              name: f.name || undefined,
+              exif, // if your DB already stores it
+              lat,  // only when actual GPS exists
+              lon,  // only when actual GPS exists
+            };
+          })
+        );
 
         return {
-          url,
-          cid: f.cid || undefined,
-          name: f.name || undefined,
-          exif, // if present in DB
-          lat,  // null unless real GPS exists
-          lon,  // null unless real GPS exists
+          proposalId: p.proposalId,
+          milestoneIndex: p.milestoneIndex,
+          note: p.note || undefined,
+          files,
         };
-      }),
-    }));
+      })
+    );
 
-    return NextResponse.json(out);
+    return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e: any) {
     return NextResponse.json(
       { error: 'db_error', message: String(e?.message || e) },
@@ -104,6 +154,7 @@ export async function GET(req: Request) {
   }
 }
 
+// --------------- POST ---------------------
 /** POST /api/proofs */
 export async function POST(req: Request) {
   try {
@@ -133,13 +184,11 @@ export async function POST(req: Request) {
 
     let saved;
     if (!existing) {
-      // first record for this milestone
       saved = await prisma.proof.create({
         data: { proposalId, milestoneIndex, note, files: { create: files } },
         include: { files: true },
       });
     } else {
-      // append or replace
       saved = await prisma.proof.update({
         where: { id: existing.id },
         data: {
@@ -152,27 +201,19 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({
-      proposalId: saved.proposalId,
-      milestoneIndex: saved.milestoneIndex,
-      note: saved.note || undefined,
-      files: (saved.files || []).map((f: any) => {
-        const url = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
+    // Mirror GET response shape; also compute lat/lon on-the-fly for new/updated files
+    const out = await Promise.all(
+      (saved.files || []).map(async (f: any) => {
+        const url: string | undefined = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
         const exif = f.exif ?? undefined;
 
-        const lat =
-          typeof f.lat === 'number'
-            ? f.lat
-            : typeof exif?.gpsLatitude === 'number'
-            ? exif.gpsLatitude
-            : null;
+        let lat = preferNumber(f.lat, exif?.gpsLatitude);
+        let lon = preferNumber(f.lon, exif?.gpsLongitude);
 
-        const lon =
-          typeof f.lon === 'number'
-            ? f.lon
-            : typeof exif?.gpsLongitude === 'number'
-            ? exif.gpsLongitude
-            : null;
+        if ((lat == null || lon == null) && url) {
+          const g = await gpsFromUrl(url);
+          if (g) { lat = g.lat; lon = g.lon; }
+        }
 
         return {
           url,
@@ -182,8 +223,18 @@ export async function POST(req: Request) {
           lat,
           lon,
         };
-      }),
-    }, { status: 201 });
+      })
+    );
+
+    return NextResponse.json(
+      {
+        proposalId: saved.proposalId,
+        milestoneIndex: saved.milestoneIndex,
+        note: saved.note || undefined,
+        files: out,
+      },
+      { status: 201 }
+    );
   } catch (e: any) {
     return NextResponse.json(
       { error: 'db_error', message: String(e?.message || e) },
