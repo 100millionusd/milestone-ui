@@ -382,197 +382,209 @@ export default function VendorOversightPage() {
         if (!aborted) setRole(roleJson);
 
         // My bids (robust with fallbacks for vendor-scoped endpoints)
-let bidList: BidRow[] = [];
+        let bidList: BidRow[] = [];
 
-const tryFetchBids = async (url: string) => {
-  const r = await fetch(url, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-  if (!r.ok) return null;
-  const j = await r.json();
-  return normalizeBids(Array.isArray(j) ? j : (j?.bids ?? j ?? []));
-};
+        const tryFetchBids = async (url: string) => {
+          const r = await fetch(url, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+          if (!r.ok) return null;
+          const j = await r.json();
+          return normalizeBids(Array.isArray(j) ? j : (j?.bids ?? j ?? []));
+        };
 
-// 1) Standard path
-bidList = (await tryFetchBids(`${api('/bids')}?t=${Date.now()}`)) ?? [];
+        // 1) Standard path
+        bidList = (await tryFetchBids(`${api('/bids')}?t=${Date.now()}`)) ?? [];
 
-// 2) Common vendor flags
-if (bidList.length === 0) {
-  bidList = (await tryFetchBids(`${api('/bids')}?mine=1&t=${Date.now()}`)) ?? [];
-}
-if (bidList.length === 0 && role?.address) {
-  bidList = (await tryFetchBids(`${api('/bids')}?vendorAddress=${encodeURIComponent(role.address)}&t=${Date.now()}`)) ?? [];
-}
+        // 2) Common vendor flags
+        if (bidList.length === 0) {
+          bidList = (await tryFetchBids(`${api('/bids')}?mine=1&t=${Date.now()}`)) ?? [];
+        }
+        if (bidList.length === 0 && role?.address) {
+          bidList = (await tryFetchBids(`${api('/bids')}?vendorAddress=${encodeURIComponent(role.address)}&t=${Date.now()}`)) ?? [];
+        }
 
-if (!aborted) setBids(bidList);
+        if (!aborted) setBids(bidList);
 
- // Proofs (try list → vendor flags → per-bid fallback)
-let proofsList: any[] = [];
+        // Proofs - Use vendor-specific endpoints
+        let proofsList: any[] = [];
 
-// 1) Try direct list
-try {
-  const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-  if (rp.ok) {
-    const pj = await rp.json();
-    proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
-  }
-} catch { /* ignore */ }
+        // 1) Try vendor-scoped endpoints first
+        try {
+          const rpMine = await fetch(`${api('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+          if (rpMine.ok) {
+            const pj2 = await rpMine.json();
+            proofsList = Array.isArray(pj2) ? pj2 : (pj2?.proofs ?? []);
+          }
+        } catch { /* ignore */ }
 
-// 2) Try vendor-scoped list if still empty
-if (!Array.isArray(proofsList) || proofsList.length === 0) {
-  try {
-    const rpMine = await fetch(`${api('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-    if (rpMine.ok) {
-      const pj2 = await rpMine.json();
-      proofsList = Array.isArray(pj2) ? pj2 : (pj2?.proofs ?? []);
-    }
-  } catch { /* ignore */ }
-}
+        // 2) Try alternative vendor endpoints
+        if (!Array.isArray(proofsList) || proofsList.length === 0) {
+          try {
+            const rpVendor = await fetch(`${api('/vendor/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+            if (rpVendor.ok) {
+              const pj3 = await rpVendor.json();
+              proofsList = Array.isArray(pj3) ? pj3 : (pj3?.proofs ?? []);
+            }
+          } catch { /* ignore */ }
+        }
 
-// 3) Fallback: per-bid fetch if still empty
-if (!Array.isArray(proofsList) || proofsList.length === 0) {
-  // Use only valid, numeric ids (deduped)
-  const ids = Array.from(
-    new Set((bidList ?? []).map(b => Number(b.id)).filter(isFiniteId))
-  );
+        // 3) Fallback: per-bid fetch if still empty
+        if (!Array.isArray(proofsList) || proofsList.length === 0) {
+          // Use only valid, numeric ids (deduped)
+          const ids = Array.from(
+            new Set((bidList ?? []).map(b => Number(b.id)).filter(isFiniteId))
+          );
 
-  const results: any[] = [];
-  const CONCURRENCY = 6;
+          const results: any[] = [];
+          const CONCURRENCY = 6;
 
-  async function fetchProofsForBid(id: number): Promise<any[]> {
-    // Try ?bidId= first
-    const url1 = `${api('/proofs')}?bidId=${id}&t=${Date.now()}`;
-    let r = await fetch(url1, {
-      cache: 'no-store',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (r.ok) {
-      const j = await r.json();
-      return Array.isArray(j) ? j : (j?.proofs ?? []);
-    }
+          async function fetchProofsForBid(id: number): Promise<any[]> {
+            // Try ?bidId= first
+            const url1 = `${api('/proofs')}?bidId=${id}&t=${Date.now()}`;
+            let r = await fetch(url1, {
+              cache: 'no-store',
+              credentials: 'include',
+              headers: { Accept: 'application/json' },
+            });
+            if (r.ok) {
+              const j = await r.json();
+              return Array.isArray(j) ? j : (j?.proofs ?? []);
+            }
 
-    // If backend prefers snake_case, try ?bid_id=
-    if (r.status === 400 || r.status === 404) {
-      const url2 = `${api('/proofs')}?bid_id=${id}&t=${Date.now()}`;
-      r = await fetch(url2, {
-        cache: 'no-store',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j2 = await r.json();
-        return Array.isArray(j2) ? j2 : (j2?.proofs ?? []);
-      }
-    }
+            // If backend prefers snake_case, try ?bid_id=
+            if (r.status === 400 || r.status === 404) {
+              const url2 = `${api('/proofs')}?bid_id=${id}&t=${Date.now()}`;
+              r = await fetch(url2, {
+                cache: 'no-store',
+                credentials: 'include',
+                headers: { Accept: 'application/json' },
+              });
+              if (r.ok) {
+                const j2 = await r.json();
+                return Array.isArray(j2) ? j2 : (j2?.proofs ?? []);
+              }
+            }
 
-    // Otherwise no data for this bid
-    return [];
-  }
+            // Otherwise no data for this bid
+            return [];
+          }
 
-  let idx = 0;
-  async function runBatch(): Promise<void> {
-    const batch = ids.slice(idx, idx + CONCURRENCY);
-    idx += CONCURRENCY;
-    const chunkLists = await Promise.all(batch.map(id => fetchProofsForBid(id)));
-    chunkLists.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-    if (idx < ids.length) await runBatch();
-  }
+          let idx = 0;
+          async function runBatch(): Promise<void> {
+            const batch = ids.slice(idx, idx + CONCURRENCY);
+            idx += CONCURRENCY;
+            const chunkLists = await Promise.all(batch.map(id => fetchProofsForBid(id)));
+            chunkLists.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+            if (idx < ids.length) await runBatch();
+          }
 
-  if (ids.length) {
-    await runBatch();
-    proofsList = results;
-  }
-}
+          if (ids.length) {
+            await runBatch();
+            proofsList = results;
+          }
+        }
+        
         const proofRows = normalizeProofs(proofsList);
-if (!aborted) setProofs(proofRows);
+        if (!aborted) setProofs(proofRows);
 
-// Derive milestones from proofs, then fall back to API if empty
-let ms = deriveMilestonesFromProofs(proofRows);
-if (ms.length === 0) {
-  try {
-    const apiMilestones = await tryLoadMilestonesFromApi(api, bidList);
-    if (apiMilestones.length) ms = apiMilestones;
-  } catch { /* ignore */ }
-}
-if (!aborted) setMilestones(ms);
-// ——— Payments (try list → vendor flags → per-bid) ———
-try {
-  let payList: any[] = [];
-
-  // 1) Try a direct vendor-scoped list
-  const r1 = await fetch(`${api('/payouts')}?mine=1&t=${Date.now()}`, {
-    cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-  });
-  if (r1.ok) {
-    const j1 = await r1.json();
-    payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
-  }
-
-  // 2) Try generic list if still empty
-  if (!Array.isArray(payList) || payList.length === 0) {
-    const r2 = await fetch(`${api('/payouts')}?t=${Date.now()}`, {
-      cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-    });
-    if (r2.ok) {
-      const j2 = await r2.json();
-      payList = Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
-    }
-  }
-
-  // 3) Per-bid fallback (handles backends that require bid scoping)
-  if (!Array.isArray(payList) || payList.length === 0) {
-    const ids = Array.from(new Set((bids ?? []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
-    const CONCURRENCY = 6;
-    const results: any[] = [];
-    let idx = 0;
-
-    async function fetchForBid(id: number): Promise<any[]> {
-      // ?bidId=
-      let r = await fetch(`${api('/payouts')}?bidId=${id}&t=${Date.now()}`, {
-        cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j = await r.json();
-        return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
-      }
-      // ?bid_id=
-      if (r.status === 400 || r.status === 404) {
-        r = await fetch(`${api('/payouts')}?bid_id=${id}&t=${Date.now()}`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
-        if (r.ok) {
-          const j2 = await r.json();
-          return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+        // Derive milestones from proofs, then fall back to API if empty
+        let ms = deriveMilestonesFromProofs(proofRows);
+        if (ms.length === 0) {
+          try {
+            const apiMilestones = await tryLoadMilestonesFromApi(api, bidList);
+            if (apiMilestones.length) ms = apiMilestones;
+          } catch { /* ignore */ }
         }
-      }
-      // /bids/:id (if it contains payouts)
-      try {
-        const rb = await fetch(`${api(`/bids/${id}`)}?t=${Date.now()}`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
-        if (rb.ok) {
-          const bj = await rb.json();
-          const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
-          return arr || [];
-        }
-      } catch { /* ignore */ }
-      return [];
-    }
+        if (!aborted) setMilestones(ms);
 
-    async function runBatch() {
-      const batch = ids.slice(idx, idx + CONCURRENCY);
-      idx += CONCURRENCY;
-      const chunks = await Promise.all(batch.map(id => fetchForBid(id)));
-      chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-      if (idx < ids.length) await runBatch();
-    }
-    if (ids.length) {
-      await runBatch();
-      payList = results;
-    }
-  }
+        // ——— Payments - Use vendor-specific endpoints ———
+        try {
+          let payList: any[] = [];
 
-  if (!aborted) setPayments(normalizePayments(payList));
-} catch { /* ignore payments errors so page still loads */ }
+          // 1) Try vendor-scoped endpoints first
+          try {
+            const r1 = await fetch(`${api('/payouts')}?mine=1&t=${Date.now()}`, {
+              cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+            });
+            if (r1.ok) {
+              const j1 = await r1.json();
+              payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
+            }
+          } catch { /* ignore */ }
+
+          // 2) Try alternative vendor payment endpoints
+          if (!Array.isArray(payList) || payList.length === 0) {
+            try {
+              const rVendor = await fetch(`${api('/vendor/payments')}?t=${Date.now()}`, {
+                cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+              });
+              if (rVendor.ok) {
+                const jVendor = await rVendor.json();
+                payList = Array.isArray(jVendor) ? jVendor : (jVendor?.payments ?? jVendor?.payouts ?? []);
+              }
+            } catch { /* ignore */ }
+          }
+
+          // 3) Try vendor transactions endpoint
+          if (!Array.isArray(payList) || payList.length === 0) {
+            try {
+              const rTx = await fetch(`${api('/vendor/transactions')}?t=${Date.now()}`, {
+                cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+              });
+              if (rTx.ok) {
+                const jTx = await rTx.json();
+                payList = Array.isArray(jTx) ? jTx : (jTx?.transactions ?? jTx?.payments ?? []);
+              }
+            } catch { /* ignore */ }
+          }
+
+          // 4) Per-bid fallback as last resort
+          if (!Array.isArray(payList) || payList.length === 0) {
+            const ids = Array.from(new Set((bids ?? []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
+            const CONCURRENCY = 6;
+            const results: any[] = [];
+            let idx = 0;
+
+            async function fetchForBid(id: number): Promise<any[]> {
+              // Try vendor-specific bid payments
+              try {
+                const r = await fetch(`${api('/vendor/bids')}/${id}/payments?t=${Date.now()}`, {
+                  cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+                });
+                if (r.ok) {
+                  const j = await r.json();
+                  return Array.isArray(j) ? j : (j?.payments ?? j?.payouts ?? []);
+                }
+              } catch { /* ignore */ }
+
+              // Fallback to generic bid payments
+              try {
+                const r = await fetch(`${api('/bids')}/${id}/payments?t=${Date.now()}`, {
+                  cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+                });
+                if (r.ok) {
+                  const j = await r.json();
+                  return Array.isArray(j) ? j : (j?.payments ?? j?.payouts ?? []);
+                }
+              } catch { /* ignore */ }
+
+              return [];
+            }
+
+            async function runBatch() {
+              const batch = ids.slice(idx, idx + CONCURRENCY);
+              idx += CONCURRENCY;
+              const chunks = await Promise.all(batch.map(id => fetchForBid(id)));
+              chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+              if (idx < ids.length) await runBatch();
+            }
+            if (ids.length) {
+              await runBatch();
+              payList = results;
+            }
+          }
+
+          if (!aborted) setPayments(normalizePayments(payList));
+        } catch { /* ignore payments errors so page still loads */ }
 
       } catch (e: any) {
         if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
