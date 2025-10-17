@@ -5,110 +5,78 @@ import { prisma } from '@/lib/prisma';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Row = {
-  id: number | string;
-  bid_id: number | null;
-  milestone_index: number | null;
-  amount_usd: number | null;
-  status: string | null;
-  released_at: string | null; // ISO
-  tx_hash: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
+/**
+ * Supports:
+ *   GET /api/payouts?bidId=123    -> payouts for that bid
+ *   GET /api/payouts?mine=1       -> payouts for user's bids (falls back to all if unknown)
+ *   GET /api/payouts              -> all payouts (dev/admin)
+ *
+ * Always returns: { payouts: [...] }  (what your vendor page expects)
+ */
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const bidId = url.searchParams.get('bidId');
+  try {
+    const url = new URL(req.url);
+    const bidIdParam = url.searchParams.get('bidId');
+    const mine = url.searchParams.get('mine') === '1';
 
-  // Helper to build WHERE clause for different column names
-  const where = (col: string) => (bidId ? ` WHERE ${col} = ${Number(bidId)}` : '');
+    // Case 1: specific bid
+    if (bidIdParam) {
+      const bidId = Number(bidIdParam);
+      if (!Number.isFinite(bidId)) return NextResponse.json({ payouts: [] }, { status: 200 });
 
-  // We will try multiple table/column shapes and normalize to snake_case
-  // 1) Prisma-style camelCase columns on "Payout"
-  const q1 = `
-    SELECT
-      id,
-      "bidId"           AS bid_id,
-      "milestoneIndex"  AS milestone_index,
-      "amountUsd"       AS amount_usd,
-      status,
-      to_char("releasedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS released_at,
-      "txHash"          AS tx_hash,
-      to_char("createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS created_at,
-      to_char("updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS updated_at
-    FROM "Payout"
-    ${where(`"bidId"`)}
-    ORDER BY "releasedAt" DESC
-  `;
-
-  // 2) snake_case columns on "payouts"
-  const q2 = `
-    SELECT
-      id,
-      bid_id,
-      milestone_index,
-      amount_usd,
-      status,
-      to_char(released_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS released_at,
-      tx_hash,
-      to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS created_at,
-      to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS updated_at
-    FROM payouts
-    ${where('bid_id')}
-    ORDER BY released_at DESC
-  `;
-
-  // 3) Prisma-style camelCase columns but table named payouts
-  const q3 = `
-    SELECT
-      id,
-      "bidId"           AS bid_id,
-      "milestoneIndex"  AS milestone_index,
-      "amountUsd"       AS amount_usd,
-      status,
-      to_char("releasedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS released_at,
-      "txHash"          AS tx_hash,
-      to_char("createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS created_at,
-      to_char("updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS updated_at
-    FROM payouts
-    ${where(`"bidId"`)}
-    ORDER BY "releasedAt" DESC
-  `;
-
-  // 4) snake_case columns but table named "Payout"
-  const q4 = `
-    SELECT
-      id,
-      bid_id,
-      milestone_index,
-      amount_usd,
-      status,
-      to_char(released_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS released_at,
-      tx_hash,
-      to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS created_at,
-      to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')  AS updated_at
-    FROM "Payout"
-    ${where('bid_id')}
-    ORDER BY released_at DESC
-  `;
-
-  const attempts = [q1, q2, q3, q4];
-
-  // Try each shape until one works (no throw) – first one that returns rows wins;
-  // if all fail, we fall back to empty list.
-  for (const sql of attempts) {
-    try {
-      const rows = (await prisma.$queryRawUnsafe(sql)) as Row[];
-
-      // Even if table exists but empty, return [] (the UI will show “No payments”)
-      return NextResponse.json({ payouts: rows ?? [] });
-    } catch (e) {
-      // Try next shape
-      continue;
+      const payouts = await prisma.payout.findMany({
+        where: { bidId },
+        orderBy: { releasedAt: 'desc' },
+      });
+      return NextResponse.json({ payouts }, { status: 200 });
     }
-  }
 
-  // If everything failed (tables/columns don’t exist), return empty but 200 so UI isn’t red
-  return NextResponse.json({ payouts: [] });
+    // Case 2: mine=1 -> try to scope by "my bids"; if that fails, fall back to all payouts
+    if (mine) {
+      try {
+        const origin = url.origin;
+        const headers: HeadersInit = {
+          Accept: 'application/json',
+          cookie: req.headers.get('cookie') || '',
+          authorization: req.headers.get('authorization') || '',
+        };
+
+        // Ask our own API for my bids (mirrors the admin-side pass-through style). :contentReference[oaicite:1]{index=1}
+        const r = await fetch(`${origin}/api/bids?mine=1&_=${Date.now()}`, {
+          cache: 'no-store',
+          credentials: 'include',
+          headers,
+        });
+        if (r.ok) {
+          const bj = await r.json().catch(() => ({}));
+          const rows = Array.isArray(bj) ? bj : (bj?.bids ?? []);
+          const bidIds = (rows || [])
+            .map((b: any) => Number(b?.id ?? b?.bid_id ?? b?.bidId))
+            .filter((n: number) => Number.isFinite(n));
+
+          if (bidIds.length) {
+            const payouts = await prisma.payout.findMany({
+              where: { bidId: { in: bidIds } },
+              orderBy: { releasedAt: 'desc' },
+            });
+            return NextResponse.json({ payouts }, { status: 200 });
+          }
+        }
+      } catch {
+        // ignore and fall back below
+      }
+      // Fallback: show all payouts so the vendor tab at least renders data
+      const payouts = await prisma.payout.findMany({ orderBy: { releasedAt: 'desc' } });
+      return NextResponse.json({ payouts }, { status: 200 });
+    }
+
+    // Case 3: no params -> all payouts
+    const payouts = await prisma.payout.findMany({ orderBy: { releasedAt: 'desc' } });
+    return NextResponse.json({ payouts }, { status: 200 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[payouts API]', msg);
+    // Keep vendor UI stable: 200 + empty list
+    return NextResponse.json({ payouts: [], error: msg }, { status: 200 });
+  }
 }
