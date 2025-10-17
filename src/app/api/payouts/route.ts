@@ -8,17 +8,19 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const bidId = url.searchParams.get('bidId');
+    const bidId = url.searchParams.get('bidId'); // optional
 
     const payouts = await prisma.payout.findMany({
       where: bidId ? { bidId: Number(bidId) } : undefined,
       orderBy: { releasedAt: 'desc' },
     });
 
-    // ✅ Wrap in object — required by frontend normalizePayments()
+    // IMPORTANT: your frontend expects an object with a `payouts` array
     return NextResponse.json({ payouts });
   } catch (err) {
-    console.error('[payouts API]', err);
-    return NextResponse.json({ error: 'Failed to load payouts' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[payouts API]', message);
+    // expose the real error while you debug
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
