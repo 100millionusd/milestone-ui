@@ -161,6 +161,48 @@ function normalizePending(p: any) {
   return { count, usd };
 }
 
+// ——— Normalizers for backend shape drift ———
+function normalizeProposals(rows: any[]): ProposalRow[] {
+  return (rows || []).map((r: any) => ({
+    id: Number(r?.id ?? r?.proposal_id ?? r?.proposalId),
+    title: r?.title ?? r?.name ?? r?.project_title ?? r?.projectName ?? null,
+    status: r?.status ?? r?.state ?? r?.proposal_status ?? null,
+    owner_wallet: r?.owner_wallet ?? r?.ownerWallet ?? r?.wallet_address ?? r?.walletAddress ?? null,
+    owner_email: r?.owner_email ?? r?.ownerEmail ?? r?.email ?? null,
+    created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? r?.inserted_at ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? r?.modified_at ?? null,
+  }));
+}
+
+function normalizeBids(rows: any[]): BidRow[] {
+  return (rows || []).map((r: any) => ({
+    id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
+    proposal_id: Number(r?.proposal_id ?? r?.proposalId ?? r?.proposal?.id ?? r?.proposalID),
+    vendor_name:
+      r?.vendor_name ??
+      r?.vendorName ??
+      r?.vendor ??
+      r?.vendor_name_text ??
+      r?.vendor_profile?.vendor_name ??
+      r?.vendor_profile?.name ??
+      r?.vendor_profile?.vendor ??
+      null,
+    status: r?.status ?? r?.state ?? r?.bid_status ?? 'pending',
+    amount_usd:
+      r?.amount_usd ??
+      r?.amountUsd ??
+      r?.usd ??
+      (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null),
+    created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? r?.inserted_at ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? r?.modified_at ?? null,
+  }));
+}
+
+// Convenience formatters used in the table cells
+const getVendorName = (b: BidRow) => b.vendor_name ?? '—';
+const getProposalId = (b: BidRow) =>
+  (typeof b.proposal_id === 'number' && Number.isFinite(b.proposal_id)) ? `#${b.proposal_id}` : '—';
+
 // —— Tiny primitives ——
 function Progress({ value }: { value: number }) {
   const v = Math.max(0, Math.min(100, value || 0));
@@ -419,11 +461,11 @@ useEffect(() => {
 
       if (!aborted && pRes) {
         const pj = await pRes.json();
-        setProposals(pj?.proposals ?? pj ?? []);
+        setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
       }
       if (!aborted && bRes) {
         const bj = await bRes.json();
-        setBids(bj?.bids ?? bj ?? []);
+        setBids(normalizeBids(bj?.bids ?? bj ?? []));
       }
     } catch (e: any) {
       if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
@@ -951,7 +993,7 @@ const sortedBids = useMemo(() => {
               <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
                 <Td>#{b.id}</Td>
                 <Td>#{b.proposal_id ?? "—"}</Td>
-                <Td className="max-w-[260px] truncate" title={b.vendor_name || ""}>{b.vendor_name ?? "—"}</Td>
+                <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td><Td>{getProposalId(b)}</Td>
                 <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
                 <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
                 <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
