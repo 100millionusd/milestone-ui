@@ -545,11 +545,13 @@ const tabs = useMemo(() => [
   { key: "overview", label: "Overview" },
   { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
   { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
-  { key: "proofs", label: "Proofs", count: proofs?.length ?? 0 }, // NEW
+  { key: "proposals", label: "Proposals", count: proposals?.length ?? 0 },
+  { key: "bids", label: "Bids", count: bids?.length ?? 0 },              // ← added
+  { key: "proofs", label: "Proofs", count: proofs?.length ?? 0 },
   { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
   { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
   { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
-], [data, proofs]);
+], [data, proposals, bids, proofs]); // ← ensure bids & proposals in deps
 
   function stepTab(delta: number) {
     const idx = tabs.findIndex(t => t.key === tab);
