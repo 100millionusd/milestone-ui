@@ -126,15 +126,27 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   return (rows || []).map((r: any, index) => {
     console.log('Raw proof data:', r); // Debug log
     
-    // Handle different ID fields - create one if missing
-    const id = r?.id ?? r?.proof_id ?? r?.proofId ?? index + 1;
+    // Handle different ID fields - use a combination of bid_id and milestone_index to ensure uniqueness
+    const id = r?.id ?? r?.proof_id ?? r?.proofId ?? `proof-${r.bid_id}-${r.milestone_index}-${index}`;
     
     // Handle different bid ID fields
     const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
     
-    // Handle different milestone index fields
-    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
-                           r?.index ?? r?.i ?? (index + 1);
+    // Handle different milestone index fields - use the actual milestone number from the name
+    let milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone;
+    
+    // Extract milestone number from name if available (e.g., "Milestone 3" -> 3)
+    if (!milestone_index && r?.name) {
+      const match = r.name.match(/Milestone\s+(\d+)/);
+      if (match) {
+        milestone_index = parseInt(match[1]);
+      }
+    }
+    
+    // Fallback to index if still no milestone index
+    if (!milestone_index) {
+      milestone_index = index + 1;
+    }
     
     // Handle different vendor name fields
     const vendor_name = r?.vendor_name ?? r?.vendorName ?? r?.vendor;
@@ -151,13 +163,13 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       else status = 'pending';
     }
     
-    // Handle different date fields
-    const submitted_at = r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
+    // Handle different date fields - use completionDate for submitted_at
+    const submitted_at = r?.completionDate ?? r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
     const created_at = r?.created_at ?? r?.createdAt ?? r?.created;
     const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated;
 
     return {
-      id: Number(id),
+      id: Number(index + 1), // Use index as numeric ID to ensure uniqueness
       bid_id: bid_id != null ? Number(bid_id) : null,
       milestone_index: Number(milestone_index),
       vendor_name,
@@ -167,7 +179,7 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       created_at,
       updated_at,
     };
-  }).filter(proof => proof.id > 0);
+  });
 }
 
 function normalizePayments(rows: any[]): PaymentRow[] {
