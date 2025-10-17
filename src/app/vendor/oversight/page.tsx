@@ -82,32 +82,35 @@ function downloadCSV(filename: string, rows: any[]) {
 }
 
 // ———————————————————————————————————————————
-// Normalizers
+// Enhanced Normalizers
 function normalizeBids(rows: any[]): BidRow[] {
-  return (rows || []).map((r: any) => ({
-    id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
-    proposal_id: r?.proposal_id != null ? Number(r.proposal_id) : (r?.proposal?.id != null ? Number(r.proposal.id) : null),
-    vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? r?.vendor_profile?.vendor_name ?? r?.vendor_profile?.name ?? null,
-    amount_usd: r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null),
-    status: r?.status ?? r?.state ?? null,
-    created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? null,
-    updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? null,
-  }));
+  return (rows || []).map((r: any) => {
+    // Try to get vendor name from multiple possible locations
+    let vendorName = r?.vendor_name ?? r?.vendorName ?? r?.vendor;
+    
+    // If vendor name is still null, try to extract from vendor_profile
+    if (!vendorName && r?.vendor_profile) {
+      vendorName = r.vendor_profile.vendor_name ?? r.vendor_profile.name ?? r.vendor_profile.vendor;
+    }
+    
+    return {
+      id: Number(r?.id ?? r?.bid_id ?? r?.bidId ?? 0),
+      proposal_id: r?.proposal_id != null ? Number(r.proposal_id) : (r?.proposal?.id != null ? Number(r.proposal.id) : null),
+      vendor_name: vendorName,
+      amount_usd: r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null),
+      status: r?.status ?? r?.state ?? null,
+      created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? null,
+      updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? null,
+    };
+  }).filter(bid => bid.id > 0); // Filter out invalid bids
 }
 
 function normalizeProofs(rows: any[]): ProofRow[] {
-  const toIdx = (v: any): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
   return (rows || []).map((r: any) => {
-    const idx = toIdx(r?.milestone_index) ?? toIdx(r?.milestoneIndex) ?? toIdx(r?.milestone) ?? null;
-    const bidNum = toIdx(r?.bid_id) ?? toIdx(r?.bidId) ?? toIdx(r?.bid?.id) ?? null;
-
-    return {
-      id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
-      bid_id: bidNum,
-      milestone_index: idx,
+    const proof = {
+      id: Number(r?.id ?? r?.proof_id ?? r?.proofId ?? 0),
+      bid_id: Number(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ?? 0),
+      milestone_index: Number(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.i ?? 0),
       vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? null,
       title: r?.title ?? r?.name ?? r?.proof_title ?? null,
       status: r?.status ?? r?.state ?? null,
@@ -115,7 +118,10 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       created_at: r?.created_at ?? r?.createdAt ?? null,
       updated_at: r?.updated_at ?? r?.updatedAt ?? null,
     };
-  });
+    
+    // Only include proofs with valid IDs
+    return proof.id > 0 ? proof : null;
+  }).filter(Boolean) as ProofRow[];
 }
 
 function normalizePayments(rows: any[]): PaymentRow[] {
@@ -228,7 +234,7 @@ export default function VendorOversightPage() {
         setErr(null);
         setLoading(true);
 
-        // Single API call to get all vendor data
+        // Use our aggregated vendor oversight endpoint
         const response = await fetch(`/api/vendor/oversight?t=${Date.now()}`, {
           cache: 'no-store',
           credentials: 'include',
@@ -245,17 +251,30 @@ export default function VendorOversightPage() {
         const data = await response.json();
         
         if (!aborted) {
+          console.log('Vendor data:', data); // Debug log
+          
           setRole(data.role || null);
-          setBids(normalizeBids(data.bids || []));
-          setProofs(normalizeProofs(data.proofs || []));
-          setPayments(normalizePayments(data.payments || []));
+          
+          const normalizedBids = normalizeBids(data.bids || []);
+          setBids(normalizedBids);
+          console.log('Normalized bids:', normalizedBids); // Debug log
+          
+          const normalizedProofs = normalizeProofs(data.proofs || []);
+          setProofs(normalizedProofs);
+          console.log('Normalized proofs:', normalizedProofs); // Debug log
+          
+          const normalizedPayments = normalizePayments(data.payments || []);
+          setPayments(normalizedPayments);
+          console.log('Normalized payments:', normalizedPayments); // Debug log
           
           // Derive milestones from proofs
-          const milestones = deriveMilestonesFromProofs(normalizeProofs(data.proofs || []));
+          const milestones = deriveMilestonesFromProofs(normalizedProofs);
           setMilestones(milestones);
+          console.log('Derived milestones:', milestones); // Debug log
         }
         
       } catch (e: any) {
+        console.error('Vendor data fetch error:', e);
         if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
       } finally {
         if (!aborted) setLoading(false);
@@ -329,6 +348,16 @@ export default function VendorOversightPage() {
 
   return (
     <div className="px-6 py-8 space-y-8">
+      {/* Debug Info - Temporary */}
+      <div className="fixed bottom-4 right-4 bg-yellow-100 border border-yellow-400 p-4 rounded-lg text-xs max-w-md z-50">
+        <div className="font-bold">Debug Info:</div>
+        <div>Bids: {bids?.length ?? 0}</div>
+        <div>Proofs: {proofs?.length ?? 0}</div>
+        <div>Payments: {payments?.length ?? 0}</div>
+        <div>Milestones: {milestones?.length ?? 0}</div>
+        {err && <div className="text-red-600">Error: {err}</div>}
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Vendor Overview</h1>

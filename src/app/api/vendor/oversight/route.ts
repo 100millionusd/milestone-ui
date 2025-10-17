@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 const API = (
   process.env.API_BASE ??
@@ -11,16 +10,54 @@ const API = (
   ""
 ).replace(/\/$/, "");
 
-async function go(path: string, headers: HeadersInit) {
+async function fetchWithAuth(path: string, headers: HeadersInit) {
   if (!API) throw new Error("API_BASE is not set");
   const r = await fetch(`${API}${path}`, {
     headers,
     credentials: "include",
     cache: "no-store",
   });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`${path} -> ${r.status} ${data?.error || r.statusText}`);
-  return data;
+  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+  return r.json().catch(() => ({}));
+}
+
+// Helper to extract proofs from bid data
+function extractProofsFromBids(bids: any[]): any[] {
+  const proofs: any[] = [];
+  
+  for (const bid of bids) {
+    if (bid.proofs && Array.isArray(bid.proofs)) {
+      proofs.push(...bid.proofs.map((p: any) => ({
+        ...p,
+        bid_id: bid.id
+      })));
+    }
+  }
+  
+  return proofs;
+}
+
+// Helper to extract payments from bid data
+function extractPaymentsFromBids(bids: any[]): any[] {
+  const payments: any[] = [];
+  
+  for (const bid of bids) {
+    // Try different payment field names
+    const bidPayments = 
+      bid.payments || 
+      bid.payouts || 
+      bid.transactions || 
+      [];
+    
+    if (Array.isArray(bidPayments)) {
+      payments.push(...bidPayments.map((p: any) => ({
+        ...p,
+        bid_id: bid.id
+      })));
+    }
+  }
+  
+  return payments;
 }
 
 export async function GET(req: NextRequest) {
@@ -29,42 +66,61 @@ export async function GET(req: NextRequest) {
   const headers = { authorization: auth, cookie };
 
   try {
-    // Get vendor-specific data
-    const results = await Promise.allSettled([
-      // Vendor bids
-      go("/vendor/bids", headers).catch(() => go("/bids?mine=1", headers)),
-      // Vendor proofs - try multiple endpoints
-      go("/vendor/proofs", headers).catch(() => go("/proofs?mine=1", headers)).catch(() => ({ proofs: [] })),
-      // Vendor payments
-      go("/vendor/payments", headers).catch(() => go("/payments?mine=1", headers)).catch(() => ({ payments: [] })),
-      // User role info
-      go("/auth/role", headers),
-    ]);
+    // Get vendor bids first
+    let bids: any[] = [];
+    
+    // Try multiple bid endpoints
+    const bidEndpoints = [
+      "/bids?mine=1",
+      "/vendor/bids", 
+      "/bids"
+    ];
 
-    const [bidsData, proofsData, paymentsData, roleData] = results.map(r =>
-      r.status === "fulfilled" ? r.value : null
-    );
+    for (const endpoint of bidEndpoints) {
+      try {
+        const data = await fetchWithAuth(endpoint, headers);
+        const bidData = Array.isArray(data) ? data : (data?.bids ?? data ?? []);
+        if (bidData.length > 0) {
+          bids = bidData;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
 
-    // Normalize the data structure for the frontend
+    // Extract proofs and payments from bid data
+    const proofs = extractProofsFromBids(bids);
+    const payments = extractPaymentsFromBids(bids);
+
+    // Get user role
+    let role = null;
+    try {
+      role = await fetchWithAuth("/auth/role", headers);
+    } catch {
+      // Role endpoint might not be critical
+    }
+
     const body = {
-      bids: Array.isArray(bidsData) ? bidsData : (bidsData?.bids ?? []),
-      proofs: Array.isArray(proofsData) ? proofsData : (proofsData?.proofs ?? []),
-      payments: Array.isArray(paymentsData) ? paymentsData : (paymentsData?.payments ?? paymentsData?.payouts ?? []),
-      role: roleData,
-      _errors: results
-        .map((r, i) => (r.status === "rejected" ? { part: i, error: String(r.reason) } : null))
-        .filter(Boolean),
+      bids,
+      proofs,
+      payments,
+      role,
     };
 
-    return new NextResponse(JSON.stringify(body), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-      },
-    });
+    return NextResponse.json(body);
+    
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Vendor oversight aggregation failed" }, { status: 500 });
+    console.error("Vendor oversight error:", e);
+    return NextResponse.json(
+      { 
+        error: e?.message || "Vendor oversight failed",
+        bids: [],
+        proofs: [],
+        payments: [],
+        role: null
+      }, 
+      { status: 500 }
+    );
   }
 }
