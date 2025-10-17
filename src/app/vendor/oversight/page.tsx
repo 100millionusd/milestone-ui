@@ -1,0 +1,480 @@
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useMemo, useState } from 'react';
+
+// ———————————————————————————————————————————
+// API base + same-origin fallback (matches your pattern)
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+
+// ———————————————————————————————————————————
+// Types (tolerant to backend variations)
+type RoleInfo = { address?: string | null; role?: string | null; email?: string | null };
+
+type BidRow = {
+  id: number;
+  proposal_id?: number | null;
+  vendor_name?: string | null;
+  amount_usd?: number | string | null;
+  status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ProofRow = {
+  id: number;
+  bid_id?: number | string | null;
+  milestone_index?: number | null;
+  vendor_name?: string | null;
+  title?: string | null;
+  status?: string | null;
+  submitted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type MilestoneRow = {
+  id: string;                 // `${bid_id}-${milestone_index}`
+  bid_id: number;
+  milestone_index: number;
+  title?: string | null;
+  status?: string | null;     // derived from proofs (submitted/—)
+  last_update?: string | null;
+};
+
+// ———————————————————————————————————————————
+// Small helpers (copied/compatible with your admin page style)
+function humanTime(s?: string | null) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString();
+}
+function fmtUSD0(v: any) {
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.-]/g, '')) || 0;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+}
+function toNumber(v: any) {
+  if (v == null) return 0;
+  if (typeof v === 'number') return v;
+  return Number(String(v).replace(/[^0-9.-]/g, '')) || 0;
+}
+function downloadCSV(filename: string, rows: any[]) {
+  const keys = Array.from(rows.reduce((set, r) => { Object.keys(r || {}).forEach(k => set.add(k)); return set; }, new Set<string>()));
+  const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [keys.join(','), ...rows.map(r => keys.map(k => esc((r as any)[k])).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ———————————————————————————————————————————
+// Normalizers (map varying backend shapes → our rows)
+function normalizeBids(rows: any[]): BidRow[] {
+  return (rows || []).map((r: any) => ({
+    id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
+    proposal_id: r?.proposal_id != null ? Number(r.proposal_id) : (r?.proposal?.id != null ? Number(r.proposal.id) : null),
+    vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? r?.vendor_profile?.vendor_name ?? r?.vendor_profile?.name ?? null,
+    amount_usd: r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null),
+    status: r?.status ?? r?.state ?? null,
+    created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? null,
+  }));
+}
+function normalizeProofs(rows: any[]): ProofRow[] {
+  return (rows || []).map((r: any) => ({
+    id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
+    bid_id: Number(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid) || r?.bid_id || r?.bidId || null,
+    milestone_index: r?.milestone_index != null ? Number(r.milestone_index) : (r?.milestone != null ? Number(r.milestone) : null),
+    vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? r?.vendor_profile?.vendor_name ?? r?.vendor_profile?.name ?? null,
+    title: r?.title ?? r?.name ?? r?.proof_title ?? null,
+    status: r?.status ?? r?.state ?? null,
+    submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
+    created_at: r?.created_at ?? r?.createdAt ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+  }));
+}
+
+// Derive milestones from proofs (fallback when API doesn't expose milestones list)
+function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
+  const byKey = new Map<string, MilestoneRow>();
+  for (const p of proofs) {
+    if (typeof p.bid_id !== 'number' || typeof p.milestone_index !== 'number') continue;
+    const key = `${p.bid_id}-${p.milestone_index}`;
+    const prev = byKey.get(key);
+    const row: MilestoneRow = {
+      id: key,
+      bid_id: p.bid_id as number,
+      milestone_index: p.milestone_index,
+      title: p.title ?? prev?.title ?? null,
+      status: 'submitted',
+      last_update: p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null,
+    };
+    byKey.set(key, row);
+  }
+  return Array.from(byKey.values()).sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
+}
+
+// ———————————————————————————————————————————
+// Simple UI atoms (lightweight, match your admin feel)
+function Card(props: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden mb-6">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200/70 dark:border-neutral-800/60 bg-white/60 dark:bg-neutral-900/40 backdrop-blur">
+        <div>
+          <div className="text-lg font-semibold">{props.title}</div>
+          {props.subtitle && <div className="text-xs text-neutral-500">{props.subtitle}</div>}
+        </div>
+        <div className="flex items-center gap-2">{props.right}</div>
+      </div>
+      <div className="p-0">{props.children}</div>
+    </div>
+  );
+}
+function Th(props: { children: React.ReactNode }) {
+  return <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-600">{props.children}</th>;
+}
+function Td(props: { children: React.ReactNode; className?: string; colSpan?: number }) {
+  return <td className={`px-4 py-3 ${props.className ?? ''}`} colSpan={props.colSpan}>{props.children}</td>;
+}
+function RowPlaceholder({ cols }: { cols: number }) {
+  return (
+    <tr>
+      <td colSpan={cols} className="p-6 text-center text-neutral-400">Loading…</td>
+    </tr>
+  );
+}
+
+// ———————————————————————————————————————————
+// Page
+export default function VendorOversightPage() {
+  const [role, setRole] = useState<RoleInfo | null>(null);
+  const [bids, setBids] = useState<BidRow[] | null>(null);
+  const [proofs, setProofs] = useState<ProofRow[] | null>(null);
+  const [milestones, setMilestones] = useState<MilestoneRow[] | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [tab, setTab] = useState<'overview' | 'bids' | 'proofs' | 'milestones'>('overview');
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      try {
+        setErr(null);
+        setLoading(true);
+
+        // Who am I?
+        const rRole = await fetch(`${api('/auth/role')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
+        if (!rRole.ok) throw new Error(`auth/role ${rRole.status}`);
+        const roleJson = await rRole.json();
+        if (!aborted) setRole(roleJson);
+
+        // My bids (SCOPE_BIDS_FOR_VENDOR should scope this)
+        const rBids = await fetch(`${api('/bids')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
+        if (!rBids.ok) throw new Error(`bids ${rBids.status}`);
+        const bj = await rBids.json();
+        const bidList = normalizeBids(bj?.bids ?? bj ?? []);
+        if (!aborted) setBids(bidList);
+
+        // Proofs per bid (fast path if API supports list; else per-bid)
+        let proofsList: any[] = [];
+        try {
+          const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
+          if (rp.ok) {
+            const pj = await rp.json();
+            proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
+          }
+        } catch { /* ignore */ }
+
+        if (!Array.isArray(proofsList) || proofsList.length === 0) {
+          // per-bid fetch
+          const ids = bidList.map(b => b.id).filter(Boolean);
+          const results: any[] = [];
+          const CONCURRENCY = 6;
+          let i = 0;
+          async function runBatch() {
+            const batch = ids.slice(i, i + CONCURRENCY);
+            i += CONCURRENCY;
+            const reqs = batch.map(id =>
+              fetch(`${api('/proofs')}?bidId=${id}&t=${Date.now()}`, {
+                cache: 'no-store',
+                credentials: 'include',
+              }).then(r => r.ok ? r.json() : null)
+               .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
+               .catch(() => [])
+            );
+            const chunks = await Promise.all(reqs);
+            chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+            if (i < ids.length) await runBatch();
+          }
+          if (ids.length) await runBatch();
+          proofsList = results;
+        }
+
+        const proofRows = normalizeProofs(proofsList);
+        if (!aborted) setProofs(proofRows);
+
+        // Derive milestones (from proofs; swap to API milestones if you expose them)
+        if (!aborted) setMilestones(deriveMilestonesFromProofs(proofRows));
+      } catch (e: any) {
+        if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
+      } finally {
+        if (!aborted) setLoading(false);
+      }
+    })();
+    return () => { aborted = true; };
+  }, []);
+
+  // ——— Filters
+  const filteredBids = useMemo(() => {
+    const list = bids ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(b =>
+      String(b.id).includes(q) ||
+      String(b.proposal_id ?? '').includes(q) ||
+      (b.vendor_name ?? '').toLowerCase().includes(q) ||
+      (b.status ?? '').toLowerCase().includes(q)
+    );
+  }, [bids, query]);
+
+  const filteredProofs = useMemo(() => {
+    const list = proofs ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(p =>
+      String(p.id).includes(q) ||
+      String(p.bid_id ?? '').includes(q) ||
+      String(p.milestone_index ?? '').includes(q) ||
+      (p.vendor_name ?? '').toLowerCase().includes(q) ||
+      (p.title ?? '').toLowerCase().includes(q) ||
+      (p.status ?? '').toLowerCase().includes(q)
+    );
+  }, [proofs, query]);
+
+  const filteredMilestones = useMemo(() => {
+    const list = milestones ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(m =>
+      String(m.bid_id).includes(q) ||
+      String(m.milestone_index).includes(q) ||
+      (m.title ?? '').toLowerCase().includes(q) ||
+      (m.status ?? '').toLowerCase().includes(q)
+    );
+  }, [milestones, query]);
+
+  // ——— UI
+  const tabs = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
+    { key: 'proofs', label: 'Proofs', count: proofs?.length ?? 0 },
+    { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
+  ] as const;
+
+  return (
+    <div className="px-6 py-8 space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Vendor Overview</h1>
+          <div className="text-sm text-neutral-500">
+            {role?.role ? `Signed in as ${role.role}` : '—'} • {role?.address ?? role?.email ?? '—'}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-1.5 rounded-2xl border text-sm ${tab === t.key ? 'bg-black text-white border-black' : 'bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700'}`}
+            >
+              {t.label}{' '}{t.count != null ? <span className="ml-1 text-neutral-500">{t.count}</span> : null}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab !== 'overview' && (
+        <div className="flex items-center justify-end">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Filter ${tab}…`}
+            className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2"
+          />
+        </div>
+      )}
+
+      {err && <div className="text-rose-600 text-sm">{err}</div>}
+      {loading && <div className="text-neutral-500 text-sm">Loading…</div>}
+
+      {/* ——— Overview ——— */}
+      {tab === 'overview' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card title="My Bids" subtitle="Count / Last created">
+            <div className="p-4 flex items-baseline gap-3">
+              <div className="text-3xl font-semibold">{bids?.length ?? 0}</div>
+              <div className="text-sm text-neutral-500">
+                {bids && bids.length ? `Last: ${humanTime(bids.slice().sort((a,b)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0].created_at)}` : '—'}
+              </div>
+            </div>
+          </Card>
+          <Card title="My Proofs" subtitle="Submitted proofs">
+            <div className="p-4 flex items-baseline gap-3">
+              <div className="text-3xl font-semibold">{proofs?.length ?? 0}</div>
+            </div>
+          </Card>
+          <Card title="Milestones" subtitle="Derived from submissions">
+            <div className="p-4 flex items-baseline gap-3">
+              <div className="text-3xl font-semibold">{milestones?.length ?? 0}</div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ——— Bids ——— */}
+      {tab === 'bids' && (
+        <Card
+          title={`Bids (${filteredBids.length})`}
+          subtitle="Newest first"
+          right={
+            <button
+              onClick={() => downloadCSV(`my-bids-${new Date().toISOString().slice(0,10)}.csv`, filteredBids)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              ⬇ CSV
+            </button>
+          }
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                <tr>
+                  <Th>ID</Th>
+                  <Th>Proposal</Th>
+                  <Th>Status</Th>
+                  <Th>USD</Th>
+                  <Th>Created</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {!bids && <RowPlaceholder cols={5} />}
+                {bids && filteredBids.length === 0 && <tr><Td colSpan={5} className="text-center text-neutral-500">No bids</Td></tr>}
+                {filteredBids
+                  .slice()
+                  .sort((a, b) => (new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
+                  .map(b => (
+                  <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800">
+                    <Td>#{b.id}</Td>
+                    <Td>#{b.proposal_id ?? '—'}</Td>
+                    <Td>{b.status ?? '—'}</Td>
+                    <Td className="tabular-nums">{fmtUSD0(b.amount_usd)}</Td>
+                    <Td>{humanTime(b.created_at)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* ——— Proofs ——— */}
+      {tab === 'proofs' && (
+        <Card
+          title={`Proofs (${filteredProofs.length})`}
+          subtitle="Newest first"
+          right={
+            <button
+              onClick={() => downloadCSV(`my-proofs-${new Date().toISOString().slice(0,10)}.csv`, filteredProofs)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              ⬇ CSV
+            </button>
+          }
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                <tr>
+                  <Th>ID</Th>
+                  <Th>Bid</Th>
+                  <Th>Milestone</Th>
+                  <Th>Status</Th>
+                  <Th>Submitted</Th>
+                  <Th>Title</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {!proofs && <RowPlaceholder cols={6} />}
+                {proofs && filteredProofs.length === 0 && <tr><Td colSpan={6} className="text-center text-neutral-500">No proofs</Td></tr>}
+                {filteredProofs
+                  .slice()
+                  .sort((a, b) => (new Date(b.submitted_at || b.created_at || 0).getTime() - new Date(a.submitted_at || a.created_at || 0).getTime()))
+                  .map(p => (
+                  <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800">
+                    <Td>#{p.id}</Td>
+                    <Td>{p.bid_id ?? '—'}</Td>
+                    <Td>{p.milestone_index ?? '—'}</Td>
+                    <Td>{p.status ?? '—'}</Td>
+                    <Td>{humanTime(p.submitted_at || p.created_at)}</Td>
+                    <Td className="max-w-[360px] truncate" title={p.title || ''}>{p.title ?? '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* ——— Milestones (derived) ——— */}
+      {tab === 'milestones' && (
+        <Card
+          title={`Milestones (${filteredMilestones.length})`}
+          subtitle="Derived from your submitted proofs"
+          right={
+            <button
+              onClick={() => downloadCSV(`my-milestones-${new Date().toISOString().slice(0,10)}.csv`, filteredMilestones)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              ⬇ CSV
+            </button>
+          }
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                <tr>
+                  <Th>Bid</Th>
+                  <Th>Milestone</Th>
+                  <Th>Status</Th>
+                  <Th>Last Update</Th>
+                  <Th>Title</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {!milestones && <RowPlaceholder cols={5} />}
+                {milestones && filteredMilestones.length === 0 && <tr><Td colSpan={5} className="text-center text-neutral-500">No milestones</Td></tr>}
+                {filteredMilestones.map(m => (
+                  <tr key={m.id} className="border-b border-neutral-100 dark:border-neutral-800">
+                    <Td>{m.bid_id}</Td>
+                    <Td>{m.milestone_index}</Td>
+                    <Td>{m.status ?? '—'}</Td>
+                    <Td>{humanTime(m.last_update)}</Td>
+                    <Td className="max-w-[360px] truncate" title={m.title || ''}>{m.title ?? '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
