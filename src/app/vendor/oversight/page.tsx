@@ -407,7 +407,7 @@ let proofsList: any[] = [];
 
 // 1) Try direct list
 try {
-  const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+  const rp = await fetch(`${local('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
   if (rp.ok) {
     const pj = await rp.json();
     proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
@@ -417,7 +417,7 @@ try {
 // 2) Try vendor-scoped list if still empty
 if (!Array.isArray(proofsList) || proofsList.length === 0) {
   try {
-    const rpMine = await fetch(`${api('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+    const rpMine = await fetch(`${local('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
     if (rpMine.ok) {
       const pj2 = await rpMine.json();
       proofsList = Array.isArray(pj2) ? pj2 : (pj2?.proofs ?? []);
@@ -497,9 +497,7 @@ try {
   let payList: any[] = [];
 
   // 1) Try a direct vendor-scoped list
-  const r1 = await fetch(`${api('/payouts')}?mine=1&t=${Date.now()}`, {
-    cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-  });
+  const r1 = await fetch(`${local('/payouts')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
   if (r1.ok) {
     const j1 = await r1.json();
     payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
@@ -507,9 +505,7 @@ try {
 
   // 2) Try generic list if still empty
   if (!Array.isArray(payList) || payList.length === 0) {
-    const r2 = await fetch(`${api('/payouts')}?t=${Date.now()}`, {
-      cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-    });
+    const r2 = await fetch(`${local('/payouts')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
     if (r2.ok) {
       const j2 = await r2.json();
       payList = Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
@@ -525,7 +521,7 @@ try {
 
     async function fetchForBid(id: number): Promise<any[]> {
       // ?bidId=
-      let r = await fetch(`${api('/payouts')}?bidId=${id}&t=${Date.now()}`, {
+      let r = await fetch(`${local('/payouts')}?bidId=${id}&t=${Date.now()}`, { ... });`, {
         cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
       });
       if (r.ok) {
@@ -534,7 +530,7 @@ try {
       }
       // ?bid_id=
       if (r.status === 400 || r.status === 404) {
-        r = await fetch(`${api('/payouts')}?bid_id=${id}&t=${Date.now()}`, {
+        r = await fetch(`${local('/payouts')}?bid_id=${id}&t=${Date.now()}`, { ... });`, {
           cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
         });
         if (r.ok) {
@@ -544,9 +540,7 @@ try {
       }
       // /bids/:id (if it contains payouts)
       try {
-        const rb = await fetch(`${api(`/bids/${id}`)}?t=${Date.now()}`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
+        const rb = await fetch(`${local(`/bids/${id}`)}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
         if (rb.ok) {
           const bj = await rb.json();
           const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
