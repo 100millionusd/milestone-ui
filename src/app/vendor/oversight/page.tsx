@@ -44,6 +44,18 @@ type MilestoneRow = {
   last_update?: string | null;
 };
 
+type PaymentRow = {
+  id: number | string;
+  bid_id: number | null;
+  milestone_index: number | null;
+  amount_usd: number | string | null;
+  status?: string | null;         // e.g. released, pending
+  released_at?: string | null;
+  tx_hash?: string | null;        // optional on-chain hash
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 // ———————————————————————————————————————————
 // Small helpers (copied/compatible with your admin page style)
 function humanTime(s?: string | null) {
@@ -134,6 +146,30 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       updated_at: r?.updated_at ?? r?.updatedAt ?? null,
     };
   });
+}
+
+function normalizePayments(rows: any[]): PaymentRow[] {
+  const toNum = (v: any): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const toUsd = (v: any): number | string | null => {
+    if (v == null) return null;
+    if (typeof v === 'number') return v;
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : v;
+  };
+  return (rows || []).map((r: any) => ({
+    id: r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? r?.hash ?? r?.tx_hash ?? '—',
+    bid_id: toNum(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid),
+    milestone_index: toNum(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.milestone_no ?? r?.i),
+    amount_usd: toUsd(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount)),
+    status: r?.status ?? r?.state ?? r?.payout_status ?? null,
+    released_at: r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt ?? null,
+    tx_hash: r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? null,
+    created_at: r?.created_at ?? r?.createdAt ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+  }));
 }
 
 // Derive milestones from proofs (fallback when API doesn't expose milestones list)
@@ -322,6 +358,7 @@ export default function VendorOversightPage() {
   const [bids, setBids] = useState<BidRow[] | null>(null);
   const [proofs, setProofs] = useState<ProofRow[] | null>(null);
   const [milestones, setMilestones] = useState<MilestoneRow[] | null>(null);
+  const [payments, setPayments] = useState<PaymentRow[] | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -463,6 +500,86 @@ if (!aborted) setMilestones(ms);
     return () => { aborted = true; };
   }, []);
 
+  // ——— Payments (try list → vendor flags → per-bid) ———
+try {
+  let payList: any[] = [];
+
+  // 1) Try a direct vendor-scoped list
+  const r1 = await fetch(`${api('/payouts')}?mine=1&t=${Date.now()}`, {
+    cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+  });
+  if (r1.ok) {
+    const j1 = await r1.json();
+    payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
+  }
+
+  // 2) Try generic list if still empty
+  if (!Array.isArray(payList) || payList.length === 0) {
+    const r2 = await fetch(`${api('/payouts')}?t=${Date.now()}`, {
+      cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+    });
+    if (r2.ok) {
+      const j2 = await r2.json();
+      payList = Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+    }
+  }
+
+  // 3) Per-bid fallback (handles backends that require bid scoping)
+  if (!Array.isArray(payList) || payList.length === 0) {
+    const ids = Array.from(new Set((bids ?? []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
+    const CONCURRENCY = 6;
+    const results: any[] = [];
+    let idx = 0;
+
+    async function fetchForBid(id: number): Promise<any[]> {
+      // ?bidId=
+      let r = await fetch(`${api('/payouts')}?bidId=${id}&t=${Date.now()}`, {
+        cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+      });
+      if (r.ok) {
+        const j = await r.json();
+        return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
+      }
+      // ?bid_id=
+      if (r.status === 400 || r.status === 404) {
+        r = await fetch(`${api('/payouts')}?bid_id=${id}&t=${Date.now()}`, {
+          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+        });
+        if (r.ok) {
+          const j2 = await r.json();
+          return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+        }
+      }
+      // /bids/:id (if it contains payouts)
+      try {
+        const rb = await fetch(`${api(`/bids/${id}`)}?t=${Date.now()}`, {
+          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+        });
+        if (rb.ok) {
+          const bj = await rb.json();
+          const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
+          return arr || [];
+        }
+      } catch { /* ignore */ }
+      return [];
+    }
+
+    async function runBatch() {
+      const batch = ids.slice(idx, idx + CONCURRENCY);
+      idx += CONCURRENCY;
+      const chunks = await Promise.all(batch.map(id => fetchForBid(id)));
+      chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+      if (idx < ids.length) await runBatch();
+    }
+    if (ids.length) {
+      await runBatch();
+      payList = results;
+    }
+  }
+
+  if (!aborted) setPayments(normalizePayments(payList));
+} catch { /* ignore payments errors so page still loads */ }
+
   // ——— Filters
   const filteredBids = useMemo(() => {
     const list = bids ?? [];
@@ -502,12 +619,26 @@ if (!aborted) setMilestones(ms);
     );
   }, [milestones, query]);
 
+  const filteredPayments = useMemo(() => {
+  const list = payments ?? [];
+  if (!query) return list;
+  const q = query.toLowerCase();
+  return list.filter(p =>
+    String(p.id).toLowerCase().includes(q) ||
+    String(p.bid_id ?? '').includes(q) ||
+    String(p.milestone_index ?? '').includes(q) ||
+    (p.status ?? '').toLowerCase().includes(q) ||
+    (p.tx_hash ?? '').toLowerCase().includes(q)
+  );
+}, [payments, query]);
+
   // ——— UI
   const tabs = [
     { key: 'overview', label: 'Overview' },
     { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
     { key: 'proofs', label: 'Proofs', count: proofs?.length ?? 0 },
     { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
+    { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
   ] as const;
 
   return (
@@ -664,6 +795,58 @@ if (!aborted) setMilestones(ms);
           </div>
         </Card>
       )}
+{tab === 'payments' && (
+  <Card
+    title={`Payments (${filteredPayments.length})`}
+    subtitle="Latest first"
+    right={
+      <button
+        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
+        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+      >
+        ⬇ CSV
+      </button>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th>ID</Th>
+            <Th>Bid</Th>
+            <Th>Milestone</Th>
+            <Th>Status</Th>
+            <Th>Released</Th>
+            <Th>Amount</Th>
+            <Th>Tx</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {!payments && <RowPlaceholder cols={7} />}
+          {payments && filteredPayments.length === 0 && (
+            <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
+          )}
+          {filteredPayments
+            .slice()
+            .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
+            .map(p => (
+            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
+              <Td className="font-mono text-xs">{String(p.id)}</Td>
+              <Td>{p.bid_id ?? '—'}</Td>
+              <Td>{p.milestone_index ?? '—'}</Td>
+              <Td>{p.status ?? '—'}</Td>
+              <Td>{humanTime(p.released_at || p.created_at)}</Td>
+              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
+              <Td className="max-w-[260px] truncate font-mono text-[11px]" title={p.tx_hash || ''}>
+                {p.tx_hash ? p.tx_hash.slice(0, 10) + '…' + p.tx_hash.slice(-6) : '—'}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
 
       {/* ——— Milestones (derived) ——— */}
       {tab === 'milestones' && (
