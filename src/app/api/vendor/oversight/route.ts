@@ -77,6 +77,40 @@ function extractProofsFromBids(bids: any[]): any[] {
   return proofs;
 }
 
+// Enhanced function to extract payments from proofs (since proofs have payment info)
+function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
+  const payments: any[] = [];
+  
+  console.log('Extracting payments from proofs:', proofs.length);
+  
+  for (const proof of proofs) {
+    const bidId = proof?.bid_id ?? proof?.bidId;
+    const milestoneIndex = proof?.milestone_index ?? proof?.milestoneIndex ?? proof?.milestone;
+    
+    // If proof has payment-related information, create a payment record
+    if (proof.status === 'paid' || proof.completed === true) {
+      console.log(`Creating payment from proof:`, proof);
+      
+      // Find the corresponding bid to get amount information
+      const bid = bids.find(b => (b.id ?? b.bidId) === bidId);
+      
+      payments.push({
+        id: `payment-${bidId}-${milestoneIndex}`,
+        bid_id: bidId,
+        milestone_index: milestoneIndex,
+        amount_usd: proof.amount ?? bid?.priceUsd ?? bid?.amount_usd,
+        status: 'completed',
+        released_at: proof.updated_at ?? proof.created_at,
+        created_at: proof.created_at,
+        // Use proof name as description
+        description: proof.name ?? proof.title
+      });
+    }
+  }
+  
+  return payments;
+}
+
 // Enhanced function to extract payments from bid data
 function extractPaymentsFromBids(bids: any[]): any[] {
   const payments: any[] = [];
@@ -232,9 +266,16 @@ export async function GET(req: NextRequest) {
     }
 
     // If no payments from endpoints, extract from bids
+        // If no payments from endpoints, extract from bids and proofs
     if (payments.length === 0) {
       payments = extractPaymentsFromBids(bids);
       console.log(`Extracted ${payments.length} payments from bids`);
+      
+      // If still no payments, try to create from proofs
+      if (payments.length === 0) {
+        payments = extractPaymentsFromProofs(proofs, bids);
+        console.log(`Extracted ${payments.length} payments from proofs`);
+      }
     }
 
     // Get user role

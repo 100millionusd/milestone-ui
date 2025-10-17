@@ -85,67 +85,137 @@ function downloadCSV(filename: string, rows: any[]) {
 // Enhanced Normalizers
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => {
-    // Try to get vendor name from multiple possible locations
-    let vendorName = r?.vendor_name ?? r?.vendorName ?? r?.vendor;
+    console.log('Raw bid data:', r); // Debug log
     
-    // If vendor name is still null, try to extract from vendor_profile
-    if (!vendorName && r?.vendor_profile) {
-      vendorName = r.vendor_profile.vendor_name ?? r.vendor_profile.name ?? r.vendor_profile.vendor;
+    // Handle different ID fields
+    const id = r?.id ?? r?.bidId ?? r?.bid_id;
+    
+    // Handle different proposal ID fields  
+    const proposal_id = r?.proposalId ?? r?.proposal_id ?? r?.proposal?.id;
+    
+    // Handle different vendor name fields
+    let vendor_name = r?.vendorName ?? r?.vendor_name ?? r?.vendor;
+    if (!vendor_name && r?.vendor_profile) {
+      vendor_name = r.vendor_profile.vendor_name ?? r.vendor_profile.name ?? r.vendor_profile.vendor;
     }
     
+    // Handle different amount fields
+    const amount_usd = r?.priceUsd ?? r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? 
+                      (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null);
+    
+    // Handle different status fields
+    const status = r?.status ?? r?.state ?? null;
+    
+    // Handle different date fields
+    const created_at = r?.created_at ?? r?.createdAt ?? r?.created ?? r?.inserted_at;
+    const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated ?? r?.modified_at;
+
     return {
-      id: Number(r?.id ?? r?.bid_id ?? r?.bidId ?? 0),
-      proposal_id: r?.proposal_id != null ? Number(r.proposal_id) : (r?.proposal?.id != null ? Number(r.proposal.id) : null),
-      vendor_name: vendorName,
-      amount_usd: r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null),
-      status: r?.status ?? r?.state ?? null,
-      created_at: r?.created_at ?? r?.createdAt ?? r?.created ?? null,
-      updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? null,
+      id: Number(id || 0),
+      proposal_id: proposal_id != null ? Number(proposal_id) : null,
+      vendor_name,
+      amount_usd,
+      status,
+      created_at,
+      updated_at,
     };
-  }).filter(bid => bid.id > 0); // Filter out invalid bids
+  }).filter(bid => bid.id > 0);
 }
 
 function normalizeProofs(rows: any[]): ProofRow[] {
-  return (rows || []).map((r: any) => {
-    const proof = {
-      id: Number(r?.id ?? r?.proof_id ?? r?.proofId ?? 0),
-      bid_id: Number(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ?? 0),
-      milestone_index: Number(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.i ?? 0),
-      vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? null,
-      title: r?.title ?? r?.name ?? r?.proof_title ?? null,
-      status: r?.status ?? r?.state ?? null,
-      submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
-      created_at: r?.created_at ?? r?.createdAt ?? null,
-      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-    };
+  return (rows || []).map((r: any, index) => {
+    console.log('Raw proof data:', r); // Debug log
     
-    // Only include proofs with valid IDs
-    return proof.id > 0 ? proof : null;
-  }).filter(Boolean) as ProofRow[];
+    // Handle different ID fields - create one if missing
+    const id = r?.id ?? r?.proof_id ?? r?.proofId ?? index + 1;
+    
+    // Handle different bid ID fields
+    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
+    
+    // Handle different milestone index fields
+    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
+                           r?.index ?? r?.i ?? (index + 1);
+    
+    // Handle different vendor name fields
+    const vendor_name = r?.vendor_name ?? r?.vendorName ?? r?.vendor;
+    
+    // Handle different title fields
+    const title = r?.title ?? r?.name ?? r?.proof_title ?? `Milestone ${milestone_index}`;
+    
+    // Handle different status fields
+    let status = r?.status ?? r?.state;
+    if (!status) {
+      // Derive status from other fields
+      if (r?.completed === true) status = 'completed';
+      else if (r?.proof) status = 'submitted';
+      else status = 'pending';
+    }
+    
+    // Handle different date fields
+    const submitted_at = r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
+    const created_at = r?.created_at ?? r?.createdAt ?? r?.created;
+    const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated;
+
+    return {
+      id: Number(id),
+      bid_id: bid_id != null ? Number(bid_id) : null,
+      milestone_index: Number(milestone_index),
+      vendor_name,
+      title,
+      status,
+      submitted_at,
+      created_at,
+      updated_at,
+    };
+  }).filter(proof => proof.id > 0);
 }
 
 function normalizePayments(rows: any[]): PaymentRow[] {
-  const toNum = (v: any): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  const toUsd = (v: any): number | string | null => {
-    if (v == null) return null;
-    if (typeof v === 'number') return v;
-    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(n) ? n : v;
-  };
-  return (rows || []).map((r: any) => ({
-    id: r?.id ?? r?.payment_id ?? r?.payout_id ?? '—',
-    bid_id: toNum(r?.bid_id ?? r?.bidId ?? r?.bid?.id),
-    milestone_index: toNum(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone),
-    amount_usd: toUsd(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount)),
-    status: r?.status ?? r?.state ?? r?.payout_status ?? null,
-    released_at: r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt ?? null,
-    tx_hash: r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? null,
-    created_at: r?.created_at ?? r?.createdAt ?? null,
-    updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-  }));
+  return (rows || []).map((r: any, index) => {
+    console.log('Raw payment data:', r); // Debug log
+    
+    // Handle different ID fields
+    const id = r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? 
+               r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+    
+    // Handle different bid ID fields
+    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
+    
+    // Handle different milestone index fields
+    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
+                           r?.index ?? r?.i;
+    
+    // Handle different amount fields
+    let amount_usd = r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount;
+    if (amount_usd == null && r?.usdCents != null) {
+      amount_usd = r.usdCents / 100;
+    }
+    
+    // Handle different status fields
+    const status = r?.status ?? r?.state ?? r?.payout_status ?? 
+                  (r?.completed ? 'completed' : 'pending');
+    
+    // Handle different date fields
+    const released_at = r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? 
+                       r?.created_at ?? r?.createdAt;
+    const created_at = r?.created_at ?? r?.createdAt;
+    const updated_at = r?.updated_at ?? r?.updatedAt;
+
+    // Handle transaction hash
+    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash;
+
+    return {
+      id: String(id),
+      bid_id: bid_id != null ? Number(bid_id) : null,
+      milestone_index: milestone_index != null ? Number(milestone_index) : null,
+      amount_usd,
+      status,
+      released_at,
+      tx_hash,
+      created_at,
+      updated_at,
+    };
+  });
 }
 
 // Derive milestones from proofs
