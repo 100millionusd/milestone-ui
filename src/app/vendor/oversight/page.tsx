@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 
 // ———————————————————————————————————————————
-// API base + same-origin fallback
+// API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
 
@@ -223,9 +223,13 @@ export default function VendorOversightPage() {
   useEffect(() => {
     let aborted = false;
     
-    const fetchWithAuth = async (url: string) => {
+    const fetchVendorData = async () => {
       try {
-        const response = await fetch(url, {
+        setErr(null);
+        setLoading(true);
+
+        // Single API call to get all vendor data
+        const response = await fetch(`/api/vendor/oversight?t=${Date.now()}`, {
           cache: 'no-store',
           credentials: 'include',
           headers: { 
@@ -233,144 +237,32 @@ export default function VendorOversightPage() {
             'Content-Type': 'application/json',
           },
         });
-        
+
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
+
+        const data = await response.json();
         
-        return await response.json();
-      } catch (error) {
-        console.warn(`Failed to fetch ${url}:`, error);
-        return null;
-      }
-    };
-
-    (async () => {
-      try {
-        setErr(null);
-        setLoading(true);
-
-        // Get user role
-        const roleData = await fetchWithAuth(`${api('/auth/role')}?t=${Date.now()}`);
-        if (!aborted && roleData) setRole(roleData);
-
-        // Fetch bids - try multiple vendor-specific endpoints
-        let bidList: BidRow[] = [];
+        if (!aborted) {
+          setRole(data.role || null);
+          setBids(normalizeBids(data.bids || []));
+          setProofs(normalizeProofs(data.proofs || []));
+          setPayments(normalizePayments(data.payments || []));
+          
+          // Derive milestones from proofs
+          const milestones = deriveMilestonesFromProofs(normalizeProofs(data.proofs || []));
+          setMilestones(milestones);
+        }
         
-        // Try vendor-specific bid endpoints
-        const bidEndpoints = [
-          '/bids?mine=1',
-          '/vendor/bids',
-          '/my/bids',
-          '/bids'
-        ];
-
-        for (const endpoint of bidEndpoints) {
-          if (aborted) break;
-          const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
-          if (data) {
-            const normalized = normalizeBids(Array.isArray(data) ? data : (data?.bids ?? data ?? []));
-            if (normalized.length > 0) {
-              bidList = normalized;
-              break;
-            }
-          }
-        }
-
-        if (!aborted) setBids(bidList);
-
-        // Fetch proofs - only use per-bid approach since /proofs endpoints return 400
-        let proofsList: any[] = [];
-        
-        if (bidList.length > 0) {
-          const results: any[] = [];
-          const ids = Array.from(new Set(bidList.map(b => Number(b.id)).filter(n => Number.isFinite(n) && n > 0)));
-          
-          // Fetch proofs for each bid individually
-          for (const id of ids) {
-            if (aborted) break;
-            
-            // Try multiple proof endpoints per bid
-            const proofEndpoints = [
-              `/bids/${id}/proofs`,
-              `/vendor/bids/${id}/proofs`,
-              `/my/bids/${id}/proofs`
-            ];
-
-            for (const endpoint of proofEndpoints) {
-              const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
-              if (data) {
-                const proofData = Array.isArray(data) ? data : (data?.proofs ?? []);
-                results.push(...proofData);
-                break;
-              }
-            }
-          }
-          
-          proofsList = results;
-        }
-
-        const proofRows = normalizeProofs(proofsList);
-        if (!aborted) setProofs(proofRows);
-
-        // Derive milestones from proofs
-        const ms = deriveMilestonesFromProofs(proofRows);
-        if (!aborted) setMilestones(ms);
-
-        // Fetch payments - try multiple endpoints
-        let payList: any[] = [];
-        
-        const paymentEndpoints = [
-          '/vendor/payments',
-          '/my/payments', 
-          '/vendor/transactions',
-          '/my/transactions'
-        ];
-
-        for (const endpoint of paymentEndpoints) {
-          if (aborted) break;
-          const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
-          if (data) {
-            payList = Array.isArray(data) ? data : (data?.payments ?? data?.transactions ?? []);
-            if (payList.length > 0) break;
-          }
-        }
-
-        // Fallback: get payments from bids if direct endpoints don't work
-        if (payList.length === 0 && bidList.length > 0) {
-          const paymentResults: any[] = [];
-          
-          for (const bid of bidList) {
-            if (aborted) break;
-            
-            const paymentEndpoints = [
-              `/bids/${bid.id}/payments`,
-              `/vendor/bids/${bid.id}/payments`,
-              `/my/bids/${bid.id}/payments`
-            ];
-
-            for (const endpoint of paymentEndpoints) {
-              const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
-              if (data) {
-                const paymentData = Array.isArray(data) ? data : (data?.payments ?? []);
-                paymentResults.push(...paymentData);
-                break;
-              }
-            }
-          }
-          
-          payList = paymentResults;
-        }
-
-        if (!aborted) setPayments(normalizePayments(payList));
-
       } catch (e: any) {
         if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
       } finally {
         if (!aborted) setLoading(false);
       }
-    })();
+    };
 
+    fetchVendorData();
     return () => { aborted = true; };
   }, []);
 
