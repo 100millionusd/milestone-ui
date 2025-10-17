@@ -7,7 +7,8 @@ import { useEffect, useMemo, useState } from 'react';
 // ———————————————————————————————————————————
 // API base + same-origin fallback (matches your pattern)
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+// Vendor portal must use same-origin to carry session cookies and avoid 400/CORS
+const api = (p: string) => `/api${p}`;
 
 // ———————————————————————————————————————————
 // Types (tolerant to backend variations)
