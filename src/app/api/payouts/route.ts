@@ -1,3 +1,4 @@
+// src/app/api/payouts/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
       orderBy: { releasedAt: 'desc' },
     });
 
+    // ✅ Wrap in object — required by frontend normalizePayments()
     return NextResponse.json({ payouts });
   } catch (err) {
     console.error('[payouts API]', err);
