@@ -540,7 +540,9 @@ try {
   let payList: any[] = [];
 
   // 1) Try a direct vendor-scoped list
-  const r1 = await fetch(`${local('/payouts')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+  const r1 = await fetch(`${local('/payments')}?mine=1&t=${Date.now()}`, {
+  cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+});
   if (r1.ok) {
     const j1 = await r1.json();
     payList = asPayoutArray(j1);
@@ -548,7 +550,9 @@ try {
 
   // 2) Try generic list if still empty
   if (!Array.isArray(payList) || payList.length === 0) {
-    const r2 = await fetch(`${local('/payouts')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+    const r2 = await fetch(`${local('/payments')}?t=${Date.now()}`, {
+  cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
+});
     if (r2.ok) {
       const j2 = await r2.json();
    payList = asPayoutArray(j2);
