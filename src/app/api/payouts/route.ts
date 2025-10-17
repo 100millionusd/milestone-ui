@@ -1,3 +1,4 @@
+// src/app/api/payouts/route.ts
 import { headers } from "next/headers";
 
 const UPSTREAM =
@@ -8,7 +9,11 @@ const UPSTREAM =
 function pass(res: Response, body: string) {
   return new Response(body, {
     status: res.status,
-    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+    headers: {
+      "content-type": res.headers.get("content-type") || "application/json",
+      // allow client-side fetch
+      "cache-control": "no-store",
+    },
   });
 }
 
@@ -17,10 +22,10 @@ export async function GET(request: Request) {
   const cookie = h.get("cookie") || "";
   const url = new URL(request.url);
 
-  const mine = url.searchParams.get("mine") || "";
+  const mine  = url.searchParams.get("mine") || "";
   const bidId = url.searchParams.get("bidId") || url.searchParams.get("bid_id") || "";
 
-  // Try multiple upstream shapes: /payouts, /payments, and per-bid
+  // Try multiple upstream shapes: /payouts, /payments, and per-bid endpoints
   const attempts: string[] = [];
 
   if (mine) {
@@ -41,15 +46,21 @@ export async function GET(request: Request) {
   }
 
   let last: Response | null = null;
-  for (const u of attempts) {
-    const res = await fetch(u, {
+
+  for (const target of attempts) {
+    const res = await fetch(target, {
       method: "GET",
-      headers: { ...(cookie ? { cookie } : {}), Accept: "application/json" },
+      headers: {
+        ...(cookie ? { cookie } : {}),
+        Accept: "application/json",
+      },
       cache: "no-store",
     });
+
     const text = await res.text();
     if (res.ok) return pass(res, text);
     last = new Response(text, { status: res.status, headers: res.headers });
+    // keep trying on 4xx/5xx
   }
 
   if (last) {
