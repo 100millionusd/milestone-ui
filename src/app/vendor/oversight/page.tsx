@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 // API base + same-origin fallback (matches your pattern)
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+const local = (p: string) => `/api${p}`;
 
 // ———————————————————————————————————————————
 // Types (tolerant to backend variations)
