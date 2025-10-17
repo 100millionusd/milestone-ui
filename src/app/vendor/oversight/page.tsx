@@ -61,6 +61,13 @@ function toNumber(v: any) {
   if (typeof v === 'number') return v;
   return Number(String(v).replace(/[^0-9.-]/g, '')) || 0;
 }
+
+// Accept only finite positive numeric ids
+const isFiniteId = (v: any) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0;
+};
+
 function downloadCSV(filename: string, rows: any[]) {
   const keys = Array.from(rows.reduce((set, r) => { Object.keys(r || {}).forEach(k => set.add(k)); return set; }, new Set<string>()));
   const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -223,31 +230,59 @@ if (!Array.isArray(proofsList) || proofsList.length === 0) {
 
 // 3) Fallback: per-bid fetch if still empty
 if (!Array.isArray(proofsList) || proofsList.length === 0) {
-  const ids = (bidList ?? []).map(b => b.id).filter(Boolean);
+  // Use only valid, numeric ids (deduped)
+  const ids = Array.from(
+    new Set((bidList ?? []).map(b => Number(b.id)).filter(isFiniteId))
+  );
+
   const results: any[] = [];
   const CONCURRENCY = 6;
-  let i = 0;
-  async function runBatch() {
-    const batch = ids.slice(i, i + CONCURRENCY);
-    i += CONCURRENCY;
-    const reqs = batch.map(id =>
-      fetch(`${api('/proofs')}?bidId=${id}&t=${Date.now()}`, {
+
+  async function fetchProofsForBid(id: number): Promise<any[]> {
+    // Try ?bidId= first
+    const url1 = `${api('/proofs')}?bidId=${id}&t=${Date.now()}`;
+    let r = await fetch(url1, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (r.ok) {
+      const j = await r.json();
+      return Array.isArray(j) ? j : (j?.proofs ?? []);
+    }
+
+    // If backend prefers snake_case, try ?bid_id=
+    if (r.status === 400 || r.status === 404) {
+      const url2 = `${api('/proofs')}?bid_id=${id}&t=${Date.now()}`;
+      r = await fetch(url2, {
         cache: 'no-store',
         credentials: 'include',
         headers: { Accept: 'application/json' },
-      })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
-        .catch(() => [])
-    );
-    const chunks = await Promise.all(reqs);
-    chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-    if (i < ids.length) await runBatch();
-  }
-  if (ids.length) await runBatch();
-  proofsList = results;
-}
+      });
+      if (r.ok) {
+        const j2 = await r.json();
+        return Array.isArray(j2) ? j2 : (j2?.proofs ?? []);
+      }
+    }
 
+    // Otherwise no data for this bid
+    return [];
+  }
+
+  let idx = 0;
+  async function runBatch(): Promise<void> {
+    const batch = ids.slice(idx, idx + CONCURRENCY);
+    idx += CONCURRENCY;
+    const chunkLists = await Promise.all(batch.map(id => fetchProofsForBid(id)));
+    chunkLists.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+    if (idx < ids.length) await runBatch();
+  }
+
+  if (ids.length) {
+    await runBatch();
+    proofsList = results;
+  }
+}
         const proofRows = normalizeProofs(proofsList);
         if (!aborted) setProofs(proofRows);
 
