@@ -7,7 +7,8 @@ import { useEffect, useMemo, useState } from 'react';
 // ———————————————————————————————————————————
 // API base + same-origin fallback (matches your pattern)
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+// Always go through same-origin to avoid CORS issues for vendor pages
+const api = (p: string) => `/api${p}`;
 
 // ———————————————————————————————————————————
 // Types (tolerant to backend variations)
@@ -175,47 +176,78 @@ export default function VendorOversightPage() {
         const roleJson = await rRole.json();
         if (!aborted) setRole(roleJson);
 
-        // My bids (SCOPE_BIDS_FOR_VENDOR should scope this)
-        const rBids = await fetch(`${api('/bids')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
-        if (!rBids.ok) throw new Error(`bids ${rBids.status}`);
-        const bj = await rBids.json();
-        const bidList = normalizeBids(bj?.bids ?? bj ?? []);
-        if (!aborted) setBids(bidList);
+        // My bids (robust with fallbacks for vendor-scoped endpoints)
+let bidList: BidRow[] = [];
 
-        // Proofs per bid (fast path if API supports list; else per-bid)
-        let proofsList: any[] = [];
-        try {
-          const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
-          if (rp.ok) {
-            const pj = await rp.json();
-            proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
-          }
-        } catch { /* ignore */ }
+const tryFetchBids = async (url: string) => {
+  const r = await fetch(url, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  return normalizeBids(Array.isArray(j) ? j : (j?.bids ?? j ?? []));
+};
 
-        if (!Array.isArray(proofsList) || proofsList.length === 0) {
-          // per-bid fetch
-          const ids = bidList.map(b => b.id).filter(Boolean);
-          const results: any[] = [];
-          const CONCURRENCY = 6;
-          let i = 0;
-          async function runBatch() {
-            const batch = ids.slice(i, i + CONCURRENCY);
-            i += CONCURRENCY;
-            const reqs = batch.map(id =>
-              fetch(`${api('/proofs')}?bidId=${id}&t=${Date.now()}`, {
-                cache: 'no-store',
-                credentials: 'include',
-              }).then(r => r.ok ? r.json() : null)
-               .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
-               .catch(() => [])
-            );
-            const chunks = await Promise.all(reqs);
-            chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-            if (i < ids.length) await runBatch();
-          }
-          if (ids.length) await runBatch();
-          proofsList = results;
-        }
+// 1) Standard path
+bidList = (await tryFetchBids(`${api('/bids')}?t=${Date.now()}`)) ?? [];
+
+// 2) Common vendor flags
+if (bidList.length === 0) {
+  bidList = (await tryFetchBids(`${api('/bids')}?mine=1&t=${Date.now()}`)) ?? [];
+}
+if (bidList.length === 0 && role?.address) {
+  bidList = (await tryFetchBids(`${api('/bids')}?vendorAddress=${encodeURIComponent(role.address)}&t=${Date.now()}`)) ?? [];
+}
+
+if (!aborted) setBids(bidList);
+
+ // Proofs (try list → vendor flags → per-bid fallback)
+let proofsList: any[] = [];
+
+// 1) Try direct list
+try {
+  const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+  if (rp.ok) {
+    const pj = await rp.json();
+    proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
+  }
+} catch { /* ignore */ }
+
+// 2) Try vendor-scoped list if still empty
+if (!Array.isArray(proofsList) || proofsList.length === 0) {
+  try {
+    const rpMine = await fetch(`${api('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
+    if (rpMine.ok) {
+      const pj2 = await rpMine.json();
+      proofsList = Array.isArray(pj2) ? pj2 : (pj2?.proofs ?? []);
+    }
+  } catch { /* ignore */ }
+}
+
+// 3) Fallback: per-bid fetch if still empty
+if (!Array.isArray(proofsList) || proofsList.length === 0) {
+  const ids = (bidList ?? []).map(b => b.id).filter(Boolean);
+  const results: any[] = [];
+  const CONCURRENCY = 6;
+  let i = 0;
+  async function runBatch() {
+    const batch = ids.slice(i, i + CONCURRENCY);
+    i += CONCURRENCY;
+    const reqs = batch.map(id =>
+      fetch(`${api('/proofs')}?bidId=${id}&t=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
+        .catch(() => [])
+    );
+    const chunks = await Promise.all(reqs);
+    chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+    if (i < ids.length) await runBatch();
+  }
+  if (ids.length) await runBatch();
+  proofsList = results;
+}
 
         const proofRows = normalizeProofs(proofsList);
         if (!aborted) setProofs(proofRows);
