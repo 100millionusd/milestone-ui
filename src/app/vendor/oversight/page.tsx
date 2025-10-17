@@ -93,37 +93,196 @@ function normalizeBids(rows: any[]): BidRow[] {
   }));
 }
 function normalizeProofs(rows: any[]): ProofRow[] {
-  return (rows || []).map((r: any) => ({
-    id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
-    bid_id: Number(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid) || r?.bid_id || r?.bidId || null,
-    milestone_index: r?.milestone_index != null ? Number(r.milestone_index) : (r?.milestone != null ? Number(r.milestone) : null),
-    vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? r?.vendor_profile?.vendor_name ?? r?.vendor_profile?.name ?? null,
-    title: r?.title ?? r?.name ?? r?.proof_title ?? null,
-    status: r?.status ?? r?.state ?? null,
-    submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
-    created_at: r?.created_at ?? r?.createdAt ?? null,
-    updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-  }));
+  const toIdx = (v: any): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return (rows || []).map((r: any) => {
+    // try many possible keys for milestone index
+    const idx =
+      toIdx(r?.milestone_index) ??
+      toIdx(r?.milestoneIndex) ??
+      toIdx(r?.milestone) ??
+      toIdx(r?.milestone_no) ??
+      toIdx(r?.milestoneNumber) ??
+      toIdx(r?.milestone_id) ??
+      toIdx(r?.milestone?.index);
+
+    // bid id can be number or string or nested
+    const bidNum =
+      toIdx(r?.bid_id) ??
+      toIdx(r?.bidId) ??
+      toIdx(r?.bid?.id) ??
+      toIdx(r?.bid) ??
+      null;
+
+    return {
+      id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
+      bid_id: bidNum,
+      milestone_index: idx,
+      vendor_name:
+        r?.vendor_name ??
+        r?.vendorName ??
+        r?.vendor ??
+        r?.vendor_profile?.vendor_name ??
+        r?.vendor_profile?.name ??
+        null,
+      title: r?.title ?? r?.name ?? r?.proof_title ?? null,
+      status: r?.status ?? r?.state ?? null,
+      submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
+      created_at: r?.created_at ?? r?.createdAt ?? null,
+      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+    };
+  });
 }
 
 // Derive milestones from proofs (fallback when API doesn't expose milestones list)
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
-  const byKey = new Map<string, MilestoneRow>();
-  for (const p of proofs) {
-    if (typeof p.bid_id !== 'number' || typeof p.milestone_index !== 'number') continue;
-    const key = `${p.bid_id}-${p.milestone_index}`;
+  const byKey = new Map<string, MilestoneRow & { _statusSeen?: Set<string> }>();
+  const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
+
+  for (const p of proofs || []) {
+    const bidId = typeof p.bid_id === 'number' ? p.bid_id : Number(p.bid_id);
+    const idx = typeof p.milestone_index === 'number' ? p.milestone_index : Number(p.milestone_index);
+    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) continue;
+
+    const key = `${bidId}-${idx}`;
     const prev = byKey.get(key);
-    const row: MilestoneRow = {
-      id: key,
-      bid_id: p.bid_id as number,
-      milestone_index: p.milestone_index,
-      title: p.title ?? prev?.title ?? null,
-      status: 'submitted',
-      last_update: p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null,
+    const status = (p.status || '').toLowerCase();
+
+async function tryLoadMilestonesFromApi(
+  apiFn: (p: string) => string,
+  bidList: BidRow[]
+): Promise<MilestoneRow[]> {
+  const out: MilestoneRow[] = [];
+
+  const toIdx = (v: any): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const normalizeApiMilestones = (rows: any[], knownBid?: number): MilestoneRow[] => {
+    const a: MilestoneRow[] = [];
+    for (const r of (rows || [])) {
+      const bid = toIdx(r?.bid_id) ?? toIdx(knownBid);
+      const idx = toIdx(r?.milestone_index ?? r?.index ?? r?.i ?? r?.milestone ?? r?.number);
+      if (!Number.isFinite(bid) || !Number.isFinite(idx)) continue;
+      a.push({
+        id: `${bid}-${idx}`,
+        bid_id: Number(bid),
+        milestone_index: Number(idx),
+        title: r?.title ?? r?.name ?? null,
+        status: r?.status ?? r?.state ?? null,
+        last_update: r?.updated_at ?? r?.last_update ?? r?.submitted_at ?? r?.created_at ?? null,
+      });
+    }
+    return a;
+  };
+
+  // 1) Try vendor-scoped list: /api/milestones?mine=1
+  try {
+    const r = await fetch(`${apiFn('/milestones')}?mine=1&t=${Date.now()}`, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (r.ok) {
+      const j = await r.json();
+      const arr = Array.isArray(j) ? j : (j?.milestones ?? []);
+      const rows = normalizeApiMilestones(arr);
+      if (rows.length) return rows;
+    }
+  } catch { /* ignore */ }
+
+  // 2) Per-bid fallback: /api/milestones?bidId= or ?bid_id=
+  const ids = Array.from(new Set((bidList || []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
+  const CONCURRENCY = 6;
+  let i = 0;
+  async function runBatch() {
+    const batch = ids.slice(i, i + CONCURRENCY);
+    i += CONCURRENCY;
+    const chunkLists = await Promise.all(batch.map(async (id) => {
+      // ?bidId=
+      let r = await fetch(`${apiFn('/milestones')}?bidId=${id}&t=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (r.ok) {
+        const j = await r.json();
+        const arr = Array.isArray(j) ? j : (j?.milestones ?? []);
+        return normalizeApiMilestones(arr, id);
+      }
+      // try ?bid_id=
+      if (r.status === 400 || r.status === 404) {
+        r = await fetch(`${apiFn('/milestones')}?bid_id=${id}&t=${Date.now()}`, {
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (r.ok) {
+          const j2 = await r.json();
+          const arr2 = Array.isArray(j2) ? j2 : (j2?.milestones ?? []);
+          return normalizeApiMilestones(arr2, id);
+        }
+      }
+      // last resort: /api/bids/:id (if it contains milestones)
+      try {
+        const rBid = await fetch(`${apiFn(`/bids/${id}`)}?t=${Date.now()}`, {
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (rBid.ok) {
+          const jb = await rBid.json();
+          const arrB = Array.isArray(jb?.milestones) ? jb.milestones : [];
+          return normalizeApiMilestones(arrB, id);
+        }
+      } catch { /* ignore */ }
+      return [];
+    }));
+    chunkLists.forEach(arr => { if (Array.isArray(arr)) out.push(...arr); });
+    if (i < ids.length) await runBatch();
+  }
+  if (ids.length) await runBatch();
+
+  return out;
+}
+
+    // Pick latest update
+    const ts = Math.max(toTime(p.updated_at), toTime(p.submitted_at), toTime(p.created_at));
+    const prevTs = prev ? toTime(prev.last_update) : 0;
+
+    const statusSeen = prev?._statusSeen ?? new Set<string>();
+    if (status) statusSeen.add(status);
+
+    // Status precedence: approved > pending > submitted > anything else
+    const resolveStatus = () => {
+      if (statusSeen.has('approved')) return 'approved';
+      if (statusSeen.has('pending')) return 'pending';
+      if (statusSeen.size > 0) return Array.from(statusSeen.values())[0]; // first seen
+      return 'submitted';
     };
+
+    const row: MilestoneRow & { _statusSeen?: Set<string> } = {
+      id: key,
+      bid_id: Number(bidId),
+      milestone_index: Number(idx),
+      title: p.title ?? prev?.title ?? null,
+      status: prev ? prev.status : resolveStatus(),
+      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null)
+                                : prev?.last_update ?? null,
+      _statusSeen: statusSeen,
+    };
+
+    // fix status after merging
+    row.status = resolveStatus();
     byKey.set(key, row);
   }
-  return Array.from(byKey.values()).sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
+
+  return Array.from(byKey.values())
+    .map(({ _statusSeen, ...r }) => r)
+    .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
 }
 
 // ———————————————————————————————————————————
@@ -284,10 +443,17 @@ if (!Array.isArray(proofsList) || proofsList.length === 0) {
   }
 }
         const proofRows = normalizeProofs(proofsList);
-        if (!aborted) setProofs(proofRows);
+if (!aborted) setProofs(proofRows);
 
-        // Derive milestones (from proofs; swap to API milestones if you expose them)
-        if (!aborted) setMilestones(deriveMilestonesFromProofs(proofRows));
+// Derive milestones from proofs, then fall back to API if empty
+let ms = deriveMilestonesFromProofs(proofRows);
+if (ms.length === 0) {
+  try {
+    const apiMilestones = await tryLoadMilestonesFromApi(api, bidList);
+    if (apiMilestones.length) ms = apiMilestones;
+  } catch { /* ignore */ }
+}
+if (!aborted) setMilestones(ms);
       } catch (e: any) {
         if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
       } finally {
