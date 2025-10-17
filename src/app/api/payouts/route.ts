@@ -1,5 +1,5 @@
 // src/app/api/payouts/route.ts
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const UPSTREAM =
@@ -7,55 +7,40 @@ const UPSTREAM =
   process.env.API_BASE ||
   'https://milestone-api-production.up.railway.app';
 
-function pass(status: number, body: string, contentType?: string) {
-  return new Response(body, {
-    status,
-    headers: { 'content-type': contentType || 'application/json' },
-  });
+function respond(status: number, body: string, contentType = 'application/json') {
+  return new Response(body, { status, headers: { 'content-type': contentType } });
 }
 
 export async function GET(req: Request) {
-  const cookie = req.headers.get('cookie') || '';
   const cur = new URL(req.url);
-  const p = cur.searchParams;
+  const cookie = req.headers.get('cookie') || '';
 
-  const mine = p.get('mine') || '';
-  const bidId = p.get('bidId') || p.get('bid_id') || '';
-  const vendorAddress = p.get('vendorAddress') || '';
+  // Build a tolerant query string (keep all params except our local cache-buster t)
+  const passthrough = new URLSearchParams();
+  cur.searchParams.forEach((val, key) => {
+    if (key === 't') return;
+    passthrough.set(key, val);
+  });
+  const qs = passthrough.toString();
+  const suffix = qs ? `?${qs}` : '';
 
-  // Build querystring while preserving unknown params (except cache-buster t)
-  const buildQS = (overrides: Record<string, string | undefined>) => {
-    const q = new URLSearchParams();
-    if (mine) q.set('mine', mine);
-    if (vendorAddress) q.set('vendorAddress', vendorAddress);
-
-    const v = overrides.bidId ?? overrides.bid_id;
-    if (v !== undefined) {
-      if ('bidId' in overrides) q.set('bidId', String(v));
-      if ('bid_id' in overrides) q.set('bid_id', String(v));
-    }
-
-    cur.searchParams.forEach((val, key) => {
-      if (['t', 'mine', 'bidId', 'bid_id', 'vendorAddress'].includes(key)) return;
-      if (!q.has(key)) q.set(key, val);
-    });
-
-    const s = q.toString();
-    return s ? `?${s}` : '';
-  };
-
-  // Try multiple likely upstream shapes
+  // Try multiple upstream shapes: /payouts, /payments, per-bid variants, and /bids/:id
+  const bidId = cur.searchParams.get('bidId') || cur.searchParams.get('bid_id') || '';
   const attempts: string[] = [];
-  attempts.push(`${UPSTREAM}/payouts${buildQS({})}`);
-  attempts.push(`${UPSTREAM}/payments${buildQS({})}`);
 
+  // generic lists
+  attempts.push(`${UPSTREAM}/payouts${suffix}`);
+  attempts.push(`${UPSTREAM}/payments${suffix}`);
+
+  // per-bid (if provided)
   if (bidId) {
-    attempts.push(`${UPSTREAM}/payouts${buildQS({ bidId })}`);
-    attempts.push(`${UPSTREAM}/payouts${buildQS({ bid_id: bidId })}`);
-    attempts.push(`${UPSTREAM}/payments${buildQS({ bidId })}`);
-    attempts.push(`${UPSTREAM}/payments${buildQS({ bid_id: bidId })}`);
-    attempts.push(`${UPSTREAM}/bids/${encodeURIComponent(bidId)}/payouts`);
-    attempts.push(`${UPSTREAM}/bids/${encodeURIComponent(bidId)}/payments`);
+    const enc = encodeURIComponent(bidId);
+    attempts.push(`${UPSTREAM}/payouts?bidId=${enc}`);
+    attempts.push(`${UPSTREAM}/payouts?bid_id=${enc}`);
+    attempts.push(`${UPSTREAM}/payments?bidId=${enc}`);
+    attempts.push(`${UPSTREAM}/payments?bid_id=${enc}`);
+    attempts.push(`${UPSTREAM}/bids/${enc}/payouts`);
+    attempts.push(`${UPSTREAM}/bids/${enc}/payments`);
   }
 
   let last: Response | null = null;
@@ -63,29 +48,28 @@ export async function GET(req: Request) {
   for (const url of attempts) {
     try {
       const res = await fetch(url, {
+        method: 'GET',
         headers: {
           Accept: 'application/json',
           ...(cookie ? { cookie } : {}),
         },
         cache: 'no-store',
       });
+
       const body = await res.text();
       if (res.ok) {
-        return pass(res.status, body, res.headers.get('content-type') || 'application/json');
+        return respond(res.status, body, res.headers.get('content-type') || 'application/json');
       }
+      // keep last non-OK to surface its status later
       last = new Response(body, { status: res.status, headers: res.headers });
-    } catch (err: any) {
-      last = new Response(String(err ?? 'upstream fetch error'), {
-        status: 502,
-        headers: { 'content-type': 'text/plain' },
-      });
+    } catch (e: any) {
+      last = new Response(String(e ?? 'upstream error'), { status: 502, headers: { 'content-type': 'text/plain' } });
     }
   }
 
   if (last) {
     const body = await last.text();
-    return pass(last.status, body);
+    return respond(last.status, body);
   }
-
-  return pass(502, JSON.stringify({ error: 'No attempt executed' }));
+  return respond(502, JSON.stringify({ error: 'No upstream attempted' }));
 }
