@@ -186,7 +186,43 @@ function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
     const prev = byKey.get(key);
     const status = (p.status || '').toLowerCase();
 
-async function tryLoadMilestonesFromApi(
+    // Pick latest update
+    const ts = Math.max(toTime(p.updated_at), toTime(p.submitted_at), toTime(p.created_at));
+    const prevTs = prev ? toTime(prev.last_update) : 0;
+
+    const statusSeen = prev?._statusSeen ?? new Set<string>();
+    if (status) statusSeen.add(status);
+
+    // Status precedence: approved > pending > submitted > anything else
+    const resolveStatus = () => {
+      if (statusSeen.has('approved')) return 'approved';
+      if (statusSeen.has('pending')) return 'pending';
+      if (statusSeen.size > 0) return Array.from(statusSeen.values())[0]; // first seen
+      return 'submitted';
+    };
+
+    const row: MilestoneRow & { _statusSeen?: Set<string> } = {
+      id: key,
+      bid_id: Number(bidId),
+      milestone_index: Number(idx),
+      title: p.title ?? prev?.title ?? null,
+      status: prev ? prev.status : resolveStatus(),
+      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null)
+                                : prev?.last_update ?? null,
+      _statusSeen: statusSeen,
+    };
+
+    // fix status after merging
+    row.status = resolveStatus();
+    byKey.set(key, row);
+  }
+
+  return Array.from(byKey.values())
+    .map(({ _statusSeen, ...r }) => r)
+    .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
+}
+
+sync function tryLoadMilestonesFromApi(
   apiFn: (p: string) => string,
   bidList: BidRow[]
 ): Promise<MilestoneRow[]> {
@@ -285,42 +321,6 @@ async function tryLoadMilestonesFromApi(
   return out;
 }
 
-    // Pick latest update
-    const ts = Math.max(toTime(p.updated_at), toTime(p.submitted_at), toTime(p.created_at));
-    const prevTs = prev ? toTime(prev.last_update) : 0;
-
-    const statusSeen = prev?._statusSeen ?? new Set<string>();
-    if (status) statusSeen.add(status);
-
-    // Status precedence: approved > pending > submitted > anything else
-    const resolveStatus = () => {
-      if (statusSeen.has('approved')) return 'approved';
-      if (statusSeen.has('pending')) return 'pending';
-      if (statusSeen.size > 0) return Array.from(statusSeen.values())[0]; // first seen
-      return 'submitted';
-    };
-
-    const row: MilestoneRow & { _statusSeen?: Set<string> } = {
-      id: key,
-      bid_id: Number(bidId),
-      milestone_index: Number(idx),
-      title: p.title ?? prev?.title ?? null,
-      status: prev ? prev.status : resolveStatus(),
-      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null)
-                                : prev?.last_update ?? null,
-      _statusSeen: statusSeen,
-    };
-
-    // fix status after merging
-    row.status = resolveStatus();
-    byKey.set(key, row);
-  }
-
-  return Array.from(byKey.values())
-    .map(({ _statusSeen, ...r }) => r)
-    .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
-}
-
 // ———————————————————————————————————————————
 // Simple UI atoms (lightweight, match your admin feel)
 function Card(props: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
@@ -362,7 +362,7 @@ export default function VendorOversightPage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'bids' | 'proofs' | 'milestones'>('overview');
+  const [tab, setTab] = useState<'overview' | 'bids' | 'proofs' | 'milestones' | 'payments'>('overview');
   const [query, setQuery] = useState('');
 
   useEffect(() => {
@@ -491,16 +491,7 @@ if (ms.length === 0) {
   } catch { /* ignore */ }
 }
 if (!aborted) setMilestones(ms);
-      } catch (e: any) {
-        if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
-      } finally {
-        if (!aborted) setLoading(false);
-      }
-    })();
-    return () => { aborted = true; };
-  }, []);
-
-  // ——— Payments (try list → vendor flags → per-bid) ———
+// ——— Payments (try list → vendor flags → per-bid) ———
 try {
   let payList: any[] = [];
 
@@ -579,6 +570,15 @@ try {
 
   if (!aborted) setPayments(normalizePayments(payList));
 } catch { /* ignore payments errors so page still loads */ }
+
+      } catch (e: any) {
+        if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
+      } finally {
+        if (!aborted) setLoading(false);
+      }
+    })();
+    return () => { aborted = true; };
+  }, []);
 
   // ——— Filters
   const filteredBids = useMemo(() => {
