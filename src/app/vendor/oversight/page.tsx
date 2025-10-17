@@ -161,16 +161,59 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     return Number.isFinite(n) ? n : v;
   };
   return (rows || []).map((r: any) => ({
-    id: r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? r?.hash ?? r?.tx_hash ?? '—',
+    id:
+      r?.id ??
+      r?.payment_id ??
+      r?.payout_id ??
+      r?.transfer_id ??
+      r?.hash ??
+      r?.tx_hash ??
+      '—',
     bid_id: toNum(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid),
-    milestone_index: toNum(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.milestone_no ?? r?.i),
-    amount_usd: toUsd(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount)),
+    milestone_index: toNum(
+      r?.milestone_index ??
+      r?.milestoneIndex ??
+      r?.milestone ??
+      r?.milestone_no ??
+      r?.i
+    ),
+    amount_usd: toUsd(
+      r?.amount_usd ??
+      r?.amountUsd ??
+      r?.usd ??
+      (r?.usdCents != null ? r.usdCents / 100 : null) ??
+      r?.value_usd ??         // extra aliases
+      r?.usd_value ??
+      r?.amount ??
+      r?.fiat_amount
+    ),
     status: r?.status ?? r?.state ?? r?.payout_status ?? null,
-    released_at: r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt ?? null,
+    released_at:
+      r?.released_at ??
+      r?.releasedAt ??
+      r?.paid_at ??
+      r?.date ??
+      r?.created_at ??
+      r?.createdAt ??
+      null,
     tx_hash: r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? null,
     created_at: r?.created_at ?? r?.createdAt ?? null,
     updated_at: r?.updated_at ?? r?.updatedAt ?? null,
   }));
+}
+
+// Accept: array OR {payouts:[]} OR {payments:[]} OR {data:{...}} OR {results|items:[]}
+function asPayoutArray(j: any): any[] {
+  if (Array.isArray(j)) return j;
+  return (
+    j?.payouts ??
+    j?.payments ??
+    j?.data?.payouts ??
+    j?.data?.payments ??
+    j?.results ??
+    j?.items ??
+    []
+  );
 }
 
 // Derive milestones from proofs (fallback when API doesn't expose milestones list)
@@ -500,7 +543,7 @@ try {
   const r1 = await fetch(`${local('/payouts')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
   if (r1.ok) {
     const j1 = await r1.json();
-    payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
+    payList = asPayoutArray(j1);
   }
 
   // 2) Try generic list if still empty
@@ -508,7 +551,7 @@ try {
     const r2 = await fetch(`${local('/payouts')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
     if (r2.ok) {
       const j2 = await r2.json();
-      payList = Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+   payList = asPayoutArray(j2);
     }
   }
 
@@ -528,7 +571,7 @@ try {
   });
   if (r.ok) {
     const j = await r.json();
-    return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
+   return asPayoutArray(j);
   }
 
   // ?bid_id=
@@ -540,7 +583,7 @@ try {
     });
     if (r.ok) {
       const j2 = await r.json();
-      return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+    return asPayoutArray(j2);
     }
   }
 
@@ -553,8 +596,7 @@ try {
     });
     if (rb.ok) {
       const bj = await rb.json();
-      const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
-      return arr || [];
+    return asPayoutArray(bj);
     }
   } catch {
     /* ignore */
