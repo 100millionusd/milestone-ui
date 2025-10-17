@@ -1,29 +1,21 @@
 // src/app/api/payouts/route.ts
-import { headers } from "next/headers";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+import { headers } from 'next/headers';
 
 const UPSTREAM =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.API_BASE ||
-  "https://milestone-api-production.up.railway.app";
+  'https://milestone-api-production.up.railway.app';
 
-function pass(res: Response, body: string) {
-  return new Response(body, {
-    status: res.status,
-    headers: {
-      "content-type": res.headers.get("content-type") || "application/json",
-      // allow client-side fetch
-      "cache-control": "no-store",
-    },
-  });
-}
-
-export async function GET(request: Request) {
+export async function GET(req: Request) {
   const h = headers();
-  const cookie = h.get("cookie") || "";
-  const url = new URL(request.url);
+  const cookie = h.get('cookie') || '';
+  const url = new URL(req.url);
 
-  const mine  = url.searchParams.get("mine") || "";
-  const bidId = url.searchParams.get("bidId") || url.searchParams.get("bid_id") || "";
+  const mine  = url.searchParams.get('mine')  || '';
+  const bidId = url.searchParams.get('bidId') || url.searchParams.get('bid_id') || '';
 
   // Try multiple upstream shapes: /payouts, /payments, and per-bid endpoints
   const attempts: string[] = [];
@@ -49,23 +41,36 @@ export async function GET(request: Request) {
 
   for (const target of attempts) {
     const res = await fetch(target, {
-      method: "GET",
       headers: {
         ...(cookie ? { cookie } : {}),
-        Accept: "application/json",
+        Accept: 'application/json',
       },
-      cache: "no-store",
+      cache: 'no-store',
     });
 
-    const text = await res.text();
-    if (res.ok) return pass(res, text);
-    last = new Response(text, { status: res.status, headers: res.headers });
-    // keep trying on 4xx/5xx
+    const body = await res.text();
+
+    if (res.ok) {
+      return new Response(body, {
+        status: res.status,
+        headers: { 'content-type': res.headers.get('content-type') || 'application/json' },
+      });
+    }
+
+    last = new Response(body, { status: res.status, headers: res.headers });
+    // keep trying next attempt on 4xx/5xx
   }
 
   if (last) {
-    const text = await last.text();
-    return pass(last, text);
+    const body = await last.text();
+    return new Response(body, {
+      status: last.status,
+      headers: { 'content-type': 'application/json' },
+    });
   }
-  return new Response(JSON.stringify({ error: "No upstream tried" }), { status: 502 });
+
+  return new Response(JSON.stringify({ error: 'No upstream tried' }), {
+    status: 502,
+    headers: { 'content-type': 'application/json' },
+  });
 }
