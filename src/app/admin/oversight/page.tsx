@@ -88,6 +88,20 @@ type BidRow = {
   updated_at?: string;
 };
 
+// ——— Lightweight rows for Proofs tab ———
+type ProofRow = {
+  id: number;
+  bid_id?: number | string | null;
+  milestone_index?: number | null;
+  vendor_name?: string | null;
+  wallet_address?: string | null;
+  title?: string | null;
+  status?: string | null;
+  submitted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 // —— Small inline icon set (no deps) ——
 const Icon = {
   Alert: (props: React.SVGProps<SVGSVGElement>) => (
@@ -159,6 +173,21 @@ function normalizePending(p: any) {
     ) || 0;
 
   return { count, usd };
+}
+
+function normalizeProofs(rows: any[]): ProofRow[] {
+  return (rows || []).map((r: any) => ({
+    id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
+    bid_id: Number(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bidID ?? r?.bid) || r?.bid_id || r?.bidId || null,
+    milestone_index: Number(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone) ?? null,
+    vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? r?.vendor_profile?.vendor_name ?? r?.vendor_profile?.name ?? null,
+    wallet_address: r?.wallet_address ?? r?.walletAddress ?? r?.wallet ?? null,
+    title: r?.title ?? r?.name ?? r?.proof_title ?? null,
+    status: r?.status ?? r?.state ?? r?.proof_status ?? null,
+    submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
+    created_at: r?.created_at ?? r?.createdAt ?? null,
+    updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+  }));
 }
 
 // ——— Normalizers for backend shape drift ———
@@ -348,6 +377,16 @@ export default function AdminOversightPage() {
   const [autoRefresh, setAutoRefresh] = usePersistentState<boolean>("oversight.autoRefresh", true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  // ——— Proofs state & sorting ———
+const [proofs, setProofs] = useState<ProofRow[] | null>(null);
+const [proofsLoading, setProofsLoading] = useState(false);
+const [proofsError, setProofsError] = useState<string | null>(null);
+const [proofSort, setProofSort] = usePersistentState<{ key: keyof ProofRow; dir: "asc"|"desc" }>(
+  "oversight.proofs.sort",
+  { key: "submitted_at", dir: "desc" }
+);
+
   // ——— Proposals & Bids state ———
 const [proposals, setProposals] = useState<ProposalRow[] | null>(null);
 const [bids, setBids] = useState<BidRow[] | null>(null);
@@ -382,6 +421,9 @@ const toNumber = (v: unknown) => {
   const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
   const PATH = API_BASE ? "/admin/oversight" : "/api/admin/oversight";
   const baseUrl = `${API_BASE}${PATH}`;
+
+  // Always use same-origin proxy so we never hit CORS
+const api = (p: string) => `/api${p}`;
 
   async function load(signal?: AbortSignal) {
   try {
@@ -442,6 +484,31 @@ const toNumber = (v: unknown) => {
     return () => window.removeEventListener("keydown", onKey);
   }, [tab]);
 
+  // ——— Lazy load Proofs on demand ———
+useEffect(() => {
+  if (tab !== "proofs" || proofs !== null) return;
+  let aborted = false;
+  (async () => {
+    try {
+      setProofsError(null);
+      setProofsLoading(true);
+      const res = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      setProofs(normalizeProofs(body?.proofs ?? body ?? []));
+    } catch (e: any) {
+      if (!aborted) setProofsError(e?.message || "Failed to load proofs");
+    } finally {
+      if (!aborted) setProofsLoading(false);
+    }
+  })();
+  return () => { aborted = true; };
+}, [tab, proofs]);
+  
   // ——— Lazy fetch for proposals/bids when tabs opened ———
 useEffect(() => {
   const needProposals = tab === "proposals" && proposals == null;
@@ -477,18 +544,15 @@ useEffect(() => {
   return () => { aborted = true; };
 }, [tab, proposals, bids]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tabs = useMemo(() => [
+const tabs = useMemo(() => [
   { key: "overview", label: "Overview" },
   { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
   { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
-  // NEW
-  { key: "proposals", label: "Proposals", count: proposals?.length ?? 0 },
-  { key: "bids", label: "Bids", count: bids?.length ?? 0 },
-  // /NEW
+  { key: "proofs", label: "Proofs", count: proofs?.length ?? 0 }, // NEW
   { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
   { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
   { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
-], [data, proposals, bids]);
+], [data, proofs]);
 
   function stepTab(delta: number) {
     const idx = tabs.findIndex(t => t.key === tab);
@@ -612,6 +676,32 @@ const sortedBids = useMemo(() => {
     return bidSort.dir === "asc" ? cmp : -cmp;
   });
 }, [filteredBids, bidSort]);
+
+// ——— PROOFS ———
+const filteredProofs = useMemo(() => {
+  const list = proofs ?? [];
+  if (!query) return list;
+  const q = query.toLowerCase();
+  return list.filter(p =>
+    String(p.id).includes(q) ||
+    String(p.bid_id ?? "").toLowerCase().includes(q) ||
+    String(p.milestone_index ?? "").toLowerCase().includes(q) ||
+    (p.vendor_name ?? "").toLowerCase().includes(q) ||
+    (p.title ?? "").toLowerCase().includes(q) ||
+    (p.status ?? "").toLowerCase().includes(q)
+  );
+}, [proofs, query]);
+
+const sortedProofs = useMemo(() => {
+  const arr = [...filteredProofs];
+  const k = proofSort.key as keyof ProofRow;
+  return arr.sort((a, b) => {
+    const av: any = (a as any)[k];
+    const bv: any = (b as any)[k];
+    const cmp = (typeof av === "string" ? (av || "").localeCompare(bv || "") : (Number(av) - Number(bv)));
+    return proofSort.dir === "asc" ? cmp : -cmp;
+  });
+}, [filteredProofs, proofSort]);
 
   const tiles = data?.tiles;
   const pending = useMemo(() => {
@@ -1000,6 +1090,66 @@ const sortedBids = useMemo(() => {
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
+
+{tab === "proofs" && (
+  <Card
+    title={`Proofs (${sortedProofs.length})`}
+    subtitle="Newest first (click headers to sort)"
+    right={
+      <>
+        <input
+          ref={searchRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter proofs…"
+          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+        />
+        <button
+          onClick={() => sortedProofs && downloadCSV(`proofs-${new Date().toISOString().slice(0,10)}.csv`, sortedProofs)}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+        >
+          <Icon.Download className="h-4 w-4" /> CSV
+        </button>
+      </>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "id")} sorted={proofSort.key==="id"} dir={proofSort.dir}>ID</Th>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "bid_id")} sorted={proofSort.key==="bid_id"} dir={proofSort.dir}>Bid</Th>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "milestone_index")} sorted={proofSort.key==="milestone_index"} dir={proofSort.dir}>Milestone</Th>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "vendor_name")} sorted={proofSort.key==="vendor_name"} dir={proofSort.dir}>Vendor</Th>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "status")} sorted={proofSort.key==="status"} dir={proofSort.dir}>Status</Th>
+            <Th onClick={() => toggleSort(proofSort, setProofSort, "submitted_at")} sorted={proofSort.key==="submitted_at"} dir={proofSort.dir}>Submitted</Th>
+            <Th>Title</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {(loading || proofsLoading) && <RowPlaceholder cols={7} />}
+          {proofsError && (
+            <tr><td colSpan={7} className="p-4 text-rose-600">{proofsError}</td></tr>
+          )}
+          {!proofsLoading && sortedProofs.length === 0 && (
+            <tr><td className="p-6 text-center text-neutral-500" colSpan={7}>No proofs</td></tr>
+          )}
+          {sortedProofs.map((p) => (
+            <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+              <Td>#{p.id}</Td>
+              <Td>{p.bid_id ?? "—"}</Td>
+              <Td>{p.milestone_index ?? "—"}</Td>
+              <Td className="max-w-[240px] truncate" title={p.vendor_name || ""}>{p.vendor_name ?? "—"}</Td>
+              <Td><Badge tone={p.status==="approved" ? "success" : p.status==="pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
+              <Td>{p.submitted_at ? humanTime(p.submitted_at) : (p.created_at ? humanTime(p.created_at) : "—")}</Td>
+              <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
