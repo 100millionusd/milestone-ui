@@ -520,35 +520,48 @@ try {
     let idx = 0;
 
     async function fetchForBid(id: number): Promise<any[]> {
-      // ?bidId=
-      let r = await fetch(`${local('/payouts')}?bidId=${id}&t=${Date.now()}`, { ... });`, {
-        cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j = await r.json();
-        return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
-      }
-      // ?bid_id=
-      if (r.status === 400 || r.status === 404) {
-        r = await fetch(`${local('/payouts')}?bid_id=${id}&t=${Date.now()}`, { ... });`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
-        if (r.ok) {
-          const j2 = await r.json();
-          return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
-        }
-      }
-      // /bids/:id (if it contains payouts)
-      try {
-        const rb = await fetch(`${local(`/bids/${id}`)}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-        if (rb.ok) {
-          const bj = await rb.json();
-          const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
-          return arr || [];
-        }
-      } catch { /* ignore */ }
-      return [];
+  // ?bidId=
+  let r = await fetch(`${local('/payouts')}?bidId=${id}&t=${Date.now()}`, {
+    cache: 'no-store',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (r.ok) {
+    const j = await r.json();
+    return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
+  }
+
+  // ?bid_id=
+  if (r.status === 400 || r.status === 404) {
+    r = await fetch(`${local('/payouts')}?bid_id=${id}&t=${Date.now()}`, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (r.ok) {
+      const j2 = await r.json();
+      return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
     }
+  }
+
+  // /bids/:id (if payouts live under the bid)
+  try {
+    const rb = await fetch(`${local(`/bids/${id}`)}?t=${Date.now()}`, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (rb.ok) {
+      const bj = await rb.json();
+      const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
+      return arr || [];
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return [];
+}
 
     async function runBatch() {
       const batch = ids.slice(idx, idx + CONCURRENCY);
