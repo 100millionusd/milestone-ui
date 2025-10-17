@@ -7,8 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 // ———————————————————————————————————————————
 // API base + same-origin fallback (matches your pattern)
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-// Always go through same-origin to avoid CORS issues for vendor pages
-const api = (p: string) => `/api${p}`;
+const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
 
 // ———————————————————————————————————————————
 // Types (tolerant to backend variations)
