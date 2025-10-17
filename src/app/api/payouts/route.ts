@@ -1,4 +1,3 @@
-// src/app/api/payouts/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +16,7 @@ export async function GET(req: Request) {
   const mine  = url.searchParams.get('mine')  || '';
   const bidId = url.searchParams.get('bidId') || url.searchParams.get('bid_id') || '';
 
-  // Try multiple upstream shapes: /payouts, /payments, and per-bid endpoints
   const attempts: string[] = [];
-
   if (mine) {
     attempts.push(`${UPSTREAM}/payouts?mine=${encodeURIComponent(mine)}`);
     attempts.push(`${UPSTREAM}/payments?mine=${encodeURIComponent(mine)}`);
@@ -27,7 +24,6 @@ export async function GET(req: Request) {
     attempts.push(`${UPSTREAM}/payouts`);
     attempts.push(`${UPSTREAM}/payments`);
   }
-
   if (bidId) {
     attempts.push(`${UPSTREAM}/payouts?bidId=${bidId}`);
     attempts.push(`${UPSTREAM}/payouts?bid_id=${bidId}`);
@@ -38,27 +34,19 @@ export async function GET(req: Request) {
   }
 
   let last: Response | null = null;
-
   for (const target of attempts) {
     const res = await fetch(target, {
-      headers: {
-        ...(cookie ? { cookie } : {}),
-        Accept: 'application/json',
-      },
+      headers: { ...(cookie ? { cookie } : {}), Accept: 'application/json' },
       cache: 'no-store',
     });
-
     const body = await res.text();
-
     if (res.ok) {
       return new Response(body, {
         status: res.status,
         headers: { 'content-type': res.headers.get('content-type') || 'application/json' },
       });
     }
-
     last = new Response(body, { status: res.status, headers: res.headers });
-    // keep trying next attempt on 4xx/5xx
   }
 
   if (last) {
