@@ -94,3 +94,16 @@ model Milestone {
 
   @@unique([bidId, milestoneIndex], name: "bidId_milestoneIndex")
 }
+
+model Payout {
+  id              Int      @id @default(autoincrement())
+  bidId           Int
+  milestoneIndex  Int
+  amountUsd       Float
+  status          String
+  releasedAt      DateTime
+  txHash          String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

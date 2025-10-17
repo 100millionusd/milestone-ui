@@ -1,6 +1,5 @@
-// src/app/api/payouts/route.ts
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma'; // adjust path if different
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,11 +7,11 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const vendorId = url.searchParams.get('vendorId'); // optional filtering
+    const bidId = url.searchParams.get('bidId');
 
     const payouts = await prisma.payout.findMany({
-      where: vendorId ? { vendorId: Number(vendorId) } : undefined,
-      orderBy: { released_at: 'desc' },
+      where: bidId ? { bidId: Number(bidId) } : undefined,
+      orderBy: { releasedAt: 'desc' },
     });
 
     return NextResponse.json({ payouts });
