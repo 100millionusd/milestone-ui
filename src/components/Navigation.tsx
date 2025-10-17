@@ -77,6 +77,7 @@ export default function Navigation() {
 ]
       },
       { href: '/vendor/dashboard', label: 'Vendors' },
+      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor','admin'] }, // ← add this line
     ],
     []
   );
