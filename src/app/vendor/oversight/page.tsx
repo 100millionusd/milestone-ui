@@ -5,15 +5,12 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 
 // ———————————————————————————————————————————
-// API base + same-origin fallback (matches your pattern)
-
+// API base + same-origin fallback
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
-const local = (p: string) => `/api${p}`;
-
 
 // ———————————————————————————————————————————
-// Types (tolerant to backend variations)
+// Types
 type RoleInfo = { address?: string | null; role?: string | null; email?: string | null };
 
 type BidRow = {
@@ -39,11 +36,11 @@ type ProofRow = {
 };
 
 type MilestoneRow = {
-  id: string;                 // `${bid_id}-${milestone_index}`
+  id: string;
   bid_id: number;
   milestone_index: number;
   title?: string | null;
-  status?: string | null;     // derived from proofs (submitted/—)
+  status?: string | null;
   last_update?: string | null;
 };
 
@@ -52,36 +49,26 @@ type PaymentRow = {
   bid_id: number | null;
   milestone_index: number | null;
   amount_usd: number | string | null;
-  status?: string | null;         // e.g. released, pending
+  status?: string | null;
   released_at?: string | null;
-  tx_hash?: string | null;        // optional on-chain hash
+  tx_hash?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
 
 // ———————————————————————————————————————————
-// Small helpers (copied/compatible with your admin page style)
+// Helpers
 function humanTime(s?: string | null) {
   if (!s) return '—';
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleString();
 }
+
 function fmtUSD0(v: any) {
   const n = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.-]/g, '')) || 0;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 }
-function toNumber(v: any) {
-  if (v == null) return 0;
-  if (typeof v === 'number') return v;
-  return Number(String(v).replace(/[^0-9.-]/g, '')) || 0;
-}
-
-// Accept only finite positive numeric ids
-const isFiniteId = (v: any) => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0;
-};
 
 function downloadCSV(filename: string, rows: any[]) {
   const keys = Array.from(rows.reduce((set, r) => { Object.keys(r || {}).forEach(k => set.add(k)); return set; }, new Set<string>()));
@@ -95,7 +82,7 @@ function downloadCSV(filename: string, rows: any[]) {
 }
 
 // ———————————————————————————————————————————
-// Normalizers (map varying backend shapes → our rows)
+// Normalizers
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
@@ -107,41 +94,21 @@ function normalizeBids(rows: any[]): BidRow[] {
     updated_at: r?.updated_at ?? r?.updatedAt ?? r?.updated ?? null,
   }));
 }
+
 function normalizeProofs(rows: any[]): ProofRow[] {
   const toIdx = (v: any): number | null => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
   return (rows || []).map((r: any) => {
-    // try many possible keys for milestone index
-    const idx =
-      toIdx(r?.milestone_index) ??
-      toIdx(r?.milestoneIndex) ??
-      toIdx(r?.milestone) ??
-      toIdx(r?.milestone_no) ??
-      toIdx(r?.milestoneNumber) ??
-      toIdx(r?.milestone_id) ??
-      toIdx(r?.milestone?.index);
-
-    // bid id can be number or string or nested
-    const bidNum =
-      toIdx(r?.bid_id) ??
-      toIdx(r?.bidId) ??
-      toIdx(r?.bid?.id) ??
-      toIdx(r?.bid) ??
-      null;
+    const idx = toIdx(r?.milestone_index) ?? toIdx(r?.milestoneIndex) ?? toIdx(r?.milestone) ?? null;
+    const bidNum = toIdx(r?.bid_id) ?? toIdx(r?.bidId) ?? toIdx(r?.bid?.id) ?? null;
 
     return {
       id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
       bid_id: bidNum,
       milestone_index: idx,
-      vendor_name:
-        r?.vendor_name ??
-        r?.vendorName ??
-        r?.vendor ??
-        r?.vendor_profile?.vendor_name ??
-        r?.vendor_profile?.name ??
-        null,
+      vendor_name: r?.vendor_name ?? r?.vendorName ?? r?.vendor ?? null,
       title: r?.title ?? r?.name ?? r?.proof_title ?? null,
       status: r?.status ?? r?.state ?? null,
       submitted_at: r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt ?? null,
@@ -163,9 +130,9 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     return Number.isFinite(n) ? n : v;
   };
   return (rows || []).map((r: any) => ({
-    id: r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? r?.hash ?? r?.tx_hash ?? '—',
-    bid_id: toNum(r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid),
-    milestone_index: toNum(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.milestone_no ?? r?.i),
+    id: r?.id ?? r?.payment_id ?? r?.payout_id ?? '—',
+    bid_id: toNum(r?.bid_id ?? r?.bidId ?? r?.bid?.id),
+    milestone_index: toNum(r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone),
     amount_usd: toUsd(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? (r?.usdCents != null ? r.usdCents / 100 : r?.amount)),
     status: r?.status ?? r?.state ?? r?.payout_status ?? null,
     released_at: r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt ?? null,
@@ -175,9 +142,9 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   }));
 }
 
-// Derive milestones from proofs (fallback when API doesn't expose milestones list)
+// Derive milestones from proofs
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
-  const byKey = new Map<string, MilestoneRow & { _statusSeen?: Set<string> }>();
+  const byKey = new Map<string, MilestoneRow>();
   const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
 
   for (const p of proofs || []) {
@@ -187,145 +154,27 @@ function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
 
     const key = `${bidId}-${idx}`;
     const prev = byKey.get(key);
-    const status = (p.status || '').toLowerCase();
-
-    // Pick latest update
     const ts = Math.max(toTime(p.updated_at), toTime(p.submitted_at), toTime(p.created_at));
     const prevTs = prev ? toTime(prev.last_update) : 0;
 
-    const statusSeen = prev?._statusSeen ?? new Set<string>();
-    if (status) statusSeen.add(status);
-
-    // Status precedence: approved > pending > submitted > anything else
-    const resolveStatus = () => {
-      if (statusSeen.has('approved')) return 'approved';
-      if (statusSeen.has('pending')) return 'pending';
-      if (statusSeen.size > 0) return Array.from(statusSeen.values())[0]; // first seen
-      return 'submitted';
-    };
-
-    const row: MilestoneRow & { _statusSeen?: Set<string> } = {
+    const row: MilestoneRow = {
       id: key,
       bid_id: Number(bidId),
       milestone_index: Number(idx),
       title: p.title ?? prev?.title ?? null,
-      status: prev ? prev.status : resolveStatus(),
-      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null)
-                                : prev?.last_update ?? null,
-      _statusSeen: statusSeen,
+      status: p.status ?? prev?.status ?? null,
+      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null) : prev?.last_update ?? null,
     };
 
-    // fix status after merging
-    row.status = resolveStatus();
     byKey.set(key, row);
   }
 
   return Array.from(byKey.values())
-    .map(({ _statusSeen, ...r }) => r)
     .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
 }
 
-async function tryLoadMilestonesFromApi(
-  apiFn: (p: string) => string,
-  bidList: BidRow[]
-): Promise<MilestoneRow[]> {
-  const out: MilestoneRow[] = [];
-
-  const toIdx = (v: any): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-
-  const normalizeApiMilestones = (rows: any[], knownBid?: number): MilestoneRow[] => {
-    const a: MilestoneRow[] = [];
-    for (const r of (rows || [])) {
-      const bid = toIdx(r?.bid_id) ?? toIdx(knownBid);
-      const idx = toIdx(r?.milestone_index ?? r?.index ?? r?.i ?? r?.milestone ?? r?.number);
-      if (!Number.isFinite(bid) || !Number.isFinite(idx)) continue;
-      a.push({
-        id: `${bid}-${idx}`,
-        bid_id: Number(bid),
-        milestone_index: Number(idx),
-        title: r?.title ?? r?.name ?? null,
-        status: r?.status ?? r?.state ?? null,
-        last_update: r?.updated_at ?? r?.last_update ?? r?.submitted_at ?? r?.created_at ?? null,
-      });
-    }
-    return a;
-  };
-
-  // 1) Try vendor-scoped list: /api/milestones?mine=1
-  try {
-    const r = await fetch(`${apiFn('/milestones')}?mine=1&t=${Date.now()}`, {
-      cache: 'no-store',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (r.ok) {
-      const j = await r.json();
-      const arr = Array.isArray(j) ? j : (j?.milestones ?? []);
-      const rows = normalizeApiMilestones(arr);
-      if (rows.length) return rows;
-    }
-  } catch { /* ignore */ }
-
-  // 2) Per-bid fallback: /api/milestones?bidId= or ?bid_id=
-  const ids = Array.from(new Set((bidList || []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
-  const CONCURRENCY = 6;
-  let i = 0;
-  async function runBatch() {
-    const batch = ids.slice(i, i + CONCURRENCY);
-    i += CONCURRENCY;
-    const chunkLists = await Promise.all(batch.map(async (id) => {
-      // ?bidId=
-      let r = await fetch(`${apiFn('/milestones')}?bidId=${id}&t=${Date.now()}`, {
-        cache: 'no-store',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j = await r.json();
-        const arr = Array.isArray(j) ? j : (j?.milestones ?? []);
-        return normalizeApiMilestones(arr, id);
-      }
-      // try ?bid_id=
-      if (r.status === 400 || r.status === 404) {
-        r = await fetch(`${apiFn('/milestones')}?bid_id=${id}&t=${Date.now()}`, {
-          cache: 'no-store',
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        });
-        if (r.ok) {
-          const j2 = await r.json();
-          const arr2 = Array.isArray(j2) ? j2 : (j2?.milestones ?? []);
-          return normalizeApiMilestones(arr2, id);
-        }
-      }
-      // last resort: /api/bids/:id (if it contains milestones)
-      try {
-        const rBid = await fetch(`${apiFn(`/bids/${id}`)}?t=${Date.now()}`, {
-          cache: 'no-store',
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        });
-        if (rBid.ok) {
-          const jb = await rBid.json();
-          const arrB = Array.isArray(jb?.milestones) ? jb.milestones : [];
-          return normalizeApiMilestones(arrB, id);
-        }
-      } catch { /* ignore */ }
-      return [];
-    }));
-    chunkLists.forEach(arr => { if (Array.isArray(arr)) out.push(...arr); });
-    if (i < ids.length) await runBatch();
-  }
-  if (ids.length) await runBatch();
-
-  return out;
-}
-
 // ———————————————————————————————————————————
-// Simple UI atoms (lightweight, match your admin feel)
+// UI Components
 function Card(props: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden mb-6">
@@ -340,12 +189,15 @@ function Card(props: { title: string; subtitle?: string; right?: React.ReactNode
     </div>
   );
 }
+
 function Th(props: { children: React.ReactNode }) {
   return <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-600">{props.children}</th>;
 }
+
 function Td(props: { children: React.ReactNode; className?: string; colSpan?: number }) {
   return <td className={`px-4 py-3 ${props.className ?? ''}`} colSpan={props.colSpan}>{props.children}</td>;
 }
+
 function RowPlaceholder({ cols }: { cols: number }) {
   return (
     <tr>
@@ -355,7 +207,7 @@ function RowPlaceholder({ cols }: { cols: number }) {
 }
 
 // ———————————————————————————————————————————
-// Page
+// Page Component
 export default function VendorOversightPage() {
   const [role, setRole] = useState<RoleInfo | null>(null);
   const [bids, setBids] = useState<BidRow[] | null>(null);
@@ -370,209 +222,147 @@ export default function VendorOversightPage() {
 
   useEffect(() => {
     let aborted = false;
+    
+    const fetchWithAuth = async (url: string) => {
+      try {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { 
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.warn(`Failed to fetch ${url}:`, error);
+        return null;
+      }
+    };
+
     (async () => {
       try {
         setErr(null);
         setLoading(true);
 
-        // Who am I?
-        const rRole = await fetch(`${api('/auth/role')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' });
-        if (!rRole.ok) throw new Error(`auth/role ${rRole.status}`);
-        const roleJson = await rRole.json();
-        if (!aborted) setRole(roleJson);
+        // Get user role
+        const roleData = await fetchWithAuth(`${api('/auth/role')}?t=${Date.now()}`);
+        if (!aborted && roleData) setRole(roleData);
 
-        // My bids (robust with fallbacks for vendor-scoped endpoints)
-let bidList: BidRow[] = [];
+        // Fetch bids - try multiple vendor-specific endpoints
+        let bidList: BidRow[] = [];
+        
+        // Try vendor-specific bid endpoints
+        const bidEndpoints = [
+          '/bids?mine=1',
+          '/vendor/bids',
+          '/my/bids',
+          '/bids'
+        ];
 
-const tryFetchBids = async (url: string) => {
-  const r = await fetch(url, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-  if (!r.ok) return null;
-  const j = await r.json();
-  return normalizeBids(Array.isArray(j) ? j : (j?.bids ?? j ?? []));
-};
+        for (const endpoint of bidEndpoints) {
+          if (aborted) break;
+          const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
+          if (data) {
+            const normalized = normalizeBids(Array.isArray(data) ? data : (data?.bids ?? data ?? []));
+            if (normalized.length > 0) {
+              bidList = normalized;
+              break;
+            }
+          }
+        }
 
-// 1) Standard path
-bidList = (await tryFetchBids(`${api('/bids')}?t=${Date.now()}`)) ?? [];
+        if (!aborted) setBids(bidList);
 
-// 2) Common vendor flags
-if (bidList.length === 0) {
-  bidList = (await tryFetchBids(`${api('/bids')}?mine=1&t=${Date.now()}`)) ?? [];
-}
-if (bidList.length === 0 && role?.address) {
-  bidList = (await tryFetchBids(`${api('/bids')}?vendorAddress=${encodeURIComponent(role.address)}&t=${Date.now()}`)) ?? [];
-}
+        // Fetch proofs - only use per-bid approach since /proofs endpoints return 400
+        let proofsList: any[] = [];
+        
+        if (bidList.length > 0) {
+          const results: any[] = [];
+          const ids = Array.from(new Set(bidList.map(b => Number(b.id)).filter(n => Number.isFinite(n) && n > 0)));
+          
+          // Fetch proofs for each bid individually
+          for (const id of ids) {
+            if (aborted) break;
+            
+            // Try multiple proof endpoints per bid
+            const proofEndpoints = [
+              `/bids/${id}/proofs`,
+              `/vendor/bids/${id}/proofs`,
+              `/my/bids/${id}/proofs`
+            ];
 
-if (!aborted) setBids(bidList);
+            for (const endpoint of proofEndpoints) {
+              const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
+              if (data) {
+                const proofData = Array.isArray(data) ? data : (data?.proofs ?? []);
+                results.push(...proofData);
+                break;
+              }
+            }
+          }
+          
+          proofsList = results;
+        }
 
- // Proofs (try list → vendor flags → per-bid fallback)
-let proofsList: any[] = [];
-
-// 1) Try direct list
-try {
-  const rp = await fetch(`${api('/proofs')}?t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-  if (rp.ok) {
-    const pj = await rp.json();
-    proofsList = Array.isArray(pj) ? pj : (pj?.proofs ?? []);
-  }
-} catch { /* ignore */ }
-
-// 2) Try vendor-scoped list if still empty
-if (!Array.isArray(proofsList) || proofsList.length === 0) {
-  try {
-    const rpMine = await fetch(`${api('/proofs')}?mine=1&t=${Date.now()}`, { cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' } });
-    if (rpMine.ok) {
-      const pj2 = await rpMine.json();
-      proofsList = Array.isArray(pj2) ? pj2 : (pj2?.proofs ?? []);
-    }
-  } catch { /* ignore */ }
-}
-
-// 3) Fallback: per-bid fetch if still empty
-if (!Array.isArray(proofsList) || proofsList.length === 0) {
-  // Use only valid, numeric ids (deduped)
-  const ids = Array.from(
-    new Set((bidList ?? []).map(b => Number(b.id)).filter(isFiniteId))
-  );
-
-  const results: any[] = [];
-  const CONCURRENCY = 6;
-
-  async function fetchProofsForBid(id: number): Promise<any[]> {
-    // Try ?bidId= first
-    const url1 = `${api('/proofs')}?bidId=${id}&t=${Date.now()}`;
-    let r = await fetch(url1, {
-      cache: 'no-store',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (r.ok) {
-      const j = await r.json();
-      return Array.isArray(j) ? j : (j?.proofs ?? []);
-    }
-
-    // If backend prefers snake_case, try ?bid_id=
-    if (r.status === 400 || r.status === 404) {
-      const url2 = `${api('/proofs')}?bid_id=${id}&t=${Date.now()}`;
-      r = await fetch(url2, {
-        cache: 'no-store',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j2 = await r.json();
-        return Array.isArray(j2) ? j2 : (j2?.proofs ?? []);
-      }
-    }
-
-    // Otherwise no data for this bid
-    return [];
-  }
-
-  let idx = 0;
-  async function runBatch(): Promise<void> {
-    const batch = ids.slice(idx, idx + CONCURRENCY);
-    idx += CONCURRENCY;
-    const chunkLists = await Promise.all(batch.map(id => fetchProofsForBid(id)));
-    chunkLists.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-    if (idx < ids.length) await runBatch();
-  }
-
-  if (ids.length) {
-    await runBatch();
-    proofsList = results;
-  }
-}
         const proofRows = normalizeProofs(proofsList);
-if (!aborted) setProofs(proofRows);
+        if (!aborted) setProofs(proofRows);
 
-// Derive milestones from proofs, then fall back to API if empty
-let ms = deriveMilestonesFromProofs(proofRows);
-if (ms.length === 0) {
-  try {
-    const apiMilestones = await tryLoadMilestonesFromApi(api, bidList);
-    if (apiMilestones.length) ms = apiMilestones;
-  } catch { /* ignore */ }
-}
-if (!aborted) setMilestones(ms);
-// ——— Payments (try list → vendor flags → per-bid) ———
-try {
-  let payList: any[] = [];
+        // Derive milestones from proofs
+        const ms = deriveMilestonesFromProofs(proofRows);
+        if (!aborted) setMilestones(ms);
 
-  // 1) Try a direct vendor-scoped list
-  const r1 = await fetch(`${api('/payouts')}?mine=1&t=${Date.now()}`, {
-    cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-  });
-  if (r1.ok) {
-    const j1 = await r1.json();
-    payList = Array.isArray(j1) ? j1 : (j1?.payouts ?? j1?.payments ?? []);
-  }
+        // Fetch payments - try multiple endpoints
+        let payList: any[] = [];
+        
+        const paymentEndpoints = [
+          '/vendor/payments',
+          '/my/payments', 
+          '/vendor/transactions',
+          '/my/transactions'
+        ];
 
-  // 2) Try generic list if still empty
-  if (!Array.isArray(payList) || payList.length === 0) {
-    const r2 = await fetch(`${api('/payouts')}?t=${Date.now()}`, {
-      cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-    });
-    if (r2.ok) {
-      const j2 = await r2.json();
-      payList = Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
-    }
-  }
-
-  // 3) Per-bid fallback (handles backends that require bid scoping)
-  if (!Array.isArray(payList) || payList.length === 0) {
-    const ids = Array.from(new Set((bids ?? []).map(b => Number(b.id)).filter(n => Number.isFinite(n))));
-    const CONCURRENCY = 6;
-    const results: any[] = [];
-    let idx = 0;
-
-    async function fetchForBid(id: number): Promise<any[]> {
-      // ?bidId=
-      let r = await fetch(`${api('/payouts')}?bidId=${id}&t=${Date.now()}`, {
-        cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-      });
-      if (r.ok) {
-        const j = await r.json();
-        return Array.isArray(j) ? j : (j?.payouts ?? j?.payments ?? []);
-      }
-      // ?bid_id=
-      if (r.status === 400 || r.status === 404) {
-        r = await fetch(`${api('/payouts')}?bid_id=${id}&t=${Date.now()}`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
-        if (r.ok) {
-          const j2 = await r.json();
-          return Array.isArray(j2) ? j2 : (j2?.payouts ?? j2?.payments ?? []);
+        for (const endpoint of paymentEndpoints) {
+          if (aborted) break;
+          const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
+          if (data) {
+            payList = Array.isArray(data) ? data : (data?.payments ?? data?.transactions ?? []);
+            if (payList.length > 0) break;
+          }
         }
-      }
-      // /bids/:id (if it contains payouts)
-      try {
-        const rb = await fetch(`${api(`/bids/${id}`)}?t=${Date.now()}`, {
-          cache: 'no-store', credentials: 'include', headers: { Accept: 'application/json' },
-        });
-        if (rb.ok) {
-          const bj = await rb.json();
-          const arr = Array.isArray(bj?.payouts) ? bj.payouts : (Array.isArray(bj?.payments) ? bj.payments : []);
-          return arr || [];
+
+        // Fallback: get payments from bids if direct endpoints don't work
+        if (payList.length === 0 && bidList.length > 0) {
+          const paymentResults: any[] = [];
+          
+          for (const bid of bidList) {
+            if (aborted) break;
+            
+            const paymentEndpoints = [
+              `/bids/${bid.id}/payments`,
+              `/vendor/bids/${bid.id}/payments`,
+              `/my/bids/${bid.id}/payments`
+            ];
+
+            for (const endpoint of paymentEndpoints) {
+              const data = await fetchWithAuth(`${api(endpoint)}?t=${Date.now()}`);
+              if (data) {
+                const paymentData = Array.isArray(data) ? data : (data?.payments ?? []);
+                paymentResults.push(...paymentData);
+                break;
+              }
+            }
+          }
+          
+          payList = paymentResults;
         }
-      } catch { /* ignore */ }
-      return [];
-    }
 
-    async function runBatch() {
-      const batch = ids.slice(idx, idx + CONCURRENCY);
-      idx += CONCURRENCY;
-      const chunks = await Promise.all(batch.map(id => fetchForBid(id)));
-      chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-      if (idx < ids.length) await runBatch();
-    }
-    if (ids.length) {
-      await runBatch();
-      payList = results;
-    }
-  }
-
-  if (!aborted) setPayments(normalizePayments(payList));
-} catch { /* ignore payments errors so page still loads */ }
+        if (!aborted) setPayments(normalizePayments(payList));
 
       } catch (e: any) {
         if (!aborted) setErr(e?.message || 'Failed to load vendor activity');
@@ -580,6 +370,7 @@ try {
         if (!aborted) setLoading(false);
       }
     })();
+
     return () => { aborted = true; };
   }, []);
 
@@ -623,17 +414,17 @@ try {
   }, [milestones, query]);
 
   const filteredPayments = useMemo(() => {
-  const list = payments ?? [];
-  if (!query) return list;
-  const q = query.toLowerCase();
-  return list.filter(p =>
-    String(p.id).toLowerCase().includes(q) ||
-    String(p.bid_id ?? '').includes(q) ||
-    String(p.milestone_index ?? '').includes(q) ||
-    (p.status ?? '').toLowerCase().includes(q) ||
-    (p.tx_hash ?? '').toLowerCase().includes(q)
-  );
-}, [payments, query]);
+    const list = payments ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(p =>
+      String(p.id).toLowerCase().includes(q) ||
+      String(p.bid_id ?? '').includes(q) ||
+      String(p.milestone_index ?? '').includes(q) ||
+      (p.status ?? '').toLowerCase().includes(q) ||
+      (p.tx_hash ?? '').toLowerCase().includes(q)
+    );
+  }, [payments, query]);
 
   // ——— UI
   const tabs = [
@@ -798,60 +589,62 @@ try {
           </div>
         </Card>
       )}
-{tab === 'payments' && (
-  <Card
-    title={`Payments (${filteredPayments.length})`}
-    subtitle="Latest first"
-    right={
-      <button
-        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
-        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-      >
-        ⬇ CSV
-      </button>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-          <tr>
-            <Th>ID</Th>
-            <Th>Bid</Th>
-            <Th>Milestone</Th>
-            <Th>Status</Th>
-            <Th>Released</Th>
-            <Th>Amount</Th>
-            <Th>Tx</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {!payments && <RowPlaceholder cols={7} />}
-          {payments && filteredPayments.length === 0 && (
-            <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
-          )}
-          {filteredPayments
-            .slice()
-            .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
-            .map(p => (
-            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
-              <Td className="font-mono text-xs">{String(p.id)}</Td>
-              <Td>{p.bid_id ?? '—'}</Td>
-              <Td>{p.milestone_index ?? '—'}</Td>
-              <Td>{p.status ?? '—'}</Td>
-              <Td>{humanTime(p.released_at || p.created_at)}</Td>
-              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
-              <Td className="max-w-[260px] truncate font-mono text-[11px]" title={p.tx_hash || ''}>
-                {p.tx_hash ? p.tx_hash.slice(0, 10) + '…' + p.tx_hash.slice(-6) : '—'}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </Card>
-)}
 
-      {/* ——— Milestones (derived) ——— */}
+      {/* ——— Payments ——— */}
+      {tab === 'payments' && (
+        <Card
+          title={`Payments (${filteredPayments.length})`}
+          subtitle="Latest first"
+          right={
+            <button
+              onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              ⬇ CSV
+            </button>
+          }
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                <tr>
+                  <Th>ID</Th>
+                  <Th>Bid</Th>
+                  <Th>Milestone</Th>
+                  <Th>Status</Th>
+                  <Th>Released</Th>
+                  <Th>Amount</Th>
+                  <Th>Tx</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {!payments && <RowPlaceholder cols={7} />}
+                {payments && filteredPayments.length === 0 && (
+                  <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
+                )}
+                {filteredPayments
+                  .slice()
+                  .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
+                  .map(p => (
+                  <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
+                    <Td className="font-mono text-xs">{String(p.id)}</Td>
+                    <Td>{p.bid_id ?? '—'}</Td>
+                    <Td>{p.milestone_index ?? '—'}</Td>
+                    <Td>{p.status ?? '—'}</Td>
+                    <Td>{humanTime(p.released_at || p.created_at)}</Td>
+                    <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
+                    <Td className="max-w-[260px] truncate font-mono text-[11px]" title={p.tx_hash || ''}>
+                      {p.tx_hash ? p.tx_hash.slice(0, 10) + '…' + p.tx_hash.slice(-6) : '—'}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
         <Card
           title={`Milestones (${filteredMilestones.length})`}
