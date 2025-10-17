@@ -481,30 +481,84 @@ const api = (p: string) => `/api${p}`;
     return () => window.removeEventListener("keydown", onKey);
   }, [tab]);
 
-  // ——— Lazy load Proofs on demand ———
+ // ——— Lazy load Proofs on demand ———
 useEffect(() => {
   if (tab !== "proofs" || proofs !== null) return;
+
   let aborted = false;
   (async () => {
     try {
       setProofsError(null);
       setProofsLoading(true);
-      const res = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
-        cache: "no-store",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json();
-      setProofs(normalizeProofs(body?.proofs ?? body ?? []));
+
+      // 1) Try direct list (some backends support /proofs)
+      let list: any[] = [];
+      try {
+        const res = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (res.ok) {
+          const body = await res.json();
+          list = Array.isArray(body) ? body : (body?.proofs ?? []);
+        }
+      } catch { /* ignore */ }
+
+      // 2) Fallback: fetch per-bid if direct list is empty
+      if (!Array.isArray(list) || list.length === 0) {
+        // ensure we have bids
+        let bidList = bids;
+        if (!bidList) {
+          const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
+            cache: "no-store",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          const bj = bRes.ok ? await bRes.json() : [];
+          bidList = normalizeBids(bj?.bids ?? bj ?? []);
+          setBids(bidList);
+        }
+
+        const ids = (bidList || []).map(b => b.id).filter(Boolean);
+        const results: any[] = [];
+
+        // modest concurrency to avoid hammering the API
+        const CONCURRENCY = 6;
+        let idx = 0;
+        async function runBatch() {
+          const batch = ids.slice(idx, idx + CONCURRENCY);
+          idx += CONCURRENCY;
+          const reqs = batch.map(id =>
+            fetch(`${api("/proofs")}?bidId=${id}&t=${Date.now()}`, {
+              cache: "no-store",
+              credentials: "include",
+              headers: { Accept: "application/json" },
+            })
+              .then(r => r.ok ? r.json() : null)
+              .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
+              .catch(() => [])
+          );
+          const chunks = await Promise.all(reqs);
+          chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+          if (idx < ids.length) await runBatch();
+        }
+        if (ids.length) {
+          await runBatch();
+          list = results;
+        }
+      }
+
+      if (!aborted) setProofs(normalizeProofs(list));
     } catch (e: any) {
       if (!aborted) setProofsError(e?.message || "Failed to load proofs");
     } finally {
       if (!aborted) setProofsLoading(false);
     }
   })();
+
   return () => { aborted = true; };
-}, [tab, proofs]);
+}, [tab, proofs, bids]);
   
   // ——— Lazy fetch for proposals/bids when tabs opened ———
 useEffect(() => {
