@@ -14,45 +14,91 @@ const local = (p: string) => `/api${p}`;
 // Types (tolerant to backend variations)
 type RoleInfo = { address?: string | null; role?: string | null; email?: string | null };
 
-type BidRow = {
+type Oversight = {
+  tiles: {
+    openProofs: number;
+    breachingSla: number;
+    pendingPayouts: { count: number; totalUSD: number };
+    escrowsLocked: number;
+    p50CycleHours: number;
+    revisionRatePct: number;
+  };
+  queue: Array<{
+    id: number;
+    vendor: string;
+    project: string;
+    milestone: number;
+    ageHours: number;
+    status: string;
+    risk: string;
+    actions?: { bidId?: number; proposalId?: number };
+  }>;
+  vendors: Array<{
+    vendor: string;
+    wallet: string;
+    proofs: number;
+    approved: number;
+    cr: number;
+    approvalPct: number;
+    bids: number;
+    lastActivity: string;
+  }>;
+  alerts: Array<{
+    type: string;
+    createdAt: string;
+    bidId?: string | number;
+    details?: any;
+  }>;
+  payouts: {
+    pending: any[];
+    recent: Array<{
+      id: string;
+      bid_id: string;
+      milestone_index: number;
+      amount_usd: string | number;
+      released_at: string;
+    }>;
+  };
+  recent: Array<{
+    created_at: string;
+    actor_role: string;
+    actor_wallet: string | null;
+    bid_id?: string | number;
+    changes: Record<string, any>;
+  }>;
+};
+// ——— Lightweight rows for new tabs ———
+type ProposalRow = {
   id: number;
-  proposal_id?: number | null;
-  vendor_name?: string | null;
-  amount_usd?: number | string | null;
-  status?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
+  title?: string;
+  status?: string;
+  owner_wallet?: string | null;
+  owner_email?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
+type BidRow = {
+  id: number;
+  proposal_id?: number;
+  vendor_name?: string | null;
+  status?: string;
+  amount_usd?: number | string | null;
+  amount?: number | string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// ——— Lightweight rows for Proofs tab ———
 type ProofRow = {
   id: number;
   bid_id?: number | string | null;
   milestone_index?: number | null;
   vendor_name?: string | null;
+  wallet_address?: string | null;
   title?: string | null;
   status?: string | null;
   submitted_at?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type MilestoneRow = {
-  id: string;                 // `${bid_id}-${milestone_index}`
-  bid_id: number;
-  milestone_index: number;
-  title?: string | null;
-  status?: string | null;     // derived from proofs (submitted/—)
-  last_update?: string | null;
-};
-
-type PaymentRow = {
-  id: number | string;
-  bid_id: number | null;
-  milestone_index: number | null;
-  amount_usd: number | string | null;
-  status?: string | null;         // e.g. released, pending
-  released_at?: string | null;
-  tx_hash?: string | null;        // optional on-chain hash
   created_at?: string | null;
   updated_at?: string | null;
 };
