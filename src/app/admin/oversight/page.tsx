@@ -420,7 +420,7 @@ const toNumber = (v: unknown) => {
   const baseUrl = `${API_BASE}${PATH}`;
 
   // Always use same-origin proxy so we never hit CORS
-const api = (p: string) => `/api${p}`;
+const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
 
   async function load(signal?: AbortSignal) {
   try {
