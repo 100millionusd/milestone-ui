@@ -222,7 +222,7 @@ function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
     .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
 }
 
-sync function tryLoadMilestonesFromApi(
+async function tryLoadMilestonesFromApi(
   apiFn: (p: string) => string,
   bidList: BidRow[]
 ): Promise<MilestoneRow[]> {
