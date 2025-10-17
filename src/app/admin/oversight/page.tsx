@@ -403,9 +403,6 @@ const [bidSort, setBidSort] = usePersistentState<{ key: keyof BidRow; dir: "asc"
   { key: "created_at", dir: "desc" }
 );
 
-// API path helper (mirrors your BASE logic)
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
-
 // Numeric parser tolerant to "$1,234.56"
 const toNumber = (v: unknown) => {
   if (v == null) return 0;
