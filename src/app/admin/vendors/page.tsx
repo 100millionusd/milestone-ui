@@ -107,46 +107,78 @@ useEffect(() => {
   }, [q, status, kyc, page, includeArchived]);
 
   const fetchList = async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const url = new URL(`${API_BASE}/admin/vendors`);
-      if (q) url.searchParams.set('search', q);
-      if (status !== 'all') url.searchParams.set('status', status);
-      if (kyc !== 'all') url.searchParams.set('kyc', kyc);
-      if (includeArchived) url.searchParams.set('includeArchived', 'true'); // NEW
-      url.searchParams.set('page', String(page));
-      url.searchParams.set('limit', String(pageSize));
-      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-const normalized = raw.map((it: any) => {
-  const wallet = it.walletAddress ?? it.wallet_address ?? it.wallet;
-  const statusRaw =
-    it.status ?? it.vendor_status ?? it.vendorStatus ??
-    (it.approved ? 'approved' : undefined);
-  const status =
-    typeof statusRaw === 'string' ? statusRaw.toLowerCase() :
-    statusRaw ? 'approved' : 'pending';
-  return {
-    ...it,
-    walletAddress: wallet,
-    status,
-  };
-});
-const total = typeof json?.total === 'number' ? json.total : normalized.length;
-const pg = typeof json?.page === 'number' ? json.page : page;
-const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
-setData({ items: normalized, total, page: pg, pageSize: ps });
-      setData({ items, total, page: pg, pageSize: ps });
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load vendors');
-      setData({ items: [], page: 1, pageSize, total: 0 });
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  setErr(null);
+  try {
+    const url = new URL(`${API_BASE}/admin/vendors`);
+    if (q) url.searchParams.set('search', q);
+    if (status !== 'all') url.searchParams.set('status', status);
+    if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+    if (includeArchived) url.searchParams.set('includeArchived', 'true');
+    url.searchParams.set('page', String(page));
+    url.searchParams.set('limit', String(pageSize));
+
+    const res = await fetch(url.toString(), {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json();
+
+    // Normalize server payload into our VendorLite shape
+    const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
+    const items: VendorLite[] = raw.map((it: any) => {
+      const statusRaw =
+        it.status ?? it.vendor_status ?? it.vendorStatus ??
+        (it.approved ? 'approved' : undefined);
+      const status =
+        typeof statusRaw === 'string'
+          ? statusRaw.toLowerCase()
+          : statusRaw ? 'approved' : 'pending';
+
+      return {
+        id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
+        vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
+        walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
+        status,
+        kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
+        totalAwardedUSD:
+          typeof it.totalAwardedUSD === 'number'
+            ? it.totalAwardedUSD
+            : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
+        bidsCount:
+          typeof it.bidsCount === 'number'
+            ? it.bidsCount
+            : Number(it.bids_count ?? 0),
+        lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
+        archived: !!(it.archived ?? it.is_archived),
+
+        // Contact fields
+        email: it.email ?? it.vendor_email ?? null,
+        phone: it.phone ?? it.tel ?? it.telephone ?? null,
+        website: it.website ?? it.web ?? null,
+        postalAddress: it.postalAddress ?? it.address ?? null,
+        telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
+        telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
+      };
+    });
+
+    const total = typeof json?.total === 'number' ? json.total : items.length;
+    const pg = typeof json?.page === 'number' ? json.page : page;
+    const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+
+    setData({ items, total, page: pg, pageSize: ps });
+  } catch (e: any) {
+    setErr(e?.message || 'Failed to load vendors');
+    setData({ items: [], page: 1, pageSize, total: 0 });
+  } finally {
+    setLoading(false);
+  }
+};
 
     useEffect(() => {
     if (role !== 'admin' || !hasJwt) return; // gate Safari until Bearer is ready AND role is confirmed
