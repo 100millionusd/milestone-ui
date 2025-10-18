@@ -230,28 +230,6 @@ const rejectVendor = async (wallet?: string) => {
   }
 };
 
-const rejectVendor = async (wallet?: string) => {
-  if (!wallet) return;
-  if (!confirm('Reject this vendor?')) return;
-  try {
-    setMutating(wallet);
-    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await fetchList();
-  } catch (e: any) {
-    alert(e?.message || 'Failed to reject vendor');
-  } finally {
-    setMutating(null);
-  }
-};
-
   // --- Bids loader per vendor (uses /admin/bids?vendorWallet=...) ---
   async function loadBidsForWallet(wallet?: string): Promise<VendorBid[]> {
     const w = (wallet || '').toLowerCase();
