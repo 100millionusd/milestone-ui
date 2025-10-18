@@ -606,7 +606,7 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
        </section>
     </main>
   );
-} // ← END AdminVendorsPage
+} 
 
 function StatusChip({ value }: { value?: VendorLite['status'] }) {
   const map: Record<string, string> = {
@@ -761,3 +761,4 @@ function Field({ label, mono, children }: { label: string; mono?: boolean; child
     </div>
   );
 }
+
