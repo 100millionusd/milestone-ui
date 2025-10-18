@@ -538,7 +538,7 @@ export default function AdminVendorsPage() {
                               className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
                                          bg-slate-900 text-white hover:bg-slate-950"
                             >
-                              {open ? 'Hide' : 'Bids'}
+                             {open ? 'Hide' : 'Details'}
                             </button>
 
                             {/* Approvals */}
