@@ -464,9 +464,61 @@ const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Prefetch lists so tab counts are correct without clicking any tab
+useEffect(() => {
+  if (!data) return; // wait for /admin/oversight to load once
+  let aborted = false;
+
+  (async () => {
+    try {
+      // Proposals
+      if (proposals == null) {
+        const pRes = await fetch(`${api("/proposals")}?t=${Date.now()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (!aborted && pRes.ok) {
+          const pj = await pRes.json();
+          setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+        }
+      }
+
+      // Bids
+      if (bids == null) {
+        const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (!aborted && bRes.ok) {
+          const bj = await bRes.json();
+          setBids(normalizeBids(bj?.bids ?? bj ?? []));
+        }
+      }
+
+      // Proofs (direct list; safe to skip if your backend doesn't expose it)
+      if (proofs == null) {
+        const pr = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (!aborted && pr.ok) {
+          const body = await pr.json();
+          const list = Array.isArray(body) ? body : (body?.proofs ?? []);
+          setProofs(normalizeProofs(list));
+        }
+      }
+    } catch { /* ignore network errors here */ }
+  })();
+
+  return () => { aborted = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [!!data]); // run once after first /admin/oversight load
+
   // auto refresh
   useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 30000 : null);
-  useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 15000 : null);
 
   // keyboard shortcuts: "/" focus search, "r" refresh, "[" prev tab, "]" next tab
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -1136,7 +1188,7 @@ const sortedProofs = useMemo(() => {
               <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
                 <Td>#{b.id}</Td>
                 <Td>#{b.proposal_id ?? "—"}</Td>
-                <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td><Td>{getProposalId(b)}</Td>
+                <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td>
                 <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
                 <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
                 <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
