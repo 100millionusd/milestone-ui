@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { listProposals, getBids, archiveProposal } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { listProposals, getBids, archiveProposal, getAuthRole } from '@/lib/api';
 
 type TabKey = 'active' | 'completed' | 'archived';
 
@@ -60,11 +61,12 @@ function bidMsStats(bid: Bid) {
   const completed = arr.filter(m => m?.completed || m?.paymentTxHash).length;
   const paid = arr.filter(m => m?.paymentTxHash).length;
   // find last activity among milestone dates
-  const lastMsDate = arr
-    .flatMap(m => [m.paymentDate, m.completionDate, m.dueDate].filter(Boolean) as string[])
-    .map(s => new Date(s))
-    .filter(d => !isNaN(d.getTime()))
-    .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+  const lastMsDate =
+    arr
+      .flatMap(m => [m.paymentDate, m.completionDate, m.dueDate].filter(Boolean) as string[])
+      .map(s => new Date(s))
+      .filter(d => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime())[0] || null;
   return { total, completed, paid, lastMsDate };
 }
 
@@ -95,13 +97,40 @@ function isProjectCompleted(project: Project, allBids: Bid[]) {
 // -----------------------------
 
 export default function ProjectsPage() {
+  const router = useRouter();
+  const [allowed, setAllowed] = useState<null | boolean>(null);
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [bids, setBids] = useState<Bid[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('active');
   const [archiving, setArchiving] = useState<Record<number, boolean>>({}); // proposalId -> busy
 
+  // ---- ACCESS GUARD: admin OR approved vendor only ----
   useEffect(() => {
+    (async () => {
+      try {
+        const info = await getAuthRole();
+        const role = String(info?.role ?? 'guest');
+        const vendorStatus = String(info?.vendorStatus ?? 'pending').toLowerCase();
+
+        if (role === 'admin' || (role === 'vendor' && vendorStatus === 'approved')) {
+          setAllowed(true);
+        } else {
+          setAllowed(false);
+          // pending vendors go to profile until approved
+          router.replace('/vendor/profile?awaiting_approval=1');
+        }
+      } catch {
+        setAllowed(false);
+        router.replace('/');
+      }
+    })();
+  }, [router]);
+
+  // ---- Data load (only when allowed) ----
+  useEffect(() => {
+    if (allowed !== true) return;
     (async () => {
       try {
         // includeArchived=true so the Archived tab has data
@@ -117,7 +146,7 @@ export default function ProjectsPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [allowed]);
 
   // partitions (memoized to avoid recompute churn)
   const archivedProjects = useMemo(
@@ -126,16 +155,18 @@ export default function ProjectsPage() {
   );
 
   const completedProjects = useMemo(
-    () => projects.filter(
-      (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p, bids))
-    ),
+    () =>
+      projects.filter(
+        (p) => p.status === 'completed' || (p.status === 'approved' && isProjectCompleted(p, bids))
+      ),
     [projects, bids]
   );
 
   const activeProjects = useMemo(
-    () => projects.filter(
-      (p) => p.status === 'approved' && !isProjectCompleted(p, bids)
-    ),
+    () =>
+      projects.filter(
+        (p) => p.status === 'approved' && !isProjectCompleted(p, bids)
+      ),
     [projects, bids]
   );
 
@@ -320,6 +351,14 @@ export default function ProjectsPage() {
       </div>
     );
   };
+
+  // ---- Guarded early returns ----
+  if (allowed === null) {
+    return <div className="max-w-6xl mx-auto p-6">Checking access…</div>;
+  }
+  if (allowed === false) {
+    return null; // redirected already
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-6">

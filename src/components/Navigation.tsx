@@ -10,7 +10,7 @@ import { getAuthRole } from '@/lib/api';
 type Role = 'admin' | 'vendor' | 'guest';
 
 type NavItem =
-  | { href: string; label: string; roles?: Array<Role> }
+  | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean }
   | {
       label: string;
       roles?: Array<Role>;
@@ -31,6 +31,7 @@ export default function Navigation() {
 
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
+  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -38,11 +39,11 @@ export default function Navigation() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole(); // calls /auth/role (uses cookie)
-        if (alive) setServerRole(info.role);
-      } catch {
-        if (alive) setServerRole('guest');
-      }
+ const info = await getAuthRole(); // calls /auth/role (uses cookie)
+if (alive) {
+  setServerRole(info.role);
+  setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any);
+}
     })();
     return () => { alive = false; };
   }, []);
@@ -52,41 +53,53 @@ export default function Navigation() {
     if (serverRole === 'admin') return 'admin';
     return (web3Role as Role) || serverRole || 'guest';
   }, [serverRole, web3Role]);
+  const canSeeProjects =
+  role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
 
   const isActive = (path: string) => {
     const clean = path.split('?')[0];
     return pathname === clean || pathname.startsWith(clean + '/');
   };
 
-    const navItems: NavItem[] = useMemo(
-    () => [
-      { href: '/', label: 'Dashboard' },
-      { href: '/projects', label: 'Projects', roles: ['admin','vendor'] },
-      { href: '/public', label: 'Public Projects' },
-      { href: '/new', label: 'Submit Proposal' },
-      {
-        label: 'Admin',
-        roles: ['admin'],
-        children: [
-  { href: '/admin/oversight', label: 'Oversight' },  // NEW: this page
-  { href: '/admin/proposals', label: 'Proposals' },
-  { href: '/admin/bids', label: 'Bids' },
-  { href: '/admin/proofs', label: 'Proofs' },
-  { href: '/admin/entities', label: 'Entities' },
-  { href: '/admin/vendors', label: 'Vendors' },      // FIX: back to the Vendors page
-]
-      },
-      { href: '/vendor/dashboard', label: 'Vendors' },
-      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor','admin'] }, // ← add this line
-    ],
-    []
-  );
+ const navItems: NavItem[] = useMemo(
+  () => [
+    { href: '/', label: 'Dashboard' },
 
-  const showItem = (item: NavItem) => {
-  // Hide "My Activity" for admins everywhere
-  if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') {
-    return false;
-  }
+    // Visible only to admin or approved vendors
+    { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+    { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+
+    // Only vendors (not guests, not admins)
+    { href: '/new', label: 'Submit Proposal', roles: ['vendor'] },
+
+    {
+      label: 'Admin',
+      roles: ['admin'],
+      children: [
+        { href: '/admin/oversight', label: 'Oversight' },
+        { href: '/admin/proposals', label: 'Proposals' },
+        { href: '/admin/bids', label: 'Bids' },
+        { href: '/admin/proofs', label: 'Proofs' },
+        { href: '/admin/entities', label: 'Entities' },
+        { href: '/admin/vendors', label: 'Vendors' },
+      ],
+    },
+
+    // Only vendors (hide from admin)
+    { href: '/vendor/dashboard', label: 'Vendors', roles: ['vendor'] },
+    { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor'] },
+  ],
+  []
+);
+
+ const showItem = (item: NavItem) => {
+  // Hide items marked as requiring approval when vendor is pending
+  if ('href' in item && item.requiresApproval && !canSeeProjects) return false;
+
+  if (role === 'admin') return true;
+  if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
+  return true;
+};
 
   // Hide "Submit Proposal" for admins everywhere
   if (!('children' in item) && item.href === '/new' && role === 'admin') {

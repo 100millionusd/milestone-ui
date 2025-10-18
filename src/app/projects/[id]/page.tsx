@@ -1,7 +1,8 @@
+// src/app/projects/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
@@ -215,8 +216,13 @@ const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 export default function ProjectDetailPage() {
   // ---- route param (plain) ----
   const params = useParams();
+  const router = useRouter();
   const projectIdParam = (params as any)?.id;
   const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
+
+  // ---- access guard ----
+  const [allowed, setAllowed] = useState<null | boolean>(null);
+  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
 
   // ---- hooks (fixed order; nothing conditional) ----
   const [project, setProject] = useState<any>(null);
@@ -233,12 +239,36 @@ export default function ProjectDetailPage() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Initial fetch: project + bids
+  // ---- ACCESS GUARD (admin OR approved vendor only) ----
   useEffect(() => {
+    (async () => {
+      try {
+        const info = await getAuthRole();
+        const role = String(info?.role ?? 'guest');
+        const vStatus = String(info?.vendorStatus ?? 'pending').toLowerCase() as 'approved' | 'pending' | 'rejected';
+        setVendorStatus(vStatus);
+
+        if (role === 'admin' || (role === 'vendor' && vStatus === 'approved')) {
+          setAllowed(true);
+        } else {
+          setAllowed(false);
+          router.replace('/vendor/profile?awaiting_approval=1');
+        }
+      } catch {
+        setAllowed(false);
+        router.replace('/');
+      }
+    })();
+  }, [router]);
+
+  // Initial fetch: project + bids (only when allowed)
+  useEffect(() => {
+    if (allowed !== true) return;
     let alive = true;
     async function run() {
       if (!Number.isFinite(projectIdNum)) return;
       try {
+        setLoadingProject(true);
         const [p, b] = await Promise.all([ getProposal(projectIdNum), getBids(projectIdNum) ]);
         if (!alive) return;
         setProject(p);
@@ -253,7 +283,7 @@ export default function ProjectDetailPage() {
     }
     run();
     return () => { alive = false; };
-  }, [projectIdNum]);
+  }, [projectIdNum, allowed]);
 
   // Auth (for Admin tab & Edit btn)
   useEffect(() => {
@@ -262,83 +292,85 @@ export default function ProjectDetailPage() {
 
   // Fetch proofs (always from local /api/proofs unless explicitly overridden)
   // Fetch proofs from BOTH sources and merge so Files tab matches Admin
-const refreshProofs = async () => {
-  if (!Number.isFinite(projectIdNum)) return;
-  setLoadingProofs(true);
+  const refreshProofs = async () => {
+    if (allowed !== true) return;
+    if (!Number.isFinite(projectIdNum)) return;
+    setLoadingProofs(true);
 
-  try {
-    // 1) Local DB: /api/proofs?proposalId=...
-    const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-    const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : []))
-      .catch(() => []);
+    try {
+      // 1) Local DB: /api/proofs?proposalId=...
+      const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+      const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : []))
+        .catch(() => []);
 
-    // 2) External API (same source Admin tab uses): get proofs for the accepted bid
-    //    If no accepted bid yet, we’ll still try the first bid as a fallback so vendors can see their uploads.
-    const accepted = (bids || []).find(b => b.status === 'approved') || (bids || [])[0] || null;
+      // 2) External API (same source Admin tab uses): get proofs for the accepted bid
+      //    If no accepted bid yet, we’ll still try the first bid as a fallback so vendors can see their uploads.
+      const accepted = (bids || []).find(b => b.status === 'approved') || (bids || [])[0] || null;
 
-    const adminReq = accepted
-      ? getProofs(Number(accepted.bidId))
-          .then(rows => {
-            // Normalize to the local ProofRecord shape the Files tab expects
-            return (Array.isArray(rows) ? rows : []).map((p: any) => ({
-              proposalId: projectIdNum,
-              milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
-              note: p?.description || p?.title || '',
-              files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
-                url: f?.url || '',
-                name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
-              })) : [],
-            }));
-          })
-          .catch(() => [])
-      : Promise.resolve([]);
+      const adminReq = accepted
+        ? getProofs(Number(accepted.bidId))
+            .then(rows => {
+              // Normalize to the local ProofRecord shape the Files tab expects
+              return (Array.isArray(rows) ? rows : []).map((p: any) => ({
+                proposalId: projectIdNum,
+                milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
+                note: p?.description || p?.title || '',
+                files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
+                  url: f?.url || '',
+                  name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
+                })) : [],
+              }));
+            })
+            .catch(() => [])
+        : Promise.resolve([]);
 
-    const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
+      const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
 
-    // 3) Merge + de-dupe by milestone+url
-    const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
-    const seen = new Set<string>();
-    const merged: any[] = [];
+      // 3) Merge + de-dupe by milestone+url
+      const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
+      const seen = new Set<string>();
+      const merged: any[] = [];
 
-    function pushRecord(r: any) {
-      // split into 1-file entries for simpler de-dupe
-      const files = Array.isArray(r.files) ? r.files : [];
-      for (const f of files) {
-        const k = key(r, f);
-        if (!f?.url || seen.has(k)) continue;
-        seen.add(k);
-        merged.push({
-          proposalId: projectIdNum,
-          milestoneIndex: Number(r.milestoneIndex),
-          note: r.note || '',
-          files: [{ url: String(f.url), name: String(f.name || 'file') }],
-        });
+      function pushRecord(r: any) {
+        // split into 1-file entries for simpler de-dupe
+        const files = Array.isArray(r.files) ? r.files : [];
+        for (const f of files) {
+          const k = key(r, f);
+          if (!f?.url || seen.has(k)) continue;
+          seen.add(k);
+          merged.push({
+            proposalId: projectIdNum,
+            milestoneIndex: Number(r.milestoneIndex),
+            note: r.note || '',
+            files: [{ url: String(f.url), name: String(f.name || 'file') }],
+          });
+        }
       }
+
+      (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
+      (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
+
+      // Group back by milestoneIndex to keep your Files tab logic happy
+      const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
+      for (const r of merged) {
+        const ms = Number(r.milestoneIndex);
+        if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
+        byMs.get(ms)!.files.push(...r.files);
+      }
+
+      setProofs(Array.from(byMs.values()));
+    } catch (e) {
+      console.warn('refreshProofs failed:', e);
+      setProofs([]);
+    } finally {
+      setLoadingProofs(false);
     }
+  };
 
-    (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
-    (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
-
-    // Group back by milestoneIndex to keep your Files tab logic happy
-    const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
-    for (const r of merged) {
-      const ms = Number(r.milestoneIndex);
-      if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
-      byMs.get(ms)!.files.push(...r.files);
-    }
-
-    setProofs(Array.from(byMs.values()));
-  } catch (e) {
-    console.warn('refreshProofs failed:', e);
-    setProofs([]);
-  } finally {
-    setLoadingProofs(false);
-  }
-};
-
-  // Load proofs once on mount
+  // Load proofs once on mount (only when allowed)
   useEffect(() => {
+    if (allowed !== true) return;
     let alive = true;
     (async () => {
       if (!Number.isFinite(projectIdNum)) return;
@@ -347,25 +379,28 @@ const refreshProofs = async () => {
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum]);
+  }, [projectIdNum, allowed]);
 
   // Re-fetch when any page archives/unarchives a milestone
-useMilestonesUpdated(async () => {
-  await refreshProofs();
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(next);
-  } catch {}
-});
+  useMilestonesUpdated(async () => {
+    if (allowed !== true) return;
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(next);
+    } catch {}
+  });
 
   // Refresh proofs when opening Files tab
   useEffect(() => {
+    if (allowed !== true) return;
     if (tab === 'files') { refreshProofs(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, allowed]);
 
   // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
   useEffect(() => {
+    if (allowed !== true) return;
     const onAnyProofUpdate = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
       // If no detail provided: refresh anyway. If provided: only refresh when it matches this project.
@@ -380,35 +415,37 @@ useMilestonesUpdated(async () => {
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum]);
+  }, [projectIdNum, allowed]);
 
   // instant local update when a proof is submitted (before server fetch returns)
-useEffect(() => {
-  const onJustSent = (ev: any) => {
-    const bidId = Number(ev?.detail?.bidId);
-    const idx   = Number(ev?.detail?.milestoneIndex);
-    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+  useEffect(() => {
+    if (allowed !== true) return;
+    const onJustSent = (ev: any) => {
+      const bidId = Number(ev?.detail?.bidId);
+      const idx   = Number(ev?.detail?.milestoneIndex);
+      if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
 
-    // 1) flip local flag for status/UX
-    setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
+      // 1) flip local flag for status/UX
+      setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
 
-    // 2) patch current bids so the Milestones table status updates immediately
-    setBids(prev => prev.map(b =>
-      Number(b.bidId) !== bidId ? b : {
-        ...b,
-        milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
-          i === idx ? { ...m, proof: m.proof || '{}' } : m
-        ),
-      }
-    ));
-  };
+      // 2) patch current bids so the Milestones table status updates immediately
+      setBids(prev => prev.map(b =>
+        Number(b.bidId) !== bidId ? b : {
+          ...b,
+          milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
+            i === idx ? { ...m, proof: m.proof || '{}' } : m
+          ),
+        }
+      ));
+    };
 
-  window.addEventListener('proofs:just-sent', onJustSent);
-  return () => window.removeEventListener('proofs:just-sent', onJustSent);
-}, []);
+    window.addEventListener('proofs:just-sent', onJustSent);
+    return () => window.removeEventListener('proofs:just-sent', onJustSent);
+  }, [allowed]);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
+    if (allowed !== true) return;
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
 
@@ -454,16 +491,16 @@ useEffect(() => {
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
-  }, [projectIdNum, bids]);
+  }, [projectIdNum, bids, allowed]);
 
   // Expose for console debug
   useEffect(() => {
     if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
   }, [proofs]);
 
-  // -------- Early returns ----------
-  if (loadingProject) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
+  // -------- Guarded early returns ----------
+  if (allowed === null) return <div className="p-6">Checking access…</div>;
+  if (allowed === false) return null;
 
   // -------- Derived -----------
   const acceptedBid = bids.find((b) => b.status === 'approved') || null;
@@ -529,70 +566,70 @@ useEffect(() => {
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
   if (typeof window !== 'undefined') {
-  (window as any).__FILES = allFiles.map((x) => {
-    const name = x.doc?.name || null;
+    (window as any).__FILES = allFiles.map((x) => {
+      const name = x.doc?.name || null;
 
-    // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
-    const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
+      // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+      const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
 
-    return {
-      scope: x.scope,
-      href: normalized ? withFilename(normalized, name || undefined) : null,
-      name,
-    };
-  });
-}
-
-  function renderAttachment(doc: any, key: number) {
-  if (!doc) return null;
-
-  // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
-  const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
-  if (!baseUrl) return null;
-
-  // filename for preview + nicer downloads
-  const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
-  const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
-
-  // only adds ?filename= when safe; keeps URL clean
-  const href = withFilename(baseUrl, name);
-
-  // detect image by name OR final href
-  const looksImage = isImageName(name) || isImageName(href);
-
-  if (looksImage) {
-    return (
-      <button
-        key={key}
-        onClick={() => setLightbox(href)}
-        className="group relative overflow-hidden rounded border"
-        title={name}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={href}
-          alt={name}
-          className="h-24 w-24 object-cover group-hover:scale-105 transition"
-        />
-      </button>
-    );
+      return {
+        scope: x.scope,
+        href: normalized ? withFilename(normalized, name || undefined) : null,
+        name,
+      };
+    });
   }
 
-  // non-image: show as an "Open" link
-  return (
-    <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-      <p className="truncate" title={name}>{name}</p>
-      <a
-        href={href.startsWith('http') ? href : `https://${href}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:underline"
-      >
-        Open
-      </a>
-    </div>
-  );
-}
+  function renderAttachment(doc: any, key: number) {
+    if (!doc) return null;
+
+    // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+    const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+    if (!baseUrl) return null;
+
+    // filename for preview + nicer downloads
+    const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
+    const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+
+    // only adds ?filename= when safe; keeps URL clean
+    const href = withFilename(baseUrl, name);
+
+    // detect image by name OR final href
+    const looksImage = isImageName(name) || isImageName(href);
+
+    if (looksImage) {
+      return (
+        <button
+          key={key}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+          title={name}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={href}
+            alt={name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+          />
+        </button>
+      );
+    }
+
+    // non-image: show as an "Open" link
+    return (
+      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate" title={name}>{name}</p>
+        <a
+          href={href.startsWith('http') ? href : `https://${href}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
+          Open
+        </a>
+      </div>
+    );
+  }
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
@@ -672,6 +709,9 @@ useEffect(() => {
   }
 
   // ----------------- Render -----------------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -699,7 +739,8 @@ useEffect(() => {
           </div>
         </div>
 
-        {!isCompleted && (
+        {/* Only show Submit Bid if page access is allowed and project isn't completed */}
+        {!isCompleted && allowed && (
           <Link
             href={`/bids/new?proposalId=${projectIdNum}`}
             className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
@@ -821,7 +862,7 @@ useEffect(() => {
                   <tr key={b.bidId} className="border-t">
                     <td className="py-2 pr-4">{b.vendorName}</td>
                     <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{b.days}</td>
+                    <td className="py-2 pr-4">{(b as any).days}</td>
                     <td className="py-2 pr-4">{b.status}</td>
                     <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
                     <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
@@ -857,38 +898,37 @@ useEffect(() => {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-  const paid = !!m.paymentTxHash;
-  const completedRow = paid || !!m.completed;
+                      const paid = !!m.paymentTxHash;
+                      const completedRow = paid || !!m.completed;
 
-  // 👇 NEW: show "submitted" immediately after upload
-  const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
-  const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
-  const status = paid
-    ? 'paid'
-    : completedRow
-      ? 'completed'
-      : hasProofNow
-        ? 'submitted'
-        : 'pending';
+                      // 👇 NEW: show "submitted" immediately after upload
+                      const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
+                      const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
+                      const status = paid
+                        ? 'paid'
+                        : completedRow
+                          ? 'completed'
+                          : hasProofNow
+                            ? 'submitted'
+                            : 'pending';
 
-  return (
-    <tr key={idx} className="border-t">
-      <td className="py-2 pr-4">M{idx + 1}</td>
-      <td className="py-2 pr-4">{m.name || '—'}</td>
-      <td className="py-2 pr-4">
-        {m.amount ? currency.format(Number(m.amount)) : '—'}
-      </td>
-      {/* 👇 replaced status cell */}
-      <td className="py-2 pr-4">{status}</td>
-      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-      <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
-      <td className="py-2 pr-4">
-        {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
-      </td>
-    </tr>
-  );
-})}
-
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 pr-4">M{idx + 1}</td>
+                          <td className="py-2 pr-4">{m.name || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          {/* 👇 replaced status cell */}
+                          <td className="py-2 pr-4">{status}</td>
+                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                          <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -942,25 +982,25 @@ useEffect(() => {
         </section>
       )}
 
- {/* Admin (only for admins) */}
-{tab === 'admin' && me.role === 'admin' && (
-  <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
+      {/* Admin (only for admins) */}
+      {tab === 'admin' && me.role === 'admin' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
 
-    {/* Existing proofs list (approve/reject) */}
-    <AdminProofs
-  bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
-  proposalId={projectIdNum}
-  bids={bids}
-  onRefresh={refreshProofs}
-/>
+          {/* Existing proofs list (approve/reject) */}
+          <AdminProofs
+            bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+            proposalId={projectIdNum}
+            bids={bids}
+            onRefresh={refreshProofs}
+          />
 
-    {/* 👇 Full change-request conversation thread (admin ↔ vendor) */}
-    <div className="mt-6">
-      <ChangeRequestsPanel proposalId={projectIdNum} />
-    </div>
-  </section>
-)}
+          {/* 👇 Full change-request conversation thread (admin ↔ vendor) */}
+          <div className="mt-6">
+            <ChangeRequestsPanel proposalId={projectIdNum} />
+          </div>
+        </section>
+      )}
 
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
