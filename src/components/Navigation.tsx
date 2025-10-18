@@ -10,7 +10,7 @@ import { getAuthRole } from '@/lib/api';
 type Role = 'admin' | 'vendor' | 'guest';
 
 type NavItem =
-  | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean }
+  | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean } // ← added requiresApproval (optional)
   | {
       label: string;
       roles?: Array<Role>;
@@ -31,100 +31,93 @@ export default function Navigation() {
 
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
-  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
+  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null); // ← NEW
 
   useEffect(() => setMounted(true), []);
 
-  // make sure this import exists at the top:
-// import { getAuthRole } from '@/lib/api';
-
-useEffect(() => {
-  let alive = true;
-
-  getAuthRole()
-    .then((info) => {
-      if (!alive) return;
-      setServerRole(info?.role);
-      setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any);
-    })
-    .catch(() => {
-      if (!alive) return;
-      setServerRole('guest' as any);
-      setVendorStatus(null);
-    });
-
-  return () => {
-    alive = false;
-  };
-}, []);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const info = await getAuthRole(); // calls /auth/role (uses cookie)
+        if (alive) {
+          setServerRole(info.role);
+          setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any); // ← NEW
+        }
+      } catch {
+        if (alive) {
+          setServerRole('guest');
+          setVendorStatus(null); // ← NEW
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   // Effective role
   const role: Role = useMemo(() => {
     if (serverRole === 'admin') return 'admin';
     return (web3Role as Role) || serverRole || 'guest';
   }, [serverRole, web3Role]);
-  const canSeeProjects =
-  role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
+
+  // Only admins or approved vendors can see project lists
+  const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved'); // ← NEW
 
   const isActive = (path: string) => {
     const clean = path.split('?')[0];
     return pathname === clean || pathname.startsWith(clean + '/');
   };
 
- const navItems: NavItem[] = useMemo(
-  () => [
-    { href: '/', label: 'Dashboard' },
+  const navItems: NavItem[] = useMemo(
+    () => [
+      { href: '/', label: 'Dashboard' },
+      // Gate these two for pending vendors:
+      { href: '/projects', label: 'Projects', roles: ['admin','vendor'], requiresApproval: true },   // ← NEW flag
+      { href: '/public', label: 'Public Projects', roles: ['admin','vendor'], requiresApproval: true }, // ← NEW flag
+      { href: '/new', label: 'Submit Proposal' },
+      {
+        label: 'Admin',
+        roles: ['admin'],
+        children: [
+          { href: '/admin/oversight', label: 'Oversight' },  // NEW: this page
+          { href: '/admin/proposals', label: 'Proposals' },
+          { href: '/admin/bids', label: 'Bids' },
+          { href: '/admin/proofs', label: 'Proofs' },
+          { href: '/admin/entities', label: 'Entities' },
+          { href: '/admin/vendors', label: 'Vendors' },      // FIX: back to the Vendors page
+        ]
+      },
+      { href: '/vendor/dashboard', label: 'Vendors' },
+      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor','admin'] }, // ← kept as you had; hidden for admin via showItem below
+    ],
+    []
+  );
 
-    // Visible only to admin or approved vendors
-    { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-    { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+  const showItem = (item: NavItem) => {
+    // NEW: hide items that require approval for pending vendors
+    if (!('children' in item) && (item as any).requiresApproval && !canSeeProjects) {
+      return false;
+    }
 
-    // Only vendors (not guests, not admins)
-    { href: '/new', label: 'Submit Proposal', roles: ['vendor'] },
+    // Hide "My Activity" for admins everywhere
+    if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') {
+      return false;
+    }
 
-    {
-      label: 'Admin',
-      roles: ['admin'],
-      children: [
-        { href: '/admin/oversight', label: 'Oversight' },
-        { href: '/admin/proposals', label: 'Proposals' },
-        { href: '/admin/bids', label: 'Bids' },
-        { href: '/admin/proofs', label: 'Proofs' },
-        { href: '/admin/entities', label: 'Entities' },
-        { href: '/admin/vendors', label: 'Vendors' },
-      ],
-    },
+    // Hide "Submit Proposal" for admins everywhere
+    if (!('children' in item) && item.href === '/new' && role === 'admin') {
+      return false;
+    }
 
-    // Only vendors (hide from admin)
-    { href: '/vendor/dashboard', label: 'Vendors', roles: ['vendor'] },
-    { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor'] },
-  ],
-  []
-);
+    // Hide the public/vendor "Vendors" link for admins (keep Admin → Vendors)
+    if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') {
+      return false;
+    }
 
- const showItem = (item: NavItem) => {
-  // Hide items marked as requiring approval when vendor is pending
-  if ('href' in item && item.requiresApproval && !canSeeProjects) return false;
-
-  if (role === 'admin') return true;
-  if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
-  return true;
-};
-
-  // Hide "Submit Proposal" for admins everywhere
-  if (!('children' in item) && item.href === '/new' && role === 'admin') {
-    return false;
-  }
-
-  // Hide the public/vendor "Vendors" link for admins (keep Admin → Vendors)
-  if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') {
-    return false;
-  }
-
-  if (role === 'admin') return true;
-  if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
-  return true;
-};
+    if (role === 'admin') return true;
+    if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
+    return true;
+  };
 
   // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
@@ -166,24 +159,24 @@ useEffect(() => {
                     </svg>
                   </button>
                   {isAdminOpen && (
-  <div
-    className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-    onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
-  >
-    {item.children.map((sub) => (
-      <Link
-        prefetch={false}
-        key={sub.href}
-        href={sub.href}
-        className={`block px-4 py-2 text-sm ${
-          isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-        }`}
-      >
-        {sub.label}
-      </Link>
-    ))}
-  </div>
-)}
+                    <div
+                      className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
+                      onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
+                    >
+                      {item.children.map((sub) => (
+                        <Link
+                          prefetch={false}
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block px-4 py-2 text-sm ${
+                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                          }`}
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <Link prefetch={false}
@@ -217,43 +210,43 @@ useEffect(() => {
                 </svg>
               </div>
 
- {isProfileOpen && (
-  <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
-    {address ? (
-      <>
-        <Link
-          prefetch={false}
-          href="/vendor/profile"
-          className="block px-4 py-2 text-sm hover:bg-gray-100"
-          onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
-        >
-          Vendor Profile
-        </Link>
+              {isProfileOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                  {address ? (
+                    <>
+                      <Link
+                        prefetch={false}
+                        href="/vendor/profile"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100"
+                        onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
+                      >
+                        Vendor Profile
+                      </Link>
 
-        <button
-          onClick={async () => {
-            setIsProfileOpen(false);                     // close immediately
-            await logout();
-            router.push('/vendor/login');
-          }}
-          className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-        >
-          Logout
-        </button>
-      </>
-    ) : (
-      <button
-        onClick={() => {
-          setIsProfileOpen(false);
-          router.push('/vendor/login');
-        }}
-        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-      >
-        Login
-      </button>
-    )}
-  </div>
-)}
+                      <button
+                        onClick={async () => {
+                          setIsProfileOpen(false);                     // close immediately
+                          await logout();
+                          router.push('/vendor/login');
+                        }}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Logout
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        router.push('/vendor/login');
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Login
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
