@@ -20,6 +20,14 @@ type VendorLite = {
   archived?: boolean; // NEW
 };
 
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  postalAddress?: string | null;      // if your API uses "address" you’ll normalize it below
+  telegramChatId?: string | number | null;
+  telegramUsername?: string | null;
+};
+
 type VendorBid = {
   bidId: string;
   projectId: string;
@@ -129,64 +137,41 @@ useEffect(() => {
 
     const json = await res.json();
 
-    // Normalize server payload into our VendorLite shape
-    const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-    const items: VendorLite[] = raw.map((it: any) => {
-      const statusRaw =
-        it.status ?? it.vendor_status ?? it.vendorStatus ??
-        (it.approved ? 'approved' : undefined);
-      const status =
-        typeof statusRaw === 'string'
-          ? statusRaw.toLowerCase()
-          : statusRaw ? 'approved' : 'pending';
+// NORMALIZE: map snake_case/camelCase into our VendorLite fields
+const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
+const items: VendorLite[] = raw.map((it: any) => {
+  const statusRaw =
+    it.status ?? it.vendor_status ?? it.vendorStatus ??
+    (it.approved ? 'approved' : undefined);
+  const status =
+    typeof statusRaw === 'string' ? statusRaw.toLowerCase() :
+    statusRaw ? 'approved' : 'pending';
 
-      return {
-        id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
-        vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
-        walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
-        status,
-        kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
-        totalAwardedUSD:
-          typeof it.totalAwardedUSD === 'number'
-            ? it.totalAwardedUSD
-            : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
-        bidsCount:
-          typeof it.bidsCount === 'number'
-            ? it.bidsCount
-            : Number(it.bids_count ?? 0),
-        lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
-        archived: !!(it.archived ?? it.is_archived),
+  return {
+    id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
+    vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
+    walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
+    status,
+    kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
+    totalAwardedUSD: typeof it.totalAwardedUSD === 'number' ? it.totalAwardedUSD : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
+    bidsCount: typeof it.bidsCount === 'number' ? it.bidsCount : Number(it.bids_count ?? 0),
+    lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
 
-        // Contact fields
-        email: it.email ?? it.vendor_email ?? null,
-        phone: it.phone ?? it.tel ?? it.telephone ?? null,
-        website: it.website ?? it.web ?? null,
-        postalAddress: it.postalAddress ?? it.address ?? null,
-        telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
-        telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
-      };
-    });
+    // NEW contact fields
+    email: it.email ?? it.vendor_email ?? null,
+    phone: it.phone ?? it.tel ?? it.telephone ?? null,
+    website: it.website ?? it.web ?? null,
+    postalAddress: it.postalAddress ?? it.address ?? null,
+    telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
+    telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
+    archived: !!(it.archived ?? it.is_archived),
+  };
+});
 
-    const total = typeof json?.total === 'number' ? json.total : items.length;
-    const pg = typeof json?.page === 'number' ? json.page : page;
-    const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
-
-    setData({ items, total, page: pg, pageSize: ps });
-  } catch (e: any) {
-    setErr(e?.message || 'Failed to load vendors');
-    setData({ items: [], page: 1, pageSize, total: 0 });
-  } finally {
-    setLoading(false);
-  }
-};
-
-    useEffect(() => {
-    if (role !== 'admin' || !hasJwt) return; // gate Safari until Bearer is ready AND role is confirmed
-    fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, hasJwt, q, status, kyc, page, pageSize, includeArchived]);
-
-  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
+const total = typeof json?.total === 'number' ? json.total : items.length;
+const pg = typeof json?.page === 'number' ? json.page : page;
+const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+setData({ items, total, page: pg, pageSize: ps });
 
   // --- Admin actions ---
   const archiveVendor = async (wallet?: string) => {
@@ -545,36 +530,42 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
                     {open && (
   <tr className="bg-slate-50 border-b">
     <td colSpan={8} className="px-3 py-3">
-      <VendorBidsPanel
-        state={bidsState}
-        busyId={mutatingBidId}
-        onArchive={async (bidId) => {
-          if (!confirm("Archive this bid?")) return;
-          try {
-            setMutatingBidId(bidId);
-            await archiveBid(Number(bidId));
-            await refreshVendorRow(rowKey, v.walletAddress); // refresh the expanded list
-            await fetchList(); // refresh top-level counts/totals
-          } catch (e: any) {
-            alert(e?.message || "Failed to archive bid");
-          } finally {
-            setMutatingBidId(null);
-          }
-        }}
-        onDelete={async (bidId) => {
-          if (!confirm("PERMANENTLY delete this bid? This cannot be undone.")) return;
-          try {
-            setMutatingBidId(bidId);
-            await deleteBid(Number(bidId));
-            await refreshVendorRow(rowKey, v.walletAddress);
-            await fetchList();
-          } catch (e: any) {
-            alert(e?.message || "Failed to delete bid");
-          } finally {
-            setMutatingBidId(null);
-          }
-        }}
-      />
+ {/* Vendor contact details */}
+<VendorDetails v={v} />
+
+<div className="h-3" />
+
+{/* Existing bids panel */}
+<VendorBidsPanel
+  state={bidsState}
+  busyId={mutatingBidId}
+  onArchive={async (bidId) => {
+    if (!confirm("Archive this bid?")) return;
+    try {
+      setMutatingBidId(bidId);
+      await archiveBid(Number(bidId));
+      await refreshVendorRow(rowKey, v.walletAddress);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || "Failed to archive bid");
+    } finally {
+      setMutatingBidId(null);
+    }
+  }}
+  onDelete={async (bidId) => {
+    if (!confirm("PERMANENTLY delete this bid? This cannot be undone.")) return;
+    try {
+      setMutatingBidId(bidId);
+      await deleteBid(Number(bidId));
+      await refreshVendorRow(rowKey, v.walletAddress);
+      await fetchList();
+    } catch (e: any) {
+      alert(e?.message || "Failed to delete bid");
+    } finally {
+      setMutatingBidId(null);
+    }
+  }}
+/>
     </td>
   </tr>
 )}
@@ -661,7 +652,7 @@ function VendorBidsPanel({
             <th className="py-2 pr-3">Status</th>
             <th className="py-2 pr-3">Date</th>
             <th className="py-2 pr-3">Open</th>
-            <th className="py-2 pr-3 text-right">Actions</th> {/* NEW */}
+            <th className="py-2 pr-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -713,3 +704,56 @@ function VendorBidsPanel({
     </div>
   );
 }
+
+function VendorDetails({ v }: { v: VendorLite }) {
+  const Email = v.email ? (
+    <a className="text-sky-700 hover:underline" href={`mailto:${v.email}`}>{v.email}</a>
+  ) : <span className="text-slate-500">—</span>;
+
+  const Phone = v.phone ? (
+    <a className="text-sky-700 hover:underline" href={`tel:${String(v.phone).replace(/\s+/g, '')}`}>{v.phone}</a>
+  ) : <span className="text-slate-500">—</span>;
+
+  const Website = v.website ? (
+    <a
+      className="text-sky-700 hover:underline"
+      href={/^https?:\/\//i.test(v.website) ? v.website : `https://${v.website}`}
+      target="_blank" rel="noreferrer"
+    >
+      {v.website}
+    </a>
+  ) : <span className="text-slate-500">—</span>;
+
+  const Telegram = v.telegramUsername
+    ? <a className="text-sky-700 hover:underline" href={`https://t.me/${v.telegramUsername}`} target="_blank" rel="noreferrer">@{v.telegramUsername}</a>
+    : v.telegramChatId
+      ? <span className="font-mono text-xs">{String(v.telegramChatId)}</span>
+      : <span className="text-slate-500">—</span>;
+
+  const Address = v.postalAddress
+    ? <span className="whitespace-pre-wrap">{v.postalAddress}</span>
+    : <span className="text-slate-500">—</span>;
+
+  return (
+    <div className="rounded border bg-white p-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+        <Field label="Email">{Email}</Field>
+        <Field label="Phone">{Phone}</Field>
+        <Field label="Website">{Website}</Field>
+        <Field label="Telegram">{Telegram}</Field>
+        <Field label="Address">{Address}</Field>
+        <Field label="Wallet" mono>{v.walletAddress || '—'}</Field>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, mono, children }: { label: string; mono?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={mono ? "font-mono text-xs break-all" : "text-slate-900"}>{children}</div>
+    </div>
+  );
+}
+/* ==================== END PASTE ==================== */
