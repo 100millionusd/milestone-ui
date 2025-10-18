@@ -61,7 +61,7 @@ export default function Navigation() {
     const navItems: NavItem[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard' },
-      { href: '/projects', label: 'Projects' },
+      { href: '/projects', label: 'Projects', roles: ['admin','vendor'] },
       { href: '/public', label: 'Public Projects' },
       { href: '/new', label: 'Submit Proposal' },
       {
