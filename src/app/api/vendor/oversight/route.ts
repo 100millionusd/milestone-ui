@@ -78,6 +78,7 @@ function extractProofsFromBids(bids: any[]): any[] {
 }
 
 // Enhanced function to extract payments from proofs (since proofs have payment info)
+// Enhanced function to extract payments from proofs (since proofs have payment info)
 function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   const payments: any[] = [];
   
@@ -85,7 +86,25 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   
   for (const proof of proofs) {
     const bidId = proof?.bid_id ?? proof?.bidId;
-    const milestoneIndex = proof?.milestone_index ?? proof?.milestoneIndex ?? proof?.milestone;
+    
+    // Extract milestone number from name (e.g., "Milestone 3" -> 3)
+    let milestoneIndex = null;
+    if (proof?.name) {
+      const match = proof.name.match(/Milestone\s+(\d+)/);
+      if (match) {
+        milestoneIndex = parseInt(match[1]);
+      }
+    }
+    
+    // If no milestone from name, try other fields
+    if (!milestoneIndex) {
+      milestoneIndex = proof?.milestone_index ?? proof?.milestoneIndex ?? proof?.milestone;
+    }
+    
+    // Fallback to 1 if still no milestone index
+    if (!milestoneIndex) {
+      milestoneIndex = 1;
+    }
     
     // If proof has payment-related information, create a payment record
     if (proof.status === 'paid' || proof.completed === true) {
@@ -95,12 +114,12 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
       const bid = bids.find(b => (b.id ?? b.bidId) === bidId);
       
       payments.push({
-        id: `payment-${bidId}-${milestoneIndex}`,
+        id: `payment-${bidId}-${milestoneIndex}`, // Use milestoneIndex to make unique
         bid_id: bidId,
         milestone_index: milestoneIndex,
         amount_usd: proof.amount ?? bid?.priceUsd ?? bid?.amount_usd,
         status: 'completed',
-        released_at: proof.updated_at ?? proof.created_at,
+        released_at: proof.paymentDate ?? proof.updated_at ?? proof.created_at,
         created_at: proof.created_at,
         // Use proof name as description
         description: proof.name ?? proof.title
