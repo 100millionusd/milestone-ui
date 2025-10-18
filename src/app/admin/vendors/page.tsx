@@ -503,171 +503,175 @@ const items: VendorLite[] = raw
           </tr>
         )}
 
-        {!loading && !err && (data.items || [])
-          .filter((v): v is VendorLite => !!v && typeof v === 'object')
-          .map((v, idx) => {
-            const rowKey = v.id || v.walletAddress || `row-${idx}`;
-            const open = !!rowsOpen[rowKey];
-            const bidsState = bidsByVendor[rowKey];
-            const busy = mutating === v.walletAddress;
-            const isApproved = v.status === 'approved' || !!approvedCache[v.walletAddress];
+ {!loading && !err &&
+  (data.items ?? [])
+    .filter((v): v is VendorLite => !!v && typeof v === 'object')
+    .map((v, idx) => {
+      const wallet = v.walletAddress || '';
+      const rowKey = v.id || wallet || `row-${idx}`;
+      const open = !!rowsOpen[rowKey];
+      const bidsState = bidsByVendor[rowKey];
+      const busy = wallet ? mutating === wallet : false;
+      const statusVal = (v.status as VendorLite['status']) || undefined;
+      const kycVal = (v.kycStatus as VendorLite['kycStatus']) || undefined;
+      const isApproved = statusVal === 'approved' || !!approvedCache[wallet];
 
-            return (
-              <Fragment key={rowKey}>
-                <tr className="border-b hover:bg-slate-50">
-                  <td className="py-2 px-3 font-medium">
-                    {v.vendorName || '—'}
-                    {v.archived && (
-                      <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
-                        Archived
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 px-3 font-mono text-xs break-all">
-                    {v.walletAddress || '—'}
-                  </td>
-                  <td className="py-2 px-3">
-                    <StatusChip value={v.status} />
-                  </td>
-                  <td className="py-2 px-3">
-                    <KycChip value={v.kycStatus} />
-                  </td>
-                  <td className="py-2 px-3">
-                    {typeof v.bidsCount === 'number' ? v.bidsCount : '—'}
-                  </td>
-                  <td className="py-2 px-3">
-                    ${Number(v.totalAwardedUSD || 0).toLocaleString()}
-                  </td>
-                  <td className="py-2 px-3">
-                    {v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
-                  </td>
-                  <td className="py-2 px-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Bids */}
+      return (
+        <Fragment key={rowKey}>
+          <tr className="border-b hover:bg-slate-50">
+            <td className="py-2 px-3 font-medium">
+              {v.vendorName || '—'}
+              {v.archived && (
+                <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
+                  Archived
+                </span>
+              )}
+            </td>
+            <td className="py-2 px-3 font-mono text-xs break-all">
+              {wallet || '—'}
+            </td>
+            <td className="py-2 px-3">
+              <StatusChip value={statusVal} />
+            </td>
+            <td className="py-2 px-3">
+              <KycChip value={kycVal} />
+            </td>
+            <td className="py-2 px-3">
+              {typeof v.bidsCount === 'number' ? v.bidsCount : '—'}
+            </td>
+            <td className="py-2 px-3">
+              ${Number(v.totalAwardedUSD || 0).toLocaleString()}
+            </td>
+            <td className="py-2 px-3">
+              {v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
+            </td>
+            <td className="py-2 px-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Bids */}
+                <button
+                  onClick={() => toggleOpen(rowKey, wallet)}
+                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                             bg-slate-900 text-white hover:bg-slate-950"
+                >
+                  {open ? 'Hide' : 'Details-Bids'}
+                </button>
+
+                {/* Approvals */}
+                {!isApproved ? (
+                  <>
+                    <button
+                      onClick={() => approveVendor(wallet)}
+                      disabled={!wallet || busy}
+                      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                                 bg-emerald-600 text-white hover:bg-emerald-700
+                                 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Approve vendor"
+                    >
+                      {busy ? 'Working…' : 'Approve'}
+                    </button>
+                    {statusVal === 'pending' && (
                       <button
-                        onClick={() => toggleOpen(rowKey, v.walletAddress)}
-                        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                   bg-slate-900 text-white hover:bg-slate-950"
-                      >
-                        {open ? 'Hide' : 'Details-Bids'}
-                      </button>
-
-                      {/* Approvals */}
-                      {!isApproved ? (
-                        <>
-                          <button
-                            onClick={() => approveVendor(v.walletAddress)}
-                            disabled={!v.walletAddress || busy}
-                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                       bg-emerald-600 text-white hover:bg-emerald-700
-                                       disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Approve vendor"
-                          >
-                            {busy ? 'Working…' : 'Approve'}
-                          </button>
-                          {v.status === 'pending' && (
-                            <button
-                              onClick={() => rejectVendor(v.walletAddress)}
-                              disabled={!v.walletAddress || busy}
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                         bg-rose-600 text-white hover:bg-rose-700
-                                         disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Reject vendor"
-                            >
-                              {busy ? 'Working…' : 'Reject'}
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <span
-                          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                     bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-                          title="Vendor is approved"
-                        >
-                          Approved
-                        </span>
-                      )}
-
-                      {/* Archive / Unarchive */}
-                      {!v.archived ? (
-                        <button
-                          onClick={() => archiveVendor(v.walletAddress)}
-                          disabled={!v.walletAddress || busy}
-                          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                     bg-amber-600 text-white hover:bg-amber-700
-                                     disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Archive vendor (soft hide)"
-                        >
-                          {busy ? 'Archiving…' : 'Archive'}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => unarchiveVendor(v.walletAddress)}
-                          disabled={!v.walletAddress || busy}
-                          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                     bg-emerald-600 text-white hover:bg-emerald-700
-                                     disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Unarchive vendor"
-                        >
-                          {busy ? 'Working…' : 'Unarchive'}
-                        </button>
-                      )}
-
-                      {/* Delete */}
-                      <button
-                        onClick={() => deleteVendor(v.walletAddress)}
-                        disabled={!v.walletAddress || busy}
+                        onClick={() => rejectVendor(wallet)}
+                        disabled={!wallet || busy}
                         className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
                                    bg-rose-600 text-white hover:bg-rose-700
                                    disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Reject vendor"
                       >
-                        Delete
+                        {busy ? 'Working…' : 'Reject'}
                       </button>
-                    </div>
-                  </td>
-                </tr>
-
-                {open && (
-                  <tr className="bg-slate-50 border-b">
-                    <td colSpan={8} className="px-3 py-3">
-                      <VendorDetails v={v} />
-                      <div className="h-3" />
-                      <VendorBidsPanel
-                        state={bidsState}
-                        busyId={mutatingBidId}
-                        onArchive={async (bidId) => {
-                          if (!confirm('Archive this bid?')) return;
-                          try {
-                            setMutatingBidId(bidId);
-                            await archiveBid(Number(bidId));
-                            await refreshVendorRow(rowKey, v.walletAddress);
-                            await fetchList();
-                          } catch (e: any) {
-                            alert(e?.message || 'Failed to archive bid');
-                          } finally {
-                            setMutatingBidId(null);
-                          }
-                        }}
-                        onDelete={async (bidId) => {
-                          if (!confirm('PERMANENTLY delete this bid? This cannot be undone.')) return;
-                          try {
-                            setMutatingBidId(bidId);
-                            await deleteBid(Number(bidId));
-                            await refreshVendorRow(rowKey, v.walletAddress);
-                            await fetchList();
-                          } catch (e: any) {
-                            alert(e?.message || 'Failed to delete bid');
-                          } finally {
-                            setMutatingBidId(null);
-                          }
-                        }}
-                      />
-                    </td>
-                  </tr>
+                    )}
+                  </>
+                ) : (
+                  <span
+                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                               bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
+                    title="Vendor is approved"
+                  >
+                    Approved
+                  </span>
                 )}
-              </Fragment>
-            );
-          })}
+
+                {/* Archive / Unarchive */}
+                {!v.archived ? (
+                  <button
+                    onClick={() => archiveVendor(wallet)}
+                    disabled={!wallet || busy}
+                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                               bg-amber-600 text-white hover:bg-amber-700
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Archive vendor (soft hide)"
+                  >
+                    {busy ? 'Archiving…' : 'Archive'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => unarchiveVendor(wallet)}
+                    disabled={!wallet || busy}
+                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                               bg-emerald-600 text-white hover:bg-emerald-700
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Unarchive vendor"
+                  >
+                    {busy ? 'Working…' : 'Unarchive'}
+                  </button>
+                )}
+
+                {/* Delete */}
+                <button
+                  onClick={() => deleteVendor(wallet)}
+                  disabled={!wallet || busy}
+                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                             bg-rose-600 text-white hover:bg-rose-700
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+
+          {open && (
+            <tr className="bg-slate-50 border-b">
+              <td colSpan={8} className="px-3 py-3">
+                <VendorDetails v={v} />
+                <div className="h-3" />
+                <VendorBidsPanel
+                  state={bidsState}
+                  busyId={mutatingBidId}
+                  onArchive={async (bidId) => {
+                    if (!confirm('Archive this bid?')) return;
+                    try {
+                      setMutatingBidId(bidId);
+                      await archiveBid(Number(bidId));
+                      await refreshVendorRow(rowKey, wallet);
+                      await fetchList();
+                    } catch (e: any) {
+                      alert(e?.message || 'Failed to archive bid');
+                    } finally {
+                      setMutatingBidId(null);
+                    }
+                  }}
+                  onDelete={async (bidId) => {
+                    if (!confirm('PERMANENTLY delete this bid? This cannot be undone.')) return;
+                    try {
+                      setMutatingBidId(bidId);
+                      await deleteBid(Number(bidId));
+                      await refreshVendorRow(rowKey, wallet);
+                      await fetchList();
+                    } catch (e: any) {
+                      alert(e?.message || 'Failed to delete bid');
+                    } finally {
+                      setMutatingBidId(null);
+                    }
+                  }}
+                />
+              </td>
+            </tr>
+          )}
+        </Fragment>
+      );
+    })}
       </tbody>
     </table>
   </div>
