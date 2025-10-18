@@ -12,7 +12,7 @@ type VendorLite = {
   id?: string;
   vendorName: string;
   walletAddress: string;
-  status?: 'pending' | 'approved' | 'suspended' | 'banned';
+  status?: 'pending' | 'approved' | 'rejected' | 'suspended' | 'banned';
   kycStatus?: 'none' | 'pending' | 'verified' | 'rejected';
   totalAwardedUSD?: number;
   bidsCount?: number;
@@ -183,6 +183,49 @@ export default function AdminVendorsPage() {
     }
   };
 
+  const approveVendor = async (wallet?: string) => {
+  if (!wallet) return;
+  try {
+    setMutating(wallet);
+    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchList();
+  } catch (e: any) {
+    alert(e?.message || 'Failed to approve vendor');
+  } finally {
+    setMutating(null);
+  }
+};
+
+const rejectVendor = async (wallet?: string) => {
+  if (!wallet) return;
+  if (!confirm('Reject this vendor?')) return;
+  try {
+    setMutating(wallet);
+    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchList();
+  } catch (e: any) {
+    alert(e?.message || 'Failed to reject vendor');
+  } finally {
+    setMutating(null);
+  }
+};
+
   // --- Bids loader per vendor (uses /admin/bids?vendorWallet=...) ---
   async function loadBidsForWallet(wallet?: string): Promise<VendorBid[]> {
     const w = (wallet || '').toLowerCase();
@@ -280,6 +323,7 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="suspended">Suspended</option>
+            <option value="rejected">Rejected</option>
             <option value="banned">Banned</option>
           </select>
           <select
@@ -353,6 +397,29 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
                           >
                             {open ? 'Hide' : 'Bids'}
                           </button>
+
+                            {/* Approvals */}
+  {v.status !== 'approved' && (
+    <button
+      onClick={() => approveVendor(v.walletAddress)}
+      disabled={!v.walletAddress || busy}
+      className="px-2 py-1 rounded bg-emerald-600 text-white text-xs disabled:opacity-50"
+      title="Approve vendor"
+    >
+      {busy ? 'Working…' : 'Approve'}
+    </button>
+  )}
+  {v.status === 'pending' && (
+    <button
+      onClick={() => rejectVendor(v.walletAddress)}
+      disabled={!v.walletAddress || busy}
+      className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
+      title="Reject vendor"
+    >
+      {busy ? 'Working…' : 'Reject'}
+    </button>
+  )}
+
 
                           {!v.archived ? (
                             <button
@@ -459,6 +526,7 @@ function StatusChip({ value }: { value?: VendorLite['status'] }) {
   const map: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800',
     approved: 'bg-emerald-100 text-emerald-800',
+    rejected: 'bg-rose-100 text-rose-800',
     suspended: 'bg-rose-100 text-rose-800',
     banned: 'bg-zinc-200 text-zinc-700',
   };
