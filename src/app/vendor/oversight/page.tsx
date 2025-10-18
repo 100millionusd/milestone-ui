@@ -695,13 +695,13 @@ export default function VendorOversightPage() {
               </Td>
               <Td>{humanTime(p.released_at || p.created_at)}</Td>
               <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
-              <Td className="max-w-[160px] truncate font-mono text-[11px] text-blue-600 dark:text-blue-400" title={p.tx_hash || ''}>
+              <Td className="max-w-[160px] truncate" title={p.tx_hash || ''}>
                 {p.tx_hash ? (
                   <a 
                     href={`https://etherscan.io/tx/${p.tx_hash}`} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="hover:underline"
+                    className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline hover:underline-offset-2 transition-all"
                   >
                     {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
                   </a>
