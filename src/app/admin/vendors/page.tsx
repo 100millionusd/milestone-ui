@@ -77,6 +77,7 @@ export default function AdminVendorsPage() {
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
   const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
   const [mutatingBidId, setMutatingBidId] = useState<string | null>(null); // bid-level busy state
+  const [approvedCache, setApprovedCache] = useState<Record<string, boolean>>({});
 
   // sync URL
   useEffect(() => {
@@ -193,6 +194,7 @@ export default function AdminVendorsPage() {
       headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    setApprovedCache(prev => ({ ...prev, [wallet]: true }));
     // ✅ instant UI: mark approved locally, then refresh from server
     setData(prev => ({
       ...prev,
@@ -376,6 +378,7 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
+                const isApproved = v.status === 'approved' || !!approvedCache[v.walletAddress];
                 return (
                   <>
                     <tr key={rowKey} className="border-b hover:bg-slate-50">
@@ -405,40 +408,40 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
   </button>
 
   {/* Approvals */}
-  {v.status !== 'approved' ? (
-    <>
+{!isApproved ? (
+  <>
+    <button
+      onClick={() => approveVendor(v.walletAddress)}
+      disabled={!v.walletAddress || busy}
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                 bg-emerald-600 text-white hover:bg-emerald-700
+                 disabled:opacity-50 disabled:cursor-not-allowed"
+      title="Approve vendor"
+    >
+      {busy ? 'Working…' : 'Approve'}
+    </button>
+    {v.status === 'pending' && (
       <button
-        onClick={() => approveVendor(v.walletAddress)}
+        onClick={() => rejectVendor(v.walletAddress)}
         disabled={!v.walletAddress || busy}
         className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                   bg-emerald-600 text-white hover:bg-emerald-700
+                   bg-rose-600 text-white hover:bg-rose-700
                    disabled:opacity-50 disabled:cursor-not-allowed"
-        title="Approve vendor"
+        title="Reject vendor"
       >
-        {busy ? 'Working…' : 'Approve'}
+        {busy ? 'Working…' : 'Reject'}
       </button>
-      {v.status === 'pending' && (
-        <button
-          onClick={() => rejectVendor(v.walletAddress)}
-          disabled={!v.walletAddress || busy}
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                     bg-rose-600 text-white hover:bg-rose-700
-                     disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Reject vendor"
-        >
-          {busy ? 'Working…' : 'Reject'}
-        </button>
-      )}
-    </>
-  ) : (
-    <span
-      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                 bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-      title="Vendor is approved"
-    >
-      Approved
-    </span>
-  )}
+    )}
+  </>
+) : (
+  <span
+    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+               bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
+    title="Vendor is approved"
+  >
+    Approved
+  </span>
+)}
 
   {/* Archive / Unarchive */}
   {!v.archived ? (
