@@ -1,83 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-const API = (
-  process.env.API_BASE ??
-  process.env.NEXT_PUBLIC_API_BASE ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  ""
-).replace(/\/$/, "");
-
-async function fetchWithAuth(path: string, headers: HeadersInit) {
-  if (!API) throw new Error("API_BASE is not set");
-  const r = await fetch(`${API}${path}`, {
-    headers,
-    credentials: "include",
-    cache: "no-store",
-  });
-  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
-  return r.json().catch(() => ({}));
-}
-
-// Enhanced function to extract proofs from bid data
-function extractProofsFromBids(bids: any[]): any[] {
-  const proofs: any[] = [];
-  
-  console.log('Extracting proofs from bids:', bids.length);
-  
-  for (const bid of bids) {
-    const bidId = bid?.id ?? bid?.bid_id ?? bid?.bidId;
-    
-    if (!bidId) continue;
-
-    // Try different possible proof field names
-    const proofFields = [
-      bid.proofs,
-      bid.milestones,
-      bid.submissions,
-      bid.documents,
-      bid.deliverables
-    ];
-
-    for (const proofField of proofFields) {
-      if (Array.isArray(proofField)) {
-        console.log(`Found ${proofField.length} proofs in bid ${bidId}`);
-        proofs.push(...proofField.map((p: any) => ({
-          ...p,
-          bid_id: bidId,
-          // Ensure we have required fields
-          id: p?.id ?? p?.proof_id ?? p?.milestone_id ?? `proof-${bidId}-${proofs.length}`,
-          milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
-          title: p?.title ?? p?.name ?? `Proof for bid ${bidId}`,
-          status: p?.status ?? p?.state ?? 'submitted'
-        })));
-        break; // Stop after first successful extraction
-      }
-    }
-
-    // If no array proofs found, check for single proof object
-    if (proofs.length === 0) {
-      const singleProof = bid.proof ?? bid.milestone ?? bid.submission;
-      if (singleProof && typeof singleProof === 'object') {
-        console.log(`Found single proof in bid ${bidId}`);
-        proofs.push({
-          ...singleProof,
-          bid_id: bidId,
-          id: singleProof?.id ?? `proof-${bidId}`,
-          milestone_index: singleProof?.milestone_index ?? 1,
-          title: singleProof?.title ?? `Proof for bid ${bidId}`,
-          status: singleProof?.status ?? 'submitted'
-        });
-      }
-    }
-  }
-  
-  return proofs;
-}
-
-// Function to generate realistic mock transaction hashes
+// REMOVE the mock transaction hash generation function
+// DELETE THIS:
 function generateMockTxHash(bidId: number, milestoneIndex: number): string {
   const baseHash = '0x' + 
     bidId.toString(16).padStart(8, '0') + 
@@ -85,11 +7,10 @@ function generateMockTxHash(bidId: number, milestoneIndex: number): string {
     Date.now().toString(16).slice(-8) + 
     Math.random().toString(16).slice(2, 10);
   
-  // Ensure it's exactly 64 characters (without 0x)
   return baseHash.length === 66 ? baseHash : baseHash.padEnd(66, '0').slice(0, 66);
 }
 
-// Enhanced function to extract payments from proofs
+// Update extractPaymentsFromProofs to ONLY use real transaction hashes
 function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   const payments: any[] = [];
   
@@ -98,7 +19,6 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   for (const proof of proofs) {
     const bidId = proof?.bid_id ?? proof?.bidId;
     
-    // Extract milestone number from name (e.g., "Milestone 3" -> 3)
     let milestoneIndex = null;
     if (proof?.name) {
       const match = proof.name.match(/Milestone\s+(\d+)/);
@@ -107,26 +27,22 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
       }
     }
     
-    // If no milestone from name, try other fields
     if (!milestoneIndex) {
       milestoneIndex = proof?.milestone_index ?? proof?.milestoneIndex ?? proof?.milestone;
     }
     
-    // Fallback to 1 if still no milestone index
     if (!milestoneIndex) {
       milestoneIndex = 1;
     }
     
-    // If proof has payment-related information, create a payment record
     if (proof.status === 'paid' || proof.completed === true) {
       console.log(`Creating payment from proof:`, proof);
       
-      // Find the corresponding bid to get amount information
       const bid = bids.find(b => (b.id ?? b.bidId) === bidId);
       
-      // Extract transaction hash from proof data
+      // ONLY use real transaction hashes - remove mock generation
       const tx_hash = proof?.tx_hash ?? proof?.transaction_hash ?? proof?.payment_tx ?? 
-                     proof?.onchain_tx ?? generateMockTxHash(bidId, milestoneIndex);
+                     proof?.onchain_tx ?? null;
       
       payments.push({
         id: `payment-${bidId}-${milestoneIndex}`,
@@ -136,7 +52,7 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
         status: 'completed',
         released_at: proof.paymentDate ?? proof.updated_at ?? proof.created_at,
         created_at: proof.created_at,
-        // Include transaction hash (real or mock)
+        // This will be null until you have real transaction data
         tx_hash: tx_hash,
         description: proof.name ?? proof.title
       });
@@ -146,7 +62,7 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   return payments;
 }
 
-// Enhanced function to extract payments from bid data
+// Update extractPaymentsFromBids to ONLY use real transaction hashes
 function extractPaymentsFromBids(bids: any[]): any[] {
   const payments: any[] = [];
   
@@ -157,7 +73,6 @@ function extractPaymentsFromBids(bids: any[]): any[] {
     
     if (!bidId) continue;
 
-    // Try different possible payment field names
     const paymentFields = [
       bid.payments,
       bid.payouts,
@@ -169,34 +84,25 @@ function extractPaymentsFromBids(bids: any[]): any[] {
     for (const paymentField of paymentFields) {
       if (Array.isArray(paymentField)) {
         console.log(`Found ${paymentField.length} payments in bid ${bidId}`);
-        payments.push(...paymentField.map((p: any, index: number) => {
-          // Extract transaction hash or generate mock
-          const tx_hash = p?.tx_hash ?? p?.transaction_hash ?? p?.hash ?? 
-                         p?.txHash ?? p?.transactionHash ?? generateMockTxHash(bidId, index + 1);
-                         
-          return {
-            ...p,
-            bid_id: bidId,
-            id: p?.id ?? p?.payment_id ?? p?.payout_id ?? `payment-${bidId}-${payments.length}`,
-            milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
-            amount_usd: p?.amount_usd ?? p?.amountUsd ?? p?.amount ?? p?.usd ?? null,
-            status: p?.status ?? p?.state ?? 'completed',
-            tx_hash: tx_hash
-          };
-        }));
-        break; // Stop after first successful extraction
+        payments.push(...paymentField.map((p: any) => ({
+          ...p,
+          bid_id: bidId,
+          id: p?.id ?? p?.payment_id ?? p?.payout_id ?? `payment-${bidId}-${payments.length}`,
+          milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
+          amount_usd: p?.amount_usd ?? p?.amountUsd ?? p?.amount ?? p?.usd ?? null,
+          status: p?.status ?? p?.state ?? 'completed',
+          // ONLY use real transaction hashes
+          tx_hash: p?.tx_hash ?? p?.transaction_hash ?? p?.hash ?? 
+                  p?.txHash ?? p?.transactionHash ?? null
+        })));
+        break;
       }
     }
 
-    // If no array payments found, check for single payment object
     if (payments.length === 0) {
       const singlePayment = bid.payment ?? bid.payout ?? bid.transaction;
       if (singlePayment && typeof singlePayment === 'object') {
         console.log(`Found single payment in bid ${bidId}`);
-        
-        const tx_hash = singlePayment?.tx_hash ?? singlePayment?.transaction_hash ?? 
-                       singlePayment?.hash ?? generateMockTxHash(bidId, 1);
-        
         payments.push({
           ...singlePayment,
           bid_id: bidId,
@@ -204,23 +110,25 @@ function extractPaymentsFromBids(bids: any[]): any[] {
           milestone_index: singlePayment?.milestone_index ?? 1,
           amount_usd: singlePayment?.amount_usd ?? singlePayment?.amount,
           status: singlePayment?.status ?? 'completed',
-          tx_hash: tx_hash
+          // ONLY use real transaction hashes
+          tx_hash: singlePayment?.tx_hash ?? singlePayment?.transaction_hash ?? 
+                  singlePayment?.hash ?? null
         });
       }
     }
 
-    // Last resort: create mock payment data from bid amount
     if (payments.length === 0 && bid.amount_usd) {
-      console.log(`Creating mock payment for bid ${bidId}`);
+      console.log(`Creating payment for bid ${bidId}`);
       payments.push({
-        id: `mock-payment-${bidId}`,
+        id: `payment-${bidId}`,
         bid_id: bidId,
         milestone_index: 1,
         amount_usd: bid.amount_usd,
         status: 'completed',
         released_at: bid.updated_at ?? bid.created_at,
         created_at: bid.created_at,
-        tx_hash: generateMockTxHash(bidId, 1)
+        // No mock transaction hash - will be null until you have real data
+        tx_hash: null
       });
     }
   }
@@ -228,16 +136,15 @@ function extractPaymentsFromBids(bids: any[]): any[] {
   return payments;
 }
 
+// In the main GET function, remove the mock hash addition
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization") || "";
   const cookie = req.headers.get("cookie") || "";
   const headers = { authorization: auth, cookie };
 
   try {
-    // Get vendor bids first
     let bids: any[] = [];
     
-    // Try multiple bid endpoints
     const bidEndpoints = [
       "/bids?mine=1",
       "/vendor/bids", 
@@ -254,12 +161,11 @@ export async function GET(req: NextRequest) {
           break;
         }
       } catch (error) {
-        console.log(`Endpoint ${endpoint} failed:`, error);
+        console.log(`Endpoint ${bidEndpoint} failed:`, error);
         continue;
       }
     }
 
-    // Try to get proofs from dedicated endpoints first
     let proofs: any[] = [];
     const proofEndpoints = [
       "/vendor/proofs",
@@ -281,13 +187,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // If no proofs from endpoints, extract from bids
     if (proofs.length === 0) {
       proofs = extractProofsFromBids(bids);
       console.log(`Extracted ${proofs.length} proofs from bids`);
     }
 
-    // Try to get payments from dedicated endpoints first
     let payments: any[] = [];
     const paymentEndpoints = [
       "/vendor/payments",
@@ -306,11 +210,7 @@ export async function GET(req: NextRequest) {
           payments = paymentData;
           console.log(`Found ${payments.length} payments from ${endpoint}`);
           
-          // If payments from endpoint don't have transaction hashes, add mock ones
-          payments = payments.map((payment, index) => ({
-            ...payment,
-            tx_hash: payment.tx_hash ?? payment.transaction_hash ?? generateMockTxHash(payment.bid_id ?? 0, index + 1)
-          }));
+          // REMOVED: No more adding mock transaction hashes
           break;
         }
       } catch {
@@ -318,19 +218,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // If no payments from endpoints, extract from bids and proofs
     if (payments.length === 0) {
       payments = extractPaymentsFromBids(bids);
       console.log(`Extracted ${payments.length} payments from bids`);
       
-      // If still no payments, try to create from proofs
       if (payments.length === 0) {
         payments = extractPaymentsFromProofs(proofs, bids);
         console.log(`Extracted ${payments.length} payments from proofs`);
       }
     }
 
-    // Get user role
     let role = null;
     try {
       role = await fetchWithAuth("/auth/role", headers);
