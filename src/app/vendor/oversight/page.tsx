@@ -224,8 +224,10 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     const created_at = r?.created_at ?? r?.createdAt;
     const updated_at = r?.updated_at ?? r?.updatedAt;
 
-    // Handle transaction hash
-    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash;
+    // IMPROVED: Handle transaction hash - check multiple possible fields
+    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? 
+                   r?.txHash ?? r?.transactionHash ?? r?.payment_hash ??
+                   r?.onchain_tx_id ?? r?.onchain_tx_hash ?? null;
 
     return {
       id: String(id),
@@ -642,68 +644,78 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
-      {/* ——— Payments ——— */}
-      {tab === 'payments' && (
-        <Card
-          title={`Payments (${filteredPayments.length})`}
-          subtitle="Latest first"
-          right={
-            <button
-              onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
-              className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-            >
-              ⬇ CSV
-            </button>
-          }
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-                <tr>
-                  <Th>ID</Th>
-                  <Th>Bid</Th>
-                  <Th>Milestone</Th>
-                  <Th>Status</Th>
-                  <Th>Released</Th>
-                  <Th>Amount</Th>
-                  <Th>Tx</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {!payments && <RowPlaceholder cols={7} />}
-                {payments && filteredPayments.length === 0 && (
-                  <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
+ {/* ——— Payments ——— */}
+{tab === 'payments' && (
+  <Card
+    title={`Payments (${filteredPayments.length})`}
+    subtitle="Latest first"
+    right={
+      <button
+        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
+        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+      >
+        ⬇ CSV
+      </button>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th>ID</Th>
+            <Th>Bid</Th>
+            <Th>Milestone</Th>
+            <Th>Status</Th>
+            <Th>Released</Th>
+            <Th>Amount</Th>
+            <Th>Tx</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {!payments && <RowPlaceholder cols={7} />}
+          {payments && filteredPayments.length === 0 && (
+            <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
+          )}
+          {filteredPayments
+            .slice()
+            .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
+            .map(p => (
+            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
+              <Td className="font-mono text-xs">{String(p.id)}</Td>
+              <Td>{p.bid_id ?? '—'}</Td>
+              <Td>{p.milestone_index ?? '—'}</Td>
+              <Td>
+                <Badge tone={
+                  p.status === 'completed' ? 'success' :
+                  p.status === 'released' ? 'success' :
+                  p.status === 'pending' ? 'warning' : 'neutral'
+                }>
+                  {p.status ?? '—'}
+                </Badge>
+              </Td>
+              <Td>{humanTime(p.released_at || p.created_at)}</Td>
+              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
+              <Td className="max-w-[160px] truncate font-mono text-[11px] text-blue-600 dark:text-blue-400" title={p.tx_hash || ''}>
+                {p.tx_hash ? (
+                  <a 
+                    href={`https://etherscan.io/tx/${p.tx_hash}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
+                  </a>
+                ) : (
+                  <span className="text-neutral-400">—</span>
                 )}
-                {filteredPayments
-                  .slice()
-                  .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
-                  .map(p => (
-                  <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
-                    <Td className="font-mono text-xs">{String(p.id)}</Td>
-                    <Td>{p.bid_id ?? '—'}</Td>
-                    <Td>{p.milestone_index ?? '—'}</Td>
-                    <Td>
-                      <Badge tone={
-                        p.status === 'completed' ? 'success' :
-                        p.status === 'released' ? 'success' :
-                        p.status === 'pending' ? 'warning' : 'neutral'
-                      }>
-                        {p.status ?? '—'}
-                      </Badge>
-                    </Td>
-                    <Td>{humanTime(p.released_at || p.created_at)}</Td>
-                    <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
-                    <Td className="max-w-[260px] truncate font-mono text-[11px]" title={p.tx_hash || ''}>
-                      {p.tx_hash ? p.tx_hash.slice(0, 10) + '…' + p.tx_hash.slice(-6) : '—'}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
         <Card

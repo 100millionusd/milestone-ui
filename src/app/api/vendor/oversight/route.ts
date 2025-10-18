@@ -79,6 +79,7 @@ function extractProofsFromBids(bids: any[]): any[] {
 
 // Enhanced function to extract payments from proofs (since proofs have payment info)
 // Enhanced function to extract payments from proofs (since proofs have payment info)
+// Enhanced function to extract payments from proofs (since proofs have payment info)
 function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   const payments: any[] = [];
   
@@ -113,6 +114,10 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
       // Find the corresponding bid to get amount information
       const bid = bids.find(b => (b.id ?? b.bidId) === bidId);
       
+      // ADDED: Extract transaction hash from proof data
+      const tx_hash = proof?.tx_hash ?? proof?.transaction_hash ?? proof?.payment_tx ?? 
+                     proof?.onchain_tx ?? null;
+      
       payments.push({
         id: `payment-${bidId}-${milestoneIndex}`, // Use milestoneIndex to make unique
         bid_id: bidId,
@@ -121,6 +126,8 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
         status: 'completed',
         released_at: proof.paymentDate ?? proof.updated_at ?? proof.created_at,
         created_at: proof.created_at,
+        // ADDED: Include transaction hash
+        tx_hash: tx_hash,
         // Use proof name as description
         description: proof.name ?? proof.title
       });
