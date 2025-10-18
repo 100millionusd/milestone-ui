@@ -1,7 +1,7 @@
 // src/app/admin/vendors/page.tsx
 'use client';
 
-import React, { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { API_BASE, getAuthRole, archiveBid, deleteBid } from '@/lib/api';
@@ -10,28 +10,25 @@ type Role = 'admin' | 'vendor' | 'guest';
 
 type VendorLite = {
   id?: string;
-  vendorName: string;
-  walletAddress: string;
-
-  // status / kyc
-  status?: 'pending' | 'approved' | 'rejected' | 'suspended' | 'banned';
+  vendorName?: string;
+  walletAddress?: string;
+  status?: 'pending' | 'approved' | 'suspended' | 'banned';
   kycStatus?: 'none' | 'pending' | 'verified' | 'rejected';
-
-  // stats
   totalAwardedUSD?: number;
   bidsCount?: number;
   lastBidAt?: string | null;
+  archived?: boolean; // NEW
 
-  // flags
-  archived?: boolean;
-
-  // CONTACT
+  // Contact (optional; we’ll read both snake_case and camelCase at render-time)
   email?: string | null;
   phone?: string | null;
   website?: string | null;
   postalAddress?: string | null;
   telegramChatId?: string | number | null;
   telegramUsername?: string | null;
+
+  // Allow any extra fields from API without breaking
+  [key: string]: any;
 };
 
 type VendorBid = {
@@ -53,8 +50,9 @@ type Paged<T> = {
 export default function AdminVendorsPage() {
   const sp = useSearchParams();
   const router = useRouter();
+  const hasJwt = typeof window !== 'undefined' && !!localStorage.getItem('lx_jwt');
 
-  // Auth gate
+  // auth gate
   const [role, setRole] = useState<Role | null>(null);
   const isAdmin = role === 'admin';
 
@@ -70,54 +68,28 @@ export default function AdminVendorsPage() {
         setRole('guest');
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Filters / pagination
+  // list state
   const [q, setQ] = useState(sp.get('q') || '');
   const [status, setStatus] = useState(sp.get('status') || 'all');
   const [kyc, setKyc] = useState(sp.get('kyc') || 'all');
   const [page, setPage] = useState(Number(sp.get('page') || '1'));
   const [pageSize] = useState(25);
-  const [includeArchived, setIncludeArchived] = useState(sp.get('includeArchived') === 'true');
+  const [includeArchived, setIncludeArchived] = useState(sp.get('includeArchived') === 'true'); // NEW
 
-  // List state
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [data, setData] = useState<Paged<VendorLite>>({
-    items: [],
-    page: 1,
-    pageSize: 25,
-    total: 0,
-  });
+  const [data, setData] = useState<Paged<VendorLite>>({ items: [], page: 1, pageSize: 25, total: 0 });
 
-  // Row expansion and per-row bids
+  // expanded rows: per-vendor bids cache
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
-  const [bidsByVendor, setBidsByVendor] = useState<
-    Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>
-  >({});
-  const [mutating, setMutating] = useState<string | null>(null);
-  const [mutatingBidId, setMutatingBidId] = useState<string | null>(null);
+  const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
+  const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
+  const [mutatingBidId, setMutatingBidId] = useState<string | null>(null); // bid-level busy state
 
-  // Local approved cache (persists to localStorage)
-  const [approvedCache, setApprovedCache] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('lx_approved_cache') || '{}');
-      if (saved && typeof saved === 'object') setApprovedCache(saved);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('lx_approved_cache', JSON.stringify(approvedCache));
-    } catch {}
-  }, [approvedCache]);
-
-  // Sync URL
+  // sync URL
   useEffect(() => {
     const query = new URLSearchParams();
     if (q) query.set('q', q);
@@ -130,7 +102,6 @@ export default function AdminVendorsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, status, kyc, page, includeArchived]);
 
-  // Load list
   const fetchList = async () => {
     setLoading(true);
     setErr(null);
@@ -139,64 +110,16 @@ export default function AdminVendorsPage() {
       if (q) url.searchParams.set('search', q);
       if (status !== 'all') url.searchParams.set('status', status);
       if (kyc !== 'all') url.searchParams.set('kyc', kyc);
-      if (includeArchived) url.searchParams.set('includeArchived', 'true');
+      if (includeArchived) url.searchParams.set('includeArchived', 'true'); // NEW
       url.searchParams.set('page', String(page));
       url.searchParams.set('limit', String(pageSize));
-
-      const res = await fetch(url.toString(), {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-        },
-      });
+      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const json = await res.json();
-
-      const raw: any[] = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-
-// drop any null/undefined rows BEFORE mapping to avoid "reading 'status' of null"
-const items: VendorLite[] = raw
-  .filter((x): x is Record<string, any> => !!x && typeof x === 'object')
-  .map((it: any) => {
-    const statusRaw =
-      it.status ?? it.vendor_status ?? it.vendorStatus ?? (it.approved ? 'approved' : undefined);
-    const statusNorm =
-      typeof statusRaw === 'string' && statusRaw !== ''
-        ? statusRaw.toLowerCase()
-        : statusRaw
-        ? 'approved'
-        : 'pending';
-
-    return {
-      id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
-      vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
-      walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
-      status: statusNorm as VendorLite['status'],
-      kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
-      totalAwardedUSD:
-        typeof it.totalAwardedUSD === 'number'
-          ? it.totalAwardedUSD
-          : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
-      bidsCount:
-        typeof it.bidsCount === 'number' ? it.bidsCount : Number(it.bids_count ?? 0),
-      lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
-      archived: !!(it.archived ?? it.is_archived),
-
-      email: it.email ?? it.vendor_email ?? null,
-      phone: it.phone ?? it.tel ?? it.telephone ?? null,
-      website: it.website ?? it.web ?? null,
-      postalAddress: it.postalAddress ?? it.address ?? null,
-      telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
-      telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
-    };
-  });
-
+      const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
       const total = typeof json?.total === 'number' ? json.total : items.length;
       const pg = typeof json?.page === 'number' ? json.page : page;
       const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
-
       setData({ items, total, page: pg, pageSize: ps });
     } catch (e: any) {
       setErr(e?.message || 'Failed to load vendors');
@@ -207,15 +130,12 @@ const items: VendorLite[] = raw
   };
 
   useEffect(() => {
-    if (role !== 'admin') return;
+    if (role !== 'admin' || !hasJwt) return; // gate Safari until Bearer is ready AND role is confirmed
     fetchList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, q, status, kyc, page, pageSize, includeArchived]);
+  }, [role, hasJwt, q, status, kyc, page, pageSize, includeArchived]);
 
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((data.total || 0) / pageSize)),
-    [data.total, pageSize]
-  );
+  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
 
   // --- Admin actions ---
   const archiveVendor = async (wallet?: string) => {
@@ -274,72 +194,13 @@ const items: VendorLite[] = raw
     }
   };
 
-  const approveVendor = async (wallet?: string) => {
-    if (!wallet) return;
-    try {
-      setMutating(wallet);
-      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      // lock UI as approved immediately + persist
-      setApprovedCache(prev => ({ ...prev, [wallet]: true }));
-
-      // instant UI update
-      setData(prev => ({
-        ...prev,
-        items: prev.items.map(x =>
-          x.walletAddress === wallet ? { ...x, status: 'approved' } : x
-        ),
-      }));
-      await fetchList();
-    } catch (e: any) {
-      alert(e?.message || 'Failed to approve vendor');
-    } finally {
-      setMutating(null);
-    }
-  };
-
-  const rejectVendor = async (wallet?: string) => {
-    if (!wallet) return;
-    if (!confirm('Reject this vendor?')) return;
-    try {
-      setMutating(wallet);
-      const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      // instant UI update
-      setData(prev => ({
-        ...prev,
-        items: prev.items.map(x =>
-          x.walletAddress === wallet ? { ...x, status: 'rejected' } : x
-        ),
-      }));
-      await fetchList();
-    } catch (e: any) {
-      alert(e?.message || 'Failed to reject vendor');
-    } finally {
-      setMutating(null);
-    }
-  };
-
-  // Bids loader per vendor
+  // --- Bids loader per vendor (uses /admin/bids?vendorWallet=...) ---
   async function loadBidsForWallet(wallet?: string): Promise<VendorBid[]> {
     const w = (wallet || '').toLowerCase();
     if (!w) return [];
     const url = new URL(`${API_BASE}/admin/bids`);
     url.searchParams.set('vendorWallet', w);
-    const res = await fetch(url.toString(), {
-      credentials: 'include',
-      headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
-    });
+    const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const arr = Array.isArray(json?.items) ? json.items : [];
@@ -362,7 +223,7 @@ const items: VendorLite[] = raw
     } catch (e: any) {
       setBidsByVendor(prev => ({
         ...prev,
-        [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] },
+        [rowKey]: { loading: false, error: e?.message || "Failed to load bids", bids: [] }
       }));
     }
   }
@@ -371,16 +232,14 @@ const items: VendorLite[] = raw
     setRowsOpen(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
     const opening = !rowsOpen[rowKey];
     if (!opening) return;
+
     if (!bidsByVendor[rowKey]) {
       setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: true, error: null, bids: [] } }));
       try {
         const bids = await loadBidsForWallet(walletAddress);
         setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: null, bids } }));
       } catch (e: any) {
-        setBidsByVendor(prev => ({
-          ...prev,
-          [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] },
-        }));
+        setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] } }));
       }
     }
   };
@@ -412,44 +271,31 @@ const items: VendorLite[] = raw
             <input
               type="checkbox"
               checked={includeArchived}
-              onChange={(e) => {
-                setPage(1);
-                setIncludeArchived(e.target.checked);
-              }}
+              onChange={(e) => { setPage(1); setIncludeArchived(e.target.checked); }}
             />
             Show archived
           </label>
           <input
             value={q}
-            onChange={(e) => {
-              setPage(1);
-              setQ(e.target.value);
-            }}
+            onChange={(e) => { setPage(1); setQ(e.target.value); }}
             placeholder="Search vendor or wallet…"
             className="border rounded px-3 py-1.5 text-sm"
           />
           <select
             value={status}
-            onChange={(e) => {
-              setPage(1);
-              setStatus(e.target.value);
-            }}
+            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
             className="border rounded px-2 py-1.5 text-sm"
             title="Status"
           >
             <option value="all">All statuses</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
             <option value="suspended">Suspended</option>
             <option value="banned">Banned</option>
           </select>
           <select
             value={kyc}
-            onChange={(e) => {
-              setPage(1);
-              setKyc(e.target.value);
-            }}
+            onChange={(e) => { setPage(1); setKyc(e.target.value); }}
             className="border rounded px-2 py-1.5 text-sm"
             title="KYC"
           >
@@ -463,252 +309,177 @@ const items: VendorLite[] = raw
       </div>
 
       {/* List */}
-   <section className="rounded border bg-white">
-  <div className="overflow-x-auto">
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left border-b bg-slate-50">
-          <th className="py-2 px-3">Vendor</th>
-          <th className="py-2 px-3">Wallet</th>
-          <th className="py-2 px-3">Status</th>
-          <th className="py-2 px-3">KYC</th>
-          <th className="py-2 px-3">Bids</th>
-          <th className="py-2 px-3">Total Awarded</th>
-          <th className="py-2 px-3">Last Bid</th>
-          <th className="py-2 px-3 w-64">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {loading && (
-          <tr>
-            <td colSpan={8} className="py-6 px-3 text-slate-500">
-              Loading vendors…
-            </td>
-          </tr>
-        )}
-
-        {err && !loading && (
-          <tr>
-            <td colSpan={8} className="py-6 px-3 text-rose-700">
-              {err}
-            </td>
-          </tr>
-        )}
-
-        {!loading && !err && ((data.items || []).filter(Boolean).length === 0) && (
-          <tr>
-            <td colSpan={8} className="py-6 px-3 text-slate-500">
-              No vendors found.
-            </td>
-          </tr>
-        )}
-
- {!loading && !err &&
-  (data.items ?? [])
-    .filter((v): v is VendorLite => !!v && typeof v === 'object')
-    .map((v, idx) => {
-      const wallet = v.walletAddress || '';
-      const rowKey = v.id || wallet || `row-${idx}`;
-      const open = !!rowsOpen[rowKey];
-      const bidsState = bidsByVendor[rowKey];
-      const busy = wallet ? mutating === wallet : false;
-      const statusVal = (v.status as VendorLite['status']) || undefined;
-      const kycVal = (v.kycStatus as VendorLite['kycStatus']) || undefined;
-      const isApproved = statusVal === 'approved' || !!approvedCache[wallet];
-
-      return (
-        <Fragment key={rowKey}>
-          <tr className="border-b hover:bg-slate-50">
-            <td className="py-2 px-3 font-medium">
-              {v.vendorName || '—'}
-              {v.archived && (
-                <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
-                  Archived
-                </span>
+      <section className="rounded border bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b bg-slate-50">
+                <th className="py-2 px-3">Vendor</th>
+                <th className="py-2 px-3">Wallet</th>
+                <th className="py-2 px-3">Status</th>
+                <th className="py-2 px-3">KYC</th>
+                <th className="py-2 px-3">Bids</th>
+                <th className="py-2 px-3">Total Awarded</th>
+                <th className="py-2 px-3">Last Bid</th>
+                <th className="py-2 px-3 w-64">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">Loading vendors…</td></tr>
               )}
-            </td>
-            <td className="py-2 px-3 font-mono text-xs break-all">
-              {wallet || '—'}
-            </td>
-            <td className="py-2 px-3">
-              <StatusChip value={statusVal} />
-            </td>
-            <td className="py-2 px-3">
-              <KycChip value={kycVal} />
-            </td>
-            <td className="py-2 px-3">
-              {typeof v.bidsCount === 'number' ? v.bidsCount : '—'}
-            </td>
-            <td className="py-2 px-3">
-              ${Number(v.totalAwardedUSD || 0).toLocaleString()}
-            </td>
-            <td className="py-2 px-3">
-              {v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}
-            </td>
-            <td className="py-2 px-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Bids */}
-                <button
-                  onClick={() => toggleOpen(rowKey, wallet)}
-                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                             bg-slate-900 text-white hover:bg-slate-950"
-                >
-                  {open ? 'Hide' : 'Details-Bids'}
-                </button>
+              {err && !loading && (
+                <tr><td colSpan={8} className="py-6 px-3 text-rose-700">{err}</td></tr>
+              )}
+              {!loading && !err && ((data.items || []).filter(Boolean).length === 0) && (
+                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
+              )}
 
-                {/* Approvals */}
-                {!isApproved ? (
-                  <>
-                    <button
-                      onClick={() => approveVendor(wallet)}
-                      disabled={!wallet || busy}
-                      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                 bg-emerald-600 text-white hover:bg-emerald-700
-                                 disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Approve vendor"
-                    >
-                      {busy ? 'Working…' : 'Approve'}
-                    </button>
-                    {statusVal === 'pending' && (
-                      <button
-                        onClick={() => rejectVendor(wallet)}
-                        disabled={!wallet || busy}
-                        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                                   bg-rose-600 text-white hover:bg-rose-700
-                                   disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Reject vendor"
-                      >
-                        {busy ? 'Working…' : 'Reject'}
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <span
-                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                               bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-                    title="Vendor is approved"
-                  >
-                    Approved
-                  </span>
-                )}
+              {!loading && !err && (data.items || [])
+                .filter((v): v is VendorLite => !!v && typeof v === 'object')
+                .map((v, idx) => {
+                  const rowKey = (v.id || v.walletAddress || (v as any).wallet_address || `row-${idx}`) as string;
+                  const open = !!rowsOpen[rowKey];
+                  const bidsState = bidsByVendor[rowKey];
+                  const wallet = (v.walletAddress || (v as any).wallet_address || (v as any).wallet || '') as string;
+                  const busy = mutating === wallet;
 
-                {/* Archive / Unarchive */}
-                {!v.archived ? (
-                  <button
-                    onClick={() => archiveVendor(wallet)}
-                    disabled={!wallet || busy}
-                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                               bg-amber-600 text-white hover:bg-amber-700
-                               disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Archive vendor (soft hide)"
-                  >
-                    {busy ? 'Archiving…' : 'Archive'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => unarchiveVendor(wallet)}
-                    disabled={!wallet || busy}
-                    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                               bg-emerald-600 text-white hover:bg-emerald-700
-                               disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Unarchive vendor"
-                  >
-                    {busy ? 'Working…' : 'Unarchive'}
-                  </button>
-                )}
+                  return (
+                    <>
+                      <tr key={rowKey} className="border-b hover:bg-slate-50">
+                        <td className="py-2 px-3 font-medium">
+                          {v.vendorName || (v as any).vendor_name || (v as any).name || '—'}
+                          {v.archived && (
+                            <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
+                              Archived
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-xs break-all">{wallet || '—'}</td>
+                        <td className="py-2 px-3"><StatusChip value={v.status} /></td>
+                        <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
+                        <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
+                        <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+                        <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => toggleOpen(rowKey, wallet)}
+                              className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
+                            >
+                              {open ? 'Hide' : 'Bids'}
+                            </button>
 
-                {/* Delete */}
-                <button
-                  onClick={() => deleteVendor(wallet)}
-                  disabled={!wallet || busy}
-                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                             bg-rose-600 text-white hover:bg-rose-700
-                             disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Delete
-                </button>
-              </div>
-            </td>
-          </tr>
+                            {!v.archived ? (
+                              <button
+                                onClick={() => archiveVendor(wallet)}
+                                disabled={!wallet || busy}
+                                className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
+                                title="Archive vendor (soft hide)"
+                              >
+                                {busy ? 'Archiving…' : 'Archive'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => unarchiveVendor(wallet)}
+                                disabled={!wallet || busy}
+                                className="px-2 py-1 rounded bg-emerald-600 text-white text-xs disabled:opacity-50"
+                                title="Unarchive vendor"
+                              >
+                                {busy ? 'Working…' : 'Unarchive'}
+                              </button>
+                            )}
 
-          {open && (
-            <tr className="bg-slate-50 border-b">
-              <td colSpan={8} className="px-3 py-3">
-                <VendorDetails v={v} />
-                <div className="h-3" />
-                <VendorBidsPanel
-                  state={bidsState}
-                  busyId={mutatingBidId}
-                  onArchive={async (bidId) => {
-                    if (!confirm('Archive this bid?')) return;
-                    try {
-                      setMutatingBidId(bidId);
-                      await archiveBid(Number(bidId));
-                      await refreshVendorRow(rowKey, wallet);
-                      await fetchList();
-                    } catch (e: any) {
-                      alert(e?.message || 'Failed to archive bid');
-                    } finally {
-                      setMutatingBidId(null);
-                    }
-                  }}
-                  onDelete={async (bidId) => {
-                    if (!confirm('PERMANENTLY delete this bid? This cannot be undone.')) return;
-                    try {
-                      setMutatingBidId(bidId);
-                      await deleteBid(Number(bidId));
-                      await refreshVendorRow(rowKey, wallet);
-                      await fetchList();
-                    } catch (e: any) {
-                      alert(e?.message || 'Failed to delete bid');
-                    } finally {
-                      setMutatingBidId(null);
-                    }
-                  }}
-                />
-              </td>
-            </tr>
-          )}
-        </Fragment>
-      );
-    })}
-      </tbody>
-    </table>
-  </div>
+                            <button
+                              onClick={() => deleteVendor(wallet)}
+                              disabled={!wallet || busy}
+                              className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
+                              title="Delete vendor profile (bids remain)"
+                            >
+                              {busy ? 'Deleting…' : 'Delete'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
 
-  {/* Pagination */}
-  <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
-    <div className="text-xs text-slate-500">
-      Page {data.page} of {totalPages} — {data.total} total
-    </div>
-    <div className="flex items-center gap-2">
-      <button
-        disabled={page <= 1}
-        onClick={() => setPage((p) => Math.max(1, p - 1))}
-        className="px-2 py-1 text-xs rounded border disabled:opacity-50"
-      >
-        Prev
-      </button>
-      <button
-        disabled={page >= totalPages}
-        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-        className="px-2 py-1 text-xs rounded border disabled:opacity-50"
-      >
-        Next
-      </button>
-    </div>
-  </div>
-</section>
+                      {open && (
+                        <tr className="bg-slate-50 border-b">
+                          <td colSpan={8} className="px-3 py-3">
+                            {/* Contact details card (NEW) */}
+                            <VendorDetails v={v} />
+                            <div className="h-3" />
+                            {/* Bids panel */}
+                            <VendorBidsPanel
+                              state={bidsState}
+                              busyId={mutatingBidId}
+                              onArchive={async (bidId) => {
+                                if (!confirm("Archive this bid?")) return;
+                                try {
+                                  setMutatingBidId(bidId);
+                                  await archiveBid(Number(bidId));
+                                  await refreshVendorRow(rowKey, wallet); // refresh the expanded list
+                                  await fetchList(); // refresh top-level counts/totals
+                                } catch (e: any) {
+                                  alert(e?.message || "Failed to archive bid");
+                                } finally {
+                                  setMutatingBidId(null);
+                                }
+                              }}
+                              onDelete={async (bidId) => {
+                                if (!confirm("PERMANENTLY delete this bid? This cannot be undone.")) return;
+                                try {
+                                  setMutatingBidId(bidId);
+                                  await deleteBid(Number(bidId));
+                                  await refreshVendorRow(rowKey, wallet);
+                                  await fetchList();
+                                } catch (e: any) {
+                                  alert(e?.message || "Failed to delete bid");
+                                } finally {
+                                  setMutatingBidId(null);
+                                }
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
+          <div className="text-xs text-slate-500">
+            Page {data.page} of {totalPages} — {data.total} total
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
-
 
 function StatusChip({ value }: { value?: VendorLite['status'] }) {
   const map: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800',
     approved: 'bg-emerald-100 text-emerald-800',
-    rejected: 'bg-rose-100 text-rose-800',
     suspended: 'bg-rose-100 text-rose-800',
     banned: 'bg-zinc-200 text-zinc-700',
   };
@@ -753,11 +524,11 @@ function VendorBidsPanel({
             <th className="py-2 pr-3">Status</th>
             <th className="py-2 pr-3">Date</th>
             <th className="py-2 pr-3">Open</th>
-            <th className="py-2 pr-3 text-right">Actions</th>
+            <th className="py-2 pr-3 text-right">Actions</th> {/* NEW */}
           </tr>
         </thead>
         <tbody>
-          {state.bids.filter(Boolean).map((b) => {
+          {state.bids.map((b) => {
             const busy = busyId === b.bidId;
             return (
               <tr key={b.bidId} className="border-b last:border-0">
@@ -806,33 +577,44 @@ function VendorBidsPanel({
   );
 }
 
+/* ==== NEW: contact card shown in expanded row ==== */
 function VendorDetails({ v }: { v: VendorLite }) {
-  const Email = v.email ? (
-    <a className="text-sky-700 hover:underline" href={`mailto:${v.email}`}>{v.email}</a>
+  // tolerate both snake_case and camelCase without changing your fetchList
+  const email = v?.email ?? (v as any)?.vendor_email ?? (v as any)?.vendorEmail ?? null;
+  const phone = v?.phone ?? (v as any)?.tel ?? (v as any)?.telephone ?? null;
+  const website = v?.website ?? (v as any)?.web ?? null;
+  const postalAddress = v?.postalAddress ?? (v as any)?.address ?? null;
+  const telegramChatId = v?.telegramChatId ?? (v as any)?.telegram_chat_id ?? null;
+  const telegramUsername = v?.telegramUsername ?? (v as any)?.telegram_username ?? null;
+  const wallet =
+    v?.walletAddress ?? (v as any)?.wallet_address ?? (v as any)?.wallet ?? '';
+
+  const Email = email ? (
+    <a className="text-sky-700 hover:underline" href={`mailto:${email}`}>{email}</a>
   ) : <span className="text-slate-500">—</span>;
 
-  const Phone = v.phone ? (
-    <a className="text-sky-700 hover:underline" href={`tel:${String(v.phone).replace(/\s+/g, '')}`}>{v.phone}</a>
+  const Phone = phone ? (
+    <a className="text-sky-700 hover:underline" href={`tel:${String(phone).replace(/\s+/g, '')}`}>{phone}</a>
   ) : <span className="text-slate-500">—</span>;
 
-  const Website = v.website ? (
+  const Website = website ? (
     <a
       className="text-sky-700 hover:underline"
-      href={/^https?:\/\//i.test(v.website) ? v.website : `https://${v.website}`}
+      href={/^https?:\/\//i.test(String(website)) ? String(website) : `https://${String(website)}`}
       target="_blank" rel="noreferrer"
     >
-      {v.website}
+      {website}
     </a>
   ) : <span className="text-slate-500">—</span>;
 
-  const Telegram = v.telegramUsername
-    ? <a className="text-sky-700 hover:underline" href={`https://t.me/${v.telegramUsername}`} target="_blank" rel="noreferrer">@{v.telegramUsername}</a>
-    : v.telegramChatId
-      ? <span className="font-mono text-xs">{String(v.telegramChatId)}</span>
+  const Telegram = telegramUsername
+    ? <a className="text-sky-700 hover:underline" href={`https://t.me/${telegramUsername}`} target="_blank" rel="noreferrer">@{telegramUsername}</a>
+    : telegramChatId
+      ? <span className="font-mono text-xs">{String(telegramChatId)}</span>
       : <span className="text-slate-500">—</span>;
 
-  const Address = v.postalAddress
-    ? <span className="whitespace-pre-wrap">{v.postalAddress}</span>
+  const Address = postalAddress
+    ? <span className="whitespace-pre-wrap">{String(postalAddress)}</span>
     : <span className="text-slate-500">—</span>;
 
   return (
@@ -843,7 +625,7 @@ function VendorDetails({ v }: { v: VendorLite }) {
         <Field label="Website">{Website}</Field>
         <Field label="Telegram">{Telegram}</Field>
         <Field label="Address">{Address}</Field>
-        <Field label="Wallet" mono>{v.walletAddress || '—'}</Field>
+        <Field label="Wallet" mono>{wallet || '—'}</Field>
       </div>
     </div>
   );
