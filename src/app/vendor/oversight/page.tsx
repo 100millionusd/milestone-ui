@@ -423,13 +423,17 @@ export default function VendorOversightPage() {
   }, [payments, query]);
 
   // ——— UI
-  const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
-    { key: 'proofs', label: 'Proofs', count: proofs?.length ?? 0 },
-    { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
-    { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
-  ] as const;
+ const tabs = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
+  { 
+    key: 'proofs', 
+    label: 'Proofs', 
+    count: (proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)
+  },
+  { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
+  { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
+] as const;
 
   return (
     <div className="px-6 py-8 space-y-8">
@@ -489,11 +493,13 @@ export default function VendorOversightPage() {
               </div>
             </div>
           </Card>
-          <Card title="My Proofs" subtitle="Submitted proofs">
-            <div className="p-4 flex items-baseline gap-3">
-              <div className="text-3xl font-semibold">{proofs?.length ?? 0}</div>
-            </div>
-          </Card>
+ <Card title="My Proofs" subtitle="Completed proofs">
+  <div className="p-4 flex items-baseline gap-3">
+    <div className="text-3xl font-semibold">
+      {(proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)}
+    </div>
+  </div>
+</Card>
           <Card title="Milestones" subtitle="Derived from submissions">
             <div className="p-4 flex items-baseline gap-3">
               <div className="text-3xl font-semibold">{milestones?.length ?? 0}</div>
