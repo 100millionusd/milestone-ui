@@ -78,6 +78,7 @@ export interface Proof {
 export interface AuthInfo {
   address?: string;
   role: "admin" | "vendor" | "guest";
+  vendorStatus?: "pending" | "approved" | "rejected";
 }
 
 /** ✅ NEW: Admin vendor directory row */
@@ -429,12 +430,15 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
 }
 
 // ---- Auth ----
-export async function getAuthRole(): Promise<AuthInfo> {
+export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
+  const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
-    const info = await apiFetch("/auth/role");
-    const role = (info?.role ?? "guest") as AuthInfo["role"];
-    const address = typeof info?.address === "string" ? info.address : undefined;
-    return { address, role };
+    const r = await apiFetch(`/auth/role${q}`);
+    return {
+      address: r?.address ?? undefined,
+      role: (r?.role as AuthInfo["role"]) ?? "guest",
+      vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
+    };
   } catch {
     return { role: "guest" };
   }
@@ -875,6 +879,20 @@ export async function getAdminVendors(): Promise<VendorSummary[]> {
     if (isAuthError(e)) return [];
     throw e;
   }
+}
+
+export async function approveVendor(walletAddress: string) {
+  if (!walletAddress) throw new Error("walletAddress required");
+  return apiFetch(`/admin/vendors/${encodeURIComponent(walletAddress)}/approve`, {
+    method: "POST",
+  });
+}
+
+export async function rejectVendor(walletAddress: string) {
+  if (!walletAddress) throw new Error("walletAddress required");
+  return apiFetch(`/admin/vendors/${encodeURIComponent(walletAddress)}/reject`, {
+    method: "POST",
+  });
 }
 
 /** ✅ NEW: Admin — list all proposers/entities (server should expose GET /admin/proposers) */
@@ -1436,7 +1454,10 @@ export default {
   // admin vendors
   getAdminVendors,
   getVendors, // alias
+  approveVendor,
+  rejectVendor,
   listProposers,
+
 
   // admin entities
   adminArchiveEntity,
