@@ -230,27 +230,6 @@ const rejectVendor = async (wallet?: string) => {
   }
 };
 
-  const approveVendor = async (wallet?: string) => {
-  if (!wallet) return;
-  try {
-    setMutating(wallet);
-    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await fetchList();
-  } catch (e: any) {
-    alert(e?.message || 'Failed to approve vendor');
-  } finally {
-    setMutating(null);
-  }
-};
-
 const rejectVendor = async (wallet?: string) => {
   if (!wallet) return;
   if (!confirm('Reject this vendor?')) return;
