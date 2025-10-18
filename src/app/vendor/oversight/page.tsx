@@ -679,40 +679,61 @@ export default function VendorOversightPage() {
           {filteredPayments
             .slice()
             .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
-            .map(p => (
-            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
-              <Td className="font-mono text-xs">{String(p.id)}</Td>
-              <Td>{p.bid_id ?? '—'}</Td>
-              <Td>{p.milestone_index ?? '—'}</Td>
-              <Td>
-                <Badge tone={
-                  p.status === 'completed' ? 'success' :
-                  p.status === 'released' ? 'success' :
-                  p.status === 'pending' ? 'warning' : 'neutral'
-                }>
-                  {p.status ?? '—'}
-                </Badge>
-              </Td>
-              <Td>{humanTime(p.released_at || p.created_at)}</Td>
-              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
-              <Td className="max-w-[160px] truncate" title={p.tx_hash || ''}>
-                {p.tx_hash ? (
-                  <a 
-                    href={`https://etherscan.io/tx/${p.tx_hash}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline hover:underline-offset-2 transition-all"
-                  >
-                    {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
-                  </a>
-                ) : (
-                  <span className="text-neutral-400">—</span>
-                )}
-              </Td>
-            </tr>
-          ))}
+            .map(p => {
+              // Debug: log what transaction data we have
+              console.log('Payment transaction data:', {
+                id: p.id,
+                tx_hash: p.tx_hash,
+                bid_id: p.bid_id,
+                milestone: p.milestone_index
+              });
+              
+              return (
+              <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
+                <Td className="font-mono text-xs">{String(p.id)}</Td>
+                <Td>{p.bid_id ?? '—'}</Td>
+                <Td>{p.milestone_index ?? '—'}</Td>
+                <Td>
+                  <Badge tone={
+                    p.status === 'completed' ? 'success' :
+                    p.status === 'released' ? 'success' :
+                    p.status === 'pending' ? 'warning' : 'neutral'
+                  }>
+                    {p.status ?? '—'}
+                  </Badge>
+                </Td>
+                <Td>{humanTime(p.released_at || p.created_at)}</Td>
+                <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
+                <Td className="max-w-[160px] truncate">
+                  {p.tx_hash ? (
+                    <a 
+                      href={`https://etherscan.io/tx/${p.tx_hash}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="font-mono text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-800/50 hover:shadow-sm transition-all"
+                    >
+                      {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
+                    </a>
+                  ) : (
+                    <span className="text-neutral-400">—</span>
+                  )}
+                </Td>
+              </tr>
+            )})}
         </tbody>
       </table>
+    </div>
+    
+    {/* Debug info for payments */}
+    <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-yellow-50 dark:bg-yellow-900/20">
+      <div className="text-xs text-yellow-700 dark:text-yellow-300">
+        <strong>Debug: Payment Transaction Hashes</strong>
+        {filteredPayments.map(p => (
+          <div key={String(p.id)} className="mt-1">
+            Payment {p.id}: {p.tx_hash ? `✅ ${p.tx_hash}` : '❌ No transaction hash'}
+          </div>
+        ))}
+      </div>
     </div>
   </Card>
 )}
