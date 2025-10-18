@@ -35,18 +35,28 @@ export default function Navigation() {
 
   useEffect(() => setMounted(true), []);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
- const info = await getAuthRole(); // calls /auth/role (uses cookie)
-if (alive) {
-  setServerRole(info.role);
-  setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any);
-}
-    })();
-    return () => { alive = false; };
-  }, []);
+  // make sure this import exists at the top:
+// import { getAuthRole } from '@/lib/api';
+
+useEffect(() => {
+  let alive = true;
+
+  getAuthRole()
+    .then((info) => {
+      if (!alive) return;
+      setServerRole(info?.role);
+      setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any);
+    })
+    .catch(() => {
+      if (!alive) return;
+      setServerRole('guest' as any);
+      setVendorStatus(null);
+    });
+
+  return () => {
+    alive = false;
+  };
+}, []);
 
   // Effective role
   const role: Role = useMemo(() => {
