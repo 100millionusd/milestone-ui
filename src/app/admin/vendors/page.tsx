@@ -78,6 +78,20 @@ export default function AdminVendorsPage() {
   const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
   const [mutatingBidId, setMutatingBidId] = useState<string | null>(null); // bid-level busy state
   const [approvedCache, setApprovedCache] = useState<Record<string, boolean>>({});
+  // load cache on mount
+useEffect(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lx_approved_cache') || '{}');
+    if (saved && typeof saved === 'object') setApprovedCache(saved);
+  } catch {}
+}, []);
+
+// save cache whenever it changes
+useEffect(() => {
+  try {
+    localStorage.setItem('lx_approved_cache', JSON.stringify(approvedCache));
+  } catch {}
+}, [approvedCache]);
 
   // sync URL
   useEffect(() => {
@@ -106,10 +120,25 @@ export default function AdminVendorsPage() {
       const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-      const total = typeof json?.total === 'number' ? json.total : items.length;
-      const pg = typeof json?.page === 'number' ? json.page : page;
-      const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+      const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
+const normalized = raw.map((it: any) => {
+  const wallet = it.walletAddress ?? it.wallet_address ?? it.wallet;
+  const statusRaw =
+    it.status ?? it.vendor_status ?? it.vendorStatus ??
+    (it.approved ? 'approved' : undefined);
+  const status =
+    typeof statusRaw === 'string' ? statusRaw.toLowerCase() :
+    statusRaw ? 'approved' : 'pending';
+  return {
+    ...it,
+    walletAddress: wallet,
+    status,
+  };
+});
+const total = typeof json?.total === 'number' ? json.total : normalized.length;
+const pg = typeof json?.page === 'number' ? json.page : page;
+const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+setData({ items: normalized, total, page: pg, pageSize: ps });
       setData({ items, total, page: pg, pageSize: ps });
     } catch (e: any) {
       setErr(e?.message || 'Failed to load vendors');
