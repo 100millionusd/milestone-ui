@@ -82,7 +82,7 @@ function downloadCSV(filename: string, rows: any[]) {
 }
 
 // ———————————————————————————————————————————
-// Enhanced Normalizers
+// Updated Normalizers for your API structure
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => {
     console.log('Raw bid data:', r); // Debug log
@@ -297,6 +297,22 @@ function RowPlaceholder({ cols }: { cols: number }) {
   );
 }
 
+// ADD THIS BADGE COMPONENT
+function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral"|"success"|"warning"|"danger" }) {
+  const toneStyles = {
+    neutral: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
+    success: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
+    warning: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200", 
+    danger: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+  }[tone];
+  
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium ${toneStyles}`}>
+      {children}
+    </span>
+  );
+}
+
 // ———————————————————————————————————————————
 // Page Component
 export default function VendorOversightPage() {
@@ -423,17 +439,17 @@ export default function VendorOversightPage() {
   }, [payments, query]);
 
   // ——— UI
- const tabs = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
-  { 
-    key: 'proofs', 
-    label: 'Proofs', 
-    count: (proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)
-  },
-  { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
-  { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
-] as const;
+  const tabs = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'bids', label: 'Bids', count: bids?.length ?? 0 },
+    { 
+      key: 'proofs', 
+      label: 'Proofs', 
+      count: (proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)
+    },
+    { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
+    { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
+  ] as const;
 
   return (
     <div className="px-6 py-8 space-y-8">
@@ -493,13 +509,13 @@ export default function VendorOversightPage() {
               </div>
             </div>
           </Card>
- <Card title="My Proofs" subtitle="Completed proofs">
-  <div className="p-4 flex items-baseline gap-3">
-    <div className="text-3xl font-semibold">
-      {(proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)}
-    </div>
-  </div>
-</Card>
+          <Card title="My Proofs" subtitle="Completed proofs">
+            <div className="p-4 flex items-baseline gap-3">
+              <div className="text-3xl font-semibold">
+                {(proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)}
+              </div>
+            </div>
+          </Card>
           <Card title="Milestones" subtitle="Derived from submissions">
             <div className="p-4 flex items-baseline gap-3">
               <div className="text-3xl font-semibold">{milestones?.length ?? 0}</div>
@@ -543,7 +559,14 @@ export default function VendorOversightPage() {
                   <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800">
                     <Td>#{b.id}</Td>
                     <Td>#{b.proposal_id ?? '—'}</Td>
-                    <Td>{b.status ?? '—'}</Td>
+                    <Td>
+                      <Badge tone={
+                        b.status === 'approved' ? 'success' : 
+                        b.status === 'pending' ? 'warning' : 'neutral'
+                      }>
+                        {b.status ?? '—'}
+                      </Badge>
+                    </Td>
                     <Td className="tabular-nums">{fmtUSD0(b.amount_usd)}</Td>
                     <Td>{humanTime(b.created_at)}</Td>
                   </tr>
@@ -591,7 +614,15 @@ export default function VendorOversightPage() {
                     <Td>#{p.id}</Td>
                     <Td>{p.bid_id ?? '—'}</Td>
                     <Td>{p.milestone_index ?? '—'}</Td>
-                    <Td>{p.status ?? '—'}</Td>
+                    <Td>
+                      <Badge tone={
+                        p.status === 'paid' ? 'success' :
+                        p.status === 'approved' ? 'success' :
+                        p.status === 'submitted' ? 'warning' : 'neutral'
+                      }>
+                        {p.status ?? '—'}
+                      </Badge>
+                    </Td>
                     <Td>{humanTime(p.submitted_at || p.created_at)}</Td>
                     <Td className="max-w-[360px] truncate" title={p.title || ''}>{p.title ?? '—'}</Td>
                   </tr>
@@ -642,7 +673,15 @@ export default function VendorOversightPage() {
                     <Td className="font-mono text-xs">{String(p.id)}</Td>
                     <Td>{p.bid_id ?? '—'}</Td>
                     <Td>{p.milestone_index ?? '—'}</Td>
-                    <Td>{p.status ?? '—'}</Td>
+                    <Td>
+                      <Badge tone={
+                        p.status === 'completed' ? 'success' :
+                        p.status === 'released' ? 'success' :
+                        p.status === 'pending' ? 'warning' : 'neutral'
+                      }>
+                        {p.status ?? '—'}
+                      </Badge>
+                    </Td>
                     <Td>{humanTime(p.released_at || p.created_at)}</Td>
                     <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
                     <Td className="max-w-[260px] truncate font-mono text-[11px]" title={p.tx_hash || ''}>
@@ -688,7 +727,15 @@ export default function VendorOversightPage() {
                   <tr key={m.id} className="border-b border-neutral-100 dark:border-neutral-800">
                     <Td>{m.bid_id}</Td>
                     <Td>{m.milestone_index}</Td>
-                    <Td>{m.status ?? '—'}</Td>
+                    <Td>
+                      <Badge tone={
+                        m.status === 'paid' ? 'success' :
+                        m.status === 'approved' ? 'success' :
+                        m.status === 'submitted' ? 'warning' : 'neutral'
+                      }>
+                        {m.status ?? '—'}
+                      </Badge>
+                    </Td>
                     <Td>{humanTime(m.last_update)}</Td>
                     <Td className="max-w-[360px] truncate" title={m.title || ''}>{m.title ?? '—'}</Td>
                   </tr>
