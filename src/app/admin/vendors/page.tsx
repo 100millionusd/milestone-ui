@@ -12,18 +12,23 @@ type VendorLite = {
   id?: string;
   vendorName: string;
   walletAddress: string;
+
+  // status / kyc
   status?: 'pending' | 'approved' | 'rejected' | 'suspended' | 'banned';
   kycStatus?: 'none' | 'pending' | 'verified' | 'rejected';
+
+  // stats
   totalAwardedUSD?: number;
   bidsCount?: number;
   lastBidAt?: string | null;
-  archived?: boolean; // NEW
-};
+
+  // flags
+  archived?: boolean;
 
   email?: string | null;
   phone?: string | null;
   website?: string | null;
-  postalAddress?: string | null;      // if your API uses "address" you’ll normalize it below
+  postalAddress?: string | null;        
   telegramChatId?: string | number | null;
   telegramUsername?: string | null;
 };
