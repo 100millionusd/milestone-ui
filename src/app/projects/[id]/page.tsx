@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
@@ -216,13 +216,8 @@ const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 export default function ProjectDetailPage() {
   // ---- route param (plain) ----
   const params = useParams();
-  const router = useRouter();
   const projectIdParam = (params as any)?.id;
   const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
-
-  // ---- access guard ----
-  const [allowed, setAllowed] = useState<null | boolean>(null);
-  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
 
   // ---- hooks (fixed order; nothing conditional) ----
   const [project, setProject] = useState<any>(null);
@@ -236,43 +231,24 @@ export default function ProjectDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
 
+  // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
+  const safeBids = Array.isArray(bids)
+    ? bids.filter((b): b is any => !!b && typeof b === 'object')
+    : [];
+
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // ---- ACCESS GUARD (admin OR approved vendor only) ----
+  // Initial fetch: project + bids
   useEffect(() => {
-    (async () => {
-      try {
-        const info = await getAuthRole();
-        const role = String(info?.role ?? 'guest');
-        const vStatus = String(info?.vendorStatus ?? 'pending').toLowerCase() as 'approved' | 'pending' | 'rejected';
-        setVendorStatus(vStatus);
-
-        if (role === 'admin' || (role === 'vendor' && vStatus === 'approved')) {
-          setAllowed(true);
-        } else {
-          setAllowed(false);
-          router.replace('/vendor/profile?awaiting_approval=1');
-        }
-      } catch {
-        setAllowed(false);
-        router.replace('/');
-      }
-    })();
-  }, [router]);
-
-  // Initial fetch: project + bids (only when allowed)
-  useEffect(() => {
-    if (allowed !== true) return;
     let alive = true;
     async function run() {
       if (!Number.isFinite(projectIdNum)) return;
       try {
-        setLoadingProject(true);
         const [p, b] = await Promise.all([ getProposal(projectIdNum), getBids(projectIdNum) ]);
         if (!alive) return;
         setProject(p);
-        setBids(b);
+        setBids(Array.isArray(b) ? b : []);
         setErrorMsg(null);
       } catch (e: any) {
         if (!alive) return;
@@ -283,7 +259,7 @@ export default function ProjectDetailPage() {
     }
     run();
     return () => { alive = false; };
-  }, [projectIdNum, allowed]);
+  }, [projectIdNum]);
 
   // Auth (for Admin tab & Edit btn)
   useEffect(() => {
@@ -293,7 +269,6 @@ export default function ProjectDetailPage() {
   // Fetch proofs (always from local /api/proofs unless explicitly overridden)
   // Fetch proofs from BOTH sources and merge so Files tab matches Admin
   const refreshProofs = async () => {
-    if (allowed !== true) return;
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
 
@@ -304,14 +279,12 @@ export default function ProjectDetailPage() {
         .then(r => (r.ok ? r.json() : []))
         .catch(() => []);
 
-      // 2) External API (same source Admin tab uses): get proofs for the accepted bid
-      //    If no accepted bid yet, we’ll still try the first bid as a fallback so vendors can see their uploads.
-      const accepted = (bids || []).find(b => b.status === 'approved') || (bids || [])[0] || null;
+      // 2) External API (same source Admin tab uses)
+      const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
 
       const adminReq = accepted
         ? getProofs(Number(accepted.bidId))
             .then(rows => {
-              // Normalize to the local ProofRecord shape the Files tab expects
               return (Array.isArray(rows) ? rows : []).map((p: any) => ({
                 proposalId: projectIdNum,
                 milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
@@ -333,7 +306,6 @@ export default function ProjectDetailPage() {
       const merged: any[] = [];
 
       function pushRecord(r: any) {
-        // split into 1-file entries for simpler de-dupe
         const files = Array.isArray(r.files) ? r.files : [];
         for (const f of files) {
           const k = key(r, f);
@@ -351,7 +323,7 @@ export default function ProjectDetailPage() {
       (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
       (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
 
-      // Group back by milestoneIndex to keep your Files tab logic happy
+      // Group back by milestoneIndex
       const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
       for (const r of merged) {
         const ms = Number(r.milestoneIndex);
@@ -368,9 +340,8 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // Load proofs once on mount (only when allowed)
+  // Load proofs once on mount
   useEffect(() => {
-    if (allowed !== true) return;
     let alive = true;
     (async () => {
       if (!Number.isFinite(projectIdNum)) return;
@@ -379,47 +350,42 @@ export default function ProjectDetailPage() {
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum, allowed]);
+  }, [projectIdNum]);
 
   // Re-fetch when any page archives/unarchives a milestone
   useMilestonesUpdated(async () => {
-    if (allowed !== true) return;
     await refreshProofs();
     try {
       const next = await getBids(projectIdNum);
-      setBids(next);
+      setBids(Array.isArray(next) ? next : []);
     } catch {}
   });
 
   // Refresh proofs when opening Files tab
   useEffect(() => {
-    if (allowed !== true) return;
     if (tab === 'files') { refreshProofs(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, allowed]);
+  }, [tab]);
 
   // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
   useEffect(() => {
-    if (allowed !== true) return;
     const onAnyProofUpdate = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
-      // If no detail provided: refresh anyway. If provided: only refresh when it matches this project.
       if (!Number.isFinite(pid) || pid === projectIdNum) {
         refreshProofs();
       }
     };
     window.addEventListener('proofs:updated', onAnyProofUpdate);
-    window.addEventListener('proofs:changed', onAnyProofUpdate); // backward-compat
+    window.addEventListener('proofs:changed', onAnyProofUpdate);
     return () => {
       window.removeEventListener('proofs:updated', onAnyProofUpdate);
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum, allowed]);
+  }, [projectIdNum]);
 
   // instant local update when a proof is submitted (before server fetch returns)
   useEffect(() => {
-    if (allowed !== true) return;
     const onJustSent = (ev: any) => {
       const bidId = Number(ev?.detail?.bidId);
       const idx   = Number(ev?.detail?.milestoneIndex);
@@ -429,23 +395,25 @@ export default function ProjectDetailPage() {
       setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
 
       // 2) patch current bids so the Milestones table status updates immediately
-      setBids(prev => prev.map(b =>
-        Number(b.bidId) !== bidId ? b : {
-          ...b,
-          milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
-            i === idx ? { ...m, proof: m.proof || '{}' } : m
-          ),
-        }
-      ));
+      setBids(prev => prev.map(b => {
+        if (!b || typeof b !== 'object') return b;
+        return Number(b.bidId) !== bidId
+          ? b
+          : {
+              ...b,
+              milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
+                i === idx ? { ...m, proof: m.proof || '{}' } : m
+              ),
+            };
+      }));
     };
 
     window.addEventListener('proofs:just-sent', onJustSent);
     return () => window.removeEventListener('proofs:just-sent', onJustSent);
-  }, [allowed]);
+  }, []);
 
   // Poll bids while AI analysis runs
   useEffect(() => {
-    if (allowed !== true) return;
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
 
@@ -458,8 +426,9 @@ export default function ProjectDetailPage() {
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
+        const safeNext = Array.isArray(next) ? next.filter(x => !!x && typeof x === 'object') : [];
         setBids(next);
-        if (Date.now() - start < 90_000 && needsMore(next)) {
+        if (Date.now() - start < 90_000 && needsMore(safeNext)) {
           pollTimer.current = setTimeout(tick, 1500);
         } else {
           clearPoll();
@@ -473,13 +442,13 @@ export default function ProjectDetailPage() {
       }
     };
 
-    if (needsMore(bids)) {
+    if (needsMore(safeBids)) {
       clearPoll();
       pollTimer.current = setTimeout(tick, 1500);
     }
 
     const onFocus = () => {
-      if (needsMore(bids)) {
+      if (needsMore(safeBids)) {
         clearPoll();
         pollTimer.current = setTimeout(tick, 0);
       }
@@ -491,19 +460,19 @@ export default function ProjectDetailPage() {
       window.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
-  }, [projectIdNum, bids, allowed]);
+  }, [projectIdNum, safeBids]);
 
   // Expose for console debug
   useEffect(() => {
     if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
   }, [proofs]);
 
-  // -------- Guarded early returns ----------
-  if (allowed === null) return <div className="p-6">Checking access…</div>;
-  if (allowed === false) return null;
+  // -------- Early returns ----------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
 
   // -------- Derived -----------
-  const acceptedBid = bids.find((b) => b.status === 'approved') || null;
+  const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
   const projectDocs = parseDocs(project?.docs) || [];
 
@@ -526,7 +495,7 @@ export default function ProjectDetailPage() {
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
-    for (const b of bids) {
+    for (const b of safeBids) {
       dates.push(b.createdAt, b.updatedAt);
       const arr = parseMilestones(b.milestones);
       for (const m of arr) {
@@ -545,7 +514,7 @@ export default function ProjectDetailPage() {
   const timeline: EventItem[] = [];
   if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
   if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
-  for (const b of bids) {
+  for (const b of safeBids) {
     if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
     if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
     const arr = parseMilestones(b.milestones);
@@ -558,7 +527,7 @@ export default function ProjectDetailPage() {
 
   // Files (Project + Bid + Proofs)
   const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
-  const bidFiles = bids.flatMap((b) => {
+  const bidFiles = safeBids.flatMap((b) => {
     const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
     return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
   });
@@ -709,9 +678,6 @@ export default function ProjectDetailPage() {
   }
 
   // ----------------- Render -----------------
-  if (loadingProject) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
-
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -739,8 +705,7 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        {/* Only show Submit Bid if page access is allowed and project isn't completed */}
-        {!isCompleted && allowed && (
+        {!isCompleted && (
           <Link
             href={`/bids/new?proposalId=${projectIdNum}`}
             className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
@@ -755,7 +720,7 @@ export default function ProjectDetailPage() {
         <div className="flex gap-2">
           <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
           <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
-          <TabBtn id="bids" label={`Bids (${bids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="bids" label={`Bids (${safeBids.length})`} tab={tab} setTab={setTab} />
           <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
           <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
           {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
@@ -795,9 +760,9 @@ export default function ProjectDetailPage() {
 
           <div className="border rounded p-4">
             <h3 className="font-semibold mb-3">Bids snapshot</h3>
-            {bids.length ? (
+            {safeBids.length ? (
               <ul className="space-y-2 text-sm">
-                {bids.slice(0, 5).map((b) => (
+                {safeBids.slice(0, 5).map((b) => (
                   <li key={b.bidId} className="flex items-center justify-between">
                     <div>
                       <div className="font-medium">{b.vendorName}</div>
@@ -845,7 +810,7 @@ export default function ProjectDetailPage() {
       {tab === 'bids' && (
         <section className="border rounded p-4 overflow-x-auto">
           <h3 className="font-semibold mb-3">All Bids</h3>
-          {bids.length ? (
+          {safeBids.length ? (
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-600">
@@ -858,11 +823,11 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {bids.map((b) => (
+                {safeBids.map((b) => (
                   <tr key={b.bidId} className="border-t">
                     <td className="py-2 pr-4">{b.vendorName}</td>
                     <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{(b as any).days}</td>
+                    <td className="py-2 pr-4">{b.days}</td>
                     <td className="py-2 pr-4">{b.status}</td>
                     <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
                     <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
@@ -901,7 +866,7 @@ export default function ProjectDetailPage() {
                       const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
 
-                      // 👇 NEW: show "submitted" immediately after upload
+                      // 👇 show "submitted" immediately after upload
                       const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
                       const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
                       const status = paid
@@ -919,7 +884,6 @@ export default function ProjectDetailPage() {
                           <td className="py-2 pr-4">
                             {m.amount ? currency.format(Number(m.amount)) : '—'}
                           </td>
-                          {/* 👇 replaced status cell */}
                           <td className="py-2 pr-4">{status}</td>
                           <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                           <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
@@ -934,10 +898,10 @@ export default function ProjectDetailPage() {
               </div>
 
               {/* ✅ Render the proof submission widget here */}
-              {(acceptedBid || (bids && bids[0])) && (
+              {(acceptedBid || safeBids[0]) && (
                 <div className="mt-6">
                   <MilestonePayments
-                    bid={acceptedBid || bids[0]}      // show the widget even if the bid isn’t approved yet
+                    bid={acceptedBid || safeBids[0]}      // show the widget even if the bid isn’t approved yet
                     onUpdate={refreshProofs}
                     proposalId={projectIdNum}         // ← REQUIRED so /api/proofs writes to the correct project
                   />
@@ -987,15 +951,13 @@ export default function ProjectDetailPage() {
         <section className="border rounded p-4">
           <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
 
-          {/* Existing proofs list (approve/reject) */}
           <AdminProofs
-            bidIds={bids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+            bidIds={safeBids.map(b => Number(b.bidId)).filter(Number.isFinite)}
             proposalId={projectIdNum}
-            bids={bids}
+            bids={safeBids}
             onRefresh={refreshProofs}
           />
 
-          {/* 👇 Full change-request conversation thread (admin ↔ vendor) */}
           <div className="mt-6">
             <ChangeRequestsPanel proposalId={projectIdNum} />
           </div>
