@@ -157,13 +157,20 @@ function normalizeProofs(rows: any[]): ProofRow[] {
     // Handle different title fields
     const title = r?.title ?? r?.name ?? r?.proof_title ?? `Milestone ${milestone_index}`;
     
-    // Handle different status fields
+    // FIXED: Handle different status fields - prioritize explicit status
     let status = r?.status ?? r?.state;
+    
+    // If no explicit status, derive from other fields
     if (!status) {
-      // Derive status from other fields
       if (r?.completed === true) status = 'completed';
-      else if (r?.proof) status = 'submitted';
-      else status = 'pending';
+      else if (r?.proof && r?.submitted_at) status = 'submitted';
+      else if (r?.proof && !r?.submitted_at) status = 'open'; // Proof exists but not submitted
+      else status = 'pending'; // No proof content yet
+    }
+    
+    // Additional fix: If status is 'submitted' but no submission date, it should be 'open'
+    if (status === 'submitted' && !r?.submitted_at && !r?.completionDate) {
+      status = 'open';
     }
     
     // Handle different date fields - use completionDate for submitted_at
@@ -179,54 +186,6 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       title,
       status,
       submitted_at,
-      created_at,
-      updated_at,
-    };
-  });
-}
-
-function normalizePayments(rows: any[]): PaymentRow[] {
-  return (rows || []).map((r: any, index) => {
-    console.log('Raw payment data:', r); // Debug log
-    
-    // Handle different ID fields
-    const id = r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? 
-               r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
-    
-    // Handle different bid ID fields
-    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
-    
-    // Handle different milestone index fields
-    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
-                           r?.index ?? r?.i;
-    
-    // Handle different amount fields
-    let amount_usd = r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount;
-    if (amount_usd == null && r?.usdCents != null) {
-      amount_usd = r.usdCents / 100;
-    }
-    
-    // Handle different status fields
-    const status = r?.status ?? r?.state ?? r?.payout_status ?? 
-                  (r?.completed ? 'completed' : 'pending');
-    
-    // Handle different date fields
-    const released_at = r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? 
-                       r?.created_at ?? r?.createdAt;
-    const created_at = r?.created_at ?? r?.createdAt;
-    const updated_at = r?.updated_at ?? r?.updatedAt;
-
-    // Handle transaction hash
-    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash;
-
-    return {
-      id: String(id),
-      bid_id: bid_id != null ? Number(bid_id) : null,
-      milestone_index: milestone_index != null ? Number(milestone_index) : null,
-      amount_usd,
-      status,
-      released_at,
-      tx_hash,
       created_at,
       updated_at,
     };
@@ -614,15 +573,17 @@ export default function VendorOversightPage() {
                     <Td>#{p.id}</Td>
                     <Td>{p.bid_id ?? '—'}</Td>
                     <Td>{p.milestone_index ?? '—'}</Td>
-                    <Td>
-                      <Badge tone={
-                        p.status === 'paid' ? 'success' :
-                        p.status === 'approved' ? 'success' :
-                        p.status === 'submitted' ? 'warning' : 'neutral'
-                      }>
-                        {p.status ?? '—'}
-                      </Badge>
-                    </Td>
+<Td>
+  <Badge tone={
+    p.status === 'paid' ? 'success' :
+    p.status === 'approved' ? 'success' :
+    p.status === 'submitted' ? 'warning' :
+    p.status === 'open' ? 'neutral' : // Add this line for open status
+    'neutral'
+  }>
+    {p.status ?? '—'}
+  </Badge>
+</Td>
                     <Td>{humanTime(p.submitted_at || p.created_at)}</Td>
                     <Td className="max-w-[360px] truncate" title={p.title || ''}>{p.title ?? '—'}</Td>
                   </tr>
@@ -727,15 +688,17 @@ export default function VendorOversightPage() {
                   <tr key={m.id} className="border-b border-neutral-100 dark:border-neutral-800">
                     <Td>{m.bid_id}</Td>
                     <Td>{m.milestone_index}</Td>
-                    <Td>
-                      <Badge tone={
-                        m.status === 'paid' ? 'success' :
-                        m.status === 'approved' ? 'success' :
-                        m.status === 'submitted' ? 'warning' : 'neutral'
-                      }>
-                        {m.status ?? '—'}
-                      </Badge>
-                    </Td>
+ <Td>
+  <Badge tone={
+    m.status === 'paid' ? 'success' :
+    m.status === 'approved' ? 'success' :
+    m.status === 'submitted' ? 'warning' :
+    m.status === 'open' ? 'neutral' : // Add this line for open status
+    'neutral'
+  }>
+    {m.status ?? '—'}
+  </Badge>
+</Td>
                     <Td>{humanTime(m.last_update)}</Td>
                     <Td className="max-w-[360px] truncate" title={m.title || ''}>{m.title ?? '—'}</Td>
                   </tr>
