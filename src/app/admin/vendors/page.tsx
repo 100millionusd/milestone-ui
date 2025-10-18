@@ -154,35 +154,44 @@ export default function AdminVendorsPage() {
 
       const json = await res.json();
 
-      const raw = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-      const items: VendorLite[] = raw.map((it: any) => {
-        const statusRaw =
-          it.status ?? it.vendor_status ?? it.vendorStatus ?? (it.approved ? 'approved' : undefined);
-        const statusNorm =
-          typeof statusRaw === 'string' ? statusRaw.toLowerCase() : statusRaw ? 'approved' : 'pending';
-        return {
-          id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
-          vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
-          walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
-          status: statusNorm as VendorLite['status'],
-          kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
-          totalAwardedUSD:
-            typeof it.totalAwardedUSD === 'number'
-              ? it.totalAwardedUSD
-              : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
-          bidsCount:
-            typeof it.bidsCount === 'number' ? it.bidsCount : Number(it.bids_count ?? 0),
-          lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
-          archived: !!(it.archived ?? it.is_archived),
+      const raw: any[] = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
 
-          email: it.email ?? it.vendor_email ?? null,
-          phone: it.phone ?? it.tel ?? it.telephone ?? null,
-          website: it.website ?? it.web ?? null,
-          postalAddress: it.postalAddress ?? it.address ?? null,
-          telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
-          telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
-        };
-      });
+// drop any null/undefined rows BEFORE mapping to avoid "reading 'status' of null"
+const items: VendorLite[] = raw
+  .filter((x): x is Record<string, any> => !!x && typeof x === 'object')
+  .map((it: any) => {
+    const statusRaw =
+      it.status ?? it.vendor_status ?? it.vendorStatus ?? (it.approved ? 'approved' : undefined);
+    const statusNorm =
+      typeof statusRaw === 'string' && statusRaw !== ''
+        ? statusRaw.toLowerCase()
+        : statusRaw
+        ? 'approved'
+        : 'pending';
+
+    return {
+      id: String(it.id ?? it.vendor_id ?? it.wallet_address ?? it.wallet ?? ''),
+      vendorName: String(it.vendor_name ?? it.vendorName ?? it.name ?? '—'),
+      walletAddress: String(it.walletAddress ?? it.wallet_address ?? it.wallet ?? '—'),
+      status: statusNorm as VendorLite['status'],
+      kycStatus: (it.kyc_status ?? it.kycStatus ?? 'none') as VendorLite['kycStatus'],
+      totalAwardedUSD:
+        typeof it.totalAwardedUSD === 'number'
+          ? it.totalAwardedUSD
+          : Number(it.total_awarded_usd ?? it.total_awarded ?? 0),
+      bidsCount:
+        typeof it.bidsCount === 'number' ? it.bidsCount : Number(it.bids_count ?? 0),
+      lastBidAt: it.lastBidAt ?? it.last_bid_at ?? null,
+      archived: !!(it.archived ?? it.is_archived),
+
+      email: it.email ?? it.vendor_email ?? null,
+      phone: it.phone ?? it.tel ?? it.telephone ?? null,
+      website: it.website ?? it.web ?? null,
+      postalAddress: it.postalAddress ?? it.address ?? null,
+      telegramChatId: it.telegram_chat_id ?? it.telegramChatId ?? null,
+      telegramUsername: it.telegram_username ?? it.telegramUsername ?? null,
+    };
+  });
 
       const total = typeof json?.total === 'number' ? json.total : items.length;
       const pg = typeof json?.page === 'number' ? json.page : page;
@@ -743,7 +752,7 @@ function VendorBidsPanel({
           </tr>
         </thead>
         <tbody>
-          {state.bids.map((b) => {
+          {state.bids.filter(Boolean).map((b) => {
             const busy = busyId === b.bidId;
             return (
               <tr key={b.bidId} className="border-b last:border-0">
