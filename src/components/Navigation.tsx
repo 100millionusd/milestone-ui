@@ -90,12 +90,20 @@ export default function Navigation() {
     return false;
   }
 
+  // Hide "Submit Proposal" for admins everywhere
+  if (!('children' in item) && item.href === '/new' && role === 'admin') {
+    return false;
+  }
+
+  // Hide the non-admin "Vendors" (vendor dashboard) for admins everywhere
+  if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') {
+    return false;
+  }
+
   if (role === 'admin') return true;
   if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
   return true;
 };
-
-if (!mounted) return null;
 
   // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
