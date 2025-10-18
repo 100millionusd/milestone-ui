@@ -1,20 +1,76 @@
-// REMOVE the mock transaction hash generation function
-// DELETE THIS:
-function generateMockTxHash(bidId: number, milestoneIndex: number): string {
-  const baseHash = '0x' + 
-    bidId.toString(16).padStart(8, '0') + 
-    milestoneIndex.toString(16).padStart(4, '0') + 
-    Date.now().toString(16).slice(-8) + 
-    Math.random().toString(16).slice(2, 10);
-  
-  return baseHash.length === 66 ? baseHash : baseHash.padEnd(66, '0').slice(0, 66);
+import { NextRequest, NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const API = (
+  process.env.API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  ""
+).replace(/\/$/, "");
+
+async function fetchWithAuth(path: string, headers: HeadersInit) {
+  if (!API) throw new Error("API_BASE is not set");
+  const r = await fetch(`${API}${path}`, {
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+  return r.json().catch(() => ({}));
 }
 
-// Update extractPaymentsFromProofs to ONLY use real transaction hashes
+function extractProofsFromBids(bids: any[]): any[] {
+  const proofs: any[] = [];
+  
+  for (const bid of bids) {
+    const bidId = bid?.id ?? bid?.bid_id ?? bid?.bidId;
+    
+    if (!bidId) continue;
+
+    const proofFields = [
+      bid.proofs,
+      bid.milestones,
+      bid.submissions,
+      bid.documents,
+      bid.deliverables
+    ];
+
+    for (const proofField of proofFields) {
+      if (Array.isArray(proofField)) {
+        proofs.push(...proofField.map((p: any) => ({
+          ...p,
+          bid_id: bidId,
+          id: p?.id ?? p?.proof_id ?? p?.milestone_id ?? `proof-${bidId}-${proofs.length}`,
+          milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
+          title: p?.title ?? p?.name ?? `Proof for bid ${bidId}`,
+          status: p?.status ?? p?.state ?? 'submitted'
+        })));
+        break;
+      }
+    }
+
+    if (proofs.length === 0) {
+      const singleProof = bid.proof ?? bid.milestone ?? bid.submission;
+      if (singleProof && typeof singleProof === 'object') {
+        proofs.push({
+          ...singleProof,
+          bid_id: bidId,
+          id: singleProof?.id ?? `proof-${bidId}`,
+          milestone_index: singleProof?.milestone_index ?? 1,
+          title: singleProof?.title ?? `Proof for bid ${bidId}`,
+          status: singleProof?.status ?? 'submitted'
+        });
+      }
+    }
+  }
+  
+  return proofs;
+}
+
 function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   const payments: any[] = [];
-  
-  console.log('Extracting payments from proofs:', proofs.length);
   
   for (const proof of proofs) {
     const bidId = proof?.bid_id ?? proof?.bidId;
@@ -36,13 +92,23 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
     }
     
     if (proof.status === 'paid' || proof.completed === true) {
-      console.log(`Creating payment from proof:`, proof);
-      
       const bid = bids.find(b => (b.id ?? b.bidId) === bidId);
       
-      // ONLY use real transaction hashes - remove mock generation
-      const tx_hash = proof?.tx_hash ?? proof?.transaction_hash ?? proof?.payment_tx ?? 
-                     proof?.onchain_tx ?? null;
+      // REAL transaction hash extraction - check ALL possible fields
+      const tx_hash = 
+        proof?.tx_hash ?? 
+        proof?.transaction_hash ?? 
+        proof?.payment_tx ?? 
+        proof?.onchain_tx ??
+        proof?.hash ??
+        proof?.txHash ??
+        proof?.transactionHash ??
+        proof?.payment_hash ??
+        proof?.blockchain_tx ??
+        proof?.eth_tx ??
+        proof?.polygon_tx ??
+        proof?.onchain_transaction_id ??
+        null;
       
       payments.push({
         id: `payment-${bidId}-${milestoneIndex}`,
@@ -52,8 +118,7 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
         status: 'completed',
         released_at: proof.paymentDate ?? proof.updated_at ?? proof.created_at,
         created_at: proof.created_at,
-        // This will be null until you have real transaction data
-        tx_hash: tx_hash,
+        tx_hash: tx_hash, // This will be a real hash if it exists in your data
         description: proof.name ?? proof.title
       });
     }
@@ -62,11 +127,8 @@ function extractPaymentsFromProofs(proofs: any[], bids: any[]): any[] {
   return payments;
 }
 
-// Update extractPaymentsFromBids to ONLY use real transaction hashes
 function extractPaymentsFromBids(bids: any[]): any[] {
   const payments: any[] = [];
-  
-  console.log('Extracting payments from bids:', bids.length);
   
   for (const bid of bids) {
     const bidId = bid?.id ?? bid?.bid_id ?? bid?.bidId;
@@ -83,18 +145,31 @@ function extractPaymentsFromBids(bids: any[]): any[] {
 
     for (const paymentField of paymentFields) {
       if (Array.isArray(paymentField)) {
-        console.log(`Found ${paymentField.length} payments in bid ${bidId}`);
-        payments.push(...paymentField.map((p: any) => ({
-          ...p,
-          bid_id: bidId,
-          id: p?.id ?? p?.payment_id ?? p?.payout_id ?? `payment-${bidId}-${payments.length}`,
-          milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
-          amount_usd: p?.amount_usd ?? p?.amountUsd ?? p?.amount ?? p?.usd ?? null,
-          status: p?.status ?? p?.state ?? 'completed',
-          // ONLY use real transaction hashes
-          tx_hash: p?.tx_hash ?? p?.transaction_hash ?? p?.hash ?? 
-                  p?.txHash ?? p?.transactionHash ?? null
-        })));
+        payments.push(...paymentField.map((p: any) => {
+          // REAL transaction hash extraction
+          const tx_hash = 
+            p?.tx_hash ?? 
+            p?.transaction_hash ?? 
+            p?.hash ??
+            p?.txHash ??
+            p?.transactionHash ??
+            p?.payment_hash ??
+            p?.blockchain_hash ??
+            p?.eth_transaction ??
+            p?.polygon_transaction ??
+            p?.onchain_id ??
+            null;
+            
+          return {
+            ...p,
+            bid_id: bidId,
+            id: p?.id ?? p?.payment_id ?? p?.payout_id ?? `payment-${bidId}-${payments.length}`,
+            milestone_index: p?.milestone_index ?? p?.milestoneIndex ?? p?.index ?? p?.milestone ?? 1,
+            amount_usd: p?.amount_usd ?? p?.amountUsd ?? p?.amount ?? p?.usd ?? null,
+            status: p?.status ?? p?.state ?? 'completed',
+            tx_hash: tx_hash
+          };
+        }));
         break;
       }
     }
@@ -102,7 +177,14 @@ function extractPaymentsFromBids(bids: any[]): any[] {
     if (payments.length === 0) {
       const singlePayment = bid.payment ?? bid.payout ?? bid.transaction;
       if (singlePayment && typeof singlePayment === 'object') {
-        console.log(`Found single payment in bid ${bidId}`);
+        const tx_hash = 
+          singlePayment?.tx_hash ?? 
+          singlePayment?.transaction_hash ?? 
+          singlePayment?.hash ??
+          singlePayment?.txHash ??
+          singlePayment?.transactionHash ??
+          null;
+        
         payments.push({
           ...singlePayment,
           bid_id: bidId,
@@ -110,15 +192,12 @@ function extractPaymentsFromBids(bids: any[]): any[] {
           milestone_index: singlePayment?.milestone_index ?? 1,
           amount_usd: singlePayment?.amount_usd ?? singlePayment?.amount,
           status: singlePayment?.status ?? 'completed',
-          // ONLY use real transaction hashes
-          tx_hash: singlePayment?.tx_hash ?? singlePayment?.transaction_hash ?? 
-                  singlePayment?.hash ?? null
+          tx_hash: tx_hash
         });
       }
     }
 
     if (payments.length === 0 && bid.amount_usd) {
-      console.log(`Creating payment for bid ${bidId}`);
       payments.push({
         id: `payment-${bidId}`,
         bid_id: bidId,
@@ -127,7 +206,6 @@ function extractPaymentsFromBids(bids: any[]): any[] {
         status: 'completed',
         released_at: bid.updated_at ?? bid.created_at,
         created_at: bid.created_at,
-        // No mock transaction hash - will be null until you have real data
         tx_hash: null
       });
     }
@@ -136,7 +214,6 @@ function extractPaymentsFromBids(bids: any[]): any[] {
   return payments;
 }
 
-// In the main GET function, remove the mock hash addition
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization") || "";
   const cookie = req.headers.get("cookie") || "";
@@ -157,11 +234,9 @@ export async function GET(req: NextRequest) {
         const bidData = Array.isArray(data) ? data : (data?.bids ?? data ?? []);
         if (bidData.length > 0) {
           bids = bidData;
-          console.log(`Found ${bids.length} bids from ${endpoint}`);
           break;
         }
       } catch (error) {
-        console.log(`Endpoint ${bidEndpoint} failed:`, error);
         continue;
       }
     }
@@ -179,7 +254,6 @@ export async function GET(req: NextRequest) {
         const proofData = Array.isArray(data) ? data : (data?.proofs ?? []);
         if (proofData.length > 0) {
           proofs = proofData;
-          console.log(`Found ${proofs.length} proofs from ${endpoint}`);
           break;
         }
       } catch {
@@ -189,7 +263,6 @@ export async function GET(req: NextRequest) {
 
     if (proofs.length === 0) {
       proofs = extractProofsFromBids(bids);
-      console.log(`Extracted ${proofs.length} proofs from bids`);
     }
 
     let payments: any[] = [];
@@ -208,9 +281,6 @@ export async function GET(req: NextRequest) {
         const paymentData = Array.isArray(data) ? data : (data?.payments ?? data?.payouts ?? []);
         if (paymentData.length > 0) {
           payments = paymentData;
-          console.log(`Found ${payments.length} payments from ${endpoint}`);
-          
-          // REMOVED: No more adding mock transaction hashes
           break;
         }
       } catch {
@@ -220,37 +290,24 @@ export async function GET(req: NextRequest) {
 
     if (payments.length === 0) {
       payments = extractPaymentsFromBids(bids);
-      console.log(`Extracted ${payments.length} payments from bids`);
       
       if (payments.length === 0) {
         payments = extractPaymentsFromProofs(proofs, bids);
-        console.log(`Extracted ${payments.length} payments from proofs`);
       }
     }
 
     let role = null;
     try {
       role = await fetchWithAuth("/auth/role", headers);
-    } catch {
-      // Role endpoint might not be critical
-    }
+    } catch {}
 
     const body = {
       bids,
       proofs,
       payments,
-      role,
-      _debug: {
-        bidCount: bids.length,
-        proofCount: proofs.length,
-        paymentCount: payments.length,
-        bidIds: bids.map(b => b?.id ?? b?.bid_id),
-        paymentTxHashes: payments.map(p => p.tx_hash)
-      }
+      role
     };
 
-    console.log('Final vendor oversight data:', body._debug);
-    
     return NextResponse.json(body);
     
   } catch (e: any) {
