@@ -132,15 +132,18 @@ function normalizeProofs(rows: any[]): ProofRow[] {
     // Handle different bid ID fields
     const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
     
-    // Handle different milestone index fields - use the actual milestone number from the name
-    let milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone;
-    
-    // Extract milestone number from name if available (e.g., "Milestone 3" -> 3)
-    if (!milestone_index && r?.name) {
+    // Extract milestone number from name (e.g., "Milestone 3" -> 3)
+    let milestone_index = null;
+    if (r?.name) {
       const match = r.name.match(/Milestone\s+(\d+)/);
       if (match) {
         milestone_index = parseInt(match[1]);
       }
+    }
+    
+    // If no milestone from name, try other fields
+    if (!milestone_index) {
+      milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone;
     }
     
     // Fallback to index if still no milestone index
