@@ -83,12 +83,19 @@ export default function Navigation() {
   );
 
   const showItem = (item: NavItem) => {
-    if (role === 'admin') return true;
-    if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
-    return true;
-  };
+  const isAdminRoute = pathname.startsWith('/admin');
 
-  if (!mounted) return null;
+  // Hide "My Activity" on any /admin/* page
+  if (!('children' in item) && item.href === '/vendor/oversight' && isAdminRoute) {
+    return false;
+  }
+
+  if (role === 'admin') return true;
+  if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
+  return true;
+};
+
+if (!mounted) return null;
 
   // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
