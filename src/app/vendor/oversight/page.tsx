@@ -462,16 +462,6 @@ export default function VendorOversightPage() {
 
   return (
     <div className="px-6 py-8 space-y-8">
-      {/* Debug Info - Temporary */}
-      <div className="fixed bottom-4 right-4 bg-yellow-100 border border-yellow-400 p-4 rounded-lg text-xs max-w-md z-50">
-        <div className="font-bold">Debug Info:</div>
-        <div>Bids: {bids?.length ?? 0}</div>
-        <div>Proofs: {proofs?.length ?? 0}</div>
-        <div>Payments: {payments?.length ?? 0}</div>
-        <div>Milestones: {milestones?.length ?? 0}</div>
-        {err && <div className="text-red-600">Error: {err}</div>}
-      </div>
-
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Vendor Overview</h1>
