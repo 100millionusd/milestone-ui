@@ -695,8 +695,10 @@ const items: VendorLite[] = raw
     </div>
   </div>
 </section>
+    </main>
   );
-} 
+}
+
 
 function StatusChip({ value }: { value?: VendorLite['status'] }) {
   const map: Record<string, string> = {
