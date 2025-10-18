@@ -190,6 +190,53 @@ export default function AdminVendorsPage() {
     const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
       method: 'POST',
       credentials: 'include',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // ✅ instant UI: mark approved locally, then refresh from server
+    setData(prev => ({
+      ...prev,
+      items: prev.items.map(x => x.walletAddress === wallet ? { ...x, status: 'approved' } : x),
+    }));
+    await fetchList();
+  } catch (e: any) {
+    alert(e?.message || 'Failed to approve vendor');
+  } finally {
+    setMutating(null);
+  }
+};
+
+const rejectVendor = async (wallet?: string) => {
+  if (!wallet) return;
+  if (!confirm('Reject this vendor?')) return;
+  try {
+    setMutating(wallet);
+    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // ✅ instant UI: mark rejected locally, then refresh
+    setData(prev => ({
+      ...prev,
+      items: prev.items.map(x => x.walletAddress === wallet ? { ...x, status: 'rejected' } : x),
+    }));
+    await fetchList();
+  } catch (e: any) {
+    alert(e?.message || 'Failed to reject vendor');
+  } finally {
+    setMutating(null);
+  }
+};
+
+  const approveVendor = async (wallet?: string) => {
+  if (!wallet) return;
+  try {
+    setMutating(wallet);
+    const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
+      method: 'POST',
+      credentials: 'include',
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
@@ -391,18 +438,18 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
  <td className="py-2 px-3">
   <div className="flex flex-wrap items-center gap-2">
+  {/* Bids */}
+  <button
+    onClick={() => toggleOpen(rowKey, v.walletAddress)}
+    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+               bg-slate-900 text-white hover:bg-slate-950"
+  >
+    {open ? 'Hide' : 'Bids'}
+  </button>
 
-    {/* Bids */}
-    <button
-      onClick={() => toggleOpen(rowKey, v.walletAddress)}
-      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                 bg-slate-900 text-white hover:bg-slate-950"
-    >
-      Bids
-    </button>
-
-    {/* Approve (hide once approved) */}
-    {v.status !== 'approved' ? (
+  {/* Approvals */}
+  {v.status !== 'approved' ? (
+    <>
       <button
         onClick={() => approveVendor(v.walletAddress)}
         disabled={!v.walletAddress || busy}
@@ -413,43 +460,65 @@ async function refreshVendorRow(rowKey: string, wallet?: string) {
       >
         {busy ? 'Working…' : 'Approve'}
       </button>
-    ) : (
-      <span
-        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                   bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200 cursor-default"
-        title="Vendor is approved"
-      >
-        Approved
-      </span>
-    )}
+      {v.status === 'pending' && (
+        <button
+          onClick={() => rejectVendor(v.walletAddress)}
+          disabled={!v.walletAddress || busy}
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                     bg-rose-600 text-white hover:bg-rose-700
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Reject vendor"
+        >
+          {busy ? 'Working…' : 'Reject'}
+        </button>
+      )}
+    </>
+  ) : (
+    <span
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                 bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
+      title="Vendor is approved"
+    >
+      Approved
+    </span>
+  )}
 
-    {/* Archive / Unarchive toggle */}
+  {/* Archive / Unarchive */}
+  {!v.archived ? (
     <button
-      onClick={() =>
-        v.archived
-          ? unarchiveVendor(v.walletAddress)
-          : archiveVendor(v.walletAddress)
-      }
+      onClick={() => archiveVendor(v.walletAddress)}
       disabled={!v.walletAddress || busy}
       className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
                  bg-amber-600 text-white hover:bg-amber-700
                  disabled:opacity-50 disabled:cursor-not-allowed"
+      title="Archive vendor (soft hide)"
     >
-      {v.archived ? 'Unarchive' : 'Archive'}
+      {busy ? 'Archiving…' : 'Archive'}
     </button>
-
-    {/* Delete */}
+  ) : (
     <button
-      onClick={() => deleteVendor(v.walletAddress)}
+      onClick={() => unarchiveVendor(v.walletAddress)}
       disabled={!v.walletAddress || busy}
       className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
-                 bg-rose-600 text-white hover:bg-rose-700
+                 bg-emerald-600 text-white hover:bg-emerald-700
                  disabled:opacity-50 disabled:cursor-not-allowed"
+      title="Unarchive vendor"
     >
-      Delete
+      {busy ? 'Working…' : 'Unarchive'}
     </button>
+  )}
 
-  </div>
+  {/* Delete */}
+  <button
+    onClick={() => deleteVendor(v.walletAddress)}
+    disabled={!v.walletAddress || busy}
+    className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+               bg-rose-600 text-white hover:bg-rose-700
+               disabled:opacity-50 disabled:cursor-not-allowed"
+  >
+    Delete
+  </button>
+</div>
 </td>
                     </tr>
                     {open && (
