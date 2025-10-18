@@ -83,10 +83,8 @@ export default function Navigation() {
   );
 
   const showItem = (item: NavItem) => {
-  const isAdminRoute = pathname.startsWith('/admin');
-
-  // Hide "My Activity" on any /admin/* page
-  if (!('children' in item) && item.href === '/vendor/oversight' && isAdminRoute) {
+  // Hide "My Activity" for admins everywhere
+  if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') {
     return false;
   }
 
@@ -95,7 +93,7 @@ export default function Navigation() {
     return false;
   }
 
-  // Hide the non-admin "Vendors" (vendor dashboard) for admins everywhere
+  // Hide the public/vendor "Vendors" link for admins (keep Admin → Vendors)
   if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') {
     return false;
   }
