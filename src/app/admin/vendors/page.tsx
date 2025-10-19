@@ -441,7 +441,7 @@ export default function AdminVendorsPage() {
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
                       <td className="py-2 px-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          {/* Bids */}
+                          {/* Info-Bids */}
                           <button
                             onClick={() => toggleOpen(rowKey, v.walletAddress)}
                             className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
