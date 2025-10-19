@@ -88,7 +88,7 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   if (s.includes('approve')) return 'approved';
   if (s.includes('reject')) return 'rejected';
   if (s.includes('change')) return 'changes_requested';
-  return s || 'submitted';
+  return s || 'approved';
 }
 
 // Per-file GPS detector
