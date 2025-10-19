@@ -9,7 +9,7 @@ import ClientBootstrap from './ClientBootstrap'; // ← ADD THIS
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Milestone - Professional Project Management',
+  title: 'LithiumX - Professional Project Management',
   description: 'Manage projects, bids, and milestone payments with USDT/USDC',
 };
 
