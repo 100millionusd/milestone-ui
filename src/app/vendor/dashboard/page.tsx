@@ -9,20 +9,6 @@ import { getBids, getProofs, archiveProof } from '@/lib/api';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import SendFunds from '@/components/SendFunds';
 
-// ✨ UI-only additions (no functional changes)
-import { motion } from 'framer-motion';
-import {
-  Copy,
-  LogOut,
-  WalletMinimal,
-  Search as SearchIcon,
-  Building2,
-  Layers,
-  Archive,
-  FileText,
-  Rocket
-} from 'lucide-react';
-
 // ---- RPC (read-only) ----
 // Uses env when present (NEXT_PUBLIC_SEPOLIA_RPC) and falls back to public Sepolia.
 const RPC_URL =
@@ -59,6 +45,9 @@ export default function VendorDashboard() {
   const [balances, setBalances] = useState<{ ETH?: string; USDT?: string; USDC?: string }>({});
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
+
+  // NEW: compact modal for SendFunds (replaces big block)
+  const [sendOpen, setSendOpen] = useState(false);
 
   // Track archiving state per-bid to disable button + show "Archiving…"
   const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
@@ -208,7 +197,7 @@ export default function VendorDashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-        <div className="max-w-6xl mx-auto px-6 py-20">
+        <div className="max-w-5xl mx-auto px-4 py-16">
           <div className="animate-pulse space-y-6">
             <div className="h-24 bg-white/70 rounded-2xl shadow-sm"></div>
             <div className="h-20 bg-white/70 rounded-2xl shadow-sm"></div>
@@ -224,83 +213,55 @@ export default function VendorDashboard() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      {/* Decorative background */}
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(1000px_500px_at_50%_-100px,rgba(59,130,246,0.10),transparent)]" />
-
-      <div className="max-w-6xl mx-auto px-6 py-10">
-        {/* ===== Hero / Top Bar ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white/80 backdrop-blur rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8"
-        >
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
-                <WalletMinimal className="h-6 w-6" />
-              </div>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-                  Vendor Dashboard
-                </h1>
-                <p className="mt-1 text-sm text-slate-600">
-                  Signed in as{' '}
-                  <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">
-                    {shortAddr}
-                  </span>
-                </p>
-                <p className="mt-1 text-xs text-slate-500 break-all">Wallet: {address}</p>
-              </div>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+      <div className="max-w-6xl mx-auto px-4 py-10">
+        {/* Top Bar Card */}
+        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
+                Vendor Dashboard
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Signed in as <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{shortAddr}</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-500 break-all">Wallet: {address}</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSendOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                title="Open Send Funds"
+              >
+                <span className="text-slate-900">➤</span>
+                <span>Send</span>
+              </button>
               <button
                 onClick={() => navigator.clipboard.writeText(address || '')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
               >
-                <Copy className="h-4 w-4" />
-                <span>Copy Address</span>
+                Copy Address
               </button>
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-950 active:scale-[.99] transition"
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] transition"
               >
-                <LogOut className="h-4 w-4" />
-                <span>Sign Out</span>
+                Sign Out
               </button>
             </div>
           </div>
 
-          {/* Balances */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Balances: compact metric chips */}
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <BalanceCard label="ETH" value={balances.ETH} />
             <BalanceCard label="USDT" value={balances.USDT} />
             <BalanceCard label="USDC" value={balances.USDC} />
           </div>
-        </motion.div>
+        </div>
 
-        {/* ===== Quick Actions (Send Funds) ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="bg-white/80 backdrop-blur rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8"
-        >
-          <div className="flex items-center gap-2 mb-4">
-            <Rocket className="h-4 w-4 text-slate-500" />
-            <h2 className="text-lg font-semibold text-slate-900">Send Funds</h2>
-          </div>
-          <SendFunds />
-        </motion.div>
-
-        {/* ===== Controls: Tabs + Search ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="sticky top-4 z-10 mb-6"
-        >
+        {/* Tabs + search */}
+        <div className="sticky top-4 z-10 mb-6">
           <div className="bg-white/90 backdrop-blur rounded-2xl ring-1 ring-slate-200 p-3">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex flex-wrap gap-2">
@@ -309,7 +270,7 @@ export default function VendorDashboard() {
                     key={t.key}
                     onClick={() => setTab(t.key)}
                     className={[
-                      'px-3 py-1.5 rounded-full text-sm font-medium border transition',
+                      'px-3 py-1.5 rounded-full text-sm font-medium border',
                       tab === t.key
                         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
@@ -321,20 +282,20 @@ export default function VendorDashboard() {
               </div>
               <div className="w-full md:w-80">
                 <div className="relative">
-                  <SearchIcon className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search bids…"
-                    className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    className="w-full rounded-xl border border-slate-200 pl-3 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                   />
+                  <div className="pointer-events-none absolute right-3 top-2.5 text-slate-400 text-xs">⌘K</div>
                 </div>
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        {/* ===== Bid list (cards grid) ===== */}
+        {/* Bid list */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {filtered.map((bid) => {
             const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
@@ -347,23 +308,16 @@ export default function VendorDashboard() {
             const isArchiving = archivingIds.has(bid.bidId);
 
             return (
-              <motion.div
-                key={bid.bidId}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6"
-              >
+              <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
                 <div className="flex items-start justify-between gap-4 mb-5">
                   <div className="space-y-1">
                     <h2 className="text-lg font-semibold text-slate-900">{bid.title}</h2>
                     <div className="flex flex-wrap items-center gap-3 text-sm">
-                      <span className="inline-flex items-center gap-1 text-slate-600">
-                        <Layers className="h-4 w-4" />
+                      <span className="text-slate-600">
                         <span className="font-medium">Bid ID:</span> {bid.bidId}
                       </span>
                       {bid.orgName && (
-                        <span className="inline-flex items-center gap-1 text-slate-600">
-                          <Building2 className="h-4 w-4" />
+                        <span className="text-slate-600">
                           <span className="font-medium">Organization:</span> {bid.orgName}
                         </span>
                       )}
@@ -390,13 +344,11 @@ export default function VendorDashboard() {
 
                 {/* Actions */}
                 <div className="flex flex-wrap gap-3 mb-5">
-                  {/* NEW: open the vendor bid detail page with Agent 2 panel */}
                   <Link
                     href={`/vendor/bids/${bid.bidId}`}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
                     title="Open bid details and interact with Agent 2"
                   >
-                    <FileText className="h-4 w-4" />
                     View / Agent 2
                   </Link>
 
@@ -404,17 +356,15 @@ export default function VendorDashboard() {
                     <>
                       <Link
                         href={`/vendor/proof/${bid.bidId}`}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
+                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
                       >
-                        <Rocket className="h-4 w-4" />
                         Submit Proof
                       </Link>
                       <button
                         onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
                         title="Copy vendor wallet address"
                       >
-                        <Copy className="h-4 w-4" />
                         Copy Wallet Address
                       </button>
                     </>
@@ -426,16 +376,15 @@ export default function VendorDashboard() {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        onArchive(bid.bidId); // Fixed: changed 'b.bidId' to 'bid.bidId'
+                        onArchive(bid.bidId);
                       }}
                       disabled={isArchiving}
                       className={[
-                        'inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition',
+                        'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
                         'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
                       ].join(' ')}
                       title="Move this bid to Archived"
                     >
-                      <Archive className="h-4 w-4" />
                       {isArchiving ? 'Archiving…' : 'Move to Archived'}
                     </button>
                   )}
@@ -488,16 +437,12 @@ export default function VendorDashboard() {
                     </div>
                   </div>
                 )}
-              </motion.div>
+              </div>
             );
           })}
 
           {filtered.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center col-span-full"
-            >
+            <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center col-span-full">
               <div className="text-5xl mb-4">🗂️</div>
               <h2 className="text-xl font-semibold text-slate-900 mb-2">No bids in this view</h2>
               <p className="text-slate-600 mb-6">Try a different tab or clear your search.</p>
@@ -507,10 +452,37 @@ export default function VendorDashboard() {
               >
                 Browse Projects
               </Link>
-            </motion.div>
+            </div>
           )}
         </div>
       </div>
+
+      {/* ==== Minimal Modal for Send Funds ==== */}
+      {sendOpen && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/50"
+            onClick={() => setSendOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl ring-1 ring-slate-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold text-slate-900">Send Funds</h3>
+                <button
+                  onClick={() => setSendOpen(false)}
+                  className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              {/* The functional component stays intact */}
+              <SendFunds />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -521,8 +493,8 @@ function BalanceCard({ label, value }: { label: string; value?: string }) {
   const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
   return (
     <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-4">
-      <div className="text-xs uppercase tracking-wider text-slate-500">{label} Balance</div>
-      <div className="mt-1 text-lg font-semibold text-slate-900 tabular-nums">{display}</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label} Balance</div>
+      <div className="mt-0.5 text-lg font-semibold text-slate-900 tabular-nums">{display}</div>
     </div>
   );
 }
@@ -554,7 +526,7 @@ function InfoTile({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 p-4">
-      <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
       <p className={`mt-1 text-base font-semibold text-slate-900 ${accent || ''}`}>{value}</p>
       {helper && <p className="mt-0.5 text-xs text-slate-500 break-all">{helper}</p>}
     </div>
