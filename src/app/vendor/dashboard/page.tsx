@@ -557,7 +557,6 @@ function InfoTile({
     </div>
   );
 }
-'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
