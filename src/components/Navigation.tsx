@@ -56,10 +56,7 @@ export default function Navigation() {
 
   // Effective role
   const role: Role = useMemo(() => serverRole ?? 'guest', [serverRole]);
-    if (serverRole === 'admin') return 'admin';
-    return (web3Role as Role) || serverRole || 'guest';
-  }, [serverRole, web3Role]);
-
+ 
   // Only admins or approved vendors can see project lists
   const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved'); // ← NEW
 
