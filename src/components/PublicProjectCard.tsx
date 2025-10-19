@@ -88,7 +88,7 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   if (s.includes('approve')) return 'approved';
   if (s.includes('reject')) return 'rejected';
   if (s.includes('change')) return 'changes_requested';
-  return s || 'approved';
+  return s || 'submitted';
 }
 
 // Per-file GPS detector
@@ -358,41 +358,59 @@ useEffect(() => {
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
 
-  // ---------- FILES TAB RENDERER ----------
+// ---------- FILES TAB RENDERER ----------
 function renderFilesTab() {
-  const hasAnyNonApproved = files.some((p) => getProofStatus(p) !== 'approved');
-  const proofsToShow = approvedOnly ? files.filter((p) => getProofStatus(p) === 'approved') : files;
+  // Normalize status for UI filtering:
+  // If API didn't send any status fields AND helper defaulted to "submitted",
+  // treat as "approved" (public page shows only approved proofs).
+  const uiStatus = (p: any) => {
+    const s = getProofStatus(p);
+    if (
+      s === 'submitted' &&
+      !(p?.status || p?.proof_status || p?.proofStatus) &&
+      (p?.approved === true || p?.approvedAt || p?.approved_at || true) // public view bias to approved
+    ) {
+      return 'approved';
+    }
+    if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+    return s;
+  };
+
+  const proofsToShow = approvedOnly
+    ? files.filter((p) => uiStatus(p) === 'approved')
+    : files;
+
+  const approvedCount = files.filter((p) => uiStatus(p) === 'approved').length;
+  const totalCount = files.length;
 
   return (
     <>
-      {/* Always show the toggle (if there exist any non-approved proofs) */}
-      {hasAnyNonApproved && (
-        <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
-          <span className="mr-1">Show:</span>
-          <button
-            type="button"
-            aria-pressed={approvedOnly}
-            onClick={() => setApprovedOnly(true)}
-            className={
-              'rounded-full px-2 py-0.5 border ' +
-              (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-            }
-          >
-            Approved only
-          </button>
-          <button
-            type="button"
-            aria-pressed={!approvedOnly}
-            onClick={() => setApprovedOnly(false)}
-            className={
-              'rounded-full px-2 py-0.5 border ' +
-              (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-            }
-          >
-            All
-          </button>
-        </div>
-      )}
+      {/* Always show the toggle */}
+      <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+        <span className="mr-1">Show:</span>
+        <button
+          type="button"
+          aria-pressed={approvedOnly}
+          onClick={() => setApprovedOnly(true)}
+          className={
+            'rounded-full px-2 py-0.5 border ' +
+            (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+          }
+        >
+          Approved only{typeof approvedCount === 'number' ? ` (${approvedCount})` : ''}
+        </button>
+        <button
+          type="button"
+          aria-pressed={!approvedOnly}
+          onClick={() => setApprovedOnly(false)}
+          className={
+            'rounded-full px-2 py-0.5 border ' +
+            (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+          }
+        >
+          All{typeof totalCount === 'number' ? ` (${totalCount})` : ''}
+        </button>
+      </div>
 
       {/* Empty state OR grid */}
       {proofsToShow.length === 0 ? (
@@ -400,15 +418,13 @@ function renderFilesTab() {
           {approvedOnly ? (
             <>
               No approved proofs yet.{` `}
-              {hasAnyNonApproved && (
-                <button
-                  type="button"
-                  onClick={() => setApprovedOnly(false)}
-                  className="underline underline-offset-2 ml-1"
-                >
-                  Show all
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setApprovedOnly(false)}
+                className="underline underline-offset-2 ml-1"
+              >
+                Show all
+              </button>
             </>
           ) : (
             'No public milestones/proofs yet.'
@@ -443,7 +459,7 @@ function renderFilesTab() {
               return true;
             });
 
-            const st = getProofStatus(p);
+            const st = uiStatus(p); // <-- use normalized status for badge & filtering
             const badgeCls =
               st === 'approved'
                 ? 'bg-emerald-100 text-emerald-700'
@@ -495,57 +511,57 @@ function renderFilesTab() {
                 {/* Grid: GPS label inside each photo that has coordinates */}
                 {Array.isArray(p.files) && p.files.length > 0 && (
                   <div className="mt-2 grid grid-cols-2 gap-3">
- {p.files.map((f: any, i: number) => {
-  // 1) try what the API already gave us
-  let gps = fileCoords(f);
+                    {p.files.map((f: any, i: number) => {
+                      // 1) try what the API already gave us
+                      let gps = fileCoords(f);
 
-  // 2) strict fallback: only use client-extracted GPS for THIS file (no proof-level fallback)
-  if (!gps) {
-    const hit = gpsByUrl[String(f?.url || '')];
-    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
-      gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
-    }
-  }
+                      // 2) strict fallback: only use client-extracted GPS for THIS file (no proof-level fallback)
+                      if (!gps) {
+                        const hit = gpsByUrl[String(f?.url || '')];
+                        if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+                          gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
+                        }
+                      }
 
-  const hasGPS = !!gps;
-  const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
-  const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
+                      const hasGPS = !!gps;
+                      const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
+                      const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
 
-  return (
-    <div
-      key={i}
-      role="button"
-      tabIndex={0}
-      onClick={() => setLightboxUrl(String(f.url || ''))}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-      className={
-        'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
-        (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
-      }
-      title={hoverTitle}
-    >
-      {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-        <img
-          src={f.url}
-          alt={f.name || `file ${i + 1}`}
-          className="w-full aspect-video object-cover"
-          loading="lazy"
-          crossOrigin="anonymous"
-        />
-      ) : (
-        <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-          {f.name || 'file'}
-        </div>
-      )}
+                      return (
+                        <div
+                          key={i}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setLightboxUrl(String(f.url || ''))}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                          className={
+                            'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+                            (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+                          }
+                          title={hoverTitle}
+                        >
+                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+                            <img
+                              src={f.url}
+                              alt={f.name || `file ${i + 1}`}
+                              className="w-full aspect-video object-cover"
+                              loading="lazy"
+                              crossOrigin="anonymous"
+                            />
+                          ) : (
+                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                              {f.name || 'file'}
+                            </div>
+                          )}
 
-      {hasGPS && label ? (
-        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
-          📍 {label}
-        </span>
-      ) : null}
-    </div>
-  );
-})}
+                          {hasGPS && label ? (
+                            <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
+                              📍 {label}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
