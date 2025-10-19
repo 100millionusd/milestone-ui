@@ -84,20 +84,11 @@ function fmtTakenAt(iso?: string | null): string | null {
 
 // ---- Proof status helper ----
 function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' | 'submitted' | string {
-  // accept multiple shapes from different endpoints
-  const raw =
-    p?.status ??
-    p?.proof_status ??          // snake_case
-    p?.proofStatus ??           // camelCase (FIX)
-    (p?.approved ? 'approved' : '') ??   // boolean flag
-    (p?.approvedAt || p?.approved_at ? 'approved' : ''); // timestamp implies approval
-
-  const s = String(raw).toLowerCase().trim();
-
+  const s = String(p?.status ?? p?.proof_status ?? '').toLowerCase();
   if (s.includes('approve')) return 'approved';
-  if (s.includes('reject') || s === 'denied') return 'rejected';
+  if (s.includes('reject')) return 'rejected';
   if (s.includes('change')) return 'changes_requested';
-  return s || 'approved';
+  return s || 'submitted';
 }
 
 // Per-file GPS detector
