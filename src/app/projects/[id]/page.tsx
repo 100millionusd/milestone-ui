@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids, getAuthRole, getProofs } from '@/lib/api';
+import { getProposal, getBids, getAuthRole, getProofs, payMilestone } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
@@ -230,6 +230,8 @@ export default function ProjectDetailPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
+  // track which (bidId:milestoneIndex) is releasing now
+  const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
   // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
   const safeBids = Array.isArray(bids)
@@ -474,6 +476,35 @@ export default function ProjectDetailPage() {
   // -------- Derived -----------
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
+  // Admin action: release a milestone payment
+async function handleReleasePayment(idx: number) {
+  if (!acceptedBid) return;
+  const bidIdNum = Number(acceptedBid.bidId);
+  const key = `${bidIdNum}:${idx}`;
+  if (!Number.isFinite(bidIdNum)) return;
+
+  if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+
+  try {
+    setReleasingKey(key);
+    await payMilestone(bidIdNum, idx);
+
+    // Refresh local views so status/tx update
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {
+      // ignore
+    }
+    alert('Payment released.');
+  } catch (e: any) {
+    alert(e?.message || 'Failed to release payment.');
+  } finally {
+    setReleasingKey(null);
+  }
+}
+
   const projectDocs = parseDocs(project?.docs) || [];
 
   const canEdit =
@@ -961,6 +992,72 @@ export default function ProjectDetailPage() {
           <div className="mt-6">
             <ChangeRequestsPanel proposalId={projectIdNum} />
           </div>
+              <div className="mt-8">
+      <h4 className="font-semibold mb-2">Admin — Payments</h4>
+
+      {acceptedBid ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2 pr-4">#</th>
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Amount</th>
+                <th className="py-2 pr-4">Status</th>
+                <th className="py-2 pr-4">Tx</th>
+                <th className="py-2 pr-4">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {acceptedMilestones.map((m, idx) => {
+                const paid = !!m.paymentTxHash;
+                const completedRow = paid || !!m.completed;
+
+                // mirror status logic from Milestones tab
+                const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                const hasProofNow = !!m.proof || !!proofJustSent[key];
+                const status = paid
+                  ? 'paid'
+                  : completedRow
+                  ? 'completed'
+                  : hasProofNow
+                  ? 'submitted'
+                  : 'pending';
+
+                // enable release when not paid and either completed or at least submitted
+                const canRelease = !paid && completedRow;
+
+                return (
+                  <tr key={idx} className="border-t">
+                    <td className="py-2 pr-4">M{idx + 1}</td>
+                    <td className="py-2 pr-4">{m.name || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {m.amount ? currency.format(Number(m.amount)) : '—'}
+                    </td>
+                    <td className="py-2 pr-4">{status}</td>
+                    <td className="py-2 pr-4">
+                      {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <button
+                        onClick={() => handleReleasePayment(idx)}
+                        disabled={!canRelease || releasingKey === key}
+                        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                        title={canRelease ? 'Release payment' : 'Not ready for payment'}
+                      >
+                        {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500">No approved bid yet.</p>
+      )}
+    </div>
         </section>
       )}
 
