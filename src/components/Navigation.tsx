@@ -84,7 +84,7 @@ export default function Navigation() {
           { href: '/admin/vendors', label: 'Vendors' },      // FIX: back to the Vendors page
         ]
       },
-      { href: '/vendor/dashboard', label: 'Vendors' },
+      { href: '/vendor/dashboard', label: 'MyDesk' },
       { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor','admin'] }, // ← kept as you had; hidden for admin via showItem below
     ],
     []
