@@ -473,34 +473,6 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
 let _authRoleMainInflight: Promise<AuthInfo> | null = null;
 let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
 
-export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
-  const now = Date.now();
-  // 1) serve cached for 30s
-  if (_authRoleMainCache && now - _authRoleMainCache.at < 30_000) return _authRoleMainCache.data;
-  // 2) coalesce concurrent callers
-  if (_authRoleMainInflight) return _authRoleMainInflight;
-
-  _authRoleMainInflight = (async () => {
-    try {
-      const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
-      const r = await apiFetch(`/auth/role${q}`);
-      const result = {
-        address: r?.address ?? undefined,
-        role: (r?.role as AuthInfo["role"]) ?? "guest",
-        vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
-      };
-      _authRoleMainCache = { at: Date.now(), data: result };
-      return result;
-    } catch {
-      return { role: "guest" };
-    } finally {
-      _authRoleMainInflight = null;
-    }
-  })();
-
-  return _authRoleMainInflight;
-}
-
 // ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
 let _bidsInflight: Promise<Bid[]> | null = null;
 let _bidsCache: { at: number; data: Bid[] } | null = null;
