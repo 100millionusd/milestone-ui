@@ -226,9 +226,8 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   }
 
   useEffect(() => {
-    loadProofs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(bidIds), proposalId]);
+  if (initialBids?.length === 0) loadProofs();
+}, [initialBids]);
 
   const refreshAll = async () => {
     await loadProofs();
