@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useMemo, useState } from 'react';
+import AgentDigestWidget from "@/components/AgentDigestWidget";
 
 // ———————————————————————————————————————————
 // API base
@@ -482,6 +483,11 @@ export default function VendorOversightPage() {
           ))}
         </div>
       </div>
+
+      {/* Agent 2 — What’s New */}
+  <section className="mb-6">
+    <AgentDigestWidget />
+  </section>
 
       {tab !== 'overview' && (
         <div className="flex items-center justify-end">
