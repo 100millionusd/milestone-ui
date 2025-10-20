@@ -159,40 +159,72 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   // client-side GPS cache (EXIF fallback)
   const [gpsByUrl, setGpsByUrl] = useState<Record<string, { lat: number; lon: number }>>({});
 
-  useEffect(() => {
-    const want: string[] = [];
-    for (const pr of files || []) {
-      const fileList = Array.isArray(pr?.files) ? pr.files : [];
-      for (const f of fileList) {
-        const u = String(f?.url || '');
-        if (!u) continue;
-        if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
+useEffect(() => {
+  // collect ALL image URLs from all proofs/files
+  const urls: string[] = [];
+  for (const pr of files || []) {
+    const fileList = Array.isArray(pr?.files) ? pr.files : [];
+    for (const f of fileList) {
+      const u = String(f?.url || '');
+      if (!u) continue;
+      // image extensions only
+      if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
+      urls.push(u);
+    }
+  }
 
-        const hasFromApi =
-          f?.lat != null || f?.lon != null ||
-          (typeof f?.exif?.gpsLatitude === 'number' && typeof f?.exif?.gpsLongitude === 'number');
+  // unique targets we haven't resolved yet
+  const unique = Array.from(new Set(urls)).filter((u) => !gpsByUrl[u]);
+  if (unique.length === 0) return;
 
-        if (!hasFromApi && !gpsByUrl[u]) want.push(u);
+  let cancelled = false;
+
+  (async () => {
+    const exifr = (await import('exifr')).default as any;
+
+    const MAX_RANGE_BYTES = 524_287; // ~512 KB
+    const CONCURRENCY = 2;           // gentle; bump to 3 if needed
+
+    async function fetchGpsViaRange(url: string) {
+      try {
+        const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
+        // If the server ignored Range and returns a big 200, don't download the body.
+        if (!r.ok) return null;
+        const cl = Number(r.headers.get('content-length') || '0');
+        if (r.status === 200 && cl > MAX_RANGE_BYTES) return null; // skip huge full fetches
+        const buf = await r.arrayBuffer();
+        const g = await exifr.gps(buf).catch(() => null);
+        if (g?.latitude != null && g?.longitude != null) {
+          return { lat: Number(g.latitude), lon: Number(g.longitude) };
+        }
+        return null;
+      } catch {
+        return null;
       }
     }
-    if (want.length === 0) return;
 
-    let cancelled = false;
-    (async () => {
-      const exifr = (await import('exifr')).default as any;
-      for (const u of want) {
-        try {
-          const g = await exifr.gps(u).catch(() => null);
-          const lat = g?.latitude, lon = g?.longitude;
-          if (!cancelled && Number.isFinite(lat) && Number.isFinite(lon)) {
-            setGpsByUrl(m => ({ ...m, [u]: { lat: Number(lat), lon: Number(lon) } }));
-          }
-        } catch {}
+    const queue = [...unique];
+    const workers: Promise<void>[] = [];
+
+    async function worker() {
+      while (!cancelled && queue.length) {
+        const url = queue.shift()!;
+        const gps = await fetchGpsViaRange(url);
+        if (cancelled) break;
+        if (gps) {
+          setGpsByUrl((m) => (m[url] ? m : { ...m, [url]: gps }));
+        }
       }
-    })();
+    }
 
-    return () => { cancelled = true; };
-  }, [files, gpsByUrl]);
+    for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+    await Promise.all(workers);
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [files, gpsByUrl]);
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
