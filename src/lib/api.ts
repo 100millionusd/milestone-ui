@@ -472,7 +472,7 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
 let _roleCache: { at: number; data: AuthInfo } | null = null;
 let _roleInflight: Promise<AuthInfo> | null = null;
 
-export function getAuthRoleOnce(): Promise<AuthInfo> {
+export function getAuthRole(): Promise<AuthInfo> {
   const now = Date.now();
   if (_roleCache && now - _roleCache.at < 30_000) return Promise.resolve(_roleCache.data);
   if (_roleInflight) return _roleInflight;
