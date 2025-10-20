@@ -75,6 +75,36 @@ export interface Proof {
   aiAnalysis?: any;
 }
 
+/** 🆕 Agent Digest types */
+export type DigestCounts = {
+  proposals_new: number;
+  bids_new: number;
+  proofs_new: number;
+};
+
+export type DigestItem = {
+  type: "proposal" | "bid" | "proof" | string;
+  id: string | number;
+  title?: string | null;
+  vendor?: string | null;
+  wallet?: string | null;
+  proposalId?: string | number | null;
+  bidId?: string | number | null;
+  milestoneIndex?: number | null;
+  amountUSD?: number | null;
+  status?: string | null;
+  updated_at?: string;
+  submitted_at?: string;
+  link?: string | null;
+};
+
+export type DigestResponse = {
+  since: string;
+  counts: DigestCounts;
+  items: DigestItem[];
+  ai_summary: string;
+};
+
 export interface AuthInfo {
   address?: string;
   role: "admin" | "vendor" | "guest";
@@ -468,6 +498,33 @@ export async function logout() {
     await apiFetch("/auth/logout", { method: "POST" });
   } catch {}
   setJwt(null);
+}
+
+/* ==========================
+   🆕 Agent Digest (dashboard)
+   - GET /agent/digest
+   - POST /agent/seen
+   ========================== */
+
+/** Get a role-aware digest (admin sees all; vendor sees theirs). */
+export async function getDigest(
+  since?: string,
+  limit = 50
+): Promise<DigestResponse> {
+  const qs = new URLSearchParams();
+  if (since) qs.set("since", since);
+  if (limit) qs.set("limit", String(limit));
+  return apiFetch<DigestResponse>(
+    `/agent/digest${qs.toString() ? `?${qs.toString()}` : ""}`
+  );
+}
+
+/** Mark the digest as seen (server stores "now" for your wallet). */
+export async function markDigestSeen(): Promise<{ ok: boolean; at?: string }> {
+  return apiFetch(`/agent/seen`, {
+    method: "POST",
+    body: JSON.stringify({}), // keep body JSON so parsers behave consistently
+  });
 }
 
 // ---- Normalizers ----
@@ -1477,6 +1534,10 @@ export default {
   // public read
   getPublicProjects,
   getPublicProject,
+
+  // 🆕 agent digest
+  getDigest,
+  markDigestSeen,
 
   // chat
   chatProof,
