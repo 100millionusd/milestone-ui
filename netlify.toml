@@ -1,15 +1,5 @@
-[build]
-  command = "npm run build"
-  publish = ".next"
-
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-
-[functions]
-  included_files = [
-    "node_modules/.prisma/**",
-    "node_modules/@prisma/client/**"
-  ]
-
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "22"
+
+[context.production.environment]
+  AWS_LAMBDA_JS_RUNTIME = "nodejs22.x"
