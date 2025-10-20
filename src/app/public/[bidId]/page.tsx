@@ -334,6 +334,7 @@ export default function PublicProjectDetailClient() {
     {(!proofs || proofs.length === 0) && (
       <p className="text-gray-500">No public milestones/proofs yet.</p>
     )}
+
     {Array.isArray(proofs) &&
       proofs.map((p: any) => (
         <div key={p.proofId || `${p.milestoneIndex}-p`} className="rounded-lg border p-4">
@@ -355,8 +356,8 @@ export default function PublicProjectDetailClient() {
                     key={idx}
                     href={url}
                     target="_blank"
-                    className="block rounded-lg border overflow-hidden"
                     rel="noreferrer"
+                    className="block rounded-lg border overflow-hidden"
                   >
                     {isImg ? (
                       <div className="relative w-full aspect-video">
@@ -388,3 +389,15 @@ export default function PublicProjectDetailClient() {
       ))}
   </section>
 )}
+
+{tab === 'audit' && (
+  <section>
+    <AuditPanel events={events} milestoneNames={milestoneNames} initialDays={3} />
+  </section>
+)}
+</div>
+</>
+)}
+</div>
+);
+}
