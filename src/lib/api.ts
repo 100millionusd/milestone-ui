@@ -495,6 +495,30 @@ export async function getAuthRoleOnce(): Promise<AuthRoleResp> {
   return _roleInflight;
 }
 
+// ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
+let _bidsInflight: Promise<Bid[]> | null = null;
+let _bidsCache: { at: number; data: Bid[] } | null = null;
+
+export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
+  const now = Date.now();
+  // 1) serve cached for 30s
+  if (_bidsCache && now - _bidsCache.at < 30_000) return _bidsCache.data;
+  // 2) coalesce concurrent callers
+  if (_bidsInflight) return _bidsInflight;
+
+  _bidsInflight = (async () => {
+    try {
+      const bids = await getBids(proposalId);
+      _bidsCache = { at: Date.now(), data: bids };
+      return bids;
+    } finally {
+      _bidsInflight = null;
+    }
+  })();
+
+  return _bidsInflight;
+}
+
 /**
  * Exchange a signed nonce for a JWT cookie (and token).
  * Call flow:

@@ -132,7 +132,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     setLoading(true);
     setError(null);
     try {
-      const allBids = await getBids();
+      const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
       
       // Update cache
