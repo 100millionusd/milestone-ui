@@ -455,18 +455,16 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
 }
 
 // ---- Auth ----
-let _roleInflight: Promise<AuthInfo> | null = null;
 let _roleCache: { at: number; data: AuthInfo } | null = null;
+let _roleInflight: Promise<AuthInfo> | null = null;
 
-export function getAuthRoleOnceCached(): Promise<AuthInfo> {
+export function getAuthRoleOnce(): Promise<AuthInfo> {
   const now = Date.now();
   if (_roleCache && now - _roleCache.at < 30_000) return Promise.resolve(_roleCache.data);
   if (_roleInflight) return _roleInflight;
 
-  _roleInflight = getAuthRoleOnce().then((info) => {
-    if (info?.role && info.role !== 'guest') {
-      _roleCache = { at: Date.now(), data: info };
-    }
+  _roleInflight = getAuthRole().then((info) => {
+    _roleCache = { at: Date.now(), data: info };
     return info;
   }).finally(() => {
     _roleInflight = null;
