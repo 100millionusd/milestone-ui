@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getPublicProject } from '@/lib/api';
 import AuditPanel from '@/components/AuditPanel';
-import Image from "next/image";
+import Image from 'next/image';
 
 function usd(n: number) {
   try {
@@ -22,10 +22,13 @@ function usd(n: number) {
 // --- helpers that call your Next API (client-side)
 async function fetchProofsClient(proposalId: number) {
   try {
-    const r = await fetch(`/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`, {
-      cache: 'no-store',
-      credentials: 'include',
-    });
+    const r = await fetch(
+      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
+      {
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
     return Array.isArray(list) ? list : [];
@@ -36,10 +39,13 @@ async function fetchProofsClient(proposalId: number) {
 
 async function fetchAuditClient(proposalId: number) {
   try {
-    const r = await fetch(`/api/public/audit/${encodeURIComponent(String(proposalId))}?ts=${Date.now()}`, {
-      cache: 'no-store',
-      credentials: 'include',
-    });
+    const r = await fetch(
+      `/api/public/audit/${encodeURIComponent(String(proposalId))}?ts=${Date.now()}`,
+      {
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    );
     if (!r.ok) return [];
     const data = await r.json().catch(() => []);
     const list = Array.isArray(data)
@@ -62,10 +68,13 @@ function normalizeAudit(items: any[]) {
       const at = a.createdAt ?? a.timestamp ?? a.at ?? a.time ?? a.date;
       const actor = a.actor ?? a.user ?? a.wallet ?? a.address ?? a.by;
       const milestoneIndex =
-        Number.isFinite(a.milestoneIndex) ? Number(a.milestoneIndex)
-        : Number.isFinite(a.milestone_index) ? Number(a.milestone_index)
-        : Number.isFinite(a.msIndex) ? Number(a.msIndex)
-        : undefined;
+        Number.isFinite(a.milestoneIndex)
+          ? Number(a.milestoneIndex)
+          : Number.isFinite(a.milestone_index)
+          ? Number(a.milestone_index)
+          : Number.isFinite(a.msIndex)
+          ? Number(a.msIndex)
+          : undefined;
       const txHash = a.txHash ?? a.payment_tx_hash ?? a.hash;
       const ipfs = a.ipfs_url ?? a.ipfsUrl ?? a.ipfs;
 
@@ -206,18 +215,20 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
-  <Image
-    src={project.coverImage}
-    alt={project.proposalTitle || 'cover'}
-    width={1600}
-    height={900}
-    sizes="(max-width: 768px) 100vw, 1024px"
-    style={{ width: "100%", height: "auto", objectFit: "cover" }}
-    priority
-  />
-) : (
-  <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
-)}
+              <Image
+                src={project.coverImage}
+                alt={project.proposalTitle || 'cover'}
+                width={1600}
+                height={900}
+                sizes="(max-width: 768px) 100vw, 1024px"
+                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+                priority
+              />
+            ) : (
+              <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
+            )}
+          </div>
+
           {/* tabs */}
           <div className="mt-6 border-b border-gray-200">
             <nav className="-mb-px flex gap-6">
@@ -255,17 +266,17 @@ export default function PublicProjectDetailClient() {
                   <div>
                     <h3 className="text-sm font-medium mb-2">More images</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
- {project.images.slice(1, 10).map((u: string, i: number) => (
-  <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
-    <Image
-      src={u}
-      alt={`image ${i + 1}`}
-      fill
-      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-      style={{ objectFit: "cover" }}
-    />
-  </div>
-))}
+                      {project.images.slice(1, 10).map((u: string, i: number) => (
+                        <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
+                          <Image
+                            src={u}
+                            alt={`image ${i + 1}`}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                            style={{ objectFit: 'cover' }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -274,7 +285,9 @@ export default function PublicProjectDetailClient() {
 
             {tab === 'bids' && (
               <section className="space-y-4">
-                {(project.bids || []).length === 0 && <p className="text-gray-500">No public bids visible.</p>}
+                {(project.bids || []).length === 0 && (
+                  <p className="text-gray-500">No public bids visible.</p>
+                )}
                 {Array.isArray(project.bids) &&
                   project.bids.map((b: any) => (
                     <div key={b.bidId} className="rounded-xl border p-4">
@@ -308,12 +321,15 @@ export default function PublicProjectDetailClient() {
 
             {tab === 'milestones' && (
               <section className="space-y-3">
-                {allMilestones.length === 0 && <p className="text-gray-500">No public milestones yet.</p>}
+                {allMilestones.length === 0 && (
+                  <p className="text-gray-500">No public milestones yet.</p>
+                )}
                 {allMilestones.map(({ fromBidId, vendor, m }, i) => (
                   <div key={i} className="rounded-lg border p-3 text-sm">
                     <div className="flex items-center justify-between">
                       <div className="font-medium">
-                        {m.name || `Milestone`} <span className="text-gray-400">• bid #{fromBidId}</span>
+                        {m.name || `Milestone`}{' '}
+                        <span className="text-gray-400">• bid #{fromBidId}</span>
                       </div>
                       <div className="text-gray-700">
                         {typeof m.amount === 'number' ? usd(m.amount) : ''}
@@ -329,75 +345,84 @@ export default function PublicProjectDetailClient() {
               </section>
             )}
 
-{tab === 'files' && (
-  <section className="space-y-4">
-    {(!proofs || proofs.length === 0) && (
-      <p className="text-gray-500">No public milestones/proofs yet.</p>
-    )}
+            {tab === 'files' && (
+              <section className="space-y-4">
+                {(!proofs || proofs.length === 0) && (
+                  <p className="text-gray-500">No public milestones/proofs yet.</p>
+                )}
+                {Array.isArray(proofs) &&
+                  proofs.map((p: any) => (
+                    <div
+                      key={p.proofId || `${p.milestoneIndex}-p`}
+                      className="rounded-lg border p-4"
+                    >
+                      <div className="text-sm font-medium">
+                        Milestone {Number(p.milestoneIndex) + 1}:{' '}
+                        {p.title || 'Submission'}
+                      </div>
 
-    {Array.isArray(proofs) &&
-      proofs.map((p: any) => (
-        <div key={p.proofId || `${p.milestoneIndex}-p`} className="rounded-lg border p-4">
-          <div className="text-sm font-medium">
-            Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                      {p.publicText && (
+                        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
+                          {p.publicText}
+                        </p>
+                      )}
+
+                      {Array.isArray(p.files) && p.files.length > 0 && (
+                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {p.files.map((f: any, idx: number) => {
+                            const url = String(f.url || '');
+                            const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(url);
+                            return (
+                              <a
+                                key={idx}
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block rounded-lg border overflow-hidden"
+                              >
+                                {isImg ? (
+                                  <div className="relative w-full aspect-video">
+                                    <Image
+                                      src={url}
+                                      alt={f.name || `file ${idx + 1}`}
+                                      fill
+                                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                                      style={{ objectFit: 'cover' }}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                                    {f.name || 'file'}
+                                  </div>
+                                )}
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {p.submittedAt && (
+                        <div className="mt-1 text-xs text-gray-500">
+                          Submitted {new Date(p.submittedAt).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </section>
+            )}
+
+            {tab === 'audit' && (
+              <section>
+                <AuditPanel
+                  events={events}
+                  milestoneNames={milestoneNames}
+                  initialDays={3}
+                />
+              </section>
+            )}
           </div>
-
-          {p.publicText && (
-            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-          )}
-
-          {Array.isArray(p.files) && p.files.length > 0 && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {p.files.map((f: any, idx: number) => {
-                const url = String(f.url || '');
-                const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(url);
-                return (
-                  <a
-                    key={idx}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block rounded-lg border overflow-hidden"
-                  >
-                    {isImg ? (
-                      <div className="relative w-full aspect-video">
-                        <Image
-                          src={url}
-                          alt={f.name || `file ${idx + 1}`}
-                          fill
-                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                          style={{ objectFit: 'cover' }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                        {f.name || 'file'}
-                      </div>
-                    )}
-                  </a>
-                );
-              })}
-            </div>
-          )}
-
-          {p.submittedAt && (
-            <div className="mt-1 text-xs text-gray-500">
-              Submitted {new Date(p.submittedAt).toLocaleString()}
-            </div>
-          )}
-        </div>
-      ))}
-  </section>
-)}
-
-{tab === 'audit' && (
-  <section>
-    <AuditPanel events={events} milestoneNames={milestoneNames} initialDays={3} />
-  </section>
-)}
-</div>
-</>
-)}
-</div>
-);
+        </>
+      )}
+    </div>
+  );
 }
