@@ -198,25 +198,25 @@ export default function VendorDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100">
-        <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+      <div className="min-h-screen bg-slate-50">
+        <div className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="space-y-6">
-            <div className="rounded-3xl border border-slate-200/70 bg-white/70 p-8 shadow-lg">
-              <div className="h-6 w-32 animate-pulse rounded-full bg-slate-200" />
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="h-5 w-32 animate-pulse rounded-full bg-slate-200" />
               <div className="mt-6 grid gap-4 sm:grid-cols-3">
                 {[0, 1, 2].map((key) => (
-                  <div key={key} className="rounded-2xl border border-slate-200/70 bg-white/80 p-4">
+                  <div key={key} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <div className="h-4 w-24 animate-pulse rounded-full bg-slate-200" />
-                    <div className="mt-4 h-6 w-3/4 animate-pulse rounded-full bg-slate-200/80" />
+                    <div className="mt-3 h-6 w-3/4 animate-pulse rounded-full bg-slate-200" />
                   </div>
                 ))}
               </div>
             </div>
-            <div className="rounded-3xl border border-slate-200/70 bg-white/70 p-8 shadow-lg">
-              <div className="h-5 w-40 animate-pulse rounded-full bg-slate-200/80" />
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="h-5 w-40 animate-pulse rounded-full bg-slate-200" />
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 {[0, 1, 2, 3].map((key) => (
-                  <div key={key} className="h-32 rounded-2xl border border-slate-200/70 bg-white/80" />
+                  <div key={key} className="h-32 rounded-lg border border-slate-200 bg-slate-50" />
                 ))}
               </div>
             </div>
@@ -227,286 +227,271 @@ export default function VendorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
-      <div className="relative mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-        <div className="absolute inset-x-6 -top-12 h-48 rounded-3xl bg-gradient-to-r from-blue-200/40 via-emerald-200/40 to-transparent blur-3xl" />
-        <div className="absolute inset-x-10 top-20 h-72 rounded-3xl bg-gradient-to-br from-emerald-100/40 via-sky-100/30 to-transparent blur-3xl" />
-        <div className="relative space-y-10">
-          {/* Hero */}
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)]">
-            <div className="rounded-3xl border border-slate-200 bg-white/90 p-8 shadow-xl">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Vendor Workspace</p>
-                    <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">Vendor Dashboard</h1>
-                  </div>
-                  <div className="space-y-1 text-sm text-slate-600">
-                    <p>
-                      Signed in as{' '}
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-mono text-xs uppercase tracking-[0.25em] text-slate-700">
-                        {shortAddr}
-                      </span>
-                    </p>
-                    <p className="break-all font-mono text-xs text-slate-400">Wallet: {address}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={() => navigator.clipboard.writeText(address || '')}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-                  >
-                    Copy Address
-                  </button>
-                  <button
-                    onClick={handleLogout}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-sky-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:from-emerald-600 hover:to-sky-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              </div>
+    <div className="min-h-screen bg-slate-50">
+      {/* Top bar */}
+      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold text-slate-900">Vendor Dashboard</h1>
+            <p className="mt-0.5 text-sm text-slate-500">Manage your bids, proofs, and payouts.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="hidden text-right sm:block">
+              <div className="text-xs text-slate-500">Signed in</div>
+              <div className="font-mono text-sm text-slate-700">{shortAddr}</div>
+            </div>
+            <button
+              onClick={() => navigator.clipboard.writeText(address || '')}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              title="Copy wallet address"
+            >
+              Copy Address
+            </button>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-black"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </header>
 
-              <div className="mt-8 grid gap-4 sm:grid-cols-3">
-                <BalanceCard label="ETH" value={balances.ETH} />
-                <BalanceCard label="USDT" value={balances.USDT} />
-                <BalanceCard label="USDC" value={balances.USDC} />
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Overview */}
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)]">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Balances</h2>
+                <p className="mt-1 text-sm text-slate-500">Wallet: <span className="break-all font-mono text-xs text-slate-500">{address}</span></p>
               </div>
             </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-white/90 p-8 shadow-xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-base font-semibold text-slate-900">Send Funds</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Transfer project payments directly from your connected wallet.
-                  </p>
-                </div>
-                <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
-                  Secure
-                </span>
-              </div>
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <SendFunds />
-              </div>
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <BalanceCard label="ETH" value={balances.ETH} />
+              <BalanceCard label="USDT" value={balances.USDT} />
+              <BalanceCard label="USDC" value={balances.USDC} />
             </div>
           </div>
 
-          {/* Tabs and search */}
-          <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl md:flex-row md:items-center md:justify-between">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Send Funds</h2>
+                <p className="mt-1 text-sm text-slate-500">Transfer project payments from your connected wallet.</p>
+              </div>
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">Secure</span>
+            </div>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <SendFunds />
+            </div>
+          </div>
+        </section>
+
+        {/* Toolbar */}
+        <section className="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap gap-2">
               {TABS.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
                   className={[
-                    'rounded-full px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300',
+                    'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ring-1 ring-inset',
                     tab === t.key
-                      ? 'bg-slate-900 text-white shadow'
-                      : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+                      ? 'bg-slate-900 text-white ring-slate-900'
+                      : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   {t.label}
                 </button>
               ))}
             </div>
-            <div className="w-full md:w-72">
+            <div className="w-full md:w-80">
               <label className="relative block">
-                <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-sm text-slate-400">
-                  🔍
-                </span>
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">🔍</span>
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search bids…"
-                  className="w-full rounded-full border border-slate-200 bg-white px-11 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-9 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300"
                 />
               </label>
             </div>
           </div>
+        </section>
 
-          {/* Bid list */}
-          <div className="space-y-6">
-            {filtered.map((bid) => {
-              const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-              const done = ms.filter((m: any) => m.completed).length;
-              const total = ms.length;
-              const progress = total ? Math.round((done / total) * 100) : 0;
+        {/* Bid list */}
+        <section className="mt-6 space-y-6">
+          {filtered.map((bid) => {
+            const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+            const done = ms.filter((m: any) => m.completed).length;
+            const total = ms.length;
+            const progress = total ? Math.round((done / total) * 100) : 0;
 
-              // ✅ allow archive if not already archived
-              const canArchive = bid.status !== 'archived';
-              const isArchiving = archivingIds.has(bid.bidId);
+            // ✅ allow archive if not already archived
+            const canArchive = bid.status !== 'archived';
+            const isArchiving = archivingIds.has(bid.bidId);
 
-              return (
-                <div
-                  key={bid.bidId}
-                  className="rounded-3xl border border-slate-200 bg-white/90 p-8 shadow-xl transition hover:-translate-y-1 hover:shadow-2xl"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="space-y-2">
-                      <h2 className="text-2xl font-semibold text-slate-900">{bid.title}</h2>
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
-                        <span className="font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
-                          #{bid.bidId}
-                        </span>
-                        {bid.orgName && (
-                          <span>
-                            <span className="text-slate-400">Organization:</span> {bid.orgName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <StatusPill status={bid.status} label={computedStatusLabel(bid)} />
-                  </div>
-
-                  {/* Progress */}
-                  <div className="mt-6 space-y-3">
-                    <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                      <p>
-                        Milestones completed{' '}
-                        <span className="font-semibold text-slate-900">
-                          {done}
-                          <span className="text-slate-400"> / {total}</span>
-                        </span>
-                      </p>
-                      <p className="font-mono text-xs uppercase tracking-[0.3em] text-slate-400">{progress}%</p>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-sky-400 transition-[width] duration-500"
-                        style={{ width: `${progress}%` }}
-                      />
+            return (
+              <div
+                key={bid.bidId}
+                className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-1">
+                    <h3 className="truncate text-lg font-semibold text-slate-900">{bid.title}</h3>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
+                      <span className="font-mono text-xs text-slate-400">#{bid.bidId}</span>
+                      {bid.orgName && (
+                        <span><span className="text-slate-400">Organization:</span> {bid.orgName}</span>
+                      )}
                     </div>
                   </div>
+                  <StatusPill status={bid.status} label={computedStatusLabel(bid)} />
+                </div>
 
-                  {/* Actions */}
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    <Link
-                      href={`/vendor/bids/${bid.bidId}`}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                      title="Open bid details and interact with Agent 2"
-                    >
-                      View / Agent 2
-                    </Link>
+                {/* Progress */}
+                <div className="mt-5 space-y-2">
+                  <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                      Milestones completed{' '}
+                      <span className="font-medium text-slate-900">
+                        {done}
+                        <span className="text-slate-400"> / {total}</span>
+                      </span>
+                    </p>
+                    <p className="font-mono text-xs text-slate-500">{progress}%</p>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-slate-900 transition-[width] duration-500"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
 
-                    {bid.status?.toLowerCase() === 'approved' && (
-                      <>
-                        <Link
-                          href={`/vendor/proof/${bid.bidId}`}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:from-sky-600 hover:to-indigo-600"
-                        >
-                          Submit Proof
-                        </Link>
-                        <button
-                          onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          Copy Wallet Address
-                        </button>
-                      </>
-                    )}
+                {/* Actions */}
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <Link
+                    href={`/vendor/bids/${bid.bidId}`}
+                    className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-black"
+                    title="Open bid details and interact with Agent 2"
+                  >
+                    View / Agent 2
+                  </Link>
 
-                    {canArchive && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onArchive(bid.bidId);
-                        }}
-                        disabled={isArchiving}
-                        className={[
-                          'inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition',
-                          'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100',
-                          'disabled:cursor-not-allowed disabled:opacity-60',
-                        ].join(' ')}
-                        title="Move this bid to Archived"
+                  {bid.status?.toLowerCase() === 'approved' && (
+                    <>
+                      <Link
+                        href={`/vendor/proof/${bid.bidId}`}
+                        className="inline-flex items-center justify-center rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
                       >
-                        {isArchiving ? 'Archiving…' : 'Move to Archived'}
+                        Submit Proof
+                      </Link>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
+                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                      >
+                        Copy Wallet Address
                       </button>
-                    )}
-                  </div>
+                    </>
+                  )}
 
-                  {/* Quick facts */}
-                  <div className="mt-8 grid gap-4 md:grid-cols-4">
-                    <InfoTile
-                      label="Your Bid"
-                      value={`$${Number(bid.priceUSD).toLocaleString()}`}
-                      accent="text-emerald-600"
-                    />
-                    <InfoTile label="Timeline" value={`${bid.days} days`} />
-                    <InfoTile
-                      label="Payment"
-                      value={`${bid.preferredStablecoin}`}
-                      helper={`to ${bid.walletAddress}`}
-                    />
-                    <InfoTile label="Status" value={computedStatusLabel(bid)} />
-                  </div>
-
-                  {/* Submitted proofs */}
-                  {bid.proofs?.length > 0 && (
-                    <div className="mt-8 border-t border-slate-200 pt-6">
-                      <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Submitted Proofs
-                      </h3>
-                      <div className="mt-4 grid gap-3">
-                        {bid.proofs.map((p: any, i: number) => (
-                          <div key={i} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                            <p className="text-sm text-slate-700 whitespace-pre-line">
-                              {p.description || 'No description'}
-                            </p>
-                            {p.files?.length > 0 && (
-                              <ul className="mt-3 space-y-1">
-                                {p.files.map((f: any, j: number) => (
-                                  <li key={j} className="text-sm">
-                                    <a
-                                      href={f.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-emerald-600 underline-offset-4 hover:text-emerald-500 hover:underline"
-                                    >
-                                      {f.name}
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            <span
-                              className={`mt-4 inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] ${
-                                p.status === 'approved'
-                                  ? 'bg-emerald-100 text-emerald-700'
-                                  : p.status === 'rejected'
-                                  ? 'bg-rose-100 text-rose-700'
-                                  : 'bg-amber-100 text-amber-700'
-                              }`}
-                            >
-                              {p.status || 'pending'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                  {canArchive && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onArchive(bid.bidId);
+                      }}
+                      disabled={isArchiving}
+                      className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Move this bid to Archived"
+                    >
+                      {isArchiving ? 'Archiving…' : 'Move to Archived'}
+                    </button>
                   )}
                 </div>
-              );
-            })}
 
-            {filtered.length === 0 && (
-              <div className="rounded-3xl border border-slate-200 bg-white/90 p-12 text-center shadow-xl">
-                <div className="mb-4 text-5xl">🗂️</div>
-                <h2 className="mb-2 text-xl font-semibold text-slate-900">No bids in this view</h2>
-                <p className="mb-6 text-sm text-slate-500">Try a different tab or clear your search.</p>
-                <Link
-                  href="/projects"
-                  className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-emerald-500 to-sky-500 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:from-emerald-600 hover:to-sky-600"
-                >
-                  Browse Projects
-                </Link>
+                {/* Quick facts */}
+                <div className="mt-6 grid gap-4 md:grid-cols-4">
+                  <InfoTile
+                    label="Your Bid"
+                    value={`$${Number(bid.priceUSD).toLocaleString()}`}
+                    accent="text-slate-900"
+                  />
+                  <InfoTile label="Timeline" value={`${bid.days} days`} />
+                  <InfoTile
+                    label="Payment"
+                    value={`${bid.preferredStablecoin}`}
+                    helper={`to ${bid.walletAddress}`}
+                  />
+                  <InfoTile label="Status" value={computedStatusLabel(bid)} />
+                </div>
+
+                {/* Submitted proofs */}
+                {bid.proofs?.length > 0 && (
+                  <div className="mt-6 border-t border-slate-200 pt-5">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Submitted Proofs</h4>
+                    <div className="mt-3 grid gap-3">
+                      {bid.proofs.map((p: any, i: number) => (
+                        <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                          <p className="whitespace-pre-line text-sm text-slate-700">
+                            {p.description || 'No description'}
+                          </p>
+                          {p.files?.length > 0 && (
+                            <ul className="mt-3 space-y-1">
+                              {p.files.map((f: any, j: number) => (
+                                <li key={j} className="text-sm">
+                                  <a
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-slate-900 underline-offset-4 hover:underline"
+                                  >
+                                    {f.name}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <span
+                            className={`mt-4 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                              p.status === 'approved'
+                                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200'
+                                : p.status === 'rejected'
+                                ? 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200'
+                                : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200'
+                            }`}
+                          >
+                            {p.status || 'pending'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
+            );
+          })}
+
+          {filtered.length === 0 && (
+            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+              <div className="mb-3 text-4xl">🗂️</div>
+              <h3 className="mb-1 text-lg font-semibold text-slate-900">No bids in this view</h3>
+              <p className="mb-6 text-sm text-slate-500">Try a different tab or clear your search.</p>
+              <Link
+                href="/projects"
+                className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-black"
+              >
+                Browse Projects
+              </Link>
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
@@ -516,8 +501,8 @@ export default function VendorDashboard() {
 function BalanceCard({ label, value }: { label: string; value?: string }) {
   const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
   return (
-    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-inner">
-      <div className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">{label} Balance</div>
+    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-inner">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label} Balance</div>
       <div className="mt-2 text-2xl font-semibold text-slate-900 tabular-nums">{display}</div>
     </div>
   );
@@ -526,16 +511,16 @@ function BalanceCard({ label, value }: { label: string; value?: string }) {
 function StatusPill({ status, label }: { status: string; label: string }) {
   const cls =
     status === 'approved'
-      ? 'bg-emerald-100 text-emerald-700'
+      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200'
       : status === 'completed'
-      ? 'bg-sky-100 text-sky-700'
+      ? 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200'
       : status === 'rejected'
-      ? 'bg-rose-100 text-rose-700'
+      ? 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200'
       : status === 'archived'
-      ? 'bg-slate-200 text-slate-600'
-      : 'bg-amber-100 text-amber-700';
+      ? 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200'
+      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200';
   return (
-    <span className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.3em] ${cls}`}>
+    <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${cls}`}>
       {label}
     </span>
   );
@@ -553,10 +538,10 @@ function InfoTile({
   accent?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{label}</p>
+    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className={[`mt-2 text-lg font-semibold`, accent || 'text-slate-900'].join(' ')}>{value}</p>
-      {helper && <p className="mt-1 text-xs text-slate-500 break-all">{helper}</p>}
+      {helper && <p className="mt-1 break-all text-xs text-slate-500">{helper}</p>}
     </div>
   );
 }
