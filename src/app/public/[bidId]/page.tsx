@@ -329,64 +329,62 @@ export default function PublicProjectDetailClient() {
               </section>
             )}
 
-            {tab === 'files' && (
-              <section className="space-y-4">
-                {(!proofs || proofs.length === 0) && (
-                  <p className="text-gray-500">No public milestones/proofs yet.</p>
-                )}
-                {Array.isArray(proofs) &&
-                  proofs.map((p: any) => (
-                    <div key={p.proofId || `${p.milestoneIndex}-p`} className="rounded-lg border p-4">
-                      <div className="text-sm font-medium">
-                        Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-                      </div>
-                      {p.publicText && (
-                        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
-                      )}
-                      {Array.isArray(p.files) && p.files.length > 0 && (
-                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {p.files.map((f: any, idx: number) => (
-                            <a
-                              key={idx}
-                              href={f.url}
-                              target="_blank"
-                              className="block rounded-lg border overflow-hidden"
-                              rel="noreferrer"
-                            >
- {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-  <div className="relative w-full aspect-video">
-    <Image
-      src={f.url}
-      alt={f.name || `file ${idx + 1}`}
-      fill
-      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-      style={{ objectFit: "cover" }}
-    />
-  </div>
-) : (
-  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-    {f.name || 'file'}
- </div>
-)}
-{p.submittedAt && (
-  <div className="mt-1 text-xs text-gray-500">
-    Submitted {new Date(p.submittedAt).toLocaleString()}
-  </div>
-)}
-</div>
-</div> {/* extra closing for an outer container opened above */}
-))}
-              </section>
-            )}
-
-            {tab === 'audit' && (
-              <section>
-                <AuditPanel events={events} milestoneNames={milestoneNames} initialDays={3} />
-              </section>
-            )}
+{tab === 'files' && (
+  <section className="space-y-4">
+    {(!proofs || proofs.length === 0) && (
+      <p className="text-gray-500">No public milestones/proofs yet.</p>
+    )}
+    {Array.isArray(proofs) &&
+      proofs.map((p: any) => (
+        <div key={p.proofId || `${p.milestoneIndex}-p`} className="rounded-lg border p-4">
+          <div className="text-sm font-medium">
+            Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
           </div>
-        </>
-      )}
-    </div>
-  );
-}
+
+          {p.publicText && (
+            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>
+          )}
+
+          {Array.isArray(p.files) && p.files.length > 0 && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {p.files.map((f: any, idx: number) => {
+                const url = String(f.url || '');
+                const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(url);
+                return (
+                  <a
+                    key={idx}
+                    href={url}
+                    target="_blank"
+                    className="block rounded-lg border overflow-hidden"
+                    rel="noreferrer"
+                  >
+                    {isImg ? (
+                      <div className="relative w-full aspect-video">
+                        <Image
+                          src={url}
+                          alt={f.name || `file ${idx + 1}`}
+                          fill
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                          style={{ objectFit: 'cover' }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                        {f.name || 'file'}
+                      </div>
+                    )}
+                  </a>
+                );
+              })}
+            </div>
+          )}
+
+          {p.submittedAt && (
+            <div className="mt-1 text-xs text-gray-500">
+              Submitted {new Date(p.submittedAt).toLocaleString()}
+            </div>
+          )}
+        </div>
+      ))}
+  </section>
+)}
