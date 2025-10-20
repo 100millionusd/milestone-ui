@@ -354,12 +354,9 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method || 'GET').toString().toUpperCase();
 
-  // Ensure leading slash and cache-bust GETs
-  const basePath = path.startsWith('/') ? path : `/${path}`;
-  const fullPath =
-    method === 'GET'
-      ? `${basePath}${basePath.includes('?') ? '&' : '?'}_ts=${Date.now()}`
-      : basePath;
+ // Ensure leading slash (no cache-busting)
+const basePath = path.startsWith('/') ? path : `/${path}`;
+const fullPath = basePath;
 
   // Only set Content-Type when not FormData and caller didn't set it
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -374,26 +371,24 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   const ssrForward = !isBrowser ? await getServerForwardHeaders() : {};
 
   const headers: Record<string, string> = {
-    Accept: 'application/json',
-    Pragma: 'no-cache',
-    'Cache-Control': 'no-cache',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options.headers as any),
-    ...ssrForward,
-  };
+  Accept: 'application/json',
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  ...(options.headers as any),
+  ...ssrForward,
+};
 
   if (!callerCT && !isFormData && options.body != null) {
     headers['Content-Type'] = 'application/json';
   }
 
   const init: RequestInit = {
-    ...options,
-    cache: 'no-store',
-    mode: 'cors',
-    redirect: 'follow',
-    credentials: 'include',
-    headers,
-  };
+  ...options,
+  cache: isBrowser ? 'no-store' : (options.cache ?? 'force-cache'),
+  mode: 'cors',
+  redirect: 'follow',
+  credentials: 'include',
+  headers,
+};
 
   // Use the resilient base resolver (API_BASE → '' → '/api')
   const r = await fetchWithFallback(fullPath, init);
