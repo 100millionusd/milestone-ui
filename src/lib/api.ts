@@ -1359,6 +1359,9 @@ type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReaso
 // Per-bid cache so 5 lookups -> 1 request
 const __ARCH_CACHE: Record<number, Promise<Record<number, ArchiveInfo>>> = {};
 
+// Bulk archive cache for multiple bids
+let __BULK_ARCH_CACHE: Record<number, Record<number, ArchiveInfo>> = {};
+
 /** Fetch many milestone statuses at once. */
 export async function getMilestonesArchiveMap(
   bidId: number,
@@ -1375,50 +1378,20 @@ export async function getMilestonesArchiveMap(
 
 /** Backwards-compatible: returns one index, but internally batches & caches. */
 export async function getMilestoneArchive(bidId: number, milestoneIndex: number): Promise<ArchiveInfo> {
+  // If we already have this bid's data in bulk cache, use it
+  if (__BULK_ARCH_CACHE[bidId]?.[milestoneIndex] !== undefined) {
+    return __BULK_ARCH_CACHE[bidId][milestoneIndex];
+  }
+
+  // Fallback to individual request (existing behavior)
   if (!__ARCH_CACHE[bidId]) {
-    // First call for this bidId -> fetch whole set once
     __ARCH_CACHE[bidId] = getMilestonesArchiveMap(bidId, [0, 1, 2, 3, 4]);
   }
   const map = await __ARCH_CACHE[bidId];
   return map[milestoneIndex] ?? { archived: false };
 }
 
-/** Archive ONE milestone via batch endpoint (then invalidate cache). */
-export async function archiveMilestone(
-  bidId: number,
-  milestoneIndex: number,
-  reason?: string
-): Promise<{ ok: true; count: number }> {
-  const res = await fetch('/api/milestones/bulk-archive', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'omit',
-    body: JSON.stringify({ items: [{ bidId, milestoneIndex, reason: reason ?? '' }] }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  delete __ARCH_CACHE[bidId]; // cache invalidation
-  return res.json();
-}
-
-/** Unarchive ONE milestone via batch endpoint (then invalidate cache). */
-export async function unarchiveMilestone(
-  bidId: number,
-  milestoneIndex: number
-): Promise<{ ok: true; count: number }> {
-  const res = await fetch('/api/milestones/bulk-archive', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'omit',
-    body: JSON.stringify({ items: [{ bidId, milestoneIndex }] }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  delete __ARCH_CACHE[bidId]; // cache invalidation
-  return res.json();
-}
-
-// ADD TO YOUR EXISTING api.ts file - in the milestone archive helpers section
-
-// Bulk archive status - uses your existing route
+/** Bulk archive status - uses your existing route */
 export async function getBulkArchiveStatus(bidIds: number[]): Promise<Record<number, Record<number, ArchiveInfo>>> {
   if (!bidIds.length) return {};
   
@@ -1435,24 +1408,6 @@ export async function getBulkArchiveStatus(bidIds: number[]): Promise<Record<num
   return res.json();
 }
 
-// Cache for bulk archive data
-let __BULK_ARCH_CACHE: Record<number, Record<number, ArchiveInfo>> = {};
-
-// Update the existing getMilestoneArchive to use bulk cache
-export async function getMilestoneArchive(bidId: number, milestoneIndex: number): Promise<ArchiveInfo> {
-  // If we already have this bid's data in bulk cache, use it
-  if (__BULK_ARCH_CACHE[bidId]?.[milestoneIndex] !== undefined) {
-    return __BULK_ARCH_CACHE[bidId][milestoneIndex];
-  }
-  
-  // Fallback to individual request (existing behavior)
-  if (!__ARCH_CACHE[bidId]) {
-    __ARCH_CACHE[bidId] = getMilestonesArchiveMap(bidId, [0, 1, 2, 3, 4]);
-  }
-  const map = await __ARCH_CACHE[bidId];
-  return map[milestoneIndex] ?? { archived: false };
-}
-
 // Function to update the bulk cache
 export function updateBulkArchiveCache(data: Record<number, Record<number, ArchiveInfo>>) {
   __BULK_ARCH_CACHE = { ...__BULK_ARCH_CACHE, ...data };
@@ -1465,6 +1420,41 @@ export function clearBulkArchiveCache(bidId?: number) {
   } else {
     __BULK_ARCH_CACHE = {};
   }
+}
+
+/** Archive ONE milestone via batch endpoint (then invalidate cache). */
+export async function archiveMilestone(
+  bidId: number,
+  milestoneIndex: number,
+  reason?: string
+): Promise<{ ok: true; count: number }> {
+  const res = await fetch('/api/milestones/bulk-archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ items: [{ bidId, milestoneIndex, reason: reason ?? '' }] }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  delete __ARCH_CACHE[bidId]; // cache invalidation
+  clearBulkArchiveCache(bidId); // clear bulk cache for this bid
+  return res.json();
+}
+
+/** Unarchive ONE milestone via batch endpoint (then invalidate cache). */
+export async function unarchiveMilestone(
+  bidId: number,
+  milestoneIndex: number
+): Promise<{ ok: true; count: number }> {
+  const res = await fetch('/api/milestones/bulk-archive', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ items: [{ bidId, milestoneIndex }] }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  delete __ARCH_CACHE[bidId]; // cache invalidation
+  clearBulkArchiveCache(bidId); // clear bulk cache for this bid
+  return res.json();
 }
 // ---- Public projects (read-only, no auth) ----
 

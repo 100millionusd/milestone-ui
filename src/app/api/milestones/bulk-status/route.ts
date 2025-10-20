@@ -1,4 +1,4 @@
-// src/app/api/milestones/bulk-status/route.ts
+// UPDATE your existing /api/milestones/bulk-status/route.ts
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
@@ -8,16 +8,26 @@ export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
 /**
- * GET /api/milestones/bulk-status?bidId=123&indices=0,1,2,3,4
- * Returns a map: { [milestoneIndex]: { archived:boolean, archivedAt?:string|null, archiveReason?:string|null } }
+ * GET /api/milestones/bulk-status?bidIds=1,2,3
+ * Returns a nested map: { [bidId]: { [milestoneIndex]: { archived:boolean, archivedAt?:string|null, archiveReason?:string|null } } }
  */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const bidId = Number(searchParams.get('bidId'));
-    if (!Number.isFinite(bidId)) {
+    const bidIdsParam = searchParams.get('bidIds');
+    
+    if (!bidIdsParam) {
       return NextResponse.json(
-        { error: 'bad_request', message: 'bidId required' },
+        { error: 'bad_request', message: 'bidIds required' },
+        { status: 400 }
+      );
+    }
+
+    const bidIds = bidIdsParam.split(',').map(Number).filter(Number.isFinite);
+    
+    if (!bidIds.length) {
+      return NextResponse.json(
+        { error: 'bad_request', message: 'No valid bidIds' },
         { status: 400 }
       );
     }
@@ -32,12 +42,13 @@ export async function GET(req: Request) {
       if (!indices.length) indices = null;
     }
 
-    const where: any = { bidId };
+    const where: any = { bidId: { in: bidIds } };
     if (indices) where.milestoneIndex = { in: indices };
 
     const rows = await prisma.milestone.findMany({
       where,
       select: {
+        bidId: true,
         milestoneIndex: true,
         archived: true,
         archivedAt: true,
@@ -45,24 +56,39 @@ export async function GET(req: Request) {
       },
     });
 
-    const out: Record<number, { archived: boolean; archivedAt?: string | null; archiveReason?: string | null }> = {};
+    // Create nested structure: { bidId: { milestoneIndex: archiveInfo } }
+    const out: Record<number, Record<number, { archived: boolean; archivedAt?: string | null; archiveReason?: string | null }>> = {};
 
-    // If caller sent indices, initialize all to false
-    if (indices) {
-      for (const i of indices) out[i] = { archived: false };
-    }
+    // Initialize all requested bidIds
+    bidIds.forEach(bidId => {
+      out[bidId] = {};
+    });
 
-    // Fill with DB hits
-    for (const r of rows) {
-      out[r.milestoneIndex] = {
-        archived: !!r.archived,
-        archivedAt: r.archivedAt ? r.archivedAt.toISOString() : null,
-        archiveReason: r.archiveReason ?? null,
+    // Fill with data from database
+    rows.forEach(row => {
+      if (!out[row.bidId]) {
+        out[row.bidId] = {};
+      }
+      out[row.bidId][row.milestoneIndex] = {
+        archived: !!row.archived,
+        archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+        archiveReason: row.archiveReason ?? null,
       };
-    }
+    });
+
+    // Fill missing milestones with default values
+    bidIds.forEach(bidId => {
+      const milestoneIndices = indices || [0, 1, 2, 3, 4]; // Default to first 5 milestones
+      milestoneIndices.forEach(index => {
+        if (out[bidId][index] === undefined) {
+          out[bidId][index] = { archived: false };
+        }
+      });
+    });
 
     return NextResponse.json(out, { status: 200 });
   } catch (e: any) {
+    console.error('Bulk status error:', e);
     return NextResponse.json(
       { error: 'server_error', message: String(e?.message || e) },
       { status: 500 }
