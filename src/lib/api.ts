@@ -1156,7 +1156,7 @@ export async function approveProof(proofId: number, note?: string): Promise<Proo
 }
 
 export async function getProofs(bidId?: number | string): Promise<Proof[]> {
-  // If a bidId was provided, coerce & validate it, then call the query-param route
+  // If bidId provided → coerce & validate
   if (bidId != null) {
     const id = Number(bidId);
     if (!Number.isFinite(id)) {
