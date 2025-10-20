@@ -1,6 +1,4 @@
-Here you go — cleaned content for `apps/core/src/app/vendor/dashboard/page.tsx` (all leading `+` removed):
-
-```tsx
+cat > src/app/vendor/dashboard/page.tsx <<'TSX'
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -97,7 +95,7 @@ export default function VendorDashboard() {
   const loadBalances = async () => {
     if (!address) return;
     try {
-      let ethersProvider: ethers.Provider;
+      let ethersProvider: any;
       if (provider) {
         ethersProvider = new ethers.BrowserProvider(provider as any);
       } else {
@@ -229,7 +227,7 @@ export default function VendorDashboard() {
     <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.18),_transparent_62%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(15,23,42,0.99))]" />
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="relative z-10 mx-auto w/full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         {/* Hero */}
         <div className="mb-12 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)]">
           <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-8 shadow-2xl backdrop-blur">
@@ -275,7 +273,7 @@ export default function VendorDashboard() {
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-8 shadow-xl backdrop-blur">
-            <h2 className="text-base font-semibold text-white">Send Funds</h2>
+            <h2 className="text/base font-semibold text-white">Send Funds</h2>
             <p className="mt-1 text-sm text-slate-400">
               Transfer project payments directly from your connected wallet.
             </p>
@@ -540,4 +538,8 @@ function InfoTile({
     </div>
   );
 }
-```
+TSX
+
+git add src/app/vendor/dashboard/page.tsx \
+&& git commit -m "Fix vendor dashboard: remove prose/markdown from TSX" \
+&& git push
