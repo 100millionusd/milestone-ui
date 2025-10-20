@@ -1155,18 +1155,13 @@ export async function approveProof(proofId: number, note?: string): Promise<Proo
   return toProof(p);
 }
 
-export async function getProofs(bidId?: number | string): Promise<Proof[]> {
-  // If a bidId was provided, coerce & validate it, then call the query-param route
-  if (bidId != null) {
-    const id = Number(bidId);
-    if (!Number.isFinite(id)) {
-      throw new Error(`getProofs: invalid bidId "${bidId}"`);
-    }
-    const rows = await apiFetch(`/proofs?bidId=${encodeURIComponent(String(id))}`);
+export async function getProofs(bidId?: number): Promise<Proof[]> {
+  if (Number.isFinite(bidId as number)) {
+    // vendor-safe (server should allow admin OR bid owner)
+    const rows = await apiFetch(`/proofs/${encodeURIComponent(String(bidId))}`);
     return (Array.isArray(rows) ? rows : []).map(toProof);
   }
-
-  // No bidId → admin list (unchanged behavior)
+  // no bidId → admin list (still admin-only)
   const rows = await apiFetch(`/proofs`);
   return (Array.isArray(rows) ? rows : []).map(toProof);
 }
@@ -1585,7 +1580,6 @@ export default {
   testConnection,
   postJSON,
 };
-
 
 
 
