@@ -196,7 +196,7 @@ export default function AgentDigestWidget() {
       )}
 
       {/* list */}
-      <ul className="space-y-2 max-h-72 overflow-auto pr-1">
+      <ul className="space-y-2 max-h-48 overflow-auto pr-1">
         {items.map((it) => {
           const ts =
             (it as any).updated_at ||
