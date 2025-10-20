@@ -38,7 +38,7 @@ export default function VendorBidDetailPage() {
 
       try {
         // load server identity (cookie/JWT)
-        const auth = await api.getAuthRoleOnce(); // { address, role } | { role: 'guest' }
+        const auth = await api.getAuthRole(); // { address, role } | { role: 'guest' }
         setWho(auth);
       } catch {
         setWho(null);

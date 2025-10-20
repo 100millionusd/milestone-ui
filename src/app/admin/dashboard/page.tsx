@@ -75,7 +75,7 @@ export default function AdminDashboardPage() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRoleOnce();
+        const info = await getAuthRole();
         if (!alive) return;
         setRole((info?.role ?? 'guest') as Role);
       } catch {
