@@ -48,7 +48,7 @@ export default function VendorDashboard() {
 
   // Track archiving state per-bid to disable button and show "Archiving…"
   const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
-  // NEW: slide-over for SendFunds (no function changes, purely UI)
+  // Slide-over control for SendFunds (UI only)
   const [sendOpen, setSendOpen] = useState(false);
 
   useEffect(() => {
@@ -278,24 +278,26 @@ export default function VendorDashboard() {
             </div>
           </div>
 
-          {/* COMPACT payment tile instead of huge form */}
-          <div className="rounded-lg border border-slate-200 bg-white p-6">
+          {/* PAYMENT: Strongly contrasted tile */}
+          <div className="rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 p-6 text-white shadow">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">Quick Transfer</h2>
-                <p className="mt-1 text-sm text-slate-500">Open the transfer panel when you need it.</p>
+                <h2 className="text-base font-semibold">Quick Transfer</h2>
+                <p className="mt-1 text-sm text-white/80">Fast payouts from your connected wallet.</p>
               </div>
-              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+              <span className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-white ring-1 ring-inset ring-white/20">
                 Secure
               </span>
             </div>
-            <div className="mt-4">
+            <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 onClick={() => setSendOpen(true)}
-                className="inline-flex items-center justify-center rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
+                className="inline-flex items-center justify-center rounded-md bg-white/10 px-3.5 py-2 text-sm font-semibold text-white hover:bg-white/20 ring-1 ring-inset ring-white/20"
+                title="Open transfer panel"
               >
-                Open Transfer Panel
+                Send Funds
               </button>
+              <span className="text-xs text-white/70">USDT / USDC</span>
             </div>
           </div>
         </section>
@@ -331,8 +333,13 @@ export default function VendorDashboard() {
           </div>
         </section>
 
+        {/* Projects & Milestones header */}
+        <div className="mt-6 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">Projects & Milestones</h2>
+        </div>
+
         {/* Bid list */}
-        <section className="mt-6 space-y-6">
+        <section className="mt-3 space-y-6">
           {filtered.map((bid) => {
             const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
             const done = ms.filter((m: any) => m.completed).length;
@@ -360,17 +367,16 @@ export default function VendorDashboard() {
                   <StatusPill status={bid.status} label={computedStatusLabel(bid)} />
                 </div>
 
-                {/* Progress */}
+                {/* Milestones */}
                 <div className="mt-5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Milestones</h4>
+                    <p className="font-mono text-xs text-slate-500">{progress}%</p>
+                  </div>
                   <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
                     <p>
-                      Milestones completed{' '}
-                      <span className="font-medium text-slate-900">
-                        {done}
-                        <span className="text-slate-400"> / {total}</span>
-                      </span>
+                      Completed <span className="font-medium text-slate-900">{done}<span className="text-slate-400"> / {total}</span></span>
                     </p>
-                    <p className="font-mono text-xs text-slate-500">{progress}%</p>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full rounded-full bg-slate-900 transition-[width] duration-500" style={{ width: `${progress}%` }} />
