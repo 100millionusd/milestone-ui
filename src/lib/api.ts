@@ -455,7 +455,7 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
 }
 
 // ---- Auth ----
-export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
+export async function getAuthRoleOnce(opts?: { address?: string }): Promise<AuthInfo> {
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
     const r = await apiFetch(`/auth/role${q}`);
@@ -470,7 +470,7 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
 }
 
 export async function getAuthRoleOnce(): Promise<AuthInfo> {
-  return getAuthRole(); // Simple fallback - no caching for now
+  return getAuthRoleOnce(); // Simple fallback - no caching for now
 }
 
 // ---- Role: coalesced + TTL cache (single fetch per 30s) ----

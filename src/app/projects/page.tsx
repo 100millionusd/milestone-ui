@@ -110,7 +110,7 @@ export default function ProjectsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRoleOnce();
         const role = String(info?.role ?? 'guest');
         const vendorStatus = String(info?.vendorStatus ?? 'pending').toLowerCase();
 

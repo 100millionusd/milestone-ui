@@ -49,7 +49,7 @@ export default function AdminVendorsPage() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRoleOnce();
         if (!alive) return;
         setRole((info?.role ?? 'guest') as Role);
       } catch {

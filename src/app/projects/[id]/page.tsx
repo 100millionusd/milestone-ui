@@ -265,7 +265,7 @@ export default function ProjectDetailPage() {
 
   // Auth (for Admin tab & Edit btn)
   useEffect(() => {
-    getAuthRole().then(setMe).catch(() => {});
+    getAuthRoleOnce().then(setMe).catch(() => {});
   }, []);
 
   // Fetch proofs (always from local /api/proofs unless explicitly overridden)

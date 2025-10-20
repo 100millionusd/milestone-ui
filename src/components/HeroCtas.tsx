@@ -15,7 +15,7 @@ export default function HeroCtas({ className = '' }: { className?: string }) {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRoleOnce();
         if (alive) setRole(info.role);
       } catch {
         if (alive) setRole('guest');

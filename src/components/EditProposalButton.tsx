@@ -14,7 +14,7 @@ export default function EditProposalButton({ proposalId, ownerWallet, className 
   const [auth, setAuth] = useState<AuthInfo>({ role: 'guest' });
 
   useEffect(() => {
-    getAuthRole().then(setAuth).catch(() => setAuth({ role: 'guest' }));
+    getAuthRoleOnce().then(setAuth).catch(() => setAuth({ role: 'guest' }));
   }, []);
 
   const isAdmin = auth.role === 'admin';

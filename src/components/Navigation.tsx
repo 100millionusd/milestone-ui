@@ -39,7 +39,7 @@ export default function Navigation() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole(); // calls /auth/role (uses cookie)
+        const info = await getAuthRoleOnce(); // calls /auth/role (uses cookie)
         if (alive) {
           setServerRole(info.role);
           setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any); // ← NEW
