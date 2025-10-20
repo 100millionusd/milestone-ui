@@ -465,6 +465,7 @@ const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
   }, []);
 
   // Prefetch lists so tab counts are correct without clicking any tab
+// Prefetch lists so tab counts are correct without clicking any tab
 useEffect(() => {
   if (!data) return; // wait for /admin/oversight to load once
   let aborted = false;
@@ -497,19 +498,7 @@ useEffect(() => {
         }
       }
 
-      // Proofs (direct list; safe to skip if your backend doesn't expose it)
-      if (proofs == null) {
-        const pr = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (!aborted && pr.ok) {
-          const body = await pr.json();
-          const list = Array.isArray(body) ? body : (body?.proofs ?? []);
-          setProofs(normalizeProofs(list));
-        }
-      }
+      // (intentionally NO direct /proofs prefetch — backend rejects it without bidId)
     } catch { /* ignore network errors here */ }
   })();
 
@@ -534,6 +523,7 @@ useEffect(() => {
   }, [tab]);
 
  // ——— Lazy load Proofs on demand ———
+// ——— Lazy load Proofs on demand ———
 useEffect(() => {
   if (tab !== "proofs" || proofs !== null) return;
 
@@ -543,62 +533,49 @@ useEffect(() => {
       setProofsError(null);
       setProofsLoading(true);
 
-      // 1) Try direct list (some backends support /proofs)
+      // Always aggregate per-bid; do NOT call /proofs without bidId
       let list: any[] = [];
-      try {
-        const res = await fetch(`${api("/proofs")}?t=${Date.now()}`, {
+
+      // ensure we have bids
+      let bidList = bids;
+      if (!bidList) {
+        const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
           cache: "no-store",
           credentials: "include",
           headers: { Accept: "application/json" },
         });
-        if (res.ok) {
-          const body = await res.json();
-          list = Array.isArray(body) ? body : (body?.proofs ?? []);
-        }
-      } catch { /* ignore */ }
+        const bj = bRes.ok ? await bRes.json() : [];
+        bidList = normalizeBids(bj?.bids ?? bj ?? []);
+        setBids(bidList);
+      }
 
-      // 2) Fallback: fetch per-bid if direct list is empty
-      if (!Array.isArray(list) || list.length === 0) {
-        // ensure we have bids
-        let bidList = bids;
-        if (!bidList) {
-          const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
+      const ids = (bidList || []).map(b => b.id).filter(Boolean);
+      const results: any[] = [];
+
+      // modest concurrency to avoid hammering the API
+      const CONCURRENCY = 6;
+      let idx = 0;
+      async function runBatch() {
+        const batch = ids.slice(idx, idx + CONCURRENCY);
+        idx += CONCURRENCY;
+        const reqs = batch.map(id =>
+          fetch(`${api("/proofs")}?bidId=${id}&t=${Date.now()}`, {
             cache: "no-store",
             credentials: "include",
             headers: { Accept: "application/json" },
-          });
-          const bj = bRes.ok ? await bRes.json() : [];
-          bidList = normalizeBids(bj?.bids ?? bj ?? []);
-          setBids(bidList);
-        }
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
+            .catch(() => [])
+        );
+        const chunks = await Promise.all(reqs);
+        chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+        if (idx < ids.length) await runBatch();
+      }
 
-        const ids = (bidList || []).map(b => b.id).filter(Boolean);
-        const results: any[] = [];
-
-        // modest concurrency to avoid hammering the API
-        const CONCURRENCY = 6;
-        let idx = 0;
-        async function runBatch() {
-          const batch = ids.slice(idx, idx + CONCURRENCY);
-          idx += CONCURRENCY;
-          const reqs = batch.map(id =>
-            fetch(`${api("/proofs")}?bidId=${id}&t=${Date.now()}`, {
-              cache: "no-store",
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then(r => r.ok ? r.json() : null)
-              .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
-              .catch(() => [])
-          );
-          const chunks = await Promise.all(reqs);
-          chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-          if (idx < ids.length) await runBatch();
-        }
-        if (ids.length) {
-          await runBatch();
-          list = results;
-        }
+      if (ids.length) {
+        await runBatch();
+        list = results;
       }
 
       if (!aborted) setProofs(normalizeProofs(list));
