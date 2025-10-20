@@ -166,7 +166,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
       for (const f of fileList) {
         const u = String(f?.url || '');
         if (!u) continue;
-        if (!/\\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\\?|#|$)/i.test(u)) continue;
+        if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
 
         const hasFromApi =
           f?.lat != null || f?.lon != null ||
@@ -514,7 +514,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                         const hasGPS = !!gps;
                         const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
                         const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
-                        const isImg = /\\.(png|jpe?g|webp|gif)(\\?|#|$)/i.test(String(f.url || ''));
+                        const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || ''));
 
                         return (
                           <div
