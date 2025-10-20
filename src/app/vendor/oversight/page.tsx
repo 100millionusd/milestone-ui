@@ -485,8 +485,8 @@ export default function VendorOversightPage() {
       </div>
 
      {/* Agent 2 — What’s New (compact, narrow) */}
-<section className="-mt-4 mb-4">
-  <div className="max-w-md">
+<section className="mb-6">
+  <div className="inline-block align-top w-full max-w-md">
     <AgentDigestWidget />
   </div>
 </section>
