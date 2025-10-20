@@ -1,8 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import AuditPanel from '@/components/AuditPanel';
+import Image from 'next/image';
 
 function usd(n: number) {
   try {
@@ -156,44 +156,43 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [approvedOnly, setApprovedOnly] = useState(false); // default to "All" so content shows
 
-
   // client-side GPS cache (EXIF fallback)
-const [gpsByUrl, setGpsByUrl] = useState<Record<string, { lat: number; lon: number }>>({});
+  const [gpsByUrl, setGpsByUrl] = useState<Record<string, { lat: number; lon: number }>>({});
 
-useEffect(() => {
-  const want: string[] = [];
-  for (const pr of files || []) {
-    const fileList = Array.isArray(pr?.files) ? pr.files : [];
-    for (const f of fileList) {
-      const u = String(f?.url || '');
-      if (!u) continue;
-      if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
+  useEffect(() => {
+    const want: string[] = [];
+    for (const pr of files || []) {
+      const fileList = Array.isArray(pr?.files) ? pr.files : [];
+      for (const f of fileList) {
+        const u = String(f?.url || '');
+        if (!u) continue;
+        if (!/\\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\\?|#|$)/i.test(u)) continue;
 
-      const hasFromApi =
-        f?.lat != null || f?.lon != null ||
-        (typeof f?.exif?.gpsLatitude === 'number' && typeof f?.exif?.gpsLongitude === 'number');
+        const hasFromApi =
+          f?.lat != null || f?.lon != null ||
+          (typeof f?.exif?.gpsLatitude === 'number' && typeof f?.exif?.gpsLongitude === 'number');
 
-      if (!hasFromApi && !gpsByUrl[u]) want.push(u);
+        if (!hasFromApi && !gpsByUrl[u]) want.push(u);
+      }
     }
-  }
-  if (want.length === 0) return;
+    if (want.length === 0) return;
 
-  let cancelled = false;
-  (async () => {
-    const exifr = (await import('exifr')).default as any;
-    for (const u of want) {
-      try {
-        const g = await exifr.gps(u).catch(() => null);
-        const lat = g?.latitude, lon = g?.longitude;
-        if (!cancelled && Number.isFinite(lat) && Number.isFinite(lon)) {
-          setGpsByUrl(m => ({ ...m, [u]: { lat: Number(lat), lon: Number(lon) } }));
-        }
-      } catch {}
-    }
-  })();
+    let cancelled = false;
+    (async () => {
+      const exifr = (await import('exifr')).default as any;
+      for (const u of want) {
+        try {
+          const g = await exifr.gps(u).catch(() => null);
+          const lat = g?.latitude, lon = g?.longitude;
+          if (!cancelled && Number.isFinite(lat) && Number.isFinite(lon)) {
+            setGpsByUrl(m => ({ ...m, [u]: { lat: Number(lat), lon: Number(lon) } }));
+          }
+        } catch {}
+      }
+    })();
 
-  return () => { cancelled = true; };
-}, [files, gpsByUrl]);
+    return () => { cancelled = true; };
+  }, [files, gpsByUrl]);
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
@@ -358,220 +357,212 @@ useEffect(() => {
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
 
-// ---------- FILES TAB RENDERER ----------
-function renderFilesTab() {
-  // Normalize status for UI filtering:
-  // If API didn't send any status fields AND helper defaulted to "submitted",
-  // treat as "approved" (public page shows only approved proofs).
-  const uiStatus = (p: any) => {
-    const s = getProofStatus(p);
-    if (
-      s === 'submitted' &&
-      !(p?.status || p?.proof_status || p?.proofStatus) &&
-      (p?.approved === true || p?.approvedAt || p?.approved_at || true) // public view bias to approved
-    ) {
-      return 'approved';
-    }
-    if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
-    return s;
-  };
+  // ---------- FILES TAB RENDERER ----------
+  function renderFilesTab() {
+    const uiStatus = (p: any) => {
+      const s = getProofStatus(p);
+      if (
+        s === 'submitted' &&
+        !(p?.status || p?.proof_status || p?.proofStatus) &&
+        (p?.approved === true || p?.approvedAt || p?.approved_at || true)
+      ) {
+        return 'approved';
+      }
+      if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+      return s;
+    };
 
-  const proofsToShow = approvedOnly
-    ? files.filter((p) => uiStatus(p) === 'approved')
-    : files;
+    const proofsToShow = approvedOnly ? files.filter((p) => uiStatus(p) === 'approved') : files;
 
-  const approvedCount = files.filter((p) => uiStatus(p) === 'approved').length;
-  const totalCount = files.length;
+    const approvedCount = files.filter((p) => uiStatus(p) === 'approved').length;
+    const totalCount = files.length;
 
-  return (
-    <>
-      {/* Always show the toggle */}
-      <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
-        <span className="mr-1">Show:</span>
-        <button
-          type="button"
-          aria-pressed={approvedOnly}
-          onClick={() => setApprovedOnly(true)}
-          className={
-            'rounded-full px-2 py-0.5 border ' +
-            (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-          }
-        >
-          Approved only{typeof approvedCount === 'number' ? ` (${approvedCount})` : ''}
-        </button>
-        <button
-          type="button"
-          aria-pressed={!approvedOnly}
-          onClick={() => setApprovedOnly(false)}
-          className={
-            'rounded-full px-2 py-0.5 border ' +
-            (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
-          }
-        >
-          All{typeof totalCount === 'number' ? ` (${totalCount})` : ''}
-        </button>
-      </div>
-
-      {/* Empty state OR grid */}
-      {proofsToShow.length === 0 ? (
-        <div className="text-sm text-gray-500">
-          {approvedOnly ? (
-            <>
-              No approved proofs yet.{` `}
-              <button
-                type="button"
-                onClick={() => setApprovedOnly(false)}
-                className="underline underline-offset-2 ml-1"
-              >
-                Show all
-              </button>
-            </>
-          ) : (
-            'No public milestones/proofs yet.'
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {proofsToShow.map((p, idx) => {
-            // Collect ALL file GPS points & dedupe for the header list
-            const rawPts = Array.isArray(p?.files)
-              ? (p.files.map((f: any) => fileCoords(f)).filter(Boolean) as Array<{
-                  lat: number;
-                  lon: number;
-                  label?: string | null;
-                }>)
-              : [];
-
-            // Fallback to proof-level location if none per-file
-            if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
-              rawPts.push({
-                lat: Number(p.location.approx.lat),
-                lon: Number(p.location.approx.lon),
-                label: p.location.label || null,
-              });
+    return (
+      <>
+        {/* Always show the toggle */}
+        <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+          <span className="mr-1">Show:</span>
+          <button
+            type="button"
+            aria-pressed={approvedOnly}
+            onClick={() => setApprovedOnly(true)}
+            className={
+              'rounded-full px-2 py-0.5 border ' +
+              (approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
             }
-
-            const seen = new Set<string>();
-            const points = rawPts.filter((pt) => {
-              const key = `${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            });
-
-            const st = uiStatus(p); // <-- use normalized status for badge & filtering
-            const badgeCls =
-              st === 'approved'
-                ? 'bg-emerald-100 text-emerald-700'
-                : st === 'rejected'
-                ? 'bg-rose-100 text-rose-700'
-                : st === 'changes_requested'
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-gray-100 text-gray-600';
-
-            return (
-              <div key={p.proofId || idx} className="rounded-lg border p-3">
-                <div className="text-sm font-medium flex items-center justify-between">
-                  <div>
-                    Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
-                  </div>
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeCls}`}>
-                    {st.replace('_', ' ')}
-                  </span>
-                </div>
-
-                {/* Header shows ALL distinct locations across files */}
-                {points.length > 0 && (
-                  <div className="mt-1 text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {points.map((pt, i) => {
-                      const lbl = pt.label || `${pt.lat.toFixed(5)}, ${pt.lon.toFixed(5)}`;
-                      const href = mapsLink(pt.lat, pt.lon, lbl);
-                      return (
-                        <a
-                          key={i}
-                          href={href || '#'}
-                          target={href ? '_blank' : undefined}
-                          rel={href ? 'noreferrer' : undefined}
-                          className={
-                            'underline decoration-dotted underline-offset-2 hover:decoration-solid ' +
-                            (href ? '' : 'pointer-events-none')
-                          }
-                          title="Open in map"
-                        >
-                          📍 {lbl}
-                        </a>
-                      );
-                    })}
-                    {p.takenAt && <span className="text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
-                  </div>
-                )}
-
-                {p.publicText && <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>}
-
-                {/* Grid: GPS label inside each photo that has coordinates */}
-                {Array.isArray(p.files) && p.files.length > 0 && (
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    {p.files.map((f: any, i: number) => {
-                      // 1) try what the API already gave us
-                      let gps = fileCoords(f);
-
-                      // 2) strict fallback: only use client-extracted GPS for THIS file (no proof-level fallback)
-                      if (!gps) {
-                        const hit = gpsByUrl[String(f?.url || '')];
-                        if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
-                          gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
-                        }
-                      }
-
-                      const hasGPS = !!gps;
-                      const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
-                      const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
-
-                      return (
-                        <div
-                          key={i}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setLightboxUrl(String(f.url || ''))}
-                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-                          className={
-                            'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
-                            (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
-                          }
-                          title={hoverTitle}
-                        >
-                          {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                            <img
-                              src={f.url}
-                              alt={f.name || `file ${i + 1}`}
-                              className="w-full aspect-video object-cover"
-                              loading="lazy"
-                              crossOrigin="anonymous"
-                            />
-                          ) : (
-                            <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                              {f.name || 'file'}
-                            </div>
-                          )}
-
-                          {hasGPS && label ? (
-                            <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
-                              📍 {label}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          >
+            Approved only{typeof approvedCount === 'number' ? ` (${approvedCount})` : ''}
+          </button>
+          <button
+            type="button"
+            aria-pressed={!approvedOnly}
+            onClick={() => setApprovedOnly(false)}
+            className={
+              'rounded-full px-2 py-0.5 border ' +
+              (!approvedOnly ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300')
+            }
+          >
+            All{typeof totalCount === 'number' ? ` (${totalCount})` : ''}
+          </button>
         </div>
-      )}
-    </>
-  );
-}
+
+        {/* Empty state OR grid */}
+        {proofsToShow.length === 0 ? (
+          <div className="text-sm text-gray-500">
+            {approvedOnly ? (
+              <>
+                No approved proofs yet.{` `}
+                <button
+                  type="button"
+                  onClick={() => setApprovedOnly(false)}
+                  className="underline underline-offset-2 ml-1"
+                >
+                  Show all
+                </button>
+              </>
+            ) : (
+              'No public milestones/proofs yet.'
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {proofsToShow.map((p, idx) => {
+              const rawPts = Array.isArray(p?.files)
+                ? (p.files.map((f: any) => fileCoords(f)).filter(Boolean) as Array<{
+                    lat: number;
+                    lon: number;
+                    label?: string | null;
+                  }>)
+                : [];
+
+              if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
+                rawPts.push({
+                  lat: Number(p.location.approx.lat),
+                  lon: Number(p.location.approx.lon),
+                  label: p.location.label || null,
+                });
+              }
+
+              const seen = new Set<string>();
+              const points = rawPts.filter((pt) => {
+                const key = `${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              });
+
+              const st = uiStatus(p);
+              const badgeCls =
+                st === 'approved'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : st === 'rejected'
+                  ? 'bg-rose-100 text-rose-700'
+                  : st === 'changes_requested'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-gray-100 text-gray-600';
+
+              return (
+                <div key={p.proofId || idx} className="rounded-lg border p-3">
+                  <div className="text-sm font-medium flex items-center justify-between">
+                    <div>
+                      Milestone {Number(p.milestoneIndex) + 1}: {p.title || 'Submission'}
+                    </div>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeCls}`}>
+                      {st.replace('_', ' ')}
+                    </span>
+                  </div>
+
+                  {points.length > 0 && (
+                    <div className="mt-1 text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {points.map((pt, i) => {
+                        const lbl = pt.label || `${pt.lat.toFixed(5)}, ${pt.lon.toFixed(5)}`;
+                        const href = mapsLink(pt.lat, pt.lon, lbl);
+                        return (
+                          <a
+                            key={i}
+                            href={href || '#'}
+                            target={href ? '_blank' : undefined}
+                            rel={href ? 'noreferrer' : undefined}
+                            className={
+                              'underline decoration-dotted underline-offset-2 hover:decoration-solid ' +
+                              (href ? '' : 'pointer-events-none')
+                            }
+                            title="Open in map"
+                          >
+                            📍 {lbl}
+                          </a>
+                        );
+                      })}
+                      {p.takenAt && <span className="text-gray-400">• Taken {fmtTakenAt(p.takenAt)}</span>}
+                    </div>
+                  )}
+
+                  {p.publicText && <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{p.publicText}</p>}
+
+                  {Array.isArray(p.files) && p.files.length > 0 && (
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      {p.files.map((f: any, i: number) => {
+                        let gps = fileCoords(f);
+
+                        if (!gps) {
+                          const hit = gpsByUrl[String(f?.url || '')];
+                          if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+                            gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
+                          }
+                        }
+
+                        const hasGPS = !!gps;
+                        const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
+                        const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
+                        const isImg = /\\.(png|jpe?g|webp|gif)(\\?|#|$)/i.test(String(f.url || ''));
+
+                        return (
+                          <div
+                            key={i}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setLightboxUrl(String(f.url || ''))}
+                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                            className={
+                              'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+                              (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+                            }
+                            title={hoverTitle}
+                          >
+                            {isImg ? (
+                              <div className="relative w-full aspect-video">
+                                <Image
+                                  src={String(f.url)}
+                                  alt={f.name || `file ${i + 1}`}
+                                  fill
+                                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                                  style={{ objectFit: 'cover' }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                                {f.name || 'file'}
+                              </div>
+                            )}
+
+                            {hasGPS && label ? (
+                              <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
+                                📍 {label}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  }
 
   // ---------- RENDER ----------
   return (
@@ -584,11 +575,13 @@ function renderFilesTab() {
           onClick={() => project.coverImage && setLightboxUrl(project.coverImage!)}
         >
           {project.coverImage ? (
-            <img
+            <Image
               src={project.coverImage}
               alt={project.proposalTitle || 'cover'}
-              className="h-full w-full object-cover"
-              loading="lazy"
+              fill
+              sizes="(max-width: 768px) 100vw, 33vw"
+              style={{ objectFit: 'cover' }}
+              priority
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
@@ -700,14 +693,23 @@ function renderFilesTab() {
                     <h3 className="text-sm font-medium mb-2">More images</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
-                        <img
+                        <div
                           key={i}
-                          src={u}
-                          alt={`image ${i + 1}`}
-                          className="w-full aspect-video object-cover rounded-lg border"
-                          loading="lazy"
+                          className="relative w-full aspect-video rounded-lg border overflow-hidden cursor-zoom-in"
                           onClick={() => setLightboxUrl(u)}
-                        />
+                          title="Click to zoom"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
+                        >
+                          <Image
+                            src={u}
+                            alt={`image ${i + 1}`}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                            style={{ objectFit: 'cover' }}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -815,12 +817,20 @@ function renderFilesTab() {
           role="dialog"
           aria-modal="true"
         >
-          <img
-            src={lightboxUrl}
-            alt="Zoomed image"
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
+          <div
+            className="relative rounded-lg shadow-2xl bg-black/20"
+            style={{ width: 'min(90vw, 1200px)', height: 'min(90vh, 800px)' }}
             onClick={(e) => e.stopPropagation()}
-          />
+          >
+            <Image
+              src={lightboxUrl}
+              alt="Zoomed image"
+              fill
+              sizes="100vw"
+              style={{ objectFit: 'contain' }}
+              priority
+            />
+          </div>
           <button
             type="button"
             className="absolute top-4 right-4 rounded-full bg-white/90 px-3 py-1 text-sm font-medium shadow"
