@@ -484,10 +484,12 @@ export default function VendorOversightPage() {
         </div>
       </div>
 
-      {/* Agent 2 — What’s New */}
-  <section className="mb-6">
+     {/* Agent 2 — What’s New (compact, narrow) */}
+<section className="-mt-4 mb-4">
+  <div className="max-w-md">
     <AgentDigestWidget />
-  </section>
+  </div>
+</section>
 
       {tab !== 'overview' && (
         <div className="flex items-center justify-end">
