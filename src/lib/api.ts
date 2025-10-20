@@ -470,29 +470,35 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
 }
 
 // ---- Role: coalesced + TTL cache (single fetch per 30s) ----
-type AuthRoleResp = { role?: string; address?: string } | null;
-let _roleInflight: Promise<AuthRoleResp> | null = null;
-let _roleCache: { at: number; data: AuthRoleResp } | null = null;
+let _authRoleMainInflight: Promise<AuthInfo> | null = null;
+let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
 
-export async function getAuthRoleOnce(): Promise<AuthRoleResp> {
+export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
   const now = Date.now();
   // 1) serve cached for 30s
-  if (_roleCache && now - _roleCache.at < 30_000) return _roleCache.data;
+  if (_authRoleMainCache && now - _authRoleMainCache.at < 30_000) return _authRoleMainCache.data;
   // 2) coalesce concurrent callers
-  if (_roleInflight) return _roleInflight;
+  if (_authRoleMainInflight) return _authRoleMainInflight;
 
-  _roleInflight = (async () => {
+  _authRoleMainInflight = (async () => {
     try {
-      // reuse your existing function so base URL / cookies remain consistent
-      const info = await getAuthRole();
-      _roleCache = { at: Date.now(), data: info };
-      return info;
+      const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
+      const r = await apiFetch(`/auth/role${q}`);
+      const result = {
+        address: r?.address ?? undefined,
+        role: (r?.role as AuthInfo["role"]) ?? "guest",
+        vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
+      };
+      _authRoleMainCache = { at: Date.now(), data: result };
+      return result;
+    } catch {
+      return { role: "guest" };
     } finally {
-      _roleInflight = null;
+      _authRoleMainInflight = null;
     }
   })();
 
-  return _roleInflight;
+  return _authRoleMainInflight;
 }
 
 // ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
