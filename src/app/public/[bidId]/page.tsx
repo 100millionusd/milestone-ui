@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getPublicProject } from '@/lib/api';
 import AuditPanel from '@/components/AuditPanel';
+import Image from "next/image";
 
 function usd(n: number) {
   try {
@@ -205,17 +206,18 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={project.coverImage}
-                alt={project.proposalTitle || 'cover'}
-                className="w-full h-auto object-cover"
-              />
-            ) : (
-              <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
-            )}
-          </div>
-
+  <Image
+    src={project.coverImage}
+    alt={project.proposalTitle || 'cover'}
+    width={1600}
+    height={900}
+    sizes="(max-width: 768px) 100vw, 1024px"
+    style={{ width: "100%", height: "auto", objectFit: "cover" }}
+    priority
+  />
+) : (
+  <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
+)}
           {/* tabs */}
           <div className="mt-6 border-b border-gray-200">
             <nav className="-mb-px flex gap-6">
@@ -253,16 +255,17 @@ export default function PublicProjectDetailClient() {
                   <div>
                     <h3 className="text-sm font-medium mb-2">More images</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {project.images.slice(1, 10).map((u: string, i: number) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={i}
-                          src={u}
-                          alt={`image ${i + 1}`}
-                          className="w-full aspect-video object-cover rounded-lg border"
-                          loading="lazy"
-                        />
-                      ))}
+ {project.images.slice(1, 10).map((u: string, i: number) => (
+  <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
+    <Image
+      src={u}
+      alt={`image ${i + 1}`}
+      fill
+      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+      style={{ objectFit: "cover" }}
+    />
+  </div>
+))}
                     </div>
                   </div>
                 )}
@@ -350,23 +353,21 @@ export default function PublicProjectDetailClient() {
                               className="block rounded-lg border overflow-hidden"
                               rel="noreferrer"
                             >
-                              {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={f.url}
-                                  alt={f.name || `file ${idx + 1}`}
-                                  className="w-full aspect-video object-cover"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-                                  {f.name || 'file'}
-                                </div>
-                              )}
-                            </a>
-                          ))}
-                        </div>
-                      )}
+ {/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || '')) ? (
+  <div className="relative w-full aspect-video">
+    <Image
+      src={f.url}
+      alt={f.name || `file ${idx + 1}`}
+      fill
+      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+      style={{ objectFit: "cover" }}
+    />
+  </div>
+) : (
+  <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+    {f.name || 'file'}
+  </div>
+)}
                       <div className="mt-1 text-xs text-gray-500">
                         {p.submittedAt ? `Submitted ${new Date(p.submittedAt).toLocaleString()}` : ''}
                       </div>
