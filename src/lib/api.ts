@@ -455,18 +455,24 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
 }
 
 // ---- Auth ----
-export async function getAuthRoleOnce(opts?: { address?: string }): Promise<AuthInfo> {
-  const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
-  try {
-    const r = await apiFetch(`/auth/role${q}`);
-    return {
-      address: r?.address ?? undefined,
-      role: (r?.role as AuthInfo["role"]) ?? "guest",
-      vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
-    };
-  } catch {
-    return { role: "guest" };
-  }
+let _roleInflight: Promise<AuthInfo> | null = null;
+let _roleCache: { at: number; data: AuthInfo } | null = null;
+
+export function getAuthRoleOnceCached(): Promise<AuthInfo> {
+  const now = Date.now();
+  if (_roleCache && now - _roleCache.at < 30_000) return Promise.resolve(_roleCache.data);
+  if (_roleInflight) return _roleInflight;
+
+  _roleInflight = getAuthRoleOnce().then((info) => {
+    if (info?.role && info.role !== 'guest') {
+      _roleCache = { at: Date.now(), data: info };
+    }
+    return info;
+  }).finally(() => {
+    _roleInflight = null;
+  });
+
+  return _roleInflight;
 }
 
 // ---- Role: coalesced + TTL cache (single fetch per 30s) ----
