@@ -474,6 +474,32 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   }
 }
 
+// ---- Role: coalesced + TTL cache (single fetch per 30s) ----
+type AuthRoleResp = { role?: string; address?: string } | null;
+let _roleInflight: Promise<AuthRoleResp> | null = null;
+let _roleCache: { at: number; data: AuthRoleResp } | null = null;
+
+export async function getAuthRoleOnce(): Promise<AuthRoleResp> {
+  const now = Date.now();
+  // 1) serve cached for 30s
+  if (_roleCache && now - _roleCache.at < 30_000) return _roleCache.data;
+  // 2) coalesce concurrent callers
+  if (_roleInflight) return _roleInflight;
+
+  _roleInflight = (async () => {
+    try {
+      // reuse your existing function so base URL / cookies remain consistent
+      const info = await getAuthRole();
+      _roleCache = { at: Date.now(), data: info };
+      return info;
+    } finally {
+      _roleInflight = null;
+    }
+  })();
+
+  return _roleInflight;
+}
+
 /**
  * Exchange a signed nonce for a JWT cookie (and token).
  * Call flow:
