@@ -1416,6 +1416,56 @@ export async function unarchiveMilestone(
   return res.json();
 }
 
+// ADD TO YOUR EXISTING api.ts file - in the milestone archive helpers section
+
+// Bulk archive status - uses your existing route
+export async function getBulkArchiveStatus(bidIds: number[]): Promise<Record<number, Record<number, ArchiveInfo>>> {
+  if (!bidIds.length) return {};
+  
+  const qs = new URLSearchParams({
+    bidIds: bidIds.join(',')
+  });
+  
+  const res = await fetch(`/api/milestones/bulk-status?${qs.toString()}`, {
+    method: 'GET',
+    credentials: 'omit',
+  });
+  
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Cache for bulk archive data
+let __BULK_ARCH_CACHE: Record<number, Record<number, ArchiveInfo>> = {};
+
+// Update the existing getMilestoneArchive to use bulk cache
+export async function getMilestoneArchive(bidId: number, milestoneIndex: number): Promise<ArchiveInfo> {
+  // If we already have this bid's data in bulk cache, use it
+  if (__BULK_ARCH_CACHE[bidId]?.[milestoneIndex] !== undefined) {
+    return __BULK_ARCH_CACHE[bidId][milestoneIndex];
+  }
+  
+  // Fallback to individual request (existing behavior)
+  if (!__ARCH_CACHE[bidId]) {
+    __ARCH_CACHE[bidId] = getMilestonesArchiveMap(bidId, [0, 1, 2, 3, 4]);
+  }
+  const map = await __ARCH_CACHE[bidId];
+  return map[milestoneIndex] ?? { archived: false };
+}
+
+// Function to update the bulk cache
+export function updateBulkArchiveCache(data: Record<number, Record<number, ArchiveInfo>>) {
+  __BULK_ARCH_CACHE = { ...__BULK_ARCH_CACHE, ...data };
+}
+
+// Clear bulk cache for a specific bid (useful after archive/unarchive operations)
+export function clearBulkArchiveCache(bidId?: number) {
+  if (bidId) {
+    delete __BULK_ARCH_CACHE[bidId];
+  } else {
+    __BULK_ARCH_CACHE = {};
+  }
+}
 // ---- Public projects (read-only, no auth) ----
 
 /**
