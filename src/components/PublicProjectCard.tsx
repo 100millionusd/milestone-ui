@@ -183,7 +183,7 @@ useEffect(() => {
     const exifr = (await import('exifr')).default as any;
 
     const MAX_RANGE_BYTES = 524_287; // ~512 KB
-    const CONCURRENCY = 2;           // gentle; bump to 3 if needed
+    const CONCURRENCY = 4;           // gentle; bump to 3 if needed
 
     async function fetchGpsViaRange(url: string) {
       try {
