@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AdminTabs from '@/components/AdminTabs';
 import { API_BASE, getAuthRole } from '@/lib/api';
+import AgentDigestWidget from "@/components/AgentDigestWidget";
 
 type Role = 'admin' | 'vendor' | 'guest';
 
@@ -133,6 +134,12 @@ export default function AdminDashboardPage() {
           )}
         </div>
       </div>
+
+{/* Agent 2 — What’s New */}
+<section className="mb-4">
+  <AgentDigestWidget />
+</section>
+
 
       <AdminTabs isAdmin={isAdmin} />
 
