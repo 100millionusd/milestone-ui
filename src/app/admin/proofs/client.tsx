@@ -4,12 +4,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   getBids,
+  getBid,
   payMilestone,
   completeMilestone,
   rejectMilestoneProof,
   getMilestoneArchive,
   archiveMilestone,
   unarchiveMilestone,
+  getBulkArchiveStatus,
+  updateBulkArchiveCache,
+  clearBulkArchiveCache,
 } from '@/lib/api';
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
@@ -77,6 +81,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
   );
 
+  // Client-side caching for bids data
+  const [dataCache, setDataCache] = useState<{
+    bids: any[];
+    lastUpdated: number;
+  }>({ bids: [], lastUpdated: 0 });
+
   function addPending(key: string) {
     setPendingPay(prev => {
       const next = new Set(prev);
@@ -108,12 +118,29 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // listen for archive/unarchive from anywhere
   useMilestonesUpdated(loadProofs);
 
-  async function loadProofs() {
+  async function loadProofs(forceRefresh = false) {
+    const CACHE_TTL = 30000; // 30 seconds
+    
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && dataCache.bids.length > 0 && 
+        Date.now() - dataCache.lastUpdated < CACHE_TTL) {
+      setBids(dataCache.bids);
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     try {
-      const allBids = await getBids(); // keep all, filter in UI
+      const allBids = await getBids();
       const rows = Array.isArray(allBids) ? allBids : [];
+      
+      // Update cache
+      setDataCache({
+        bids: rows,
+        lastUpdated: Date.now()
+      });
+      
       setBids(rows);
 
       // Clear local "pending" for any milestones that are now paid
@@ -136,6 +163,41 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function hydrateArchiveStatuses(allBids: any[]) {
+    const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
+    
+    if (uniqueBidIds.length === 0) {
+      setArchMap({});
+      return;
+    }
+
+    try {
+      const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
+      updateBulkArchiveCache(bulkArchiveStatus);
+      
+      const nextMap: Record<string, ArchiveInfo> = { ...archMap };
+      
+      allBids.forEach(bid => {
+        const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
+        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+        
+        ms.forEach((_, index) => {
+          const key = mkKey(bid.bidId, index);
+          if (nextMap[key] === undefined) {
+            nextMap[key] = bidArchiveStatus[index] || { archived: false };
+          }
+        });
+      });
+      
+      setArchMap(nextMap);
+    } catch (error) {
+      console.error('Failed to fetch bulk archive status:', error);
+      // Fallback to individual requests if bulk fails
+      await hydrateArchiveStatusesFallback(allBids);
+    }
+  }
+
+  // Fallback function for individual requests
+  async function hydrateArchiveStatusesFallback(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
     const nextMap: Record<string, ArchiveInfo> = { ...archMap };
 
@@ -259,21 +321,32 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 40, intervalMs = 2000) {
+  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
+    const key = mkKey(bidId, milestoneIndex);
+    
     for (let i = 0; i < tries; i++) {
       try {
-        const all = await getBids();
-        const target = (all || []).find((b: any) => b.bidId === bidId);
-        const m = target?.milestones?.[milestoneIndex];
+        // Only fetch the specific bid, not all bids
+        const bid = await getBid(bidId);
+        const m = bid?.milestones?.[milestoneIndex];
+        
         if (m && isPaid(m)) {
-          removePending(mkKey(bidId, milestoneIndex));
-          await loadProofs();
+          removePending(key);
+          // Only update this specific bid instead of reloading everything
+          setBids(prev => prev.map(b => 
+            b.bidId === bidId ? bid : b
+          ));
           return;
         }
-      } catch {}
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+      
       await new Promise(r => setTimeout(r, intervalMs));
     }
-    removePending(mkKey(bidId, milestoneIndex));
+    
+    // Final attempt with full refresh if polling fails
+    removePending(key);
     await loadProofs();
   }
 
@@ -330,6 +403,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
+      // Clear cache for this bid since archive status changed
+      clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
@@ -349,6 +424,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
+      // Clear cache for this bid since archive status changed
+      clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
@@ -374,7 +451,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const bidId = Number(bidIdStr);
         const idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-          try { await unarchiveMilestone(bidId, idx); } catch {}
+          try { 
+            await unarchiveMilestone(bidId, idx);
+            clearBulkArchiveCache(bidId);
+          } catch {}
         }
       }
       await hydrateArchiveStatuses(bids);
