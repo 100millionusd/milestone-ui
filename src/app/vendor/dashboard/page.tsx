@@ -48,6 +48,8 @@ export default function VendorDashboard() {
 
   // Track archiving state per-bid to disable button and show "Archiving…"
   const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
+  // NEW: slide-over for SendFunds (no function changes, purely UI)
+  const [sendOpen, setSendOpen] = useState(false);
 
   useEffect(() => {
     if (!address) {
@@ -229,6 +231,13 @@ export default function VendorDashboard() {
             <p className="mt-0.5 text-sm text-slate-500">Manage your bids, proofs, and payouts.</p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSendOpen(true)}
+              className="inline-flex items-center justify-center rounded-md bg-teal-600 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
+              title="Start a transfer"
+            >
+              New Transfer
+            </button>
             <div className="hidden text-right sm:block">
               <div className="text-xs text-slate-500">Signed in</div>
               <div className="font-mono text-sm text-slate-700">{shortAddr}</div>
@@ -252,7 +261,7 @@ export default function VendorDashboard() {
 
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Overview */}
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)]">
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <div className="rounded-lg border border-slate-200 bg-white p-6">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
@@ -269,18 +278,24 @@ export default function VendorDashboard() {
             </div>
           </div>
 
+          {/* COMPACT payment tile instead of huge form */}
           <div className="rounded-lg border border-slate-200 bg-white p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">Send Funds</h2>
-                <p className="mt-1 text-sm text-slate-500">Transfer project payments from your connected wallet.</p>
+                <h2 className="text-base font-semibold text-slate-900">Quick Transfer</h2>
+                <p className="mt-1 text-sm text-slate-500">Open the transfer panel when you need it.</p>
               </div>
               <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                 Secure
               </span>
             </div>
-            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <SendFunds />
+            <div className="mt-4">
+              <button
+                onClick={() => setSendOpen(true)}
+                className="inline-flex items-center justify-center rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
+              >
+                Open Transfer Panel
+              </button>
             </div>
           </div>
         </section>
@@ -465,6 +480,36 @@ export default function VendorDashboard() {
           )}
         </section>
       </main>
+
+      {/* Slide-over for SendFunds (compact) */}
+      {sendOpen && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setSendOpen(false)} />
+          <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-900">Send Funds</h3>
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">Secure</span>
+              </div>
+              <button
+                onClick={() => setSendOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded hover:bg-slate-100"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 text-sm">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                {/* Keep original component; we just contain & scale the visuals */}
+                <div className="text-[13px] leading-5">
+                  <SendFunds />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
