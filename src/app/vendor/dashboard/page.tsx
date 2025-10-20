@@ -27,12 +27,13 @@ const TOKENS: Record<string, string> = {
 // --- Tabs ---
 const TABS = [
   { key: 'all', label: 'All' },
-  { key: 'active', label: 'Active' },      // pending or approved and not fully completed
-  { key: 'awarded', label: 'Awarded' },    // approved
+  { key: 'active', label: 'Active' }, // pending or approved and not fully completed
+  { key: 'awarded', label: 'Awarded' }, // approved
   { key: 'completed', label: 'Completed' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'archived', label: 'Archived' },
 ] as const;
+
 type TabKey = typeof TABS[number]['key'];
 
 export default function VendorDashboard() {
@@ -63,9 +64,7 @@ export default function VendorDashboard() {
     const proofs = await getProofs(bidId);
 
     // Pick a proof we’re allowed to archive (not pending, not already archived)
-    const target =
-      proofs.find(p => p.status !== 'pending' && p.status !== 'archived') ??
-      proofs[0];
+    const target = proofs.find((p) => p.status !== 'pending' && p.status !== 'archived') ?? proofs[0];
 
     if (!target?.proofId && !target?.proof_id) {
       throw new Error('No proofs to archive for this bid.');
@@ -126,10 +125,7 @@ export default function VendorDashboard() {
     router.push('/vendor/login');
   };
 
-  const shortAddr = useMemo(
-    () => (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''),
-    [address]
-  );
+  const shortAddr = useMemo(() => (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''), [address]);
 
   const isBidCompleted = (bid: any) => {
     if (bid?.status === 'completed') return true;
@@ -159,9 +155,7 @@ export default function VendorDashboard() {
 
     switch (tab) {
       case 'active':
-        return base.filter(
-          (b) => b.status === 'pending' || (b.status === 'approved' && !isBidCompleted(b))
-        );
+        return base.filter((b) => b.status === 'pending' || (b.status === 'approved' && !isBidCompleted(b)));
       case 'awarded':
         return base.filter((b) => b.status === 'approved');
       case 'completed':
@@ -176,9 +170,7 @@ export default function VendorDashboard() {
   }, [bids, tab, query]);
 
   const onArchive = async (bidId: number) => {
-    const ok = window.confirm(
-      'Move this bid to Archived? You can still view it under the "Archived" tab.'
-    );
+    const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
     if (!ok) return;
 
     setArchivingIds((prev) => new Set(prev).add(bidId));
@@ -196,27 +188,28 @@ export default function VendorDashboard() {
     }
   };
 
+  // --------- Layouts ---------
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-white">
         <div className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="space-y-6">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="h-5 w-32 animate-pulse rounded-full bg-slate-200" />
+            <div className="rounded-lg border border-slate-200 bg-white p-6">
+              <div className="h-5 w-32 animate-pulse rounded bg-slate-200" />
               <div className="mt-6 grid gap-4 sm:grid-cols-3">
                 {[0, 1, 2].map((key) => (
-                  <div key={key} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="h-4 w-24 animate-pulse rounded-full bg-slate-200" />
-                    <div className="mt-3 h-6 w-3/4 animate-pulse rounded-full bg-slate-200" />
+                  <div key={key} className="rounded border border-slate-200 bg-slate-50 p-4">
+                    <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
+                    <div className="mt-3 h-6 w-3/4 animate-pulse rounded bg-slate-200" />
                   </div>
                 ))}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="h-5 w-40 animate-pulse rounded-full bg-slate-200" />
+            <div className="rounded-lg border border-slate-200 bg-white p-6">
+              <div className="h-5 w-40 animate-pulse rounded bg-slate-200" />
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 {[0, 1, 2, 3].map((key) => (
-                  <div key={key} className="h-32 rounded-lg border border-slate-200 bg-slate-50" />
+                  <div key={key} className="h-32 rounded border border-slate-200 bg-slate-50" />
                 ))}
               </div>
             </div>
@@ -227,9 +220,9 @@ export default function VendorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-white">
       {/* Top bar */}
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-slate-900">Vendor Dashboard</h1>
@@ -242,14 +235,14 @@ export default function VendorDashboard() {
             </div>
             <button
               onClick={() => navigator.clipboard.writeText(address || '')}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               title="Copy wallet address"
             >
               Copy Address
             </button>
             <button
               onClick={handleLogout}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-black"
+              className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-black"
             >
               Sign Out
             </button>
@@ -260,11 +253,13 @@ export default function VendorDashboard() {
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Overview */}
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)]">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-6">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">Balances</h2>
-                <p className="mt-1 text-sm text-slate-500">Wallet: <span className="break-all font-mono text-xs text-slate-500">{address}</span></p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Wallet: <span className="break-all font-mono text-xs text-slate-500">{address}</span>
+                </p>
               </div>
             </div>
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
@@ -274,22 +269,24 @@ export default function VendorDashboard() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">Send Funds</h2>
                 <p className="mt-1 text-sm text-slate-500">Transfer project payments from your connected wallet.</p>
               </div>
-              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">Secure</span>
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                Secure
+              </span>
             </div>
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
               <SendFunds />
             </div>
           </div>
         </section>
 
         {/* Toolbar */}
-        <section className="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="mt-8 rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap gap-2">
               {TABS.map((t) => (
@@ -298,9 +295,7 @@ export default function VendorDashboard() {
                   onClick={() => setTab(t.key)}
                   className={[
                     'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ring-1 ring-inset',
-                    tab === t.key
-                      ? 'bg-slate-900 text-white ring-slate-900'
-                      : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50',
+                    tab === t.key ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   {t.label}
@@ -314,7 +309,7 @@ export default function VendorDashboard() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search bids…"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-9 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  className="w-full rounded-md border border-slate-200 bg-white px-9 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
                 />
               </label>
             </div>
@@ -334,17 +329,16 @@ export default function VendorDashboard() {
             const isArchiving = archivingIds.has(bid.bidId);
 
             return (
-              <div
-                key={bid.bidId}
-                className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md"
-              >
+              <div key={bid.bidId} className="rounded-lg border border-slate-200 bg-white p-6">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0 space-y-1">
                     <h3 className="truncate text-lg font-semibold text-slate-900">{bid.title}</h3>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
                       <span className="font-mono text-xs text-slate-400">#{bid.bidId}</span>
                       {bid.orgName && (
-                        <span><span className="text-slate-400">Organization:</span> {bid.orgName}</span>
+                        <span>
+                          <span className="text-slate-400">Organization:</span> {bid.orgName}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -364,10 +358,7 @@ export default function VendorDashboard() {
                     <p className="font-mono text-xs text-slate-500">{progress}%</p>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-slate-900 transition-[width] duration-500"
-                      style={{ width: `${progress}%` }}
-                    />
+                    <div className="h-full rounded-full bg-slate-900 transition-[width] duration-500" style={{ width: `${progress}%` }} />
                   </div>
                 </div>
 
@@ -375,7 +366,7 @@ export default function VendorDashboard() {
                 <div className="mt-5 flex flex-wrap gap-3">
                   <Link
                     href={`/vendor/bids/${bid.bidId}`}
-                    className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-black"
+                    className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black"
                     title="Open bid details and interact with Agent 2"
                   >
                     View / Agent 2
@@ -385,13 +376,13 @@ export default function VendorDashboard() {
                     <>
                       <Link
                         href={`/vendor/proof/${bid.bidId}`}
-                        className="inline-flex items-center justify-center rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+                        className="inline-flex items-center justify-center rounded-md bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                       >
                         Submit Proof
                       </Link>
                       <button
                         onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                        className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
                         Copy Wallet Address
                       </button>
@@ -407,7 +398,7 @@ export default function VendorDashboard() {
                         onArchive(bid.bidId);
                       }}
                       disabled={isArchiving}
-                      className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                       title="Move this bid to Archived"
                     >
                       {isArchiving ? 'Archiving…' : 'Move to Archived'}
@@ -417,17 +408,9 @@ export default function VendorDashboard() {
 
                 {/* Quick facts */}
                 <div className="mt-6 grid gap-4 md:grid-cols-4">
-                  <InfoTile
-                    label="Your Bid"
-                    value={`$${Number(bid.priceUSD).toLocaleString()}`}
-                    accent="text-slate-900"
-                  />
+                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-slate-900" />
                   <InfoTile label="Timeline" value={`${bid.days} days`} />
-                  <InfoTile
-                    label="Payment"
-                    value={`${bid.preferredStablecoin}`}
-                    helper={`to ${bid.walletAddress}`}
-                  />
+                  <InfoTile label="Payment" value={`${bid.preferredStablecoin}`} helper={`to ${bid.walletAddress}`} />
                   <InfoTile label="Status" value={computedStatusLabel(bid)} />
                 </div>
 
@@ -437,20 +420,13 @@ export default function VendorDashboard() {
                     <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Submitted Proofs</h4>
                     <div className="mt-3 grid gap-3">
                       {bid.proofs.map((p: any, i: number) => (
-                        <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                          <p className="whitespace-pre-line text-sm text-slate-700">
-                            {p.description || 'No description'}
-                          </p>
+                        <div key={i} className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                          <p className="whitespace-pre-line text-sm text-slate-700">{p.description || 'No description'}</p>
                           {p.files?.length > 0 && (
                             <ul className="mt-3 space-y-1">
                               {p.files.map((f: any, j: number) => (
                                 <li key={j} className="text-sm">
-                                  <a
-                                    href={f.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-slate-900 underline-offset-4 hover:underline"
-                                  >
+                                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-slate-900 underline-offset-4 hover:underline">
                                     {f.name}
                                   </a>
                                 </li>
@@ -478,14 +454,11 @@ export default function VendorDashboard() {
           })}
 
           {filtered.length === 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-white p-12 text-center">
               <div className="mb-3 text-4xl">🗂️</div>
               <h3 className="mb-1 text-lg font-semibold text-slate-900">No bids in this view</h3>
               <p className="mb-6 text-sm text-slate-500">Try a different tab or clear your search.</p>
-              <Link
-                href="/projects"
-                className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-black"
-              >
+              <Link href="/projects" className="inline-flex items-center justify-center rounded-md bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-black">
                 Browse Projects
               </Link>
             </div>
@@ -501,8 +474,8 @@ export default function VendorDashboard() {
 function BalanceCard({ label, value }: { label: string; value?: string }) {
   const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
   return (
-    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-inner">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label} Balance</div>
+    <div className="rounded-md border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label} Balance</div>
       <div className="mt-2 text-2xl font-semibold text-slate-900 tabular-nums">{display}</div>
     </div>
   );
@@ -519,27 +492,13 @@ function StatusPill({ status, label }: { status: string; label: string }) {
       : status === 'archived'
       ? 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200'
       : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200';
-  return (
-    <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${cls}`}>
-      {label}
-    </span>
-  );
+  return <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${cls}`}>{label}</span>;
 }
 
-function InfoTile({
-  label,
-  value,
-  helper,
-  accent,
-}: {
-  label: string;
-  value: string;
-  helper?: string;
-  accent?: string;
-}) {
+function InfoTile({ label, value, helper, accent }: { label: string; value: string; helper?: string; accent?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+    <div className="rounded-md border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className={[`mt-2 text-lg font-semibold`, accent || 'text-slate-900'].join(' ')}>{value}</p>
       {helper && <p className="mt-1 break-all text-xs text-slate-500">{helper}</p>}
     </div>
