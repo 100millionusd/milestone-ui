@@ -469,6 +469,10 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   }
 }
 
+export async function getAuthRoleOnce(): Promise<AuthInfo> {
+  return getAuthRole(); // Simple fallback - no caching for now
+}
+
 // ---- Role: coalesced + TTL cache (single fetch per 30s) ----
 let _authRoleMainInflight: Promise<AuthInfo> | null = null;
 let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
