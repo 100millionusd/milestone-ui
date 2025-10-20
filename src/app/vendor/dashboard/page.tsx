@@ -1,4 +1,6 @@
-// src/app/vendor/dashboard/page.tsx
+Here you go — cleaned content for `apps/core/src/app/vendor/dashboard/page.tsx` (all leading `+` removed):
+
+```tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -173,36 +175,50 @@ export default function VendorDashboard() {
   }, [bids, tab, query]);
 
   const onArchive = async (bidId: number) => {
-  const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
-  if (!ok) return;
+    const ok = window.confirm('Move this bid to Archived? You can still view it under the "Archived" tab.');
+    if (!ok) return;
 
-  setArchivingIds(prev => new Set(prev).add(bidId));
-  try {
-    await archiveAnyProofForBid(bidId);  // archives a proof (vendor-safe)
-    await loadBids();                    // refresh the list; don't replace a bid with a proof
-  } catch (e: any) {
-    alert('Failed to archive: ' + (e?.message || 'Unknown error'));
-  } finally {
-    setArchivingIds(prev => {
-      const next = new Set(prev);
-      next.delete(bidId);
-      return next;
-    });
-  }
-};
+    setArchivingIds(prev => new Set(prev).add(bidId));
+    try {
+      await archiveAnyProofForBid(bidId);  // archives a proof (vendor-safe)
+      await loadBids();                    // refresh the list; don't replace a bid with a proof
+    } catch (e: any) {
+      alert('Failed to archive: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setArchivingIds(prev => {
+        const next = new Set(prev);
+        next.delete(bidId);
+        return next;
+      });
+    }
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-        <div className="max-w-5xl mx-auto px-4 py-16">
-          <div className="animate-pulse space-y-6">
-            <div className="h-24 bg-white/70 rounded-2xl shadow-sm"></div>
-            <div className="h-20 bg-white/70 rounded-2xl shadow-sm"></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="h-48 bg-white/70 rounded-2xl shadow-sm"></div>
-              <div className="h-48 bg-white/70 rounded-2xl shadow-sm"></div>
+      <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.12),_transparent_65%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(15,23,42,0.98))]" />
+        <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+          <div className="grid gap-6">
+            <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-8 shadow-2xl backdrop-blur">
+              <div className="h-6 w-32 animate-pulse rounded-full bg-white/20" />
+              <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                {[0, 1, 2].map((key) => (
+                  <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="h-4 w-24 animate-pulse rounded-full bg-white/10" />
+                    <div className="mt-4 h-6 w-3/4 animate-pulse rounded-full bg-white/15" />
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="h-64 bg-white/70 rounded-2xl shadow-sm"></div>
+            <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-2xl backdrop-blur">
+              <div className="h-5 w-40 animate-pulse rounded-full bg-white/15" />
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                {[0, 1, 2, 3].map((key) => (
+                  <div key={key} className="h-32 rounded-2xl border border-white/10 bg-white/5" />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -210,62 +226,77 @@ export default function VendorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-      <div className="max-w-5xl mx-auto px-4 py-10">
-        {/* Top Bar Card */}
-        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-                Vendor Dashboard
-              </h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Signed in as <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{shortAddr}</span>
-              </p>
-              <p className="mt-1 text-xs text-slate-500 break-all">Wallet: {address}</p>
+    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.18),_transparent_62%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(15,23,42,0.99))]" />
+      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+        {/* Hero */}
+        <div className="mb-12 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)]">
+          <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-8 shadow-2xl backdrop-blur">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Vendor Workspace</p>
+                  <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">
+                    Vendor Dashboard
+                  </h1>
+                </div>
+                <div className="space-y-2 text-sm text-slate-300">
+                  <p>
+                    Signed in as{' '}
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 font-mono text-xs uppercase tracking-wider text-white">
+                      {shortAddr}
+                    </span>
+                  </p>
+                  <p className="break-all font-mono text-xs text-slate-400">Wallet: {address}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => navigator.clipboard.writeText(address || '')}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-white transition hover:border-white/20 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                >
+                  Copy Address
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-lg transition hover:bg-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigator.clipboard.writeText(address || '')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
-              >
-                <span>Copy Address</span>
-              </button>
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-900 active:scale-[.99] transition"
-              >
-                Sign Out
-              </button>
+
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              <BalanceCard label="ETH" value={balances.ETH} />
+              <BalanceCard label="USDT" value={balances.USDT} />
+              <BalanceCard label="USDC" value={balances.USDC} />
             </div>
           </div>
 
-          {/* Balances */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <BalanceCard label="ETH" value={balances.ETH} />
-            <BalanceCard label="USDT" value={balances.USDT} />
-            <BalanceCard label="USDC" value={balances.USDC} />
+          <div className="rounded-3xl border border-white/10 bg-slate-900/40 p-8 shadow-xl backdrop-blur">
+            <h2 className="text-base font-semibold text-white">Send Funds</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Transfer project payments directly from your connected wallet.
+            </p>
+            <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+              <SendFunds />
+            </div>
           </div>
-        </div>
-
-        {/* Send Funds UI */}
-        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6 mb-8">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Send Funds</h2>
-          <SendFunds />
         </div>
 
         {/* Tabs + search */}
-        <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="mb-8 flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-900/50 p-6 shadow-xl backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-2">
             {TABS.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={[
-                  'px-3 py-1.5 rounded-full text-sm font-medium border',
+                  'rounded-full px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300',
                   tab === t.key
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+                    ? 'bg-emerald-500 text-slate-900 shadow'
+                    : 'border border-white/10 bg-white/5 text-slate-200 hover:border-white/20 hover:bg-white/10',
                 ].join(' ')}
               >
                 {t.label}
@@ -273,12 +304,17 @@ export default function VendorDashboard() {
             ))}
           </div>
           <div className="w-full md:w-72">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search bids…"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-            />
+            <label className="relative block">
+              <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-sm text-slate-500">
+                🔍
+              </span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search bids…"
+                className="w-full rounded-full border border-white/10 bg-slate-950/60 px-11 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              />
+            </label>
           </div>
         </div>
 
@@ -295,17 +331,20 @@ export default function VendorDashboard() {
             const isArchiving = archivingIds.has(bid.bidId);
 
             return (
-              <div key={bid.bidId} className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-6">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
-                  <div className="space-y-1">
-                    <h2 className="text-xl font-semibold text-slate-900">{bid.title}</h2>
-                    <div className="flex flex-wrap items-center gap-3 text-sm">
-                      <span className="text-slate-600">
-                        <span className="font-medium">Bid ID:</span> {bid.bidId}
+              <div
+                key={bid.bidId}
+                className="rounded-3xl border border-white/10 bg-slate-900/40 p-8 shadow-xl backdrop-blur transition hover:border-white/20 hover:bg-slate-900/60"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-semibold text-white">{bid.title}</h2>
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-300">
+                      <span className="font-mono text-xs uppercase tracking-widest text-slate-400">
+                        #{bid.bidId}
                       </span>
                       {bid.orgName && (
-                        <span className="text-slate-600">
-                          <span className="font-medium">Organization:</span> {bid.orgName}
+                        <span>
+                          <span className="text-slate-500">Organization:</span> {bid.orgName}
                         </span>
                       )}
                     </div>
@@ -314,27 +353,30 @@ export default function VendorDashboard() {
                 </div>
 
                 {/* Progress */}
-                <div className="mb-5">
-                  <div className="flex items-end justify-between mb-1">
-                    <p className="text-sm text-slate-600">
-                      Milestones: <span className="font-medium text-slate-900">{done}</span> / {total}
+                <div className="mt-6 space-y-2">
+                  <div className="flex flex-col gap-1 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                      Milestones completed{' '}
+                      <span className="font-semibold text-white">
+                        {done}
+                        <span className="text-slate-500"> / {total}</span>
+                      </span>
                     </p>
-                    <p className="text-sm tabular-nums text-slate-600">{progress}%</p>
+                    <p className="font-mono text-xs uppercase tracking-widest text-slate-400">{progress}%</p>
                   </div>
-                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
                     <div
-                      className="h-full bg-gradient-to-r from-emerald-500 to-blue-600 rounded-full transition-[width] duration-500"
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-sky-500 transition-[width] duration-500"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
                 </div>
 
                 {/* Actions */}
-                <div className="flex flex-wrap gap-3 mb-5">
-                  {/* NEW: open the vendor bid detail page with Agent 2 panel */}
+                <div className="mt-6 flex flex-wrap gap-3">
                   <Link
                     href={`/vendor/bids/${bid.bidId}`}
-                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10"
                     title="Open bid details and interact with Agent 2"
                   >
                     View / Agent 2
@@ -344,13 +386,13 @@ export default function VendorDashboard() {
                     <>
                       <Link
                         href={`/vendor/proof/${bid.bidId}`}
-                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 active:scale-[.99] transition"
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow transition hover:bg-sky-400"
                       >
                         Submit Proof
                       </Link>
                       <button
                         onClick={() => navigator.clipboard.writeText(bid.walletAddress)}
-                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition"
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10"
                       >
                         Copy Wallet Address
                       </button>
@@ -358,28 +400,29 @@ export default function VendorDashboard() {
                   )}
 
                   {canArchive && (
-  <button
-    type="button"
-    onClick={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onArchive(bid.bidId); // Fixed: changed 'b.bidId' to 'bid.bidId'
-    }}
-    disabled={isArchiving}
-    className={[
-      'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium',
-      'border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed',
-    ].join(' ')}
-    title="Move this bid to Archived"
-  >
-    {isArchiving ? 'Archiving…' : 'Move to Archived'}
-  </button>
-)}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onArchive(bid.bidId);
+                      }}
+                      disabled={isArchiving}
+                      className={[
+                        'inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition',
+                        'border-amber-300/40 bg-amber-500/10 text-amber-200 hover:border-amber-300/60 hover:bg-amber-400/20',
+                        'disabled:cursor-not-allowed disabled:opacity-60',
+                      ].join(' ')}
+                      title="Move this bid to Archived"
+                    >
+                      {isArchiving ? 'Archiving…' : 'Move to Archived'}
+                    </button>
+                  )}
                 </div>
 
                 {/* Quick facts */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-600" />
+                <div className="mt-8 grid gap-4 md:grid-cols-4">
+                  <InfoTile label="Your Bid" value={`$${Number(bid.priceUSD).toLocaleString()}`} accent="text-emerald-300" />
                   <InfoTile label="Timeline" value={`${bid.days} days`} />
                   <InfoTile label="Payment" value={`${bid.preferredStablecoin}`} helper={`to ${bid.walletAddress}`} />
                   <InfoTile label="Status" value={computedStatusLabel(bid)} />
@@ -387,21 +430,21 @@ export default function VendorDashboard() {
 
                 {/* Submitted proofs */}
                 {bid.proofs?.length > 0 && (
-                  <div className="mt-6 border-t border-slate-200 pt-4">
-                    <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitted Proofs</h3>
-                    <div className="grid gap-3">
+                  <div className="mt-8 border-t border-white/10 pt-6">
+                    <h3 className="text-sm font-semibold uppercase tracking-widest text-slate-300">Submitted Proofs</h3>
+                    <div className="mt-4 grid gap-3">
                       {bid.proofs.map((p: any, i: number) => (
-                        <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-sm text-slate-800 whitespace-pre-line">{p.description || 'No description'}</p>
+                        <div key={i} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                          <p className="text-sm text-slate-200 whitespace-pre-line">{p.description || 'No description'}</p>
                           {p.files?.length > 0 && (
-                            <ul className="mt-2 space-y-1">
+                            <ul className="mt-3 space-y-1">
                               {p.files.map((f: any, j: number) => (
                                 <li key={j} className="text-sm">
                                   <a
                                     href={f.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-blue-600 hover:underline underline-offset-2"
+                                    className="text-emerald-300 underline-offset-4 hover:text-emerald-200 hover:underline"
                                   >
                                     {f.name}
                                   </a>
@@ -410,12 +453,13 @@ export default function VendorDashboard() {
                             </ul>
                           )}
                           <span
-                            className={`mt-3 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium
-                              ${p.status === 'approved'
-                                ? 'bg-emerald-100 text-emerald-800'
+                            className={`mt-4 inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest ${
+                              p.status === 'approved'
+                                ? 'bg-emerald-500/20 text-emerald-300'
                                 : p.status === 'rejected'
-                                ? 'bg-rose-100 text-rose-800'
-                                : 'bg-amber-100 text-amber-800'}`}
+                                ? 'bg-rose-500/20 text-rose-200'
+                                : 'bg-amber-500/20 text-amber-200'
+                            }`}
                           >
                             {p.status || 'pending'}
                           </span>
@@ -429,13 +473,13 @@ export default function VendorDashboard() {
           })}
 
           {filtered.length === 0 && (
-            <div className="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 p-10 text-center">
+            <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-12 text-center shadow-xl backdrop-blur">
               <div className="text-5xl mb-4">🗂️</div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">No bids in this view</h2>
-              <p className="text-slate-600 mb-6">Try a different tab or clear your search.</p>
+              <h2 className="text-xl font-semibold text-white mb-2">No bids in this view</h2>
+              <p className="text-sm text-slate-400 mb-6">Try a different tab or clear your search.</p>
               <Link
                 href="/projects"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[.99] transition"
+                className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-slate-900 shadow transition hover:bg-emerald-400"
               >
                 Browse Projects
               </Link>
@@ -452,9 +496,9 @@ export default function VendorDashboard() {
 function BalanceCard({ label, value }: { label: string; value?: string }) {
   const display = value ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '—';
   return (
-    <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-4">
-      <div className="text-xs uppercase tracking-wider text-slate-500">{label} Balance</div>
-      <div className="mt-1 text-lg font-semibold text-slate-900 tabular-nums">{display}</div>
+    <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 shadow-inner">
+      <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">{label} Balance</div>
+      <div className="mt-2 text-2xl font-semibold text-white tabular-nums">{display}</div>
     </div>
   );
 }
@@ -462,15 +506,19 @@ function BalanceCard({ label, value }: { label: string; value?: string }) {
 function StatusPill({ status, label }: { status: string; label: string }) {
   const cls =
     status === 'approved'
-      ? 'bg-emerald-100 text-emerald-800'
+      ? 'bg-emerald-500/20 text-emerald-200'
       : status === 'completed'
-      ? 'bg-blue-100 text-blue-800'
+      ? 'bg-sky-500/20 text-sky-200'
       : status === 'rejected'
-      ? 'bg-rose-100 text-rose-800'
+      ? 'bg-rose-500/20 text-rose-200'
       : status === 'archived'
-      ? 'bg-slate-200 text-slate-700'
-      : 'bg-amber-100 text-amber-800';
-  return <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${cls}`}>{label}</span>;
+      ? 'bg-slate-500/20 text-slate-300'
+      : 'bg-amber-500/20 text-amber-200';
+  return (
+    <span className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-widest ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 function InfoTile({
@@ -485,10 +533,11 @@ function InfoTile({
   accent?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 p-4">
-      <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`mt-1 text-base font-semibold text-slate-900 ${accent || ''}`}>{value}</p>
-      {helper && <p className="mt-0.5 text-xs text-slate-500 break-all">{helper}</p>}
+    <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className={[`mt-2 text-lg font-semibold`, accent || 'text-white'].join(' ')}>{value}</p>
+      {helper && <p className="mt-1 text-xs text-slate-400 break-all">{helper}</p>}
     </div>
   );
 }
+```
