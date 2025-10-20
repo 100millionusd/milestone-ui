@@ -5,16 +5,18 @@ export const dynamic = 'force-dynamic';
 const API_BASE = process.env.API_BASE || 'https://milestone-api-production.up.railway.app';
 
 export async function GET(req: NextRequest) {
+  // Get the lx_jwt cookie
   const jwt = req.cookies.get('lx_jwt')?.value;
 
   if (!jwt) {
-    return NextResponse.json({ role: 'guest' });
+    return NextResponse.json({ role: 'guest' }, { status: 200 });
   }
 
+  // Forward it as auth_token because your backend expects that
   const upstream = await fetch(`${API_BASE}/auth/role`, {
     method: 'GET',
     headers: {
-      Cookie: `lx_jwt=${jwt}`,
+      Cookie: `auth_token=${jwt}`,
       Accept: 'application/json'
     },
     cache: 'no-store',
@@ -25,11 +27,8 @@ export async function GET(req: NextRequest) {
   try {
     data = await upstream.json();
   } catch {
-    /* leave null */
+    return NextResponse.json({ error: 'Invalid upstream response' }, { status: 502 });
   }
 
-  return NextResponse.json(
-    data ?? { error: 'Upstream returned no JSON' },
-    { status: upstream.status }
-  );
+  return NextResponse.json(data, { status: upstream.status });
 }
