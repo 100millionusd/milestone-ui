@@ -59,7 +59,78 @@ export default function AgentDigestWidget() {
   }, [since]);
 
   const counts = data?.counts;
-  const items = data?.items ?? [];
+
+  // 🔧 Normalize server shapes -> widget-friendly items
+  const items = useMemo(() => {
+    const src = (data?.items ?? []) as any[];
+    return src.map((raw) => {
+      const typeRaw = String(raw.type ?? "").toLowerCase();
+
+      const id =
+        raw.id ??
+        raw.proposal_id ??
+        raw.bid_id ??
+        raw.proof_id ??
+        "—";
+
+      const title =
+        raw.title ??
+        raw.vendor ??
+        raw.vendor_name ??
+        null;
+
+      const updated_at =
+        raw.updated_at ??
+        raw.ts ??
+        raw.submitted_at ??
+        null;
+
+      const milestoneIndex =
+        raw.milestoneIndex ??
+        raw.milestone_index ??
+        null;
+
+      const amountUSD =
+        raw.amountUSD ??
+        raw.amount_usd ??
+        null;
+
+      const link =
+        raw.link ??
+        (typeRaw.includes("proposal")
+          ? `/admin/proposals/${id}`
+          : (typeRaw.includes("bid") ||
+             typeRaw.includes("proof") ||
+             typeRaw.includes("payment") ||
+             typeRaw.includes("decision"))
+          ? `/admin/bids/${raw.bid_id ?? id}`
+          : null);
+
+      const typeLabel = (() => {
+        if (typeRaw === "proposal" || typeRaw.includes("proposal")) return "Proposal";
+        if (typeRaw === "bid" || typeRaw.includes("bid_submitted")) return "Bid";
+        if (typeRaw === "proof" || typeRaw.includes("proof_submitted")) return "Proof submitted";
+        if (typeRaw.includes("proof_decision")) return "Proof decision";
+        if (typeRaw.includes("payment_released")) return "Payment released";
+        return (raw.type ?? "").toString();
+      })();
+
+      return {
+        ...raw,
+        type: typeLabel,
+        id,
+        title,
+        updated_at,
+        milestoneIndex,
+        amountUSD,
+        link,
+      } as DigestItem & {
+        type: string;
+        updated_at?: string | null;
+      };
+    });
+  }, [data?.items]);
+
   const sinceLabel = useMemo(() => {
     if (!data?.since) return "";
     try {
@@ -128,9 +199,11 @@ export default function AgentDigestWidget() {
       <ul className="space-y-2 max-h-72 overflow-auto pr-1">
         {items.map((it) => {
           const ts =
-            it.updated_at ||
-            it.submitted_at ||
+            (it as any).updated_at ||
+            (it as any).submitted_at ||
+            (it as any).ts ||
             undefined;
+
           const tsLabel = ts
             ? (() => {
                 try {
@@ -143,28 +216,28 @@ export default function AgentDigestWidget() {
 
           return (
             <li
-              key={`${it.type}-${it.id}-${ts || Math.random()}`}
+              key={`${String((it as any).type)}-${String(it.id)}-${ts || Math.random()}`}
               className="border rounded-xl p-3"
             >
               <div className="text-[10px] uppercase tracking-wide opacity-60">
-                {it.type}
+                {(it as any).type}
               </div>
               <div className="font-medium">
-                {it.title || it.vendor || `#${it.id}`}
+                {it.title || (it as any).vendor || `#${String(it.id)}`}
               </div>
               <div className="text-xs opacity-70">
                 {tsLabel ? <>Updated {tsLabel}</> : null}
-                {it.status ? <> • {it.status}</> : null}
-                {typeof it.milestoneIndex === "number" ? (
-                  <> • Milestone {it.milestoneIndex + 1}</>
+                {(it as any).status ? <> • {(it as any).status}</> : null}
+                {typeof (it as any).milestoneIndex === "number" ? (
+                  <> • Milestone {(it as any).milestoneIndex + 1}</>
                 ) : null}
-                {typeof it.amountUSD === "number" ? (
-                  <> • ${it.amountUSD.toLocaleString()}</>
+                {typeof (it as any).amountUSD === "number" ? (
+                  <> • ${(it as any).amountUSD.toLocaleString()}</>
                 ) : null}
               </div>
-              {it.link ? (
+              {(it as any).link ? (
                 <a
-                  href={it.link}
+                  href={(it as any).link}
                   className="text-xs underline mt-1 inline-block"
                 >
                   Open
