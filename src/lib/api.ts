@@ -455,6 +455,20 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
 }
 
 // ---- Auth ----
+export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
+  const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
+  try {
+    const r = await apiFetch(`/auth/role${q}`);
+    return {
+      address: r?.address ?? undefined,
+      role: (r?.role as AuthInfo["role"]) ?? "guest",
+      vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
+    };
+  } catch {
+    return { role: "guest" };
+  }
+}
+
 let _roleCache: { at: number; data: AuthInfo } | null = null;
 let _roleInflight: Promise<AuthInfo> | null = null;
 
@@ -1545,6 +1559,7 @@ export function testConnection() {
 export default {
   // auth
   getAuthRole,
+  getAuthRoleOnce, 
   loginWithSignature,
   logout,
   updateBidMilestones,
