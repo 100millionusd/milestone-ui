@@ -2,7 +2,7 @@
 export const revalidate = 60;
 
 import { cookies } from "next/headers";
-import Client from "./Client";
+import Client from "./client";
 
 async function fetchBidsSSR() {
   const API = process.env.NEXT_PUBLIC_API_BASE || "https://milestone-api-production.up.railway.app";
