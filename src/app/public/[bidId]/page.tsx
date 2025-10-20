@@ -366,13 +366,16 @@ export default function PublicProjectDetailClient() {
 ) : (
   <div className="h-24 flex items-center justify-center text-xs text-gray-500">
     {f.name || 'file'}
+ </div>
+)}
+{p.submittedAt && (
+  <div className="mt-1 text-xs text-gray-500">
+    Submitted {new Date(p.submittedAt).toLocaleString()}
   </div>
 )}
-                      <div className="mt-1 text-xs text-gray-500">
-                        {p.submittedAt ? `Submitted ${new Date(p.submittedAt).toLocaleString()}` : ''}
-                      </div>
-                    </div>
-                  ))}
+</div>
+</div> {/* extra closing for an outer container opened above */}
+))}
               </section>
             )}
 
