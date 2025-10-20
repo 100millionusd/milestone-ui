@@ -469,27 +469,26 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   }
 }
 
-let _roleCache: { at: number; data: AuthInfo } | null = null;
-let _roleInflight: Promise<AuthInfo> | null = null;
-
-export function getAuthRole(): Promise<AuthInfo> {
-  const now = Date.now();
-  if (_roleCache && now - _roleCache.at < 30_000) return Promise.resolve(_roleCache.data);
-  if (_roleInflight) return _roleInflight;
-
-  _roleInflight = getAuthRole().then((info) => {
-    _roleCache = { at: Date.now(), data: info };
-    return info;
-  }).finally(() => {
-    _roleInflight = null;
-  });
-
-  return _roleInflight;
-}
-
 // ---- Role: coalesced + TTL cache (single fetch per 30s) ----
 let _authRoleMainInflight: Promise<AuthInfo> | null = null;
 let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
+
+export function getAuthRoleOnce(): Promise<AuthInfo> {
+  const now = Date.now();
+  if (_authRoleMainCache && now - _authRoleMainCache.at < 30_000) {
+    return Promise.resolve(_authRoleMainCache.data);
+  }
+  if (_authRoleMainInflight) return _authRoleMainInflight;
+
+  _authRoleMainInflight = getAuthRole().then((info) => {
+    _authRoleMainCache = { at: Date.now(), data: info };
+    return info;
+  }).finally(() => {
+    _authRoleMainInflight = null;
+  });
+
+  return _authRoleMainInflight;
+}
 
 // ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
 let _bidsInflight: Promise<Bid[]> | null = null;
