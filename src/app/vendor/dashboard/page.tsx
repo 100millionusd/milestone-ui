@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { getBids, getProofs, archiveProof } from '@/lib/api';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import SendFunds from '@/components/SendFunds';
+import AgentDigestWidget from "@/components/AgentDigestWidget";
 
 // ---- RPC (read-only) ----
 // Uses env when present (NEXT_PUBLIC_SEPOLIA_RPC) and falls back to public Sepolia.
@@ -260,6 +261,11 @@ export default function VendorDashboard() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Agent 2 — What’s New */}
+<section className="mb-6">
+  <AgentDigestWidget />
+</section>
+
         {/* Overview */}
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <div className="rounded-lg border border-slate-200 bg-white p-6">
