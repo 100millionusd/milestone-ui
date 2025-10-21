@@ -1,48 +1,20 @@
+// app/admin/login/page.tsx
 'use client';
-
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 
-export default function VendorLogin() {
-  const { login, address } = useWeb3Auth();
-  const router = useRouter();
-
-  const handleLogin = async () => {
-    try {
-      await login();
-      // redirect happens in useEffect once address is set
-    } catch (err) {
-      console.error('Login failed:', err);
-    }
-  };
-
-  // Redirect automatically once wallet address is available
-  useEffect(() => {
-    if (address) {
-      router.push('/vendor/dashboard');
-    }
-  }, [address, router]);
-
+export default function AdminLogin() {
+  const { login, session } = useWeb3Auth();
+  const [busy, setBusy] = useState(false);
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-md text-center">
-        <h1 className="text-2xl font-bold mb-6">Welcome to the Revolution</h1>
-        <p className="text-gray-600 mb-6">
-          Sign in to submit a proposal, provide proof of work, or manage your bids
-        </p>
-
-        <button
-          onClick={handleLogin}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-        >
-          Sign in with Google
-        </button>
-
-        <p className="text-sm text-gray-500 mt-6">
-          Powered by USDT/USDC
-        </p>
-      </div>
+    <div className="min-h-screen grid place-items-center">
+      <button
+        onClick={async () => { if (busy) return; setBusy(true); try { await login(); } finally { setBusy(false); }}}
+        disabled={busy || session === 'authenticating'}
+        className="bg-blue-600 text-white px-6 py-3 rounded-lg disabled:opacity-60"
+      >
+        {session === 'authenticating' ? 'Signing in…' : 'Sign in'}
+      </button>
     </div>
   );
 }
