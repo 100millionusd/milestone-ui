@@ -466,9 +466,14 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
     const r = await apiFetch(`/auth/role${q}`);
+    const serverRole = String(r?.role || '').toLowerCase();
+    const mapped: AuthInfo["role"] =
+      serverRole === 'admin' ? 'admin' :
+      r?.address ? 'vendor' : 'guest';
+
     return {
       address: r?.address ?? undefined,
-      role: (r?.role as AuthInfo["role"]) ?? "guest",
+      role: mapped,
       vendorStatus: (r?.vendorStatus as AuthInfo["vendorStatus"]) ?? undefined,
     };
   } catch {
@@ -771,15 +776,10 @@ export async function getBids(proposalId?: number): Promise<Bid[]> {
 }
 
 // Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
+// Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
 export async function getProofBids(): Promise<any[]> {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-  const r = await fetch(`${base}/admin/proofs-bids`, {
-    method: 'GET',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!r.ok) throw new Error(`getProofBids failed: ${r.status}`);
-  return r.json(); // same shape as /bids but milestones include paymentPending/tx
+  const rows = await apiFetch("/admin/proofs-bids");
+  return Array.isArray(rows) ? rows : rows?.rows ?? [];
 }
 
 export async function getBid(id: number): Promise<Bid> {
