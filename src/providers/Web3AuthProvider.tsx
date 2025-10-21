@@ -8,7 +8,7 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRoleOnce, getVendorProfile } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest';
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
@@ -175,7 +175,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Fresh server role check (no cache)
   const refreshRole = async () => {
     try {
-      const info = await getAuthRole(); // ← FRESH, not the cached once()
+      const info = await getAuthRoleOnce(); // ← FRESH, not the cached once()
       const r = normalizeRole(info?.role);
       setRole(r);
       setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
