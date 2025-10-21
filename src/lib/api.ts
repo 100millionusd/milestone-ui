@@ -502,6 +502,17 @@ export function getAuthRoleOnce(): Promise<AuthInfo> {
   return _authRoleMainInflight;
 }
 
+// ---- Role/Bids cache clearers ----
+export function clearAuthRoleCache() {
+  _authRoleMainCache = null;
+  _authRoleMainInflight = null;
+}
+
+export function clearBidsCache() {
+  _bidsCache = null;
+  _bidsInflight = null;
+}
+
 // ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
 let _bidsInflight: Promise<Bid[]> | null = null;
 let _bidsCache: { at: number; data: Bid[] } | null = null;
@@ -1568,6 +1579,7 @@ export default {
   getAuthRoleOnce, 
   loginWithSignature,
   logout,
+  clearBidsCache, 
   updateBidMilestones,
 
   // proposals
