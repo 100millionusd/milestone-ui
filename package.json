@@ -13,6 +13,7 @@
     "@ai-sdk/openai": "^2.0.28",
     "@ai-sdk/react": "^2.0.40",
     "@prisma/client": "^6.16.2",
+    "@walletconnect/types": "^2.22.4",
     "@web3auth/account-abstraction-provider": "^9.7.0",
     "@web3auth/base": "7.3.2",
     "@web3auth/ethereum-provider": "7.3.2",
