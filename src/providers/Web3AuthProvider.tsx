@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
@@ -108,6 +108,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Prevent double login
+  const loginInflight = useRef<Promise<void> | null>(null);
+
   // Only restore token for Bearer fallback; DO NOT restore address/role (prevents early redirect)
   useEffect(() => {
     try {
@@ -160,7 +163,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // No OpenLogin / Auth here (keeps build stable). Social can be added later if needed.
+        // No OpenLogin here.
 
         await w3a.initModal();
         setWeb3auth(w3a);
@@ -177,15 +180,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const info = await getAuthRoleOnce();
       const r = normalizeRole(info?.role);
       setRole(r);
-      if (r === 'vendor' || r === 'admin') {
-        setSession('authenticated');
-      } else {
-        setSession('unauthenticated');
-      }
-      if ((info as any)?.address) {
-        const addr = String((info as any).address);
-        setAddress(addr);
-      }
+      setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
+      if ((info as any)?.address) setAddress(String((info as any).address));
     } catch (e) {
       console.warn('refreshRole failed:', e);
       setSession('unauthenticated');
@@ -199,82 +195,85 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async () => {
     if (!web3auth) return;
-    try {
-      setSession('authenticating');
+    if (loginInflight.current) return loginInflight.current;
 
-      // Prefer MetaMask explicitly to avoid stray cached providers
-      let web3authProvider: SafeEventEmitterProvider | null = null;
+    loginInflight.current = (async () => {
       try {
-        web3authProvider = await (web3auth as any).connectTo(WALLET_ADAPTERS.METAMASK);
-      } catch (err: any) {
-        const msg = String(err?.message || err || '').toLowerCase();
-        if (msg.includes('already connected')) {
-          web3authProvider = (web3auth as any).provider || (await web3auth.connect());
-        } else {
-          // fallback to modal if user cancels, etc.
-          web3authProvider = await web3auth.connect();
-        }
-      }
+        setSession('authenticating');
 
-      if (!web3authProvider) throw new Error('No provider from Web3Auth');
-      setProvider(web3authProvider);
-
-      // Get address AFTER user approves in MetaMask
-      const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
-      const signer = await ethersProvider.getSigner();
-      const addr = await signer.getAddress();
-      setAddress(addr); // UI can show it, but we still wait for backend auth
-
-      // SIWE-ish nonce + signature
-      const { nonce } = await postJSON('/auth/nonce', { address: addr });
-      const signature = await signer.signMessage(nonce);
-
-      // Exchange for JWT (server sets cookie; we also mirror in localStorage + a lax cookie)
-      const { role: srvRole, token: jwt } = await loginWithSignature(addr, signature);
-      if (jwt) {
+        // Prefer MetaMask explicitly to avoid stray cached providers
+        let web3authProvider: SafeEventEmitterProvider | null = null;
         try {
-          localStorage.setItem('lx_jwt', jwt);
-        } catch {}
-        document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
-        setToken(jwt);
-      }
-
-      // Confirm with server (fresh, not cached)
-      const info = await getAuthRole();
-      const r = normalizeRole(info.role);
-      setRole(r);
-      setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
-
-      // Post-login redirect (vendor completeness check)
-      try {
-        const p = await getVendorProfile().catch(() => null);
-        const url = new URL(window.location.href);
-        const nextParam = url.searchParams.get('next');
-        const fallback = pathname || '/';
-        if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
-          const dest = `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`;
-          router.replace(dest);
-        } else {
-          router.replace(nextParam || (r === 'admin' ? '/admin' : '/vendor/dashboard'));
+          web3authProvider = await (web3auth as any).connectTo(WALLET_ADAPTERS.METAMASK);
+        } catch (err: any) {
+          const msg = String(err?.message || err || '').toLowerCase();
+          if (msg.includes('already connected')) {
+            web3authProvider = (web3auth as any).provider || (await web3auth.connect());
+          } else {
+            // fallback to modal if user cancels, etc.
+            web3authProvider = await web3auth.connect();
+          }
         }
-      } catch {
-        router.replace(r === 'admin' ? '/admin' : '/vendor/dashboard');
+
+        if (!web3authProvider) throw new Error('No provider from Web3Auth');
+        setProvider(web3authProvider);
+
+        // Get address AFTER user approves in MetaMask
+        const ethersProvider = new ethers.BrowserProvider(web3authProvider as any);
+        const signer = await ethersProvider.getSigner();
+        const addr = await signer.getAddress();
+        setAddress(addr); // visible to UI, but real auth follows
+
+        // SIWE-ish nonce + signature
+        const { nonce } = await postJSON('/auth/nonce', { address: addr });
+        const signature = await signer.signMessage(nonce);
+
+        // Exchange for JWT
+        const { role: srvRole, token: jwt } = await loginWithSignature(addr, signature);
+        if (jwt) {
+          try { localStorage.setItem('lx_jwt', jwt); } catch {}
+          document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
+          setToken(jwt);
+        }
+
+        // Confirm with server (coalesced)
+        const info = await getAuthRoleOnce();
+        const r = normalizeRole(info.role);
+        setRole(r);
+        setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
+
+        // Post-login redirect (vendor completeness check)
+        try {
+          const p = await getVendorProfile().catch(() => null);
+          const url = new URL(window.location.href);
+          const nextParam = url.searchParams.get('next');
+          const fallback = pathname || '/';
+          if (!p || !(p?.vendorName || p?.companyName) || !p?.email) {
+            router.replace(`/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`);
+          } else {
+            router.replace(nextParam || (r === 'admin' ? '/admin' : '/vendor/dashboard'));
+          }
+        } catch {
+          router.replace(r === 'admin' ? '/admin' : '/vendor/dashboard');
+        }
+      } catch (e) {
+        console.error('Login error:', e);
+        setSession('unauthenticated');
       }
-    } catch (e) {
-      console.error('Login error:', e);
-      setSession('unauthenticated');
+    })();
+
+    try {
+      await loginInflight.current;
+    } finally {
+      loginInflight.current = null;
     }
   };
 
   const logout = async () => {
-    try {
-      await web3auth?.logout();
-    } catch {}
-    try {
-      await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
-    } catch {}
+    try { await web3auth?.logout(); } catch {}
+    try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }); } catch {}
 
-    // 🔴 clear the client-side cookie we set on login
+    // clear our client-side cookie mirror
     try {
       document.cookie = 'lx_jwt=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=None';
     } catch {}
@@ -284,12 +283,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setRole('guest');
     setSession('unauthenticated');
-    try {
-      localStorage.removeItem('lx_jwt');
-    } catch {}
-    try {
-      router.replace('/vendor/login');
-    } catch {}
+    try { localStorage.removeItem('lx_jwt'); } catch {}
+    try { router.replace('/vendor/login'); } catch {}
   };
 
   // Account / network change
@@ -300,10 +295,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
-      try {
-        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
-      } finally {
-        // 🔴 also clear cookie here
+      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {}); }
+      finally {
         try {
           document.cookie = 'lx_jwt=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=None';
         } catch {}
