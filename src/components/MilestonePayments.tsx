@@ -6,10 +6,10 @@ import {
   completeMilestone,
   payMilestone,
   submitProof,
-  saveProofFilesToDb, // POST /api/proofs → persists for Files tab
+  saveProofFilesToDb,
   type Bid,
   type Milestone,
-  API_BASE, // used to detect admin role
+  getAuthRoleOnce,
 } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
@@ -205,24 +205,16 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(`${API_BASE}/auth/role`, {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        if (r.ok) {
-          const j = await r.json();
-          const role = String(j?.role || j?.Role || '').toLowerCase();
-          if (!cancelled) setIsAdmin(role === 'admin');
-        }
-      } catch {
-        // default remains vendor (isAdmin=false)
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  let cancelled = false;
+  (async () => {
+    try {
+      const j = await getAuthRoleOnce();
+      const role = String(j?.role || '').toLowerCase();
+      if (!cancelled) setIsAdmin(role === 'admin');
+    } catch { /* keep default vendor */ }
+  })();
+  return () => { cancelled = true; };
+}, []);
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
