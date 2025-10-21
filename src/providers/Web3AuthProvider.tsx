@@ -85,10 +85,15 @@ async function pickHealthyRpc(): Promise<string> {
   return 'https://rpc.sepolia.org';
 }
 
-// ---------- Only load wallet where needed ----------
+// ---------- Only load wallet where needed (avoid listeners on login page) ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet');
+  if (p.startsWith('/vendor/login')) return false;     // no wallet init on login screen
+  return (
+    p.startsWith('/vendor') ||
+    p.startsWith('/admin/payments') ||
+    p.startsWith('/wallet')
+  );
 };
 
 // ---------- PROVIDER ----------
@@ -103,6 +108,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<Role>('guest');
   const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);     // prevent races during login
 
   // Restore quick state from localStorage
   useEffect(() => {
@@ -173,9 +179,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, [needsWallet]);
 
-  // Role refresh from server cookie/Bearer
+  // Role refresh from server cookie/Bearer (skip while logging in)
   const refreshRole = async () => {
     try {
+      if (authBusy) return;
       const info = await getAuthRole();
       const r = normalizeRole(info?.role);
       setRole(r);
@@ -191,22 +198,22 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (mounted) void refreshRole();
+    if (mounted && !authBusy) void refreshRole();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
+  }, [mounted, authBusy]);
 
   // ----- STRICT GATED LOGIN (MetaMask must be approved first) -----
   async function ensureAccountsApproved(ethish: any): Promise<string> {
-    // If not approved, this will open the MetaMask "Connect" dialog and await the user's decision.
-    const accountsBefore = await ethish.request?.({ method: 'eth_accounts' }).catch(() => []);
-    if (!accountsBefore || !accountsBefore.length) {
-      await ethish.request({ method: 'eth_requestAccounts' }); // ← blocks until user approves/rejects
+    const before = await ethish.request?.({ method: 'eth_accounts' }).catch(() => []);
+    if (!before || !before.length) {
+      // This triggers MetaMask "Connect" and waits for user's choice
+      await ethish.request({ method: 'eth_requestAccounts' });
     }
-    const accountsAfter = await ethish.request({ method: 'eth_accounts' });
-    if (!accountsAfter || !accountsAfter.length) {
+    const after = await ethish.request({ method: 'eth_accounts' });
+    if (!after || !after.length) {
       throw new Error('User rejected wallet connection');
     }
-    return accountsAfter[0];
+    return after[0];
   }
 
   const isProfileIncomplete = (p: any) => {
@@ -233,8 +240,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async () => {
     if (!web3auth) return;
+    setAuthBusy(true);
     try {
-      // Always choose MetaMask explicitly so nothing auto-connects behind your back.
+      // Always choose MetaMask explicitly so nothing auto-connects.
       const w3Provider = await web3auth.connectTo(WALLET_ADAPTERS.METAMASK);
       if (!w3Provider) throw new Error('No provider from Web3Auth');
       setProvider(w3Provider);
@@ -257,10 +265,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       // 4) Exchange for JWT (api.ts stores localStorage "lx_jwt")
       const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      // 4.1) Mirror JWT into a first-party cookie for SSR
+      // 4.1) Mirror JWT into a first-party cookie for SSR and reload
       const jwt = localStorage.getItem('lx_jwt');
       if (jwt) {
-        // Lax works on top-level navigations and avoids many cross-site pitfalls.
         document.cookie = `lx_jwt=${jwt}; Path=/; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
       }
 
@@ -269,11 +276,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setRole(r);
       localStorage.setItem('lx_role', r);
 
-      // 6) Make sure the server now sees it, then reload so SSR-protected pages open.
+      // 6) Make sure server now sees it, then hard reload so SSR reads cookie
       await getAuthRole({ address: addr }).catch(() => ({}));
-      window.location.reload(); // ensures next SSR read sees cookie
+      window.location.reload();
     } catch (e) {
       console.error('Login error:', e);
+    } finally {
+      setAuthBusy(false);
     }
   };
 
@@ -296,29 +305,37 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
 
-  // Reset on account/network change — gated pages only
+  // ======= SAFE listeners (no auto /auth/logout spam) =======
   useEffect(() => {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
     if (!eth?.on) return;
 
-    const onAccountsChanged = async (_accounts: string[]) => {
-      try {
-        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
-      } finally {
-        setProvider(null);
-        setAddress(null);
-        setToken(null);
-        setRole('guest');
-        localStorage.removeItem('lx_addr');
-        localStorage.removeItem('lx_jwt');
-        localStorage.removeItem('lx_role');
-        window.location.href = '/vendor/login';
+    // Debounce to ignore transient empty account arrays some wallets emit on init
+    let debounce: any = null;
+
+    const onAccountsChanged = (_accounts: string[]) => {
+      // If we don't have a session address yet, ignore noise.
+      const prev = (localStorage.getItem('lx_addr') || '').toLowerCase();
+      const next = (_accounts?.[0] || '').toLowerCase();
+
+      // Ignore spurious empty events; don't log out automatically.
+      if (!prev) return;
+
+      // If user switched accounts, nudge to re-auth, but DON'T call /auth/logout automatically.
+      if (next && prev && next !== prev) {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          window.location.href = '/vendor/login?reason=account_changed';
+        }, 300);
       }
     };
 
-    const onChainChanged = () => window.location.reload();
+    const onChainChanged = () => {
+      // Soft reload is enough
+      window.location.reload();
+    };
 
     eth.on('accountsChanged', onAccountsChanged);
     eth.on('chainChanged', onChainChanged);
@@ -326,9 +343,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         eth.removeListener?.('accountsChanged', onAccountsChanged);
         eth.removeListener?.('chainChanged', onChainChanged);
+        clearTimeout(debounce);
       } catch {}
     };
-  }, [needsWallet, api]);
+  }, [needsWallet]);
 
   if (!mounted) return null;
 
