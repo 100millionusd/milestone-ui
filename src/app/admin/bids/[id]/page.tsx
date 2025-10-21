@@ -80,7 +80,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         setErr(null);
 
         // load role early to gate UI
-        api.getAuthRole().then(setMe).catch(() => {});
+        api.getAuthRoleOnce().then(setMe).catch(() => {});
 
         const b = await api.getBid(bidId);
         setBid(b);
