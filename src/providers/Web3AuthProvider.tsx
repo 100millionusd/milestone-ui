@@ -273,6 +273,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' });
     } catch {}
+
+    // 🔴 clear the client-side cookie we set on login
+    try {
+      document.cookie = 'lx_jwt=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=None';
+    } catch {}
+
     setProvider(null);
     setAddress(null);
     setToken(null);
@@ -297,6 +303,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
       } finally {
+        // 🔴 also clear cookie here
+        try {
+          document.cookie = 'lx_jwt=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=None';
+        } catch {}
         setProvider(null);
         setAddress(null);
         setToken(null);
