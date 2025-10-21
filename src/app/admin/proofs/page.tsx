@@ -1,23 +1,14 @@
-export const revalidate = 60;
-
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Client from "./client";
 
-const SITE_ORIGIN = process.env.NEXT_PUBLIC_SITE_ORIGIN || "http://localhost:3000";
+const API = "https://milestone-api-production.up.railway.app";
 
-async function fetchBidsSSR() {
-  const res = await fetch(`${SITE_ORIGIN}/api/proxy/bids`, {
-    cache: 'no-store',
-  });
-
-  if (!res.ok) return [];
-  const rows = await res.json().catch(() => []);
-  return Array.isArray(rows) ? rows : [];
-}
-
-async function getAuthRole() {
-  const res = await fetch(`${SITE_ORIGIN}/api/proxy/auth/role`, {
+async function getAuthRole(jwt: string) {
+  const res = await fetch(`${API}/auth/role`, {
+    headers: {
+      Cookie: `lx_jwt=${jwt}`,
+    },
     cache: 'no-store',
   });
 
@@ -25,13 +16,32 @@ async function getAuthRole() {
   return await res.json();
 }
 
-export default async function Page() {
-  const auth = await getAuthRole();
+async function fetchBidsSSR(jwt: string) {
+  const res = await fetch(`${API}/bids`, {
+    headers: {
+      Cookie: `lx_jwt=${jwt}`,
+    },
+    next: { revalidate: 60 },
+  });
 
-  if (auth.role !== "admin") {
-    redirect("/"); // or "/403"
+  if (!res.ok) return [];
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+export default async function Page() {
+  const jwt = cookies().get("lx_jwt")?.value;
+
+  if (!jwt) {
+    redirect("/"); // no token at all
   }
 
-  const bids = await fetchBidsSSR();
+  const auth = await getAuthRole(jwt);
+
+  if (auth.role !== "admin") {
+    redirect("/");
+  }
+
+  const bids = await fetchBidsSSR(jwt);
   return <Client initialBids={bids} />;
 }
