@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids, getAuthRole, getProofs, payMilestone } from '@/lib/api';
+import { getProposal, getBids, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
@@ -265,7 +265,7 @@ export default function ProjectDetailPage() {
 
   // Auth (for Admin tab & Edit btn)
   useEffect(() => {
-    getAuthRole().then(setMe).catch(() => {});
+    getAuthRoleOnce().then(setMe).catch(() => {});
   }, []);
 
   // Fetch proofs (always from local /api/proofs unless explicitly overridden)
