@@ -23,6 +23,8 @@ interface Web3AuthContextType {
   address: string | null;
   role: Role;
   isConnecting: boolean;
+  /** Back-compat alias so old pages that call `login()` still work */
+  login: () => Promise<void>;
   loginMetamask: () => Promise<void>;
   loginGoogle: () => Promise<void>;
   logout: () => Promise<void>;
@@ -35,6 +37,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   address: null,
   role: 'guest',
   isConnecting: false,
+  login: async () => {},
   loginMetamask: async () => {},
   loginGoogle: async () => {},
   logout: async () => {},
@@ -128,7 +131,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           tickerName: 'Ethereum Sepolia',
         };
 
-        // IMPORTANT: pass chainConfig on Web3Auth AND to the OpenLogin privateKeyProvider
         const w3a = new Web3Auth({
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
@@ -141,9 +143,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         const openloginAdapter = new OpenloginAdapter({
           privateKeyProvider,
           adapterSettings: {
-            uxMode: 'redirect', // reliable on Netlify
+            uxMode: 'redirect',
             whiteLabel: { name: 'LithiumX' },
-            // redirect must be allowlisted in Web3Auth dashboard
             redirectUrl:
               (typeof window !== 'undefined'
                 ? window.location.origin
@@ -206,7 +207,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     const { nonce } = await postJSON('/auth/nonce', { address: addr });
     // 2) sign
     const signature = await signer.signMessage(nonce);
-    // 3) exchange for token (api.ts stores lx_jwt in localStorage; Bearer fallback covers Safari)
+    // 3) exchange for token (api.ts stores lx_jwt in localStorage)
     const { role: srvRole } = await loginWithSignature(addr, signature);
 
     setRole(srvRole || 'vendor');
@@ -258,7 +259,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       await connectSafe(() =>
         web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN, {
           loginProvider: 'google',
-          // must match allowlist in Web3Auth dashboard
           redirectUrl: window.location.origin + '/vendor/login',
         } as any)
       );
@@ -318,6 +318,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         address,
         role,
         isConnecting,
+        // 👇 alias lets old pages call `login()` without crashing
+        login: loginGoogle,
         loginMetamask,
         loginGoogle,
         logout,
