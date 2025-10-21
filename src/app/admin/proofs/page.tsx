@@ -1,16 +1,16 @@
-// src/app/admin/proofs/page.tsx  (SERVER)
+// src/app/admin/proofs/page.tsx
+
 export const revalidate = 60;
 
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import Client from "./client";
 
-async function fetchBidsSSR() {
-  const API = process.env.NEXT_PUBLIC_API_BASE || "https://milestone-api-production.up.railway.app";
-  const cookie = cookies().toString();
+const API = process.env.NEXT_PUBLIC_API_BASE || "https://milestone-api-production.up.railway.app";
 
+async function fetchBidsSSR(cookie: string) {
   const res = await fetch(`${API}/bids`, {
     headers: cookie ? { cookie } : undefined,
-    // cache on the Next server for 60s
     next: { revalidate: 60 },
   });
 
@@ -19,7 +19,24 @@ async function fetchBidsSSR() {
   return Array.isArray(rows) ? rows : [];
 }
 
+async function getAuthRole(cookie: string) {
+  const res = await fetch(`${API}/auth/role`, {
+    headers: cookie ? { cookie } : undefined,
+    cache: 'no-store',
+  });
+
+  if (!res.ok) return { role: 'guest' };
+  return await res.json();
+}
+
 export default async function Page() {
-  const bids = await fetchBidsSSR();
+  const cookie = cookies().toString();
+  const auth = await getAuthRole(cookie);
+
+  if (auth.role !== "admin") {
+    redirect("/"); // you can change this to "/403" or "/login" if preferred
+  }
+
+  const bids = await fetchBidsSSR(cookie);
   return <Client initialBids={bids} />;
 }
