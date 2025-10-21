@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { listProposals, getBids, archiveProposal, getAuthRole } from '@/lib/api';
+import { listProposals, getBids, archiveProposal, getAuthRoleOnce } from '@/lib/api';
 
 type TabKey = 'active' | 'completed' | 'archived';
 
@@ -110,7 +110,7 @@ export default function ProjectsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRoleOnce();
         const role = String(info?.role ?? 'guest');
         const vendorStatus = String(info?.vendorStatus ?? 'pending').toLowerCase();
 
