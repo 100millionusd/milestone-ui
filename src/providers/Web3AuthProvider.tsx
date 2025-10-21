@@ -90,12 +90,8 @@ async function pickHealthyRpc(): Promise<string> {
 // ---------- Where to init wallets ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  // ✅ We DO init on /vendor/login so the Web3Auth modal (Google) works there
-  return (
-    p.startsWith('/vendor') ||
-    p.startsWith('/admin/payments') ||
-    p.startsWith('/wallet')
-  );
+  // We DO init on /vendor/login so the modal (Google/socials) can render there
+  return p.startsWith('/vendor') || p.startsWith('/admin/payments') || p.startsWith('/wallet');
 };
 
 // ---------- PROVIDER ----------
@@ -112,7 +108,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
 
-  // Restore from localStorage fast
+  // Restore fast
   useEffect(() => {
     try {
       setToken(localStorage.getItem('lx_jwt') || null);
@@ -150,16 +146,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
           privateKeyProvider,
-          uiConfig: {
-            appLogo: '', // optional
-          },
         });
 
-        // ---- Adapters ----
-        // MetaMask (EOA)
+        // ---- Adapters (versions MUST match @web3auth/modal major) ----
+        // MetaMask
         w3a.configureAdapter(new MetamaskAdapter());
 
-        // WalletConnect (EOA)
+        // WalletConnect
         if (wcProjectId) {
           w3a.configureAdapter(
             new WalletConnectV2Adapter({
@@ -171,26 +164,15 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // ✅ OpenLogin (socials: Google, Reddit, etc.)
+        // ✅ OpenLogin (socials like Google/Reddit)
         const openlogin = new OpenloginAdapter({
           adapterSettings: {
-            uxMode: 'popup', // popup is safest on Netlify
-            // If you use redirect mode, allowlist this in Web3Auth dashboard
-            // redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
-            loginConfig: {
-              // Example: show Google explicitly (others appear by default too)
-              google: {
-                verifier: '', // optional: if using a custom verifier
-                typeOfLogin: 'google',
-                clientId: '', // optional if using Web3Auth default
-              },
-            },
+            uxMode: 'popup', // popup works best on Netlify
           },
-          // whiteLabel: { name: 'Your App', defaultLanguage: 'en' },
         });
         w3a.configureAdapter(openlogin);
 
-        // Show OpenLogin on the modal
+        // Show all options (incl. OpenLogin) in the modal
         await w3a.initModal({
           modalConfig: {
             [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: true },
@@ -205,7 +187,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, [needsWallet]);
 
-  // Role refresh (skip during active login)
+  // Role refresh
   const refreshRole = async () => {
     try {
       if (authBusy) return;
@@ -228,11 +210,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, authBusy]);
 
-  // MetaMask approval gate — only needed when user chose MetaMask
+  // Gate MetaMask: do not proceed until the user approves account access
   async function ensureAccountsApproved(ethish: any): Promise<string> {
     const before = await ethish.request?.({ method: 'eth_accounts' }).catch(() => []);
     if (!before || !before.length) {
-      await ethish.request({ method: 'eth_requestAccounts' }); // shows MetaMask connect
+      await ethish.request({ method: 'eth_requestAccounts' }); // triggers MetaMask connect
     }
     const after = await ethish.request({ method: 'eth_accounts' });
     if (!after || !after.length) {
@@ -242,7 +224,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const isProfileIncomplete = (p: any) => !(!!(p?.vendorName || p?.companyName) && !!p?.email);
-
   const postLoginProfileRedirect = async () => {
     try {
       const p = await getVendorProfile().catch(() => null);
@@ -264,7 +245,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!web3auth) return;
     setAuthBusy(true);
     try {
-      // 1) Open the modal / adapter of choice
+      // 1) Choose adapter or open modal
       const w3Provider =
         adapter === 'metamask'
           ? await web3auth.connectTo(WALLET_ADAPTERS.METAMASK)
@@ -272,46 +253,44 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           ? await web3auth.connectTo(WALLET_ADAPTERS.WALLET_CONNECT_V2)
           : adapter === 'openlogin'
           ? await web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN)
-          : // default: show modal with all options (Google included)
-            await web3auth.connect();
+          : await web3auth.connect(); // full modal (shows Google)
 
       if (!w3Provider) throw new Error('No provider from Web3Auth');
       setProvider(w3Provider);
 
-      // 2) If this is MetaMask, force the connect approval BEFORE nonce/sign
+      // 2) If MetaMask: force account approval BEFORE nonce/sign
       const isMetaMask = (w3Provider as any)?.isMetaMask === true;
       if (isMetaMask) {
         await ensureAccountsApproved(w3Provider);
       }
 
-      // 3) Get signer/address
+      // 3) Address / signer
       const ethersProvider = new ethers.BrowserProvider(w3Provider as any);
       const signer = await ethersProvider.getSigner();
       const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // 4) Nonce -> 5) Sign
+      // 4) Nonce → 5) Sign
       const { nonce } = await postJSON('/auth/nonce', { address: addr });
       const signature = await signer.signMessage(nonce);
 
-      // 6) Exchange for JWT (stored to localStorage by api.ts)
+      // 6) Exchange for JWT (stored in localStorage by api.ts)
       const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      // 7) Mirror JWT into first-party cookie for SSR routes, then hard reload
+      // 7) Mirror JWT into a first-party cookie so SSR sees it
       const jwt = localStorage.getItem('lx_jwt');
       if (jwt) {
         document.cookie = `lx_jwt=${jwt}; Path=/; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
       }
 
-      // 8) Update local role and confirm with server once (optional)
+      // 8) Confirm role once & hard reload (so /admin SSR guard works)
       const r = normalizeRole(srvRole || 'vendor');
       setRole(r);
       localStorage.setItem('lx_role', r);
 
       await getAuthRole({ address: addr }).catch(() => ({}));
 
-      // 9) Reload so SSR-protected pages see cookie
       window.location.reload();
     } catch (e) {
       console.error('Login error:', e);
@@ -340,7 +319,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
 
-  // ---------- SAFE listeners (no auto /auth/logout spam) ----------
+  // ---------- Light listeners (no spam) ----------
   useEffect(() => {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
@@ -351,7 +330,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     const onAccountsChanged = (_accounts: string[]) => {
       const prev = (localStorage.getItem('lx_addr') || '').toLowerCase();
       const next = (_accounts?.[0] || '').toLowerCase();
-      if (!prev) return;            // ignore on first boot
+      if (!prev) return;
       if (next && prev && next !== prev) {
         clearTimeout(debounce);
         debounce = setTimeout(() => {
@@ -375,9 +354,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   if (!mounted) return null;
 
   return (
-    <Web3AuthContext.Provider
-      value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}
-    >
+    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}>
       {children}
     </Web3AuthContext.Provider>
   );
