@@ -30,7 +30,10 @@ async function getAuthRole(cookie: string) {
 }
 
 export default async function Page() {
-  const cookie = cookies().toString();
+  const cookieStore = cookies();
+  const jwt = cookieStore.get("lx_jwt")?.value;
+  const cookie = jwt ? `lx_jwt=${jwt}` : "";
+
   const auth = await getAuthRole(cookie);
 
   if (auth.role !== "admin") {

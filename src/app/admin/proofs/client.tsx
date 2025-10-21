@@ -120,7 +120,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   useMilestonesUpdated(loadProofs);
 
   async function loadProofs(forceRefresh = false) {
-    const CACHE_TTL = 30000; // 30 seconds
+    const CACHE_TTL = 0; // 30 seconds
     
     // Use cache if available and not forcing refresh
     if (!forceRefresh && dataCache.bids.length > 0 && 
