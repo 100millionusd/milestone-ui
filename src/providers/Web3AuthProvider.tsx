@@ -195,7 +195,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Cookie-based role from server (coalesced to avoid 2–3 duplicate calls)
   const refreshRole = async () => {
     try {
-      const info = await getAuthRoleOnce(); // single fetch per ~30s
+      const info = await getAuthRole(); 
       const r = normalizeRole(info?.role);
       setRole(r);
       localStorage.setItem('lx_role', r);
@@ -267,7 +267,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('lx_role', srvRole || 'vendor');
 
       // 6) Optional: confirm role from server (works via cookie or Bearer) — keep uncached here to be fresh
-      const info = await getAuthRoleOnce();
+      const info = await getAuthRole();
       const r = normalizeRole(info.role);
       setRole(r);
       localStorage.setItem('lx_role', r);
