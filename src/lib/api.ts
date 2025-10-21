@@ -296,15 +296,17 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
   const p = path.startsWith("/") ? path : `/${path}`;
   const bases: string[] = [];
 
-  if (!isBrowser) {
-    bases.push(trimSlashEnd(API_BASE)); // server-side: only external
-  } else {
-    // 1) external (your current default)
+    if (!isBrowser) {
+    // server-side: only external
     bases.push(trimSlashEnd(API_BASE));
-    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
+  } else {
+    // Prefer same-origin to avoid an external 401 first
+    // 1) same-origin (relative)
     bases.push("");
-    // 3) same-origin "/api" (if your rewrites use /api/:path*)
+    // 2) same-origin "/api" (if you proxy under /api)
     bases.push("/api");
+    // 3) external (fallback only)
+    bases.push(trimSlashEnd(API_BASE));
   }
 
   let lastResp: Response | null = null;
