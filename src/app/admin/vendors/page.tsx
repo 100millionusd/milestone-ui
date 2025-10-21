@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { API_BASE, getAuthRole, archiveBid, deleteBid } from '@/lib/api';
+import { API_BASE, getAuthRoleOnce, archiveBid, deleteBid } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest';
 
@@ -49,7 +49,7 @@ export default function AdminVendorsPage() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRole();
+        const info = await getAuthRoleOnce();
         if (!alive) return;
         setRole((info?.role ?? 'guest') as Role);
       } catch {
