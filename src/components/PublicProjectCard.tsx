@@ -533,68 +533,58 @@ useEffect(() => {
 
                   {Array.isArray(p.files) && p.files.length > 0 && (
                     <div className="mt-2 grid grid-cols-2 gap-3">
- {p.files.map((f: any, i: number) => {
-  let gps = fileCoords(f);
+                      {p.files.map((f: any, i: number) => {
+                        let gps = fileCoords(f);
 
-  // If the file had no embedded coords, try EXIF we fetched via Range requests
-  if (!gps) {
-    const hit = gpsByUrl[String(f?.url || '')];
-    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
-      gps = {
-        lat: hit.lat,
-        lon: hit.lon,
-        // ⬇️ NEW: fall back to the proof-level place label
-        label: p?.location?.label || `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}`
-      };
-    }
-  }
+                        if (!gps) {
+                          const hit = gpsByUrl[String(f?.url || '')];
+                          if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+                            gps = { lat: hit.lat, lon: hit.lon, label: `${hit.lat.toFixed(4)}, ${hit.lon.toFixed(4)}` };
+                          }
+                        }
 
-  const hasGPS = !!gps;
-  // ⬇️ NEW: prefer file label, then proof-level label, then coords
-  const label = hasGPS
-    ? (gps!.label ?? p?.location?.label ?? `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`)
-    : null;
+                        const hasGPS = !!gps;
+                        const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
+                        const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
+                        const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || ''));
 
-  const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
-  const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || ''));
+                        return (
+                          <div
+                            key={i}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setLightboxUrl(String(f.url || ''))}
+                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
+                            className={
+                              'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
+                              (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
+                            }
+                            title={hoverTitle}
+                          >
+                            {isImg ? (
+                              <div className="relative w-full aspect-video">
+                                <Image
+                                  src={String(f.url)}
+                                  alt={f.name || `file ${i + 1}`}
+                                  fill
+                                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                                  style={{ objectFit: 'cover' }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="h-24 flex items-center justify-center text-xs text-gray-500">
+                                {f.name || 'file'}
+                              </div>
+                            )}
 
-  return (
-    <div
-      key={i}
-      role="button"
-      tabIndex={0}
-      onClick={() => setLightboxUrl(String(f.url || ''))}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(String(f.url || ''))}
-      className={
-        'relative rounded-lg border overflow-hidden cursor-zoom-in ' +
-        (hasGPS ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white' : '')
-      }
-      title={hoverTitle}
-    >
-      {isImg ? (
-        <div className="relative w-full aspect-video">
-          <Image
-            src={String(f.url)}
-            alt={f.name || `file ${i + 1}`}
-            fill
-            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-            style={{ objectFit: 'cover' }}
-          />
-        </div>
-      ) : (
-        <div className="h-24 flex items-center justify-center text-xs text-gray-500">
-          {f.name || 'file'}
-        </div>
-      )}
-
-      {hasGPS && label ? (
-        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
-          📍 {label}
-        </span>
-      ) : null}
-    </div>
-  );
-})}
+                            {hasGPS && label ? (
+                              <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 text-[11px] font-medium text-white px-2 py-1 backdrop-blur max-w-[90%] truncate">
+                                📍 {label}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
