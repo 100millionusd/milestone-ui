@@ -23,7 +23,7 @@ interface Web3AuthContextType {
   address: string | null;
   role: Role;
   isConnecting: boolean;
-  /** Back-compat alias so old pages that call `login()` still work */
+  // Back-compat alias so old pages calling `login()` don’t crash:
   login: () => Promise<void>;
   loginMetamask: () => Promise<void>;
   loginGoogle: () => Promise<void>;
@@ -48,9 +48,9 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
 
-// Backend API base (empty → use Next.js rewrites at /api/*)
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
+// Only mount Web3Auth UI on routes that actually need it
+const pageNeedsWallet = (p?: string) =>
+  !!p && (p.startsWith('/vendor') || p.startsWith('/admin/payments') || p.startsWith('/wallet'));
 
 // ---------- RPC ----------
 async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
@@ -68,12 +68,11 @@ async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
     if (!r.ok) return false;
     const j = await r.json().catch(() => ({} as any));
     const hex = (j?.result || '').toString();
-    return /^0x[0-9a-f]+$/i.test(hex) && parseInt(hex, 16) === 11155111;
+    return /^0x[0-9a-f]+$/i.test(hex) && parseInt(hex, 16) === 11155111; // 0xaa36a7
   } catch {
     return false;
   }
 }
-
 async function pickHealthyRpc(): Promise<string> {
   const candidates = ['https://rpc.sepolia.org', 'https://1rpc.io/sepolia'];
   for (const url of candidates) {
@@ -82,10 +81,6 @@ async function pickHealthyRpc(): Promise<string> {
   }
   return 'https://rpc.sepolia.org';
 }
-
-// Only mount Web3Auth where needed
-const pageNeedsWallet = (p?: string) =>
-  !!p && (p.startsWith('/vendor') || p.startsWith('/admin/payments') || p.startsWith('/wallet'));
 
 // ---------- PROVIDER ----------
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
@@ -100,7 +95,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Restore quick state
+  // Quick restore
   useEffect(() => {
     try {
       setRole(normalizeRole(localStorage.getItem('lx_role')));
@@ -110,7 +105,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (MetaMask + OpenLogin)
+  // Init Web3Auth v9 (MetaMask + Google)
   useEffect(() => {
     if (!needsWallet) return;
     const init = async () => {
@@ -123,7 +118,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
-          chainId: '0xaa36a7', // 11155111
+          chainId: '0xaa36a7', // Sepolia
           rpcTarget,
           displayName: 'Sepolia Testnet',
           blockExplorerUrl: 'https://sepolia.etherscan.io',
@@ -131,27 +126,26 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           tickerName: 'Ethereum Sepolia',
         };
 
+        // Web3Auth core (v9) — chainConfig MUST be here
         const w3a = new Web3Auth({
           clientId,
-          web3AuthNetwork: WEB3AUTH_NETWORK,
+          web3AuthNetwork: WEB3AUTH_NETWORK, // keep devnet unless your clientId is allowlisted on mainnet
           chainConfig,
+          uiConfig: { appName: 'LithiumX' },
         });
 
+        // Private key provider for EVM
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        // OpenLogin (Google)
-        const openloginAdapter = new OpenloginAdapter({
+        // Google via OpenLogin
+        const openlogin = new OpenloginAdapter({
           privateKeyProvider,
           adapterSettings: {
-            uxMode: 'redirect',
+            uxMode: 'popup', // popup avoids awkward redirects
             whiteLabel: { name: 'LithiumX' },
-            redirectUrl:
-              (typeof window !== 'undefined'
-                ? window.location.origin
-                : 'https://lithiumx.netlify.app') + '/vendor/login',
           },
         });
-        w3a.configureAdapter(openloginAdapter);
+        w3a.configureAdapter(openlogin);
 
         // MetaMask
         w3a.configureAdapter(new MetamaskAdapter());
@@ -193,7 +187,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  // After wallet provider obtained → SIWE-ish flow → role → redirect
+  // Complete app login AFTER user approves in the wallet / Google popup
   const completeAppLogin = async (web3authProvider: SafeEventEmitterProvider) => {
     setProvider(web3authProvider);
 
@@ -207,13 +201,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     const { nonce } = await postJSON('/auth/nonce', { address: addr });
     // 2) sign
     const signature = await signer.signMessage(nonce);
-    // 3) exchange for token (api.ts stores lx_jwt in localStorage)
+    // 3) exchange for token (api.ts stores lx_jwt → Bearer fallback)
     const { role: srvRole } = await loginWithSignature(addr, signature);
 
     setRole(srvRole || 'vendor');
     localStorage.setItem('lx_role', srvRole || 'vendor');
 
-    // 4) confirm and redirect based on vendor profile
+    // 4) profile check → redirect
     try {
       const p = await getVendorProfile().catch(() => null);
       const url = new URL(window.location.href);
@@ -232,7 +226,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const connectSafe = async (fn: () => Promise<SafeEventEmitterProvider | null>) => {
     setIsConnecting(true);
     try {
-      // avoid “Already connected”
+      // Fixes “Already connected”
       if (web3auth?.provider) {
         try { await web3auth.logout(); } catch {}
       }
@@ -259,7 +253,6 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       await connectSafe(() =>
         web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN, {
           loginProvider: 'google',
-          redirectUrl: window.location.origin + '/vendor/login',
         } as any)
       );
     } catch (e) {
@@ -269,7 +262,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try { await web3auth?.logout(); } catch {}
-    try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }); } catch {}
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
     setProvider(null);
     setAddress(null);
     setRole('guest');
@@ -279,14 +272,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try { router.replace('/'); } catch {}
   };
 
-  // Reset on account/network changes (only where wallets are used)
+  // Reset on account/network change (only where wallets are used)
   useEffect(() => {
     if (!needsWallet) return;
     const eth = (typeof window !== 'undefined' && (window as any).ethereum) || null;
     if (!eth?.on) return;
 
     const onAccountsChanged = async () => {
-      try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }); } catch {}
+      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
       setProvider(null);
       setAddress(null);
       setRole('guest');
@@ -318,7 +311,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         address,
         role,
         isConnecting,
-        // 👇 alias lets old pages call `login()` without crashing
+        // Back-compat: your old page calls `login()` → we map to Google
         login: loginGoogle,
         loginMetamask,
         loginGoogle,
