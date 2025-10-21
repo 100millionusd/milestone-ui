@@ -1,4 +1,3 @@
-// src/providers/Web3AuthProvider.tsx
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -7,6 +6,7 @@ import { CHAIN_NAMESPACES, SafeEventEmitterProvider, WALLET_ADAPTERS } from '@we
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
 import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
+import { OpenloginAdapter } from '@web3auth/openlogin-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
 import { postJSON, loginWithSignature, getAuthRole, getVendorProfile } from '@/lib/api';
@@ -23,7 +23,7 @@ interface Web3AuthContextType {
   address: string | null;
   role: Role;
   token: string | null;
-  login: () => Promise<void>;
+  login: (adapter?: 'metamask' | 'walletconnect' | 'openlogin') => Promise<void>;
   logout: () => Promise<void>;
   refreshRole: () => Promise<void>;
 }
@@ -42,16 +42,18 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
 // ---------- ENV ----------
 const clientId = process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID as string;
 const WEB3AUTH_NETWORK = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
+
 const ankrKey = process.env.NEXT_PUBLIC_ANKR_API_KEY || '';
 const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
   (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
+
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
-// ---------- RPC HEALTH ----------
+// ---------- RPC health ----------
 async function probeRpc(url: string, timeoutMs = 2500): Promise<boolean> {
   if (!url) return false;
   try {
@@ -85,10 +87,10 @@ async function pickHealthyRpc(): Promise<string> {
   return 'https://rpc.sepolia.org';
 }
 
-// ---------- Only load wallet where needed (avoid listeners on login page) ----------
+// ---------- Where to init wallets ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  if (p.startsWith('/vendor/login')) return false;     // no wallet init on login screen
+  // ✅ We DO init on /vendor/login so the Web3Auth modal (Google) works there
   return (
     p.startsWith('/vendor') ||
     p.startsWith('/admin/payments') ||
@@ -108,9 +110,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<Role>('guest');
   const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [authBusy, setAuthBusy] = useState(false);     // prevent races during login
+  const [authBusy, setAuthBusy] = useState(false);
 
-  // Restore quick state from localStorage
+  // Restore from localStorage fast
   useEffect(() => {
     try {
       setToken(localStorage.getItem('lx_jwt') || null);
@@ -121,7 +123,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Init Web3Auth (NO OpenLogin) — gated
+  // Init Web3Auth (EOA + socials)
   useEffect(() => {
     if (!needsWallet) return;
     const init = async () => {
@@ -134,7 +136,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
-          chainId: '0xaa36a7',
+          chainId: '0xaa36a7', // 11155111
           rpcTarget,
           displayName: 'Sepolia Testnet',
           blockExplorerUrl: 'https://sepolia.etherscan.io',
@@ -148,11 +150,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
           privateKeyProvider,
-          uiConfig: {},
+          uiConfig: {
+            appLogo: '', // optional
+          },
         });
 
-        // Adapters (EOA only)
+        // ---- Adapters ----
+        // MetaMask (EOA)
         w3a.configureAdapter(new MetamaskAdapter());
+
+        // WalletConnect (EOA)
         if (wcProjectId) {
           w3a.configureAdapter(
             new WalletConnectV2Adapter({
@@ -164,10 +171,29 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // Hide OpenLogin completely
+        // ✅ OpenLogin (socials: Google, Reddit, etc.)
+        const openlogin = new OpenloginAdapter({
+          adapterSettings: {
+            uxMode: 'popup', // popup is safest on Netlify
+            // If you use redirect mode, allowlist this in Web3Auth dashboard
+            // redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+            loginConfig: {
+              // Example: show Google explicitly (others appear by default too)
+              google: {
+                verifier: '', // optional: if using a custom verifier
+                typeOfLogin: 'google',
+                clientId: '', // optional if using Web3Auth default
+              },
+            },
+          },
+          // whiteLabel: { name: 'Your App', defaultLanguage: 'en' },
+        });
+        w3a.configureAdapter(openlogin);
+
+        // Show OpenLogin on the modal
         await w3a.initModal({
           modalConfig: {
-            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: false },
+            [WALLET_ADAPTERS.OPENLOGIN]: { showOnModal: true },
           },
         });
 
@@ -179,7 +205,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, [needsWallet]);
 
-  // Role refresh from server cookie/Bearer (skip while logging in)
+  // Role refresh (skip during active login)
   const refreshRole = async () => {
     try {
       if (authBusy) return;
@@ -202,12 +228,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, authBusy]);
 
-  // ----- STRICT GATED LOGIN (MetaMask must be approved first) -----
+  // MetaMask approval gate — only needed when user chose MetaMask
   async function ensureAccountsApproved(ethish: any): Promise<string> {
     const before = await ethish.request?.({ method: 'eth_accounts' }).catch(() => []);
     if (!before || !before.length) {
-      // This triggers MetaMask "Connect" and waits for user's choice
-      await ethish.request({ method: 'eth_requestAccounts' });
+      await ethish.request({ method: 'eth_requestAccounts' }); // shows MetaMask connect
     }
     const after = await ethish.request({ method: 'eth_accounts' });
     if (!after || !after.length) {
@@ -216,11 +241,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     return after[0];
   }
 
-  const isProfileIncomplete = (p: any) => {
-    const hasName = !!(p?.vendorName || p?.companyName);
-    const hasEmail = !!p?.email;
-    return !(hasName && hasEmail);
-  };
+  const isProfileIncomplete = (p: any) => !(!!(p?.vendorName || p?.companyName) && !!p?.email);
 
   const postLoginProfileRedirect = async () => {
     try {
@@ -238,46 +259,59 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async () => {
+  // ---------- LOGIN ----------
+  const login = async (adapter?: 'metamask' | 'walletconnect' | 'openlogin') => {
     if (!web3auth) return;
     setAuthBusy(true);
     try {
-      // Always choose MetaMask explicitly so nothing auto-connects.
-      const w3Provider = await web3auth.connectTo(WALLET_ADAPTERS.METAMASK);
+      // 1) Open the modal / adapter of choice
+      const w3Provider =
+        adapter === 'metamask'
+          ? await web3auth.connectTo(WALLET_ADAPTERS.METAMASK)
+          : adapter === 'walletconnect'
+          ? await web3auth.connectTo(WALLET_ADAPTERS.WALLET_CONNECT_V2)
+          : adapter === 'openlogin'
+          ? await web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN)
+          : // default: show modal with all options (Google included)
+            await web3auth.connect();
+
       if (!w3Provider) throw new Error('No provider from Web3Auth');
       setProvider(w3Provider);
 
-      // 0) HARD GATE — MetaMask "Connect" must complete first.
-      const ethish: any = w3Provider;
-      const approvedAddr = await ensureAccountsApproved(ethish);
+      // 2) If this is MetaMask, force the connect approval BEFORE nonce/sign
+      const isMetaMask = (w3Provider as any)?.isMetaMask === true;
+      if (isMetaMask) {
+        await ensureAccountsApproved(w3Provider);
+      }
 
-      // 1) Ethers signer AFTER approval
+      // 3) Get signer/address
       const ethersProvider = new ethers.BrowserProvider(w3Provider as any);
       const signer = await ethersProvider.getSigner();
-      const addr = (await signer.getAddress()) || approvedAddr;
+      const addr = await signer.getAddress();
       setAddress(addr);
       localStorage.setItem('lx_addr', addr);
 
-      // 2) Nonce → 3) Sign
+      // 4) Nonce -> 5) Sign
       const { nonce } = await postJSON('/auth/nonce', { address: addr });
       const signature = await signer.signMessage(nonce);
 
-      // 4) Exchange for JWT (api.ts stores localStorage "lx_jwt")
+      // 6) Exchange for JWT (stored to localStorage by api.ts)
       const { role: srvRole } = await loginWithSignature(addr, signature);
 
-      // 4.1) Mirror JWT into a first-party cookie for SSR and reload
+      // 7) Mirror JWT into first-party cookie for SSR routes, then hard reload
       const jwt = localStorage.getItem('lx_jwt');
       if (jwt) {
         document.cookie = `lx_jwt=${jwt}; Path=/; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
       }
 
-      // 5) Update role locally
+      // 8) Update local role and confirm with server once (optional)
       const r = normalizeRole(srvRole || 'vendor');
       setRole(r);
       localStorage.setItem('lx_role', r);
 
-      // 6) Make sure server now sees it, then hard reload so SSR reads cookie
       await getAuthRole({ address: addr }).catch(() => ({}));
+
+      // 9) Reload so SSR-protected pages see cookie
       window.location.reload();
     } catch (e) {
       console.error('Login error:', e);
@@ -286,6 +320,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // ---------- LOGOUT ----------
   const logout = async () => {
     try {
       await web3auth?.logout();
@@ -305,25 +340,18 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
 
-  // ======= SAFE listeners (no auto /auth/logout spam) =======
+  // ---------- SAFE listeners (no auto /auth/logout spam) ----------
   useEffect(() => {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
     if (!eth?.on) return;
 
-    // Debounce to ignore transient empty account arrays some wallets emit on init
     let debounce: any = null;
-
     const onAccountsChanged = (_accounts: string[]) => {
-      // If we don't have a session address yet, ignore noise.
       const prev = (localStorage.getItem('lx_addr') || '').toLowerCase();
       const next = (_accounts?.[0] || '').toLowerCase();
-
-      // Ignore spurious empty events; don't log out automatically.
-      if (!prev) return;
-
-      // If user switched accounts, nudge to re-auth, but DON'T call /auth/logout automatically.
+      if (!prev) return;            // ignore on first boot
       if (next && prev && next !== prev) {
         clearTimeout(debounce);
         debounce = setTimeout(() => {
@@ -331,11 +359,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         }, 300);
       }
     };
-
-    const onChainChanged = () => {
-      // Soft reload is enough
-      window.location.reload();
-    };
+    const onChainChanged = () => window.location.reload();
 
     eth.on('accountsChanged', onAccountsChanged);
     eth.on('chainChanged', onChainChanged);
@@ -351,7 +375,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   if (!mounted) return null;
 
   return (
-    <Web3AuthContext.Provider value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}>
+    <Web3AuthContext.Provider
+      value={{ web3auth, provider, address, role, token, login, logout, refreshRole }}
+    >
       {children}
     </Web3AuthContext.Provider>
   );
