@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getBidsOnce } from "@/lib/api";
 
 // ------------------------------------------------------------
 // Admin Oversight — polished
@@ -487,17 +488,11 @@ useEffect(() => {
 
       // Bids
       if (bids == null) {
-        const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (!aborted && bRes.ok) {
-          const bj = await bRes.json();
-          setBids(normalizeBids(bj?.bids ?? bj ?? []));
-        }
-      }
-
+  const bj = await getBidsOnce();
+  if (!aborted) {
+    setBids(normalizeBids(bj));
+  }
+}
       // (intentionally NO direct /proofs prefetch — backend rejects it without bidId)
     } catch { /* ignore network errors here */ }
   })();
@@ -537,18 +532,12 @@ useEffect(() => {
       let list: any[] = [];
 
       // ensure we have bids
-      let bidList = bids;
-      if (!bidList) {
-        const bRes = await fetch(`${api("/bids")}?t=${Date.now()}`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        const bj = bRes.ok ? await bRes.json() : [];
-        bidList = normalizeBids(bj?.bids ?? bj ?? []);
-        setBids(bidList);
-      }
-
+ let bidList = bids;
+if (!bidList) {
+  const bj = await getBidsOnce();
+  bidList = normalizeBids(bj);
+  setBids(bidList);
+}
       const ids = (bidList || []).map(b => b.id).filter(Boolean);
       const results: any[] = [];
 
@@ -601,19 +590,17 @@ useEffect(() => {
       setPbError(null);
       setPbLoading(true);
 
-      const [pRes, bRes] = await Promise.all([
-        needProposals ? fetch(`${api("/proposals")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
-        needBids ? fetch(`${api("/bids")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
-      ]);
+const [pRes, bj] = await Promise.all([
+  needProposals ? fetch(`${api("/proposals")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
+  needBids ? getBidsOnce() : null,
+]);
 
-      if (!aborted && pRes) {
-        const pj = await pRes.json();
-        setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
-      }
-      if (!aborted && bRes) {
-        const bj = await bRes.json();
-        setBids(normalizeBids(bj?.bids ?? bj ?? []));
-      }
+if (!aborted && pRes) {
+  const pj = await pRes.json();
+  setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+}
+if (!aborted && bj) {
+  setBids(normalizeBids(bj));
     } catch (e: any) {
       if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
     } finally {
