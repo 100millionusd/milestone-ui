@@ -1,19 +1,14 @@
-// src/app/admin/proofs/page.tsx
-
 export const revalidate = 60;
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Client from "./client";
 
-const API =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  "https://milestone-api-production.up.railway.app";
+const SITE_ORIGIN = process.env.NEXT_PUBLIC_SITE_ORIGIN || "http://localhost:3000";
 
-async function fetchBidsSSR(cookie: string) {
-  const res = await fetch(`${API}/bids`, {
-    headers: cookie ? { cookie } : undefined,
-    next: { revalidate: 60 },
+async function fetchBidsSSR() {
+  const res = await fetch(`${SITE_ORIGIN}/api/proxy/bids`, {
+    cache: 'no-store',
   });
 
   if (!res.ok) return [];
@@ -21,31 +16,22 @@ async function fetchBidsSSR(cookie: string) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function getAuthRole(cookie: string) {
-  const res = await fetch(`${API}/auth/role`, {
-    headers: cookie ? { cookie } : undefined,
-    cache: "no-store",
+async function getAuthRole() {
+  const res = await fetch(`${SITE_ORIGIN}/api/proxy/auth/role`, {
+    cache: 'no-store',
   });
 
-  if (!res.ok) return { role: "guest" };
+  if (!res.ok) return { role: 'guest' };
   return await res.json();
 }
 
 export default async function Page() {
-  const cookieStore = cookies();
-  const jwt = cookieStore.get("lx_jwt")?.value;
-  const cookie = jwt ? `lx_jwt=${jwt}` : "";
-
-  const auth = await getAuthRole(cookie);
-
-  // Optional debug logging (remove in production)
-  console.log("SSR jwt cookie:", jwt);
-  console.log("auth.role:", auth.role);
+  const auth = await getAuthRole();
 
   if (auth.role !== "admin") {
-    redirect("/"); // Or "/403"
+    redirect("/"); // or "/403"
   }
 
-  const bids = await fetchBidsSSR(cookie);
+  const bids = await fetchBidsSSR();
   return <Client initialBids={bids} />;
 }
