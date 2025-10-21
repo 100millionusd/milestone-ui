@@ -578,7 +578,7 @@ if (!bidList) {
   return () => { aborted = true; };
 }, [tab, proofs, bids]);
   
-  // ——— Lazy fetch for proposals/bids when tabs opened ———
+ // ——— Lazy fetch for proposals/bids when tabs opened ———
 useEffect(() => {
   const needProposals = tab === "proposals" && proposals == null;
   const needBids = tab === "bids" && bids == null;
@@ -590,17 +590,24 @@ useEffect(() => {
       setPbError(null);
       setPbLoading(true);
 
-const [pRes, bj] = await Promise.all([
-  needProposals ? fetch(`${api("/proposals")}?t=${Date.now()}`, { cache: "no-store", credentials: "include" }) : null,
-  needBids ? getBidsOnce() : null,
-]);
+      const [pRes, bj] = await Promise.all([
+        needProposals
+          ? fetch(`${api("/proposals")}?t=${Date.now()}`, {
+              cache: "no-store",
+              credentials: "include",
+            })
+          : null,
+        needBids ? getBidsOnce() : null,
+      ]);
 
-if (!aborted && pRes) {
-  const pj = await pRes.json();
-  setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
-}
-if (!aborted && bj) {
-  setBids(normalizeBids(bj));
+      if (!aborted && pRes) {
+        const pj = await pRes.json();
+        setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+      }
+
+      if (!aborted && bj) {
+        setBids(normalizeBids(bj));
+      }
     } catch (e: any) {
       if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
     } finally {
@@ -609,7 +616,8 @@ if (!aborted && bj) {
   })();
 
   return () => { aborted = true; };
-}, [tab, proposals, bids]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [tab]);
 
 const tabs = useMemo(() => [
   { key: "overview", label: "Overview" },
