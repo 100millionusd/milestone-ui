@@ -260,7 +260,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // 4) Exchange for token (stores lx_jwt in localStorage inside api.ts)
-      const { role: srvRole } = await loginWithSignature(addr, signature);
+      const { role: srvRole, token: jwt } = await loginWithSignature(addr, signature);
+
+// 👇 NEW: Set HTTP-only-compatible cookie manually
+document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
+
 
       // 5) Update role locally
       setRole(srvRole || 'vendor');
