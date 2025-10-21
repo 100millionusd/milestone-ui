@@ -35,19 +35,30 @@ export default function Navigation() {
 
   useEffect(() => setMounted(true), []);
 
-  useEffect(() => {
+    useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRoleOnce(); // calls /auth/role (uses cookie)
+        // FIX: call the real helper (sends credentials)
+        const info = await getAuthRole(); // { address, role: 'admin'|'user', vendorStatus }
+
+        // Map backend roles → UI roles
+        const backendRole = (info?.role || '').toLowerCase();
+        const mappedRole: Role =
+          backendRole === 'admin'
+            ? 'admin'
+            : info?.address
+            ? 'vendor'
+            : 'guest';
+
         if (alive) {
-          setServerRole(info.role);
-          setVendorStatus((info?.vendorStatus ?? 'pending').toLowerCase() as any); // ← NEW
+          setServerRole(mappedRole);
+          setVendorStatus(((info as any)?.vendorStatus ?? 'pending').toLowerCase() as any);
         }
       } catch {
         if (alive) {
           setServerRole('guest');
-          setVendorStatus(null); // ← NEW
+          setVendorStatus(null);
         }
       }
     })();
