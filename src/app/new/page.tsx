@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createProposal, uploadFileToIPFS, API_BASE } from "@/lib/api";
+import { createProposal, uploadFileToIPFS, getAuthRoleOnce } from "@/lib/api";
 
 // ✅ Guard: only allow submit when the clicked button opts in
 const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
@@ -35,16 +35,13 @@ export default function NewProposalPage() {
 
   // Load connected wallet (for Telegram deep-link)
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch(`${API_BASE}/auth/role`, { credentials: 'include' });
-        const j = await r.json().catch(() => ({}));
-        if (j?.address) setWallet(j.address);
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
+  (async () => {
+    try {
+      const j = await getAuthRoleOnce();
+      if (j?.address) setWallet(j.address);
+    } catch { /* ignore */ }
+  })();
+}, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
