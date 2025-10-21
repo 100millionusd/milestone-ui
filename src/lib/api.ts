@@ -180,17 +180,24 @@ const isBrowser = typeof window !== "undefined";
 
 // ---- SSR cookie/authorization forwarding (Next.js) ----
 async function getServerForwardHeaders(): Promise<Record<string, string>> {
-  // Dynamically import so this module still works in the browser bundle
   try {
     const { cookies, headers } = await import("next/headers");
-    const cookieStr = cookies()
-      .getAll()
-      .map((c) => `${c.name}=${c.value}`)
-      .join("; ");
-    const auth = headers().get("authorization");
+    const c = cookies();
+
+    // forward all site cookies (sometimes backend reads auth from cookie)
+    const cookieStr = c.getAll().map((k) => `${k.name}=${k.value}`).join("; ");
+
+    // keep any incoming Authorization header if present
+    const incomingAuth = headers().get("authorization");
+
+    // 🔑 lift our site cookie lx_jwt and turn it into Bearer for the backend
+    const lxJwt = c.get("lx_jwt")?.value;
+
     const out: Record<string, string> = {};
-    if (cookieStr) out["cookie"] = cookieStr;      // <- critical for SSR
-    if (auth) out["authorization"] = auth;         // optional passthrough
+    if (cookieStr) out["cookie"] = cookieStr;
+    if (incomingAuth) out["authorization"] = incomingAuth;
+    else if (lxJwt) out["authorization"] = `Bearer ${lxJwt}`;
+
     return out;
   } catch {
     return {};
@@ -522,22 +529,22 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
  *  3) Call loginWithSignature(address, signature)
  * Returns `{ role }` and stores `token` to localStorage (lx_jwt) for Bearer fallback.
  */
-export async function loginWithSignature(address: string, signature: string) {
+export async function loginWithSignature(
+  address: string,
+  signature: string
+): Promise<{ role: AuthInfo["role"]; token: string | null }> {
   const res = await apiFetch("/auth/login", {
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
-  // server returns { token, role }
-  if (res?.token) setJwt(res.token);
-  return { role: (res?.role as AuthInfo["role"]) || "vendor" };
-}
 
-/** Clears cookie on server and local JWT cache */
-export async function logout() {
-  try {
-    await apiFetch("/auth/logout", { method: "POST" });
-  } catch {}
-  setJwt(null);
+  const token = (res && res.token) ? String(res.token) : null;
+  if (token) setJwt(token); // keep localStorage fallback in sync
+
+  return {
+    role: (res?.role as AuthInfo["role"]) || "vendor",
+    token,
+  };
 }
 
 /* ==========================
