@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
-import { getAuthRole } from '@/lib/api';
+import { getAuthRoleOnce } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest';
 
@@ -40,7 +40,7 @@ export default function Navigation() {
     (async () => {
       try {
         // FIX: call the real helper (sends credentials)
-        const info = await getAuthRole(); // { address, role: 'admin'|'user', vendorStatus }
+        const info = await getAuthRoleOnce(); // { address, role, vendorStatus }
 
         // Map backend roles → UI roles
         const backendRole = (info?.role || '').toLowerCase();
