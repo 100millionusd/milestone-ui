@@ -942,6 +942,26 @@ export function payMilestone(bidId: number, milestoneIndex: number) {
   });
 }
 
+// SAFE — force routing via Safe (multisig)
+export async function payMilestoneSafe(bidId: number, milestoneIndex: number) {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/pay-milestone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ milestoneIndex, method: "safe" }),
+  });
+}
+
+// MANUAL — force legacy/admin path
+export async function payMilestoneManual(bidId: number, milestoneIndex: number) {
+  if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/pay-milestone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ milestoneIndex, method: "eoa" }),
+  });
+}
+
 // keep older imports working by aliasing to payMilestone
 export function sendTokens(params: {
   bidId: number;
@@ -1612,6 +1632,8 @@ export default {
   getVendorPayments,
   adminCompleteMilestone,
   payMilestone,
+  payMilestoneSafe,
+  payMilestoneManual,
 
   // admin vendors
   getAdminVendors,
