@@ -18,6 +18,7 @@ import {
 } from '@/lib/api';
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
+import SafePayButton from '@/components/SafePayButton';
 
 // Tabs
 const TABS = [
@@ -777,22 +778,41 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 );
                               })()}
 
-                              {showPay && (
-                                <button
-                                  onClick={() => handlePay(bid.bidId, origIdx)}
-                                  disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-                                  className={[
-                                    "px-4 py-2 rounded text-white",
-                                    (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending)
-                                      ? "bg-green-600 opacity-60 cursor-not-allowed"
-                                      : "bg-green-600 hover:bg-green-700"
-                                  ].join(" ")}
-                                >
-                                  {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...'
-                                    : payIsPending ? 'Payment Pending…'
-                                    : 'Release Payment'}
-                                </button>
-                              )}
+ {showPay && (
+  <div className="flex items-center gap-2">
+    {/* Manual (existing) */}
+    <button
+      type="button"
+      onClick={() => handlePay(bid.bidId, origIdx)}
+      disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+      className={[
+        "px-4 py-2 rounded text-white",
+        (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending)
+          ? "bg-green-600 opacity-60 cursor-not-allowed"
+          : "bg-green-600 hover:bg-green-700"
+      ].join(" ")}
+      title="Release payment manually (EOA)"
+    >
+      {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...'
+        : payIsPending ? 'Payment Pending…'
+        : 'Release Payment'}
+    </button>
+
+    {/* SAFE (multisig) */}
+    <SafePayButton
+      bidId={bid.bidId}
+      milestoneIndex={origIdx}
+      amountUSD={Number(m?.amount || 0)}
+      disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+      onQueued={() => {
+        // mirror manual-flow UX: mark pending locally and start polling
+        const key = mkKey(bid.bidId, origIdx);
+        addPending(key);
+        pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+      }}
+    />
+  </div>
+)}
                             </>
                           )}
 
