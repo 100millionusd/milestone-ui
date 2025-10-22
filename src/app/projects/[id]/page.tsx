@@ -9,6 +9,7 @@ import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
+import SafePayButton from '@/components/SafePayButton';
 
 // ---------------- Consts ----------------
 // Pinata gateway base — sanitize so we end with exactly one "/ipfs"
@@ -1038,16 +1039,36 @@ async function handleReleasePayment(idx: number) {
                     <td className="py-2 pr-4">
                       {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
                     </td>
-                    <td className="py-2 pr-4">
-                      <button
-                        onClick={() => handleReleasePayment(idx)}
-                        disabled={!canRelease || releasingKey === key}
-                        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                        title={canRelease ? 'Release payment' : 'Not ready for payment'}
-                      >
-                        {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
-                      </button>
-                    </td>
+ <td className="py-2 pr-4">
+  <div className="flex items-center gap-2">
+    {/* Manual (existing) */}
+    <button
+      type="button"
+      onClick={() => handleReleasePayment(idx)}
+      disabled={!canRelease || releasingKey === key}
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+      title={canRelease ? 'Release payment' : 'Not ready for payment'}
+    >
+      {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+    </button>
+
+    {/* SAFE (multisig) */}
+    <SafePayButton
+      bidId={Number(acceptedBid.bidId)}
+      milestoneIndex={idx}
+      amountUSD={Number(m?.amount || 0)}
+      disabled={!canRelease || releasingKey === key || !!m?.paymentPending || m?.status === 'paid'}
+      onQueued={async () => {
+        // refresh like your manual flow
+        await refreshProofs();
+        try {
+          const next = await getBids(projectIdNum);
+          setBids(Array.isArray(next) ? next : []);
+        } catch {}
+      }}
+    />
+  </div>
+</td>
                   </tr>
                 );
               })}
