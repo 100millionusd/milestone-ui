@@ -473,10 +473,11 @@ export default function ProjectDetailPage() {
     const start = Date.now();
 
     const needsMore = (rows: any[]) =>
-      rows.some((row) => {
-        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
-        return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
-      });
+  rows.some((row) => {
+    const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
+    const st = String(a?.status || '').toLowerCase();
+    return !a || (st && st !== 'ready' && st !== 'error');
+  });
 
     const tick = async () => {
       try {
@@ -523,7 +524,8 @@ export default function ProjectDetailPage() {
   }, [proofs]);
 
   // -------- Derived -----------
-  const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
+  const acceptedBid =
+  safeBids.find((b) => String(b?.status || '').toLowerCase() === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
   // Admin action: release a milestone payment (NORMAL button) with sync
@@ -710,7 +712,8 @@ export default function ProjectDetailPage() {
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
-    const pending = !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+    const st = String(a?.status || '').toLowerCase();
+    const pending = !a || (st && st !== 'ready' && st !== 'error');
     if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
     if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
     const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
