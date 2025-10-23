@@ -1,7 +1,7 @@
 // src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
@@ -23,7 +23,6 @@ import {
   listPendingLS,
   isPaidLite,
   hasSafeMarkerLite,
-  // DO NOT import clearStalePendingKeys statically; we’ll dynamic-import it
 } from '@/lib/paymentsSync';
 
 // ---------------- Consts ----------------
@@ -101,10 +100,10 @@ function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (typeof a === 'object') return a as any;
   return null;
 }
-// ✅ Centralized, null-safe status getter (use everywhere)
+// ✅ Centralized, null-safe status getter
 function analysisStatus(row: any): string {
   const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
-  return String(a?.status ?? '').toLowerCase(); // returns '' | 'ready' | 'error' | whatever safely
+  return String(a?.status ?? '').toLowerCase();
 }
 
 function parseMilestones(raw: unknown): Milestone[] {
@@ -175,21 +174,15 @@ function withFilename(url: string, name?: string) {
 function isImageName(n?: string) { return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n); }
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
-// Remove any "pending" chips for milestones that are now paid / SAFE-marked
-// Clear any "pending" keys for milestones that are already paid/Safe
-function sweepPendingAgainst(
-  rows: any[],
-  setPending: React.Dispatch<React.SetStateAction<Set<string>>>
-) {
+// Remove any pending chips for milestones already paid/SAFE
+function sweepPendingAgainst(rows: any[], setPending: (fn: (s: Set<string>) => Set<string>) => void) {
   const paidKeys = new Set<string>();
   for (const b of Array.isArray(rows) ? rows : []) {
     const bidId = Number(b?.bidId);
     if (!Number.isFinite(bidId)) continue;
     const ms = parseMilestones(b?.milestones);
     ms.forEach((m, i) => {
-      if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-        paidKeys.add(mkKey2(bidId, i));
-      }
+      if (isPaidLite(m) || hasSafeMarkerLite(m)) paidKeys.add(mkKey2(bidId, i));
     });
   }
   setPending(prev => {
@@ -257,16 +250,16 @@ export default function ProjectDetailPage() {
     const ch = payBcRef.current;
     if (!ch) return;
 
- const off = onPaymentsMessage(ch, async (msg) => {
-  const k = mkKey2(msg.bidId, msg.milestoneIndex);
-  if (msg.type === 'mx:pay:queued') { setPendingPay(prev => new Set(prev).add(k)); addPendingLS(k); }
-  if (msg.type === 'mx:pay:done')  { setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; }); removePendingLS(k); }
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-    sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay); 
-  } catch {}
-});
+    const off = onPaymentsMessage(ch, async (msg) => {
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+      if (msg.type === 'mx:pay:queued') { setPendingPay(prev => new Set(prev).add(k)); addPendingLS(k); }
+      if (msg.type === 'mx:pay:done')  { setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; }); removePendingLS(k); }
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+        sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
+      } catch {}
+    });
 
     return () => { try { off?.(); } catch {}; try { ch?.close(); } catch {}; payBcRef.current = null; };
   }, [projectIdNum]);
@@ -336,19 +329,6 @@ export default function ProjectDetailPage() {
   useEffect(() => { if (tab === 'files') { refreshProofs(); } }, [tab]); // eslint-disable-line
 
   useEffect(() => {
-    const onAnyProofUpdate = (ev: any) => {
-      const pid = Number(ev?.detail?.proposalId);
-      if (!Number.isFinite(pid) || pid === projectIdNum) refreshProofs();
-    };
-    window.addEventListener('proofs:updated', onAnyProofUpdate);
-    window.addEventListener('proofs:changed', onAnyProofUpdate);
-    return () => {
-      window.removeEventListener('proofs:updated', onAnyProofUpdate);
-      window.removeEventListener('proofs:changed', onAnyProofUpdate);
-    };
-  }, [projectIdNum]);
-
-  useEffect(() => {
     const onJustSent = (ev: any) => {
       const bidId = Number(ev?.detail?.bidId);
       const idx   = Number(ev?.detail?.milestoneIndex);
@@ -365,14 +345,14 @@ export default function ProjectDetailPage() {
     return () => window.removeEventListener('proofs:just-sent', onJustSent);
   }, []);
 
-  // Poll bids while AI analysis runs — uses analysisStatus() (never touches a null)
+  // Poll bids while AI analysis runs
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
 
     const needsMore = (rows: any[]) =>
       rows.some((row) => {
-        const st = analysisStatus(row);        // '' | 'ready' | 'error' | other
+        const st = analysisStatus(row);
         return st !== '' && st !== 'ready' && st !== 'error';
       });
 
@@ -404,29 +384,6 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, safeBids]);
 
-  // TTL prune stuck pending chips (dynamic import so repo builds even if helper not exported)
-  useEffect(() => {
-    (async () => {
-      try {
-        const mod = await import('@/lib/paymentsSync');
-        const fn = (mod as any).clearStalePendingKeys as
-          | ((s: Set<string>, maxAgeMs: number, onStale: (k: string) => void) => void)
-          | undefined;
-        if (typeof fn === 'function') {
-          fn(pendingPay, 5 * 60 * 1000, (staleKey) => {
-            setPendingPay(prev => {
-              const next = new Set(prev);
-              next.delete(staleKey);
-              return next;
-            });
-          });
-        }
-      } catch {
-        // ignore
-      }
-    })();
-  }, [pendingPay]);
-
   // -------- Derived -----------
   const acceptedBid = safeBids.find((b) => String(b?.status || '').toLowerCase() === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
@@ -441,67 +398,62 @@ export default function ProjectDetailPage() {
   const proofFiles = filesFromProofRecords(proofs);
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-  // Manual (EOA) payment, synced
-  // Manual (EOA) payment, synced — with final guard after polling
-// Manual (EOA) payment — optimistic "Paid" immediately
-// Manual (EOA) payment — optimistic "Paid" immediately
-async function handleReleasePayment(idx: number) {
-  if (!acceptedBid) return;
-  const bidIdNum = Number(acceptedBid.bidId);
-  if (!Number.isFinite(bidIdNum)) return;
-  if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+  // ===== Manual (EOA) payment — OPTIMISTIC "Paid" =====
+  async function handleReleasePayment(idx: number) {
+    if (!acceptedBid) return;
+    const bidIdNum = Number(acceptedBid.bidId);
+    if (!Number.isFinite(bidIdNum)) return;
+    if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
 
-  const key = mkKey2(bidIdNum, idx);
+    const key = mkKey2(bidIdNum, idx);
 
-  try {
-    setReleasingKey(`${bidIdNum}:${idx}`);
-
-    // queue + local pending
-    postQueued(bidIdNum, idx);
-    setPendingPay(prev => new Set(prev).add(key));
-    addPendingLS(key);
-
-    // hit API
-    await payMilestone(bidIdNum, idx);
-
-    // ✅ OPTIMISTIC: mark milestone as paid in local state now
-    setBids(prev => prev.map(b =>
-      Number(b?.bidId) !== bidIdNum ? b : {
-        ...b,
-        milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
-          i === idx
-            ? {
-                ...m,
-                completed: true,
-                paymentTxHash: m.paymentTxHash || 'local-paid', // local marker
-                paymentDate: m.paymentDate || new Date().toISOString(),
-              }
-            : m
-        ),
-      }
-    ));
-
-    // clear "pending" chip immediately and broadcast done
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    postDone(bidIdNum, idx);
-
-    alert('Payment released.');
-  } catch (e: any) {
-    // failure: undo local pending
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    alert(e?.message || 'Failed to release payment.');
-  } finally {
-    setReleasingKey(null);
-    // refresh server data (and sweep any leftover pending)
     try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-      sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
-    } catch {}
+      setReleasingKey(`${bidIdNum}:${idx}`);
+
+      // queue + local pending
+      postQueued(bidIdNum, idx);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
+
+      // call API
+      await payMilestone(bidIdNum, idx);
+
+      // ✅ OPTIMISTIC: mark as paid immediately
+      setBids(prev => prev.map(b =>
+        Number(b?.bidId) !== bidIdNum ? b : {
+          ...b,
+          milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
+            i === idx
+              ? {
+                  ...m,
+                  completed: true,
+                  paymentTxHash: m.paymentTxHash || 'local-paid',
+                  paymentDate: m.paymentDate || new Date().toISOString(),
+                }
+              : m
+          ),
+        }
+      ));
+
+      // clear "pending" chip now and broadcast done
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      postDone(bidIdNum, idx);
+
+      alert('Payment released.');
+    } catch (e: any) {
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      alert(e?.message || 'Failed to release payment.');
+    } finally {
+      setReleasingKey(null);
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+        sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
+      } catch {}
+    }
   }
-}
 
   const canEdit =
     me?.role === 'admin' ||
@@ -554,29 +506,29 @@ async function handleReleasePayment(idx: number) {
   // Debug expose
   useEffect(() => { if (typeof window !== 'undefined') (window as any).__PROOFS = proofs; }, [proofs]);
 
-  // Clear any local "pending" keys for milestones that are now paid or carry a SAFE marker
+  // Clear local "pending" keys for milestones now paid or SAFE-marked
   useEffect(() => {
-  if (!safeBids.length) return;
-  setPendingPay(prev => {
-    const next = new Set(prev);
-    for (const b of safeBids) {
-      const bidId = Number(b?.bidId);
-      if (!Number.isFinite(bidId)) continue;
-      const ms = parseMilestones(b?.milestones);
-      ms.forEach((m, idx) => {
-        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-          const k = mkKey2(bidId, idx);
-          if (next.has(k)) {
-            next.delete(k);
-            try { removePendingLS(k); } catch {}
-            try { postDone(bidId, idx); } catch {}
+    if (!safeBids.length) return;
+    setPendingPay(prev => {
+      const next = new Set(prev);
+      for (const b of safeBids) {
+        const bidId = Number(b?.bidId);
+        if (!Number.isFinite(bidId)) continue;
+        const ms = parseMilestones(b?.milestones);
+        ms.forEach((m, idx) => {
+          if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+            const k = mkKey2(bidId, idx);
+            if (next.has(k)) {
+              next.delete(k);
+              try { removePendingLS(k); } catch {}
+              try { postDone(bidId, idx); } catch {}
+            }
           }
-        }
-      });
-    }
-    return next;
-  });
-}, [safeBids]);
+        });
+      }
+      return next;
+    });
+  }, [safeBids]);
 
   // ----------------- Render -----------------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
@@ -895,8 +847,7 @@ async function handleReleasePayment(idx: number) {
                     {acceptedMilestones.map((m, idx) => {
                       const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
-                      const k = `${Number(acceptedBid.bidId)}:${idx}`;
-                      const hasProofNow = !!m.proof || !!proofJustSent[k];
+                      const hasProofNow = !!m.proof;
                       const status = paid ? 'paid' : completedRow ? 'completed' : hasProofNow ? 'submitted' : 'pending';
                       const canRelease = !paid && completedRow;
 
@@ -922,46 +873,47 @@ async function handleReleasePayment(idx: number) {
                                 {releasingKey === `${Number(acceptedBid.bidId)}:${idx}` ? 'Releasing…' : (payIsPending ? 'Payment Pending…' : 'RELEASE PAYMENT')}
                               </button>
 
- <SafePayButton
-  bidId={Number(acceptedBid.bidId)}
-  milestoneIndex={idx}
-  amountUSD={Number(m?.amount || 0)}
-  disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
-  onQueued={async () => {
-    const bidIdNum = Number(acceptedBid.bidId);
-    const key = mkKey2(bidIdNum, idx);
+                              {/* SAFE button — OPTIMISTIC onQueued */}
+                              <SafePayButton
+                                bidId={Number(acceptedBid.bidId)}
+                                milestoneIndex={idx}
+                                amountUSD={Number(m?.amount || 0)}
+                                disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
+                                onQueued={async () => {
+                                  const bidIdNum = Number(acceptedBid.bidId);
+                                  const key = mkKey2(bidIdNum, idx);
 
-    // queue + pending
-    setPendingPay(prev => new Set(prev).add(key));
-    addPendingLS(key);
-    postQueued(bidIdNum, idx);
+                                  // queue + pending
+                                  setPendingPay(prev => new Set(prev).add(key));
+                                  addPendingLS(key);
+                                  postQueued(bidIdNum, idx);
 
-    // ✅ OPTIMISTIC: mark as paid immediately
-    setBids(prev => prev.map(b =>
-      Number(b?.bidId) !== bidIdNum ? b : {
-        ...b,
-        milestones: parseMilestones(b.milestones).map((mm: any, i: number) =>
-          i === idx
-            ? {
-                ...mm,
-                completed: true,
-                paymentTxHash: mm.paymentTxHash || 'local-paid',
-                paymentDate: mm.paymentDate || new Date().toISOString(),
-              }
-            : mm
-        ),
-      }
-    ));
+                                  // ✅ OPTIMISTIC: mark paid now
+                                  setBids(prev => prev.map(b =>
+                                    Number(b?.bidId) !== bidIdNum ? b : {
+                                      ...b,
+                                      milestones: parseMilestones(b.milestones).map((mm: any, i: number) =>
+                                        i === idx
+                                          ? {
+                                              ...mm,
+                                              completed: true,
+                                              paymentTxHash: mm.paymentTxHash || 'local-paid',
+                                              paymentDate: mm.paymentDate || new Date().toISOString(),
+                                            }
+                                          : mm
+                                      ),
+                                    }
+                                  ));
 
-    // clear pending chip now and broadcast done
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    postDone(bidIdNum, idx);
+                                  // clear pending chip and broadcast
+                                  setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+                                  removePendingLS(key);
+                                  postDone(bidIdNum, idx);
 
-    // optional: light refresh
-    try { const next = await getBids(projectIdNum); setBids(Array.isArray(next) ? next : []); } catch {}
-  }}
-/>
+                                  // light refresh
+                                  try { const next = await getBids(projectIdNum); setBids(Array.isArray(next) ? next : []); } catch {}
+                                }}
+                              />
                             </div>
                           </td>
                         </tr>

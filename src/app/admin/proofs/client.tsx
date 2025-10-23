@@ -1,7 +1,7 @@
 // src/app/admin/proofs/Client.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   getBids,
   getBid,
@@ -48,33 +48,6 @@ type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
 type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
-
-// === sweep pending chips against server truth ===
-function sweepPendingAgainst(
-  bids: any[] | undefined,
-  setPendingPay: React.Dispatch<React.SetStateAction<Set<string>>>
-) {
-  if (!Array.isArray(bids) || bids.length === 0) return;
-  setPendingPay(prev => {
-    const next = new Set(prev);
-    for (const b of bids) {
-      const bidId = Number(b?.bidId ?? b?.id);
-      if (!Number.isFinite(bidId)) continue;
-      const msArr = Array.isArray(b?.milestones) ? b.milestones : [];
-      msArr.forEach((m: any, idx: number) => {
-        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-          const key = mkKey2(bidId, idx);
-          if (next.has(key)) {
-            next.delete(key);
-            try { removePendingLS(key); } catch {}
-            try { postDone(bidId, idx); } catch {}
-          }
-        }
-      });
-    }
-    return next;
-  });
-}
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
@@ -136,8 +109,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const rows = Array.isArray(allBids) ? allBids : [];
       setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
-      sweepPendingAgainst(rows, setPendingPay);
-
 
       // clear local pending for already paid/marked
       for (const bid of rows) {
@@ -260,82 +231,59 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  // ==== POLL UNTIL PAID ====
-  // ==== POLL UNTIL PAID (REPLACE WHOLE FUNCTION) ====
-async function pollUntilPaid(
-  bidId: number,
-  milestoneIndex: number,
-  tries = 20,
-  intervalMs = 3000
-) {
-  const key = mkKey2(bidId, milestoneIndex);
-
-  for (let i = 0; i < tries; i++) {
+  // ==== POLL UNTIL PAID (kept for safety) ====
+  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
+    const key = mkKey2(bidId, milestoneIndex);
+    for (let i = 0; i < tries; i++) {
+      try {
+        const bid = await getBid(bidId);
+        const m = bid?.milestones?.[milestoneIndex];
+        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+          removePendingLS(key);
+          postDone(bidId, milestoneIndex);
+          setBids(prev => prev.map(b => {
+            const match = ((b as any).bidId ?? (b as any).id) === bidId;
+            if (!match) return b;
+            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+            const srvM = (bid as any)?.milestones?.[milestoneIndex];
+            if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+            return { ...b, milestones: ms };
+          }));
+          router.refresh?.();
+          return;
+        }
+      } catch (err: any) {
+        if (err?.status === 401 || err?.status === 403) {
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+          removePendingLS(key);
+          setError('Your session expired. Please sign in again.');
+          return;
+        }
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-
-      if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-        // clear pending locally + LS + broadcast
+      if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
         setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
         removePendingLS(key);
+      } else {
         postDone(bidId, milestoneIndex);
-
-        // merge the fresh milestone into local bids
-        setBids(prev => prev.map(b => {
-          const match = ((b as any).bidId ?? (b as any).id) === bidId;
-          if (!match) return b;
-          const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-          const srvM = (bid as any)?.milestones?.[milestoneIndex];
-          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-          return { ...b, milestones: ms };
-        }));
-
-        // 🧹 SWEEP: clear any other pending keys that are already paid/marked
-        sweepPendingAgainst([bid], setPendingPay);
-
-        router.refresh?.();
-        return;
       }
-    } catch (err: any) {
-      if (err?.status === 401 || err?.status === 403) {
-        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-        removePendingLS(key);
-        setError('Your session expired. Please sign in again.');
-        return;
-      }
-    }
-    await new Promise(r => setTimeout(r, intervalMs));
+      setBids(prev => prev.map(b => {
+        const match = ((b as any).bidId ?? (b as any).id) === bidId;
+        if (!match) return b;
+        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+        const srvM = (bid as any)?.milestones?.[milestoneIndex];
+        if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+        return { ...b, milestones: ms };
+      }));
+    } catch {}
+    router.refresh?.();
   }
-
-  // Final check after timeout
-  try {
-    const bid = await getBid(bidId);
-    const m = bid?.milestones?.[milestoneIndex];
-
-    if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
-      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-      removePendingLS(key);
-    } else {
-      postDone(bidId, milestoneIndex);
-    }
-
-    setBids(prev => prev.map(b => {
-      const match = ((b as any).bidId ?? (b as any).id) === bidId;
-      if (!match) return b;
-      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-      const srvM = (bid as any)?.milestones?.[milestoneIndex];
-      if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-      return { ...b, milestones: ms };
-    }));
-
-    // 🧹 SWEEP here too after we setBids on timeout path
-    sweepPendingAgainst([bid], setPendingPay);
-
-  } catch {}
-  router.refresh?.();
-}
-// ==== END POLL UNTIL PAID ====
+  // ==== END POLL UNTIL PAID ====
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -351,52 +299,53 @@ async function pollUntilPaid(
     }
   };
 
+  // ===== Manual payment — OPTIMISTIC "Paid" =====
   const handlePay = async (bidId: number, milestoneIndex: number) => {
-  if (!confirm('Release payment for this milestone?')) return;
-  const key = mkKey2(bidId, milestoneIndex);
+    if (!confirm('Release payment for this milestone?')) return;
+    const key = mkKey2(bidId, milestoneIndex);
+    try {
+      setProcessing(`pay-${bidId}-${milestoneIndex}`);
 
-  try {
-    setProcessing(`pay-${bidId}-${milestoneIndex}`);
+      // queue + local pending
+      postQueued(bidId, milestoneIndex);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
 
-    // queue + pending
-    postQueued(bidId, milestoneIndex);
-    setPendingPay(prev => new Set(prev).add(key));
-    addPendingLS(key);
+      // API
+      await payMilestone(bidId, milestoneIndex);
 
-    // call API
-    await payMilestone(bidId, milestoneIndex);
+      // ✅ OPTIMISTIC: mark as PAID now
+      setBids(prev => prev.map(b => {
+        if (((b as any).bidId ?? (b as any).id) !== bidId) return b;
+        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+        const m  = ms[milestoneIndex] || {};
+        ms[milestoneIndex] = {
+          ...m,
+          completed: true,
+          paymentTxHash: m.paymentTxHash || 'local-paid',
+          paymentDate: m.paymentDate || new Date().toISOString(),
+        };
+        return { ...b, milestones: ms };
+      }));
 
-    // ✅ OPTIMISTIC: mark as paid immediately in list
-    setBids(prev => prev.map(b => {
-      const match = ((b as any).bidId ?? (b as any).id) === bidId;
-      if (!match) return b;
-      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-      const cur = ms[milestoneIndex] || {};
-      ms[milestoneIndex] = {
-        ...cur,
-        completed: true,
-        paymentTxHash: cur.paymentTxHash || 'local-paid',
-        paymentDate: cur.paymentDate || new Date().toISOString(),
-      };
-      return { ...b, milestones: ms };
-    }));
+      // clear “pending” chip immediately
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      postDone(bidId, milestoneIndex);
 
-    // clear pending chip & broadcast done
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    postDone(bidId, milestoneIndex);
+      // non-blocking refresh
+      try { await loadProofs(true); } catch {}
 
-    // background reload (optional)
-    await loadProofs(true);
-    router.refresh?.();
-  } catch (e: any) {
-    alert(e?.message || 'Payment failed');
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-  } finally {
-    setProcessing(null);
-  }
-};
+    } catch (e: any) {
+      // undo pending on failure
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      alert(e?.message || 'Payment failed');
+    } finally {
+      setProcessing(null);
+      router.refresh?.();
+    }
+  };
 
   const handleReject = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Reason for rejection (optional):') || '';
@@ -446,7 +395,7 @@ async function pollUntilPaid(
       setProcessing('unarchive-all');
       const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
       for (const k of keys) {
-        const [bidIdStr, idxStr] = k.split(':'); // we use ":" in mkKey2
+        const [bidIdStr, idxStr] = k.split(':');
         const bidId = Number(bidIdStr);
         const idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
@@ -560,9 +509,9 @@ async function pollUntilPaid(
               ].join(' ')}
             >
               {t.label}
-              {t.key === 'archived' && Object.values(archMap).filter(v => v.archived).length > 0 && (
+              {t.key === 'archived' && archivedCount > 0 && (
                 <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
-                  {Object.values(archMap).filter(v => v.archived).length}
+                  {archivedCount}
                 </span>
               )}
             </button>
@@ -571,11 +520,11 @@ async function pollUntilPaid(
       </div>
 
       {/* Archive Controls */}
-      {tab === 'archived' && Object.values(archMap).filter(v => v.archived).length > 0 && (
+      {tab === 'archived' && archivedCount > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-600">
-              {Object.values(archMap).filter(v => v.archived).length} milestone{Object.values(archMap).filter(v => v.archived).length === 1 ? '' : 's'} archived
+              {archivedCount} milestone{archivedCount === 1 ? '' : 's'} archived
             </span>
             <button
               onClick={handleUnarchiveAll}
@@ -619,12 +568,11 @@ async function pollUntilPaid(
 
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
-                  const archived = isArchived(bid.bidId, origIdx);
-const pendKey = mkKey2(bid.bidId, origIdx);
-const showApprove = hasProof(m) && !isCompleted(m);
-// Only treat as pending if NOT paid and NOT SAFE-marked
-const payIsPending = pendingPay.has(pendKey) && !isPaidLite(m) && !hasSafeMarkerLite(m);
-const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
+                  const archived = !!archMap[mkKey2(bid.bidId, origIdx)]?.archived;
+                  const pendKey = mkKey2(bid.bidId, origIdx);
+                  const showApprove = hasProof(m) && !isCompleted(m);
+                  const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
+                  const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -639,6 +587,9 @@ const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
                           </div>
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
+                          {/* Proof */}
+                          {/* (image grid / links) */}
+                          {/* Render proof details: */}
                           {renderProof(m)}
                           {m.paymentTxHash && (<p className="text-sm text-green-600 mt-2 break-all">Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}</p>)}
                           {!hasProof(m) && !isCompleted(m) && (<p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>)}
@@ -685,44 +636,43 @@ const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
                                     {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : payIsPending ? 'Payment Pending…' : 'Release Payment'}
                                   </button>
 
- <SafePayButton
-  bidId={bid.bidId}
-  milestoneIndex={origIdx}
-  amountUSD={Number(m?.amount || 0)}
-  disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-  onQueued={async () => {
-    const key = mkKey2(bid.bidId, origIdx);
+                                  {/* SAFE — OPTIMISTIC onQueued */}
+                                  <SafePayButton
+                                    bidId={bid.bidId}
+                                    milestoneIndex={origIdx}
+                                    amountUSD={Number(m?.amount || 0)}
+                                    disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+                                    onQueued={() => {
+                                      const key = mkKey2(bid.bidId, origIdx);
+                                      setPendingPay(prev => new Set(prev).add(key));
+                                      addPendingLS(key);
+                                      postQueued(bid.bidId, origIdx);
 
-    // queue + pending
-    setPendingPay(prev => new Set(prev).add(key));
-    addPendingLS(key);
-    postQueued(bid.bidId, origIdx);
+                                      // ✅ OPTIMISTIC: mark as PAID immediately
+                                      setBids(prev => prev.map(b => {
+                                        const match = ((b as any).bidId ?? (b as any).id) === bid.bidId;
+                                        if (!match) return b;
+                                        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+                                        const m0  = ms[origIdx] || {};
+                                        ms[origIdx] = {
+                                          ...m0,
+                                          completed: true,
+                                          paymentTxHash: m0.paymentTxHash || 'local-paid',
+                                          paymentDate: m0.paymentDate || new Date().toISOString(),
+                                        };
+                                        return { ...b, milestones: ms };
+                                      }));
 
-    // ✅ OPTIMISTIC: mark as paid immediately
-    setBids(prev => prev.map(b0 => {
-      const match = ((b0 as any).bidId ?? (b0 as any).id) === bid.bidId;
-      if (!match) return b0;
-      const ms = Array.isArray((b0 as any).milestones) ? [ ...(b0 as any).milestones ] : [];
-      const cur = ms[origIdx] || {};
-      ms[origIdx] = {
-        ...cur,
-        completed: true,
-        paymentTxHash: cur.paymentTxHash || 'local-paid',
-        paymentDate: cur.paymentDate || new Date().toISOString(),
-      };
-      return { ...b0, milestones: ms };
-    }));
+                                      // clear pending right away
+                                      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+                                      removePendingLS(key);
+                                      postDone(bid.bidId, origIdx);
 
-    // clear pending chip & broadcast done
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    postDone(bid.bidId, origIdx);
-
-    // optional refresh
-    router.refresh?.();
-    await loadProofs(true);
-  }}
-/>
+                                      // quick refresh
+                                      router.refresh?.();
+                                      loadProofs(true).catch(() => {});
+                                    }}
+                                  />
                                 </div>
                               )}
                             </>
