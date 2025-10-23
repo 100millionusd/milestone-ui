@@ -1598,7 +1598,6 @@ export default {
   getAuthRole,
   getAuthRoleOnce, 
   loginWithSignature,
-  logout,
   clearBidsCache, 
   updateBidMilestones,
 
