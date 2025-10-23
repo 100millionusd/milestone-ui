@@ -1131,9 +1131,13 @@ export default function ProjectDetailPage() {
 
 // ---------------- UI bits ----------------
 function Progress({ value }: { value: number }) {
+  const clamped = Math.min(100, Math.max(0, value));
   return (
     <div className="h-2 bg-gray-200 rounded">
-      <div className="h-2 bg-black rounded transition-all" style={{ width: ${'`'}${'${'}Math.min(100, Math.max(0, value))${'}'}%${'`'} }} />
+      <div
+        className="h-2 bg-black rounded transition-all"
+        style={{ width: clamped + '%' }}
+      />
     </div>
   );
 }
