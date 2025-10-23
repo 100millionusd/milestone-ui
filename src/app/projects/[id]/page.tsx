@@ -131,16 +131,24 @@ function parseDocs(raw: unknown): any[] {
 
 // 🔧 IPFS/Gateway normalizer — paste this directly under parseDocs()
 function normalizeIpfsUrl(input?: string, cid?: string) {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
-  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid`;
+  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // ensure no trailing slash
+  if (cid && (!input || /^\s*$/.test(input))) return GW + '/' + cid;
   if (!input) return '';
   let u = String(input).trim();
+
+  // Bare CID (optionally with ?query)
   const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
+  if (m) return GW + '/' + m[1] + (m[2] || '');
+
+  // ipfs:// and leading ipfs/ segments → strip
   u = u.replace(/^ipfs:\/\//i, '');
   u = u.replace(/^\/+/, '');
   u = u.replace(/^(?:ipfs\/)+/i, '');
-  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+
+  // If not absolute http(s), prefix gateway
+  if (!/^https?:\/\//i.test(u)) u = GW + '/' + u;
+
+  // Collapse any repeated /ipfs/ipfs/
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
   return u;
 }
