@@ -292,7 +292,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx));
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !hasSafeMarker(m);
       case 'paid':
         return isPaid(m);
       case 'no-proof':
@@ -731,8 +731,8 @@ async function pollUntilPaid(
                   const key = mkKey(bid.bidId, origIdx);
                   const showApprove = hasProof(m) && !isCompleted(m);
                   const payIsPending = pendingPay.has(key);
-                  const showPay = isReadyToPay(m) && !payIsPending;
-                  !hasSafeMarker(m);
+                  const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarker(m);
+                  
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
