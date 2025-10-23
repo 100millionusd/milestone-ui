@@ -280,23 +280,22 @@ function isPaid(m: any): boolean {
 
 // Consider any Safe-* signal as "we have/had a Safe payment in flight/executed"
 function hasSafeMarker(m: any): boolean {
+  if (!m) return false;
   const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  return !!(
-    m?.safeTxHash            || m?.safe_tx_hash ||
-    m?.safePaymentTxHash     || m?.safe_payment_tx_hash ||
-    m?.safeNonce             || m?.safe_nonce ||
-    m?.safeExecutedAt        || m?.safe_executed_at ||
-    (s && ['queued','pending','submitted','awaiting_exec','success','executed'].includes(s))
-  );
-}
 
-function hasSafeSuccess(m: any): boolean {
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  return !!(
-    m?.safeExecutedAt        || m?.safe_executed_at ||
-    m?.safePaymentTxHash     || m?.safe_payment_tx_hash ||
-    ['success','executed'].includes(s)
-  );
+  // direct known fields
+  const direct =
+    m?.safeTxHash || m?.safe_tx_hash ||
+    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
+    m?.safeNonce || m?.safe_nonce ||
+    m?.safeExecutedAt || m?.safe_executed_at ||
+    (s && ['queued','pending','submitted','awaiting_exec','success','executed'].includes(s));
+
+  if (direct) return true;
+
+  // fallback: sometimes backends stash under nested "payment"/"safe" blobs or use "gnosis"
+  const raw = JSON.stringify(m).toLowerCase();
+  return raw.includes('"safe') || raw.includes('gnosis');
 }
 
 function isReadyToPay(m: any): boolean {
@@ -380,7 +379,14 @@ async function pollUntilPaid(
 
       if (m && (isPaid(m) || hasSafeMarker(m))) {
         removePending(key);
-        setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
+        setBids(prev => prev.map(b => {
+  const match = ((b as any).bidId ?? (b as any).id) === bidId;
+  if (!match) return b;
+  const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+  const srvM = (bid as any)?.milestones?.[milestoneIndex];
+  if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+  return { ...b, milestones: ms };
+}));
         try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
         if (typeof router?.refresh === 'function') router.refresh();
         return;
@@ -401,10 +407,17 @@ async function pollUntilPaid(
   try {
     const bid = await getBid(bidId);
     const m = bid?.milestones?.[milestoneIndex];
-    if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
-      removePending(key);
-    }
-    setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
+ if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
+  removePending(key);
+}
+setBids(prev => prev.map(b => {
+  const match = ((b as any).bidId ?? (b as any).id) === bidId;
+  if (!match) return b;
+  const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+  const srvM = (bid as any)?.milestones?.[milestoneIndex];
+  if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+  return { ...b, milestones: ms };
+}));
   } catch { /* silent */ }
   if (typeof router?.refresh === 'function') router.refresh();
 }
