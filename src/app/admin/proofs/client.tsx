@@ -325,34 +325,49 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
-    const key = mkKey(bidId, milestoneIndex);
-    
-    for (let i = 0; i < tries; i++) {
-      try {
-        // Only fetch the specific bid, not all bids
-        const bid = await getBid(bidId);
+ // EXACT REPLACEMENT
+async function pollUntilPaid(
+  bidId: number,
+  milestoneIndex: number,
+  tries = 20,
+  intervalMs = 3000
+) {
+  const key = mkKey(bidId, milestoneIndex);
+
+  for (let i = 0; i < tries; i++) {
+    try {
+      // Bypass any client/server cache and fetch ONLY this bid
+      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const bid = await res.json();
         const m = bid?.milestones?.[milestoneIndex];
-        
+
         if (m && isPaid(m)) {
           removePending(key);
-          // Only update this specific bid instead of reloading everything
-          setBids(prev => prev.map(b => 
-            b.bidId === bidId ? bid : b
-          ));
+          // Update just this bid in-place
+          setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
+          if (typeof router?.refresh === 'function') router.refresh(); // revalidate server comps
           return;
         }
-      } catch (error) {
-        console.error('Polling error:', error);
+      } else {
+        console.warn('pollUntilPaid non-200', res.status);
       }
-      
-      await new Promise(r => setTimeout(r, intervalMs));
+    } catch (err) {
+      console.error('Polling error:', err);
     }
-    
-    // Final attempt with full refresh if polling fails
-    removePending(key);
-    await loadProofs();
+
+    await new Promise(r => setTimeout(r, intervalMs));
   }
+
+  // Final attempt if polling times out
+  removePending(key);
+  await loadProofs();
+  if (typeof router?.refresh === 'function') router.refresh();
+}
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -801,19 +816,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         : 'Release Payment'}
     </button>
 
-    {/* SAFE (multisig) */}
-    <SafePayButton
-      bidId={bid.bidId}
-      milestoneIndex={origIdx}
-      amountUSD={Number(m?.amount || 0)}
-      disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-      onQueued={() => {
-        // mirror manual-flow UX: mark pending locally and start polling
-        const key = mkKey(bid.bidId, origIdx);
-        addPending(key);
-        pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-      }}
-    />
+ <SafePayButton
+  bidId={bid.bidId}
+  milestoneIndex={origIdx}
+  amountUSD={Number(m?.amount || 0)}
+  disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+  onQueued={() => {
+    const key = mkKey(bid.bidId, origIdx);
+    addPending(key);
+    pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+    router.refresh(); // pull fresh server data ASAP
+  }}
+/>
   </div>
 )}
                             </>
