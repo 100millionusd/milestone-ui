@@ -351,7 +351,7 @@ function hasSafeMarker(m: any): boolean {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
- // ==== POLL UNTIL PAID (EXACT REPLACEMENT) ====
+ // ==== POLL UNTIL PAID (FIXED) ====
 async function pollUntilPaid(
   bidId: number,
   milestoneIndex: number,
@@ -362,11 +362,18 @@ async function pollUntilPaid(
 
   for (let i = 0; i < tries; i++) {
     try {
-      // Force fresh data; do not use getBid (may be cached)
       const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
         method: 'GET',
         cache: 'no-store',
+        credentials: 'include',          // <-- IMPORTANT
       });
+
+      if (res.status === 401 || res.status === 403) {
+        console.warn('pollUntilPaid unauthorized; stopping');
+        removePending(key);              // don’t keep UI stuck on “Payment Pending”
+        setError('Your session expired. Please sign in again.');
+        break;
+      }
 
       if (res.ok) {
         const bid = await res.json();
@@ -389,9 +396,16 @@ async function pollUntilPaid(
     await new Promise(r => setTimeout(r, intervalMs));
   }
 
-  // Timed out: only clear "pending" when there is no Safe marker
+  // Final check; also include credentials and stop on 401
   try {
-    const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
+    const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
+      cache: 'no-store',
+      credentials: 'include',            // <-- IMPORTANT
+    });
+    if (res.status === 401 || res.status === 403) {
+      removePending(key);
+      return;
+    }
     const bid = await res.json();
     const m = bid?.milestones?.[milestoneIndex];
     if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
