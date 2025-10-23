@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import {
+  getBids,
   getBid,
   getBidsOnce,
   payMilestone,
@@ -20,7 +21,7 @@ import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import { useRouter } from 'next/navigation';
 
-// 🔗 Unified payments sync helpers (single source of truth)
+// 🔗 Unified payments sync
 import {
   openPaymentsChannel,
   onPaymentsMessage,
@@ -30,12 +31,11 @@ import {
   addPendingLS,
   removePendingLS,
   listPendingLS,
-  clearStalePendingKeys,
   isPaidLite,
   hasSafeMarkerLite,
+  clearStalePendingKeys,
 } from '@/lib/paymentsSync';
 
-// Tabs
 const TABS = [
   { key: 'all', label: 'All' },
   { key: 'needs-approval', label: 'Needs Approval' },
@@ -47,12 +47,7 @@ const TABS = [
 type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
-
-type ArchiveInfo = {
-  archived: boolean;
-  archivedAt?: string | null;
-  archiveReason?: string | null;
-};
+type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
@@ -65,124 +60,75 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
   const mkRejectKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
-  // Tabs + search
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
-  // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
-
-  // local "payment pending" while we poll the server after clicking Pay
   const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
-
-  // Client-side caching for bids data
   const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({ bids: [], lastUpdated: 0 });
 
-  // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
 
-  // create once; tolerate StrictMode double-invoke in dev
   useEffect(() => {
-    if (!bcRef.current) {
-      bcRef.current = openPaymentsChannel(); // 'mx-payments'
-    }
-    return () => {
-      try { bcRef.current?.close(); } catch {}
-      bcRef.current = null;
-    };
+    if (!bcRef.current) bcRef.current = openPaymentsChannel();
+    return () => { try { bcRef.current?.close(); } catch {}; bcRef.current = null; };
   }, []);
 
-  // 🔄 Hydrate pending set from LS on mount (works even if page hard-refreshes)
-  useEffect(() => {
-    try {
-      const keys = listPendingLS();
-      setPendingPay(new Set(Array.isArray(keys) ? keys : []));
-    } catch {}
-  }, []);
-
-  // listen for cross-page payment messages
+  // reflect queued/done from any tab/window
   useEffect(() => {
     const ch = bcRef.current;
     if (!ch) return;
-
     const off = onPaymentsMessage(ch, async (msg) => {
-      // reflect "queued" immediately so buttons hide in this tab too
-      if (msg.type === 'mx:pay:queued') {
-        const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => { const next = new Set(prev); next.add(k); return next; });
-        addPendingLS(k);
-      }
-
-      // refresh data so chips/markers update ASAP
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+      if (msg.type === 'mx:pay:queued') { setPendingPay(prev => new Set(prev).add(k)); addPendingLS(k); }
+      if (msg.type === 'mx:pay:done')   { setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; }); removePendingLS(k); }
       await loadProofs(true);
-      if (typeof router?.refresh === 'function') router.refresh();
-
-      // clear on "done"
-      if (msg.type === 'mx:pay:done') {
-        const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => { const next = new Set(prev); next.delete(k); return next; });
-        removePendingLS(k);
-      }
+      router.refresh?.();
     });
-
     return () => { try { off?.(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  // Only refetch on mount if server gave us nothing
-  useEffect(() => {
-    if (initialBids.length === 0) {
-      loadProofs();
-    } else {
-      // hydrate archive state for the given bids
-      hydrateArchiveStatuses(initialBids).catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // hydrate LS on mount
+  useEffect(() => { try { setPendingPay(new Set(listPendingLS())); } catch {} }, []);
 
-  // listen for archive/unarchive from anywhere
+  useEffect(() => {
+    if (initialBids.length === 0) loadProofs();
+    else hydrateArchiveStatuses(initialBids).catch(() => {});
+  }, []); // eslint-disable-line
+
   useMilestonesUpdated(loadProofs);
 
   async function loadProofs(forceRefresh = false) {
-    const CACHE_TTL = 0; // disable client cache for freshest admin view
-
-    // Use cache if available and not forcing refresh
+    const CACHE_TTL = 0;
     if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
-      setBids(dataCache.bids);
-      setLoading(false);
-      return;
+      setBids(dataCache.bids); setLoading(false); return;
     }
-
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
-
-      // Update cache
       setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
 
-      // Clear local "pending" for milestones that are now paid OR show any Safe markers
-      for (const bid of rows || []) {
+      // clear local pending for already paid/marked
+      for (const bid of rows) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           if (isPaidLite(ms[i]) || hasSafeMarkerLite(ms[i])) {
             const k = mkKey2(bid.bidId, i);
-            setPendingPay(prev => { const next = new Set(prev); next.delete(k); return next; });
+            setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; });
             removePendingLS(k);
           }
         }
       }
 
-      // TTL auto-clear for stale local "pending"
-      clearStalePendingKeys(pendingPay, 5 * 60 * 1000, (staleKey) => {
-        setPendingPay(prev => { const next = new Set(prev); next.delete(staleKey); return next; });
+      // optional TTL pruning
+      clearStalePendingKeys?.(pendingPay, 5 * 60 * 1000, (staleKey) => {
+        setPendingPay(prev => { const n = new Set(prev); n.delete(staleKey); return n; });
       });
 
       await hydrateArchiveStatuses(rows);
     } catch (e: any) {
-      console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
     } finally {
       setLoading(false);
@@ -191,72 +137,45 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
-
-    if (uniqueBidIds.length === 0) {
-      setArchMap({});
-      return;
-    }
-
+    if (uniqueBidIds.length === 0) { setArchMap({}); return; }
     try {
-      const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
-      updateBulkArchiveCache(bulkArchiveStatus);
-
+      const bulk = await getBulkArchiveStatus(uniqueBidIds);
+      updateBulkArchiveCache(bulk);
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
       allBids.forEach(bid => {
-        const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-
-        ms.forEach((_, index) => {
-          const key = mkKey2(bid.bidId, index);
-          if (nextMap[key] === undefined) {
-            nextMap[key] = bidArchiveStatus[index] || { archived: false };
-          }
+        const s = bulk[bid.bidId] || {};
+        ms.forEach((_, i) => {
+          const key = mkKey2(bid.bidId, i);
+          if (nextMap[key] === undefined) nextMap[key] = s[i] || { archived: false };
         });
       });
-
       setArchMap(nextMap);
-    } catch (error) {
-      console.error('Failed to fetch bulk archive status:', error);
-      // Fallback to individual requests if bulk fails
+    } catch {
       await hydrateArchiveStatusesFallback(allBids);
     }
   }
 
-  // Fallback function for individual requests
   async function hydrateArchiveStatusesFallback(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
     const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
     for (const bid of allBids || []) {
       const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
       for (let i = 0; i < ms.length; i++) {
         const key = mkKey2(bid.bidId, i);
         if (nextMap[key] !== undefined) continue;
-        tasks.push(
-          (async () => {
-            try {
-              const j = await getMilestoneArchive(bid.bidId, i);
-              const mi = j?.milestone ?? j;
-              nextMap[key] = {
-                archived: !!mi?.archived,
-                archivedAt: mi?.archivedAt ?? null,
-                archiveReason: mi?.archiveReason ?? null,
-              };
-            } catch {
-              nextMap[key] = { archived: false };
-            }
-          })()
-        );
+        tasks.push((async () => {
+          try {
+            const j = await getMilestoneArchive(bid.bidId, i);
+            const mi = j?.milestone ?? j;
+            nextMap[key] = { archived: !!mi?.archived, archivedAt: mi?.archivedAt ?? null, archiveReason: mi?.archiveReason ?? null };
+          } catch { nextMap[key] = { archived: false }; }
+        })());
       }
     }
-    if (tasks.length) {
-      await Promise.all(tasks);
-      setArchMap(nextMap);
-    }
+    if (tasks.length) { await Promise.all(tasks); setArchMap(nextMap); }
   }
 
-  // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {
     if (!m?.proof) return false;
     try {
@@ -270,67 +189,43 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
     return false;
   }
-
-  function isCompleted(m: any): boolean {
-    return m?.completed === true || m?.approved === true || m?.status === 'completed';
-  }
-
-  function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !isPaidLite(m);
-  }
-
-  function isArchived(bidId: number, milestoneIndex: number): boolean {
-    return !!archMap[mkKey2(bidId, milestoneIndex)]?.archived;
-  }
+  function isCompleted(m: any): boolean { return m?.completed === true || m?.approved === true || m?.status === 'completed'; }
+  function isReadyToPay(m: any): boolean { return isCompleted(m) && !isPaidLite(m); }
+  function isArchived(bidId: number, milestoneIndex: number): boolean { return !!archMap[mkKey2(bidId, milestoneIndex)]?.archived; }
 
   function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
     const archived = isArchived(bidId, idx);
-
     if (tab === 'archived') return archived;
     if (archived) return false;
-
     switch (tab) {
-      case 'needs-approval':
-        return hasProof(m) && !isCompleted(m);
-      case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey2(bidId, idx)) && !hasSafeMarkerLite(m);
-      case 'paid':
-        return isPaidLite(m);
-      case 'no-proof':
-        return !hasProof(m) && !isCompleted(m);
+      case 'needs-approval': return hasProof(m) && !isCompleted(m);
+      case 'ready-to-pay':  return isReadyToPay(m) && !pendingPay.has(mkKey2(bidId, idx)) && !hasSafeMarkerLite(m);
+      case 'paid':          return isPaidLite(m);
+      case 'no-proof':      return !hasProof(m) && !isCompleted(m);
       case 'all':
-      default:
-        return true;
+      default:              return true;
     }
   }
-
   function bidMatchesSearch(bid: any): boolean {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
-    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
-      .some((m: any) => (m?.name || '').toLowerCase().includes(q));
+    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : []).some((m: any) => (m?.name || '').toLowerCase().includes(q));
     return hay.includes(q) || msMatch;
   }
 
-  const archivedCount = useMemo(
-    () => Object.values(archMap).filter(v => v.archived).length,
-    [archMap]
-  );
+  const archivedCount = useMemo(() => Object.values(archMap).filter(v => v.archived).length, [archMap]);
 
-  // Build a filtered view (preserve original milestone indexes)
   const filtered = useMemo(() => {
     return (bids || [])
       .filter(bidMatchesSearch)
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-        const withIdx = ms.map((m: any, idx: number) => ({ m, idx })); // keep original idx
-
+        const withIdx = ms.map((m: any, idx: number) => ({ m, idx }));
         const visibleWithIdx =
           tab === 'all'
             ? withIdx.filter(({ idx }) => !isArchived(bid.bidId, idx))
             : withIdx.filter(({ m, idx }) => milestoneMatchesTab(m, bid.bidId, idx));
-
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
@@ -339,19 +234,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // ==== POLL UNTIL PAID ====
   async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
     const key = mkKey2(bidId, milestoneIndex);
-
     for (let i = 0; i < tries; i++) {
       try {
         const bid = await getBid(bidId);
         const m = bid?.milestones?.[milestoneIndex];
-
         if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-          // mark done locally + tell other pages
-          setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
           removePendingLS(key);
           postDone(bidId, milestoneIndex);
-
-          // merge just this milestone into the current row
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
             if (!match) return b;
@@ -360,14 +250,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
             return { ...b, milestones: ms };
           }));
-          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-          if (typeof router?.refresh === 'function') router.refresh();
+          router.refresh?.();
           return;
         }
       } catch (err: any) {
-        // lost auth → unstick
         if (err?.status === 401 || err?.status === 403) {
-          setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
           removePendingLS(key);
           setError('Your session expired. Please sign in again.');
           return;
@@ -375,22 +263,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       }
       await new Promise(r => setTimeout(r, intervalMs));
     }
-
-    // Final check & cleanup
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-
       if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
-        // not paid/marked — clear pending only
-        setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
         removePendingLS(key);
       } else {
-        // paid/marked — broadcast "done"
         postDone(bidId, milestoneIndex);
       }
-
-      // merge just this milestone into the current row
       setBids(prev => prev.map(b => {
         const match = ((b as any).bidId ?? (b as any).id) === bidId;
         if (!match) return b;
@@ -399,9 +280,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
         return { ...b, milestones: ms };
       }));
-    } catch { /* silent */ }
-
-    if (typeof router?.refresh === 'function') router.refresh();
+    } catch {}
+    router.refresh?.();
   }
   // ==== END POLL UNTIL PAID ====
 
@@ -411,7 +291,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
       await loadProofs(true);
-      router.refresh();
+      router.refresh?.();
     } catch (e: any) {
       alert(e?.message || 'Failed to approve proof');
     } finally {
@@ -424,19 +304,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     const key = mkKey2(bidId, milestoneIndex);
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
-
-      // broadcast queued + mark pending BEFORE API call
       postQueued(bidId, milestoneIndex);
       setPendingPay(prev => new Set(prev).add(key));
       addPendingLS(key);
-
       await payMilestone(bidId, milestoneIndex);
-
-      // start polling; will post 'done' on success
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
       removePendingLS(key);
     } finally {
       setProcessing(null);
@@ -464,14 +339,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
-        ...prev,
-        [mkKey2(bidId, milestoneIndex)]: {
-          archived: true,
-          archiveReason: reason || null,
-          archivedAt: new Date().toISOString(),
-        },
-      }));
+      setArchMap(prev => ({ ...prev, [mkKey2(bidId, milestoneIndex)]: { archived: true, archiveReason: reason || null, archivedAt: new Date().toISOString() } }));
     } catch (e: any) {
       alert(e?.message || 'Archive failed');
     } finally {
@@ -484,14 +352,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
-        ...prev,
-        [mkKey2(bidId, milestoneIndex)]: {
-          archived: false,
-          archiveReason: null,
-          archivedAt: null,
-        },
-      }));
+      setArchMap(prev => ({ ...prev, [mkKey2(bidId, milestoneIndex)]: { archived: false, archiveReason: null, archivedAt: null } }));
     } catch (e: any) {
       alert(e?.message || 'Unarchive failed');
     } finally {
@@ -505,14 +366,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing('unarchive-all');
       const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
       for (const k of keys) {
-        const [bidIdStr, idxStr] = k.split('-');
+        const [bidIdStr, idxStr] = k.split(':'); // we use ":" in mkKey2
         const bidId = Number(bidIdStr);
         const idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-          try {
-            await unarchiveMilestone(bidId, idx);
-            clearBulkArchiveCache(bidId);
-          } catch {}
+          try { await unarchiveMilestone(bidId, idx); clearBulkArchiveCache(bidId); } catch {}
         }
       }
       await hydrateArchiveStatuses(bids);
@@ -523,62 +381,35 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   };
 
-  // ---- Proof renderer (with lightbox support) ----
+  // ---- Proof UI (with lightbox) ----
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
-
     let parsed: any = null;
     try { parsed = JSON.parse(m.proof); } catch {}
-
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && (
-            <p className="text-sm text-gray-700">{parsed.description}</p>
-          )}
+          {parsed.description && (<p className="text-sm text-gray-700">{parsed.description}</p>)}
           {parsed.files?.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {parsed.files.map((f: any, i: number) => {
                 const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
                 if (isImage) {
-                  const imageUrls = parsed.files
-                    .filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
-                    .map((ff: any) => ff.url);
+                  const imageUrls = parsed.files.filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || '')).map((ff: any) => ff.url);
                   const startIndex = imageUrls.findIndex((u: string) => u === f.url);
-
                   return (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
-                        setLightboxOpen(true);
-                      }}
-                      className="group relative overflow-hidden rounded border"
-                    >
+                    <button key={i} onClick={() => { setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) }); setLightboxOpen(true); }} className="group relative overflow-hidden rounded border">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={f.url}
-                        alt={f.name || `Proof ${i}`}
-                        className="h-32 w-full object-cover group-hover:scale-105 transition"
-                      />
-                      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                        {f.name || 'Image'}
-                      </div>
+                      <img src={f.url} alt={f.name || `Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{f.name || 'Image'}</div>
                     </button>
                   );
                 }
                 return (
                   <div key={i} className="p-3 rounded border bg-gray-50">
                     <p className="truncate text-sm">{f?.name || 'Attachment'}</p>
-                    <a
-                      href={f?.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:underline"
-                    >
-                      Open
-                    </a>
+                    <a href={f?.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Open</a>
                   </div>
                 );
               })}
@@ -587,11 +418,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       );
     }
-
     const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
-
     return (
       <div className="mt-2 space-y-2">
         <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>
@@ -599,38 +428,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {urls.map((url, i) => {
               const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
-              if (isImage) {
-                const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
-                const startIndex = imageUrls.findIndex((u) => u === url);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
-                      setLightboxOpen(true);
-                    }}
-                    className="group relative overflow-hidden rounded border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={url}
-                      alt={`Proof ${i}`}
-                      className="h-32 w-full object-cover group-hover:scale-105 transition"
-                    />
-                  </button>
-                );
-              }
-              return (
+              return isImage ? (
+                <button key={i} onClick={() => { const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u)); const startIndex = imageUrls.findIndex((u) => u === url); setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) }); setLightboxOpen(true); }} className="group relative overflow-hidden rounded border">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                </button>
+              ) : (
                 <div key={i} className="p-3 rounded border bg-gray-50">
                   <p className="truncate text-sm">Attachment</p>
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    Open
-                  </a>
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Open</a>
                 </div>
               );
             })}
@@ -670,15 +476,13 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               onClick={() => setTab(t.key)}
               className={[
                 'px-3 py-1.5 rounded-full text-sm font-medium border',
-                tab === t.key
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+                tab === t.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
               ].join(' ')}
             >
               {t.label}
-              {t.key === 'archived' && archivedCount > 0 && (
+              {t.key === 'archived' && Object.values(archMap).filter(v => v.archived).length > 0 && (
                 <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
-                  {archivedCount}
+                  {Object.values(archMap).filter(v => v.archived).length}
                 </span>
               )}
             </button>
@@ -686,12 +490,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       </div>
 
-      {/* Archive Controls (server) */}
-      {tab === 'archived' && archivedCount > 0 && (
+      {/* Archive Controls */}
+      {tab === 'archived' && Object.values(archMap).filter(v => v.archived).length > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-600">
-              {archivedCount} milestone{archivedCount === 1 ? '' : 's'} archived
+              {Object.values(archMap).filter(v => v.archived).length} milestone{Object.values(archMap).filter(v => v.archived).length === 1 ? '' : 's'} archived
             </span>
             <button
               onClick={handleUnarchiveAll}
@@ -716,12 +520,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <div className="text-5xl mb-3">
-            {tab === 'archived' ? '📁' : '🗂️'}
-          </div>
-          <p className="text-slate-700">
-            {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
-          </p>
+          <div className="text-5xl mb-3">{tab === 'archived' ? '📁' : '🗂️'}</div>
+          <p className="text-slate-700">{tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -729,15 +529,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
               <div className="flex items-start justify-between gap-3 mb-2">
                 <div>
-                  <h2 className="text-lg font-semibold">
-                    {bid.vendorName} — Proposal #{bid.proposalId}
-                  </h2>
+                  <h2 className="text-lg font-semibold">{bid.vendorName} — Proposal #{bid.proposalId}</h2>
                   <p className="text-gray-600 text-sm">Bid ID: {bid.bidId}</p>
                 </div>
-                <Link
-                  href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
-                  className="text-sm text-blue-600 hover:underline"
-                >
+                <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-sm text-blue-600 hover:underline">
                   Manage →
                 </Link>
               </div>
@@ -756,48 +551,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-medium">{m.name}</p>
-
-                            {archived && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
-                                Archived
-                              </span>
-                            )}
-
-                            {isCompleted(m) && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
-                                Approved
-                              </span>
-                            )}
-
-                            {payIsPending && !isPaidLite(m) && !hasSafeMarkerLite(m) && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
-                                Payment Pending
-                              </span>
-                            )}
-
-                            {isPaidLite(m) && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                                Paid
-                              </span>
-                            )}
+                            {archived && <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">Archived</span>}
+                            {isCompleted(m) && <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">Approved</span>}
+                            {payIsPending && !isPaidLite(m) && !hasSafeMarkerLite(m) && <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">Payment Pending</span>}
+                            {isPaidLite(m) && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">Paid</span>}
                           </div>
 
-                          <p className="text-sm text-gray-600">
-                            Amount: ${m.amount} | Due: {m.dueDate}
-                          </p>
-
+                          <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
                           {renderProof(m)}
-
-                          {m.paymentTxHash && (
-                            <p className="text-sm text-green-600 mt-2 break-all">
-                              Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}
-                            </p>
-                          )}
-                          {!hasProof(m) && !isCompleted(m) && (
-                            <p className="text-sm text-amber-600 mt-2">
-                              No proof submitted yet.
-                            </p>
-                          )}
+                          {m.paymentTxHash && (<p className="text-sm text-green-600 mt-2 break-all">Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}</p>)}
+                          {!hasProof(m) && !isCompleted(m) && (<p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>)}
                         </div>
 
                         <div className="flex flex-col gap-2">
@@ -818,16 +581,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
                                 const isLocked = rejectedLocal.has(rKey);
                                 const disabled = isProcessing || isLocked;
-
                                 return (
                                   <button
                                     onClick={() => handleReject(bid.bidId, origIdx)}
                                     disabled={disabled}
-                                    className={[
-                                      'px-4 py-2 rounded disabled:opacity-50',
-                                      disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                                               : 'bg-red-600 hover:bg-red-700 text-white'
-                                    ].join(' ')}
+                                    className={['px-4 py-2 rounded disabled:opacity-50', disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'].join(' ')}
                                   >
                                     {isProcessing ? 'Rejecting...' : (isLocked ? 'Rejected' : 'Reject')}
                                   </button>
@@ -836,22 +594,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                               {showPay && (
                                 <div className="flex items-center gap-2">
-                                  {/* Manual (existing) */}
                                   <button
                                     type="button"
                                     onClick={() => handlePay(bid.bidId, origIdx)}
                                     disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-                                    className={[
-                                      'px-4 py-2 rounded text-white',
-                                      (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending)
-                                        ? 'bg-green-600 opacity-60 cursor-not-allowed'
-                                        : 'bg-green-600 hover:bg-green-700'
-                                    ].join(' ')}
+                                    className={['px-4 py-2 rounded text-white', (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending) ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'].join(' ')}
                                     title="Release payment manually (EOA)"
                                   >
-                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...'
-                                      : payIsPending ? 'Payment Pending…'
-                                      : 'Release Payment'}
+                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : payIsPending ? 'Payment Pending…' : 'Release Payment'}
                                   </button>
 
                                   <SafePayButton
@@ -860,14 +610,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                     amountUSD={Number(m?.amount || 0)}
                                     disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
                                     onQueued={() => {
-                                      // Mark pending locally + persist + broadcast queued
                                       const key = mkKey2(bid.bidId, origIdx);
                                       setPendingPay(prev => new Set(prev).add(key));
                                       addPendingLS(key);
                                       postQueued(bid.bidId, origIdx);
-                                      // Start polling; will post 'done' on success
                                       pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh(); // pull fresh server data ASAP
+                                      router.refresh?.();
                                     }}
                                   />
                                 </div>
@@ -907,48 +655,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       {/* Lightbox */}
       {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-        >
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightbox.urls[lightbox.index]}
-            alt="proof preview"
-            className="max-h-full max-w-full rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-
-          {lightbox.index > 0 && (
-            <button
-              className="absolute left-4 text-white text-3xl font-bold"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightbox({ ...lightbox, index: lightbox.index - 1 });
-              }}
-            >
-              ‹
-            </button>
-          )}
-
-          {lightbox.index < lightbox.urls.length - 1 && (
-            <button
-              className="absolute right-4 text-white text-3xl font-bold"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightbox({ ...lightbox, index: lightbox.index + 1 });
-              }}
-            >
-              ›
-            </button>
-          )}
-
-          <button
-            className="absolute top-4 right-4 text-white text-2xl"
-            onClick={() => setLightbox(null)}
-          >
-            ✕
-          </button>
+          <img src={lightbox.urls[lightbox.index]} alt="proof preview" className="max-h-full max-w-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          {lightbox.index > 0 && (<button className="absolute left-4 text-white text-3xl font-bold" onClick={(e) => { e.stopPropagation(); setLightbox({ ...lightbox, index: lightbox.index - 1 }); }}>‹</button>)}
+          {lightbox.index < lightbox.urls.length - 1 && (<button className="absolute right-4 text-white text-3xl font-bold" onClick={(e) => { e.stopPropagation(); setLightbox({ ...lightbox, index: lightbox.index + 1 }); }}>›</button>)}
+          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>✕</button>
         </div>
       )}
     </div>
