@@ -11,7 +11,7 @@ import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 
-// 🔗 Payment sync (shared with admin)
+// 🔗 Payment sync
 import {
   openPaymentsChannel,
   onPaymentsMessage,
@@ -56,14 +56,12 @@ type AnalysisV2 = {
   pdfUsed?: boolean;
   pdfDebug?: any;
 };
-
 type AnalysisV1 = {
   verdict?: string;
   reasoning?: string;
   suggestions?: string[];
   status?: 'ready' | 'error' | string;
 };
-
 type Milestone = {
   name?: string;
   amount?: number;
@@ -75,7 +73,6 @@ type Milestone = {
   proof?: string;
   files?: Array<{ url?: string; cid?: string; name?: string } | string>;
 };
-
 type ProofFile = { url?: string; cid?: string; name?: string } | string;
 type ProofRecord = {
   proposalId: number;
@@ -85,7 +82,6 @@ type ProofRecord = {
   urls?: string[];
   cids?: string[];
 };
-
 type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin';
 
 // -------------- Helpers --------------
@@ -93,16 +89,24 @@ function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
 function fmt(dt?: string | null) {
-  if (!dt) return '';
+  if (!dt) return '—';
   const d = new Date(dt);
-  return isNaN(d.getTime()) ? '' : d.toLocaleString();
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
   if (a == null) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'string') {
+    try { return JSON.parse(a) as any; } catch { return null; }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
+// ✅ Centralized, null-safe status getter (use everywhere)
+function analysisStatus(row: any): string {
+  const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
+  return String(a?.status ?? '').toLowerCase(); // returns '' | 'ready' | 'error' | whatever safely
+}
+
 function parseMilestones(raw: unknown): Milestone[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as Milestone[];
@@ -189,11 +193,9 @@ export default function ProjectDetailPage() {
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
-  // Payment sync state (for this page)
   const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
   const payBcRef = useRef<BroadcastChannel | null>(null);
 
-  // Safe bids (null guard)
   const safeBids = Array.isArray(bids) ? bids.filter((b): b is any => !!b && typeof b === 'object') : [];
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -241,7 +243,7 @@ export default function ProjectDetailPage() {
     return () => { try { off?.(); } catch {}; try { ch?.close(); } catch {}; payBcRef.current = null; };
   }, [projectIdNum]);
 
-  // proofs
+  // proofs (merge local + admin)
   const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
@@ -296,7 +298,6 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // load proofs
   useEffect(() => { if (Number.isFinite(projectIdNum)) { refreshProofs().catch(() => {}); } }, [projectIdNum]);
 
   useMilestonesUpdated(async () => {
@@ -336,15 +337,15 @@ export default function ProjectDetailPage() {
     return () => window.removeEventListener('proofs:just-sent', onJustSent);
   }, []);
 
-  // Poll bids while AI analysis runs — **null-safe status check**
+  // Poll bids while AI analysis runs — uses analysisStatus() (never touches a null)
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
+
     const needsMore = (rows: any[]) =>
       rows.some((row) => {
-        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
-        const st = String(a?.status ?? '').toLowerCase();
-        return !a || (st !== '' && st !== 'ready' && st !== 'error');
+        const st = analysisStatus(row);        // '' | 'ready' | 'error' | other
+        return st !== '' && st !== 'ready' && st !== 'error';
       });
 
     const tick = async () => {
@@ -375,7 +376,7 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, safeBids]);
 
-  // TTL prune any stuck pending chips locally (optional)
+  // TTL prune stuck pending chips
   useEffect(() => {
     clearStalePendingKeys?.(pendingPay, 5 * 60 * 1000, (staleKey) => {
       setPendingPay(prev => {
@@ -390,14 +391,14 @@ export default function ProjectDetailPage() {
   const acceptedBid = safeBids.find((b) => String(b?.status || '').toLowerCase() === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  // NORMAL button handler (kept, but synced)
+  // Manual (EOA) payment, synced
   async function handleReleasePayment(idx: number) {
     if (!acceptedBid) return;
     const bidIdNum = Number(acceptedBid.bidId);
     if (!Number.isFinite(bidIdNum)) return;
     if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
-
     const key = mkKey2(bidIdNum, idx);
+
     try {
       setReleasingKey(`${bidIdNum}:${idx}`);
       postQueued(bidIdNum, idx);
@@ -406,7 +407,6 @@ export default function ProjectDetailPage() {
 
       await payMilestone(bidIdNum, idx);
 
-      // poll quickly until paid/marked
       for (let t = 0; t < 20; t++) {
         try {
           const next = await getBids(projectIdNum);
@@ -433,7 +433,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  // Files (ONLY declared once — fixes duplicate identifier)
+  // Files (declared once)
   const projectDocs = parseDocs(project?.docs) || [];
   const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
   const bidFiles = safeBids.flatMap((b) => {
@@ -449,7 +449,7 @@ export default function ProjectDetailPage() {
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
   const isCompleted = (() => {
-    if (project.status === 'completed') return true;
+    if (project?.status === 'completed') return true;
     if (!acceptedBid) return false;
     if (acceptedMilestones.length === 0) return false;
     return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
@@ -460,10 +460,10 @@ export default function ProjectDetailPage() {
   const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
 
   const lastActivity = (() => {
-    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
+    const dates: (string | undefined | null)[] = [project?.updatedAt, project?.createdAt];
     for (const b of safeBids) {
-      dates.push(b.createdAt, b.updatedAt);
-      const arr = parseMilestones(b.milestones);
+      dates.push(b?.createdAt, b?.updatedAt);
+      const arr = parseMilestones(b?.milestones);
       for (const m of arr) {
         dates.push(m.paymentDate, m.completionDate, m.dueDate);
       }
@@ -478,12 +478,12 @@ export default function ProjectDetailPage() {
 
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
-  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
-  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  if (project?.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project?.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
   for (const b of safeBids) {
-    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
-    if (String(b.status || '').toLowerCase() === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
-    const arr = parseMilestones(b.milestones);
+    if (b?.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (String(b?.status || '').toLowerCase() === 'approved' && b?.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b?.milestones);
     arr.forEach((m, idx) => {
       if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
       if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined });
@@ -539,7 +539,7 @@ export default function ProjectDetailPage() {
           <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${safeBids.length})`} tab={tab} setTab={setTab} />
           <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
-          <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="files" label={`Files (${projectDocs.length + proofFiles.length + bidFiles.length})`} tab={tab} setTab={setTab} />
           {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
         </div>
       </div>
@@ -587,13 +587,13 @@ export default function ProjectDetailPage() {
                     </div>
                     <span className={classNames(
                       'px-2 py-1 rounded text-xs',
-                      b.status === 'approved'
+                      String(b?.status || '').toLowerCase() === 'approved'
                         ? 'bg-green-100 text-green-800'
-                        : b.status === 'rejected'
+                        : String(b?.status || '').toLowerCase() === 'rejected'
                         ? 'bg-red-100 text-red-800'
                         : 'bg-yellow-100 text-yellow-800'
                     )}>
-                      {b.status}
+                      {b?.status || '—'}
                     </span>
                   </li>
                 ))}
@@ -644,10 +644,10 @@ export default function ProjectDetailPage() {
                   <tr key={b.bidId} className="border-t">
                     <td className="py-2 pr-4">{b.vendorName}</td>
                     <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{b.days}</td>
-                    <td className="py-2 pr-4">{b.status}</td>
-                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
-                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+                    <td className="py-2 pr-4">{b.days ?? '—'}</td>
+                    <td className="py-2 pr-4">{b?.status || '—'}</td>
+                    <td className="py-2 pr-4">{fmt(b?.createdAt)}</td>
+                    <td className="py-2 pr-4">{fmt(b?.updatedAt)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -693,8 +693,8 @@ export default function ProjectDetailPage() {
                           <td className="py-2 pr-4">{m.name || '—'}</td>
                           <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
                           <td className="py-2 pr-4">{status}</td>
-                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                          <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                          <td className="py-2 pr-4">{fmt(m.completionDate)}</td>
+                          <td className="py-2 pr-4">{fmt(m.paymentDate)}</td>
                           <td className="py-2 pr-4">{m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}</td>
                         </tr>
                       );
@@ -734,45 +734,56 @@ export default function ProjectDetailPage() {
             </button>
           </div>
 
-          {allFiles.length ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {allFiles.map((f, i) => {
-                const doc = f.doc;
-                if (!doc) return null;
-                const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
-                if (!baseUrl) return null;
-                const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
-                const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
-                const href = withFilename(baseUrl, name);
-                const looksImage = isImageName(name) || isImageName(href);
+          {(() => {
+            const projectDocs = parseDocs(project?.docs) || [];
+            const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
+            const bidFiles = safeBids.flatMap((b) => {
+              const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+              return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+            });
+            const proofFiles = filesFromProofRecords(proofs);
+            const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-                return (
-                  <div key={i}>
-                    <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                    {looksImage ? (
-                      <button
-                        onClick={() => setLightbox(href)}
-                        className="group relative overflow-hidden rounded border"
-                        title={name}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-                      </button>
-                    ) : (
-                      <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-                        <p className="truncate" title={name}>{name}</p>
-                        <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                          Open
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500">No files yet.</p>
-          )}
+            return allFiles.length ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {allFiles.map((f, i) => {
+                  const doc = f.doc;
+                  if (!doc) return null;
+                  const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+                  if (!baseUrl) return null;
+                  const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
+                  const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+                  const href = withFilename(baseUrl, name);
+                  const looksImage = isImageName(name) || isImageName(href);
+
+                  return (
+                    <div key={i}>
+                      <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
+                      {looksImage ? (
+                        <button
+                          onClick={() => setLightbox(href)}
+                          className="group relative overflow-hidden rounded border"
+                          title={name}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+                        </button>
+                      ) : (
+                        <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+                          <p className="truncate" title={name}>{name}</p>
+                          <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                            Open
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No files yet.</p>
+            );
+          })()}
         </section>
       )}
 
