@@ -30,7 +30,6 @@ import {
   mkKey2,
   addPendingLS,
   removePendingLS,
-  clearStalePendingKeys,
   isPaidLite,
   hasSafeMarkerLite,
 } from '@/lib/paymentsSync';
@@ -206,14 +205,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // TTL auto-clear for stale local "pending"
-      clearStalePendingKeys(pendingPay, 5 * 60 * 1000, (staleKey) => {
-        setPendingPay(prev => {
-          const next = new Set(prev);
-          next.delete(staleKey);
-          return next;
-        });
+      // TTL auto-clear for stale local "pending" (optional if helper exists)
+try {
+  const mod = await import('@/lib/paymentsSync');
+  const fn = (mod as any).clearStalePendingKeys as
+    | ((s: Set<string>, maxAgeMs: number, onStale: (k: string) => void) => void)
+    | undefined;
+
+  if (typeof fn === 'function') {
+    fn(pendingPay, 5 * 60 * 1000, (staleKey) => {
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.delete(staleKey);
+        return next;
       });
+    });
+  }
+} catch {
+  // helper not present—skip TTL pruning (no-op)
+}
+
 
       await hydrateArchiveStatuses(rows);
     } catch (e: any) {
