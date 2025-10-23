@@ -176,28 +176,25 @@ function isImageName(n?: string) { return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
 // Remove any "pending" chips for milestones that are now paid / SAFE-marked
+// Clear any "pending" keys for milestones that are already paid/Safe
 function sweepPendingAgainst(
-  rows: any[] | undefined,
-  setPendingPay: React.Dispatch<React.SetStateAction<Set<string>>>
+  rows: any[],
+  setPending: React.Dispatch<React.SetStateAction<Set<string>>>
 ) {
-  if (!Array.isArray(rows) || rows.length === 0) return;
-  setPendingPay(prev => {
+  const paidKeys = new Set<string>();
+  for (const b of Array.isArray(rows) ? rows : []) {
+    const bidId = Number(b?.bidId);
+    if (!Number.isFinite(bidId)) continue;
+    const ms = parseMilestones(b?.milestones);
+    ms.forEach((m, i) => {
+      if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+        paidKeys.add(mkKey2(bidId, i));
+      }
+    });
+  }
+  setPending(prev => {
     const next = new Set(prev);
-    for (const b of rows) {
-      const bidId = Number(b?.bidId);
-      if (!Number.isFinite(bidId)) continue;
-      const msArr = Array.isArray(b?.milestones) ? b.milestones : [];
-      msArr.forEach((m: any, idx: number) => {
-        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-          const key = mkKey2(bidId, idx);
-          if (next.has(key)) {
-            next.delete(key);
-            try { removePendingLS(key); } catch {}
-            try { postDone(bidId, idx); } catch {}
-          }
-        }
-      });
-    }
+    paidKeys.forEach(k => next.delete(k));
     return next;
   });
 }
@@ -447,6 +444,7 @@ export default function ProjectDetailPage() {
   // Manual (EOA) payment, synced
   // Manual (EOA) payment, synced — with final guard after polling
 // Manual (EOA) payment — optimistic "Paid" immediately
+// Manual (EOA) payment — optimistic "Paid" immediately
 async function handleReleasePayment(idx: number) {
   if (!acceptedBid) return;
   const bidIdNum = Number(acceptedBid.bidId);
@@ -458,7 +456,7 @@ async function handleReleasePayment(idx: number) {
   try {
     setReleasingKey(`${bidIdNum}:${idx}`);
 
-    // queue + local pending (we'll clear it immediately after optimistic mark)
+    // queue + local pending
     postQueued(bidIdNum, idx);
     setPendingPay(prev => new Set(prev).add(key));
     addPendingLS(key);
@@ -490,36 +488,13 @@ async function handleReleasePayment(idx: number) {
 
     alert('Payment released.');
   } catch (e: any) {
-    // undo pending on failure
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-    removePendingLS(key);
-    alert(e?.message || 'Failed to release payment.');
-  } finally {
-    setReleasingKey(null);
-    // refresh server data in background — won't affect the immediate "Paid" badge
-    try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-  }
-}
-
-    // If still not cleared, drop the local pending so it doesn't stick forever
-    if (!cleared) {
-      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-      removePendingLS(key);
-      // don't postDone here because we didn't observe paid/SAFE yet
-    }
-
-    alert('Payment released.');
-  } catch (e: any) {
     // failure: undo local pending
     setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
     removePendingLS(key);
     alert(e?.message || 'Failed to release payment.');
   } finally {
     setReleasingKey(null);
-    // refresh table regardless
+    // refresh server data (and sweep any leftover pending)
     try {
       const next = await getBids(projectIdNum);
       setBids(Array.isArray(next) ? next : []);
