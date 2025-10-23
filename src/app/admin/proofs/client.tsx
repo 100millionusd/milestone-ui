@@ -147,11 +147,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       
       setBids(rows);
 
- // Clear local "pending" for milestones that are now paid OR have Safe execution recorded
+ // Clear local "pending" for milestones that are now paid OR show any Safe markers (queued→executed)
 for (const bid of rows || []) {
   const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
   for (let i = 0; i < ms.length; i++) {
-    if (isPaid(ms[i]) || hasSafeSuccess(ms[i])) {
+    if (isPaid(ms[i]) || hasSafeMarker(ms[i])) {
       removePending(mkKey(bid.bidId, i));
     }
   }
@@ -773,7 +773,7 @@ async function pollUntilPaid(
                               </span>
                             )}
 
- {payIsPending && !isPaid(m) && !hasSafeSuccess(m) && (
+ {payIsPending && !isPaid(m) && !hasSafeMarker(m) && (
   <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
     Payment Pending
   </span>
