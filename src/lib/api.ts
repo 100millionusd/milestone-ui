@@ -487,7 +487,7 @@ let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
 
 export function getAuthRoleOnce(): Promise<AuthInfo> {
   const now = Date.now();
-  if (_authRoleMainCache && now - _authRoleMainCache.at < 3_000) {
+  if (_authRoleMainCache && now - _authRoleMainCache.at < 30_000) {
     return Promise.resolve(_authRoleMainCache.data);
   }
   if (_authRoleMainInflight) return _authRoleMainInflight;
@@ -520,7 +520,7 @@ let _bidsCache: { at: number; data: Bid[] } | null = null;
 export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
   const now = Date.now();
   // 1) serve cached for 30s
-  if (_bidsCache && now - _bidsCache.at < 3_000) return _bidsCache.data;
+  if (_bidsCache && now - _bidsCache.at < 30_000) return _bidsCache.data;
   // 2) coalesce concurrent callers
   if (_bidsInflight) return _bidsInflight;
 
