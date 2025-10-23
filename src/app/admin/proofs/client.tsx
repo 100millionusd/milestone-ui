@@ -49,6 +49,33 @@ type TabKey = typeof TABS[number]['key'];
 type LightboxState = { urls: string[]; index: number } | null;
 type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
 
+// === sweep pending chips against server truth ===
+function sweepPendingAgainst(
+  bids: any[] | undefined,
+  setPendingPay: React.Dispatch<React.SetStateAction<Set<string>>>
+) {
+  if (!Array.isArray(bids) || bids.length === 0) return;
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    for (const b of bids) {
+      const bidId = Number(b?.bidId ?? b?.id);
+      if (!Number.isFinite(bidId)) continue;
+      const msArr = Array.isArray(b?.milestones) ? b.milestones : [];
+      msArr.forEach((m: any, idx: number) => {
+        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+          const key = mkKey2(bidId, idx);
+          if (next.has(key)) {
+            next.delete(key);
+            try { removePendingLS(key); } catch {}
+            try { postDone(bidId, idx); } catch {}
+          }
+        }
+      });
+    }
+    return next;
+  });
+}
+
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
   const [bids, setBids] = useState<any[]>(initialBids);
@@ -109,6 +136,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const rows = Array.isArray(allBids) ? allBids : [];
       setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
+      sweepPendingAgainst(rows, setPendingPay);
+
 
       // clear local pending for already paid/marked
       for (const bid of rows) {
@@ -232,58 +261,81 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }, [bids, tab, query, archMap, pendingPay]);
 
   // ==== POLL UNTIL PAID ====
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
-    const key = mkKey2(bidId, milestoneIndex);
-    for (let i = 0; i < tries; i++) {
-      try {
-        const bid = await getBid(bidId);
-        const m = bid?.milestones?.[milestoneIndex];
-        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-          removePendingLS(key);
-          postDone(bidId, milestoneIndex);
-          setBids(prev => prev.map(b => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-            const srvM = (bid as any)?.milestones?.[milestoneIndex];
-            if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          }));
-          router.refresh?.();
-          return;
-        }
-      } catch (err: any) {
-        if (err?.status === 401 || err?.status === 403) {
-          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-          removePendingLS(key);
-          setError('Your session expired. Please sign in again.');
-          return;
-        }
-      }
-      await new Promise(r => setTimeout(r, intervalMs));
-    }
+  // ==== POLL UNTIL PAID (REPLACE WHOLE FUNCTION) ====
+async function pollUntilPaid(
+  bidId: number,
+  milestoneIndex: number,
+  tries = 20,
+  intervalMs = 3000
+) {
+  const key = mkKey2(bidId, milestoneIndex);
+
+  for (let i = 0; i < tries; i++) {
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
+
+      if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+        // clear pending locally + LS + broadcast
         setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
         removePendingLS(key);
-      } else {
         postDone(bidId, milestoneIndex);
+
+        // merge the fresh milestone into local bids
+        setBids(prev => prev.map(b => {
+          const match = ((b as any).bidId ?? (b as any).id) === bidId;
+          if (!match) return b;
+          const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+          const srvM = (bid as any)?.milestones?.[milestoneIndex];
+          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+          return { ...b, milestones: ms };
+        }));
+
+        // 🧹 SWEEP: clear any other pending keys that are already paid/marked
+        sweepPendingAgainst([bid], setPendingPay);
+
+        router.refresh?.();
+        return;
       }
-      setBids(prev => prev.map(b => {
-        const match = ((b as any).bidId ?? (b as any).id) === bidId;
-        if (!match) return b;
-        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-        const srvM = (bid as any)?.milestones?.[milestoneIndex];
-        if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-        return { ...b, milestones: ms };
-      }));
-    } catch {}
-    router.refresh?.();
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+        removePendingLS(key);
+        setError('Your session expired. Please sign in again.');
+        return;
+      }
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
   }
-  // ==== END POLL UNTIL PAID ====
+
+  // Final check after timeout
+  try {
+    const bid = await getBid(bidId);
+    const m = bid?.milestones?.[milestoneIndex];
+
+    if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+    } else {
+      postDone(bidId, milestoneIndex);
+    }
+
+    setBids(prev => prev.map(b => {
+      const match = ((b as any).bidId ?? (b as any).id) === bidId;
+      if (!match) return b;
+      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+      const srvM = (bid as any)?.milestones?.[milestoneIndex];
+      if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+      return { ...b, milestones: ms };
+    }));
+
+    // 🧹 SWEEP here too after we setBids on timeout path
+    sweepPendingAgainst([bid], setPendingPay);
+
+  } catch {}
+  router.refresh?.();
+}
+// ==== END POLL UNTIL PAID ====
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -540,10 +592,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const archived = isArchived(bid.bidId, origIdx);
-                  const pendKey = mkKey2(bid.bidId, origIdx);
-                  const showApprove = hasProof(m) && !isCompleted(m);
-                  const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
-                  const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
+const pendKey = mkKey2(bid.bidId, origIdx);
+const showApprove = hasProof(m) && !isCompleted(m);
+// Only treat as pending if NOT paid and NOT SAFE-marked
+const payIsPending = pendingPay.has(pendKey) && !isPaidLite(m) && !hasSafeMarkerLite(m);
+const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
