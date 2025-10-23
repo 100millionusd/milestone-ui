@@ -352,23 +352,51 @@ async function pollUntilPaid(
   };
 
   const handlePay = async (bidId: number, milestoneIndex: number) => {
-    if (!confirm('Release payment for this milestone?')) return;
-    const key = mkKey2(bidId, milestoneIndex);
-    try {
-      setProcessing(`pay-${bidId}-${milestoneIndex}`);
-      postQueued(bidId, milestoneIndex);
-      setPendingPay(prev => new Set(prev).add(key));
-      addPendingLS(key);
-      await payMilestone(bidId, milestoneIndex);
-      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-    } catch (e: any) {
-      alert(e?.message || 'Payment failed');
-      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-      removePendingLS(key);
-    } finally {
-      setProcessing(null);
-    }
-  };
+  if (!confirm('Release payment for this milestone?')) return;
+  const key = mkKey2(bidId, milestoneIndex);
+
+  try {
+    setProcessing(`pay-${bidId}-${milestoneIndex}`);
+
+    // queue + pending
+    postQueued(bidId, milestoneIndex);
+    setPendingPay(prev => new Set(prev).add(key));
+    addPendingLS(key);
+
+    // call API
+    await payMilestone(bidId, milestoneIndex);
+
+    // ✅ OPTIMISTIC: mark as paid immediately in list
+    setBids(prev => prev.map(b => {
+      const match = ((b as any).bidId ?? (b as any).id) === bidId;
+      if (!match) return b;
+      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+      const cur = ms[milestoneIndex] || {};
+      ms[milestoneIndex] = {
+        ...cur,
+        completed: true,
+        paymentTxHash: cur.paymentTxHash || 'local-paid',
+        paymentDate: cur.paymentDate || new Date().toISOString(),
+      };
+      return { ...b, milestones: ms };
+    }));
+
+    // clear pending chip & broadcast done
+    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+    removePendingLS(key);
+    postDone(bidId, milestoneIndex);
+
+    // background reload (optional)
+    await loadProofs(true);
+    router.refresh?.();
+  } catch (e: any) {
+    alert(e?.message || 'Payment failed');
+    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+    removePendingLS(key);
+  } finally {
+    setProcessing(null);
+  }
+};
 
   const handleReject = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Reason for rejection (optional):') || '';
@@ -657,20 +685,44 @@ const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
                                     {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : payIsPending ? 'Payment Pending…' : 'Release Payment'}
                                   </button>
 
-                                  <SafePayButton
-                                    bidId={bid.bidId}
-                                    milestoneIndex={origIdx}
-                                    amountUSD={Number(m?.amount || 0)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-                                    onQueued={() => {
-                                      const key = mkKey2(bid.bidId, origIdx);
-                                      setPendingPay(prev => new Set(prev).add(key));
-                                      addPendingLS(key);
-                                      postQueued(bid.bidId, origIdx);
-                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh?.();
-                                    }}
-                                  />
+ <SafePayButton
+  bidId={bid.bidId}
+  milestoneIndex={origIdx}
+  amountUSD={Number(m?.amount || 0)}
+  disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+  onQueued={async () => {
+    const key = mkKey2(bid.bidId, origIdx);
+
+    // queue + pending
+    setPendingPay(prev => new Set(prev).add(key));
+    addPendingLS(key);
+    postQueued(bid.bidId, origIdx);
+
+    // ✅ OPTIMISTIC: mark as paid immediately
+    setBids(prev => prev.map(b0 => {
+      const match = ((b0 as any).bidId ?? (b0 as any).id) === bid.bidId;
+      if (!match) return b0;
+      const ms = Array.isArray((b0 as any).milestones) ? [ ...(b0 as any).milestones ] : [];
+      const cur = ms[origIdx] || {};
+      ms[origIdx] = {
+        ...cur,
+        completed: true,
+        paymentTxHash: cur.paymentTxHash || 'local-paid',
+        paymentDate: cur.paymentDate || new Date().toISOString(),
+      };
+      return { ...b0, milestones: ms };
+    }));
+
+    // clear pending chip & broadcast done
+    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+    removePendingLS(key);
+    postDone(bid.bidId, origIdx);
+
+    // optional refresh
+    router.refresh?.();
+    await loadProofs(true);
+  }}
+/>
                                 </div>
                               )}
                             </>
