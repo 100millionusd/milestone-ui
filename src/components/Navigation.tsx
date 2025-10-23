@@ -27,7 +27,7 @@ export default function Navigation() {
   const router = useRouter();
 
   // Wallet context
-  const { address, role: web3Role, logout } = useWeb3Auth();
+  const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
 
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);

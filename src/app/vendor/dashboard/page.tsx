@@ -1,4 +1,6 @@
 'use client';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -38,7 +40,7 @@ type TabKey = typeof TABS[number]['key'];
 
 export default function VendorDashboard() {
   const router = useRouter();
-  const { address, logout, provider } = useWeb3Auth();
+  const { address, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
 
   const [bids, setBids] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
