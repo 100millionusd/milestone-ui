@@ -1,7 +1,7 @@
 // src/app/admin/proofs/Client.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   getBids,
   getBid,
@@ -81,6 +81,34 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     lastUpdated: number;
   }>({ bids: [], lastUpdated: 0 });
 
+  // Cross-page sync for payments (listen for "done" from other tabs/pages)
+const bcRef = useRef<BroadcastChannel | null>(null);
+
+useEffect(() => {
+  if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+  const bc = new BroadcastChannel('mx-pay');
+  bcRef.current = bc;
+
+  bc.onmessage = (e: MessageEvent) => {
+    const msg = e?.data || {};
+    if (
+      (msg?.type === 'mx:pay:done') &&
+      Number.isFinite(msg.bidId) &&
+      Number.isFinite(msg.milestoneIndex)
+    ) {
+      // Clear pending locally and pull fresh data so the chip/buttons disappear
+      removePending(mkKey(msg.bidId, msg.milestoneIndex));
+      loadProofs(true);
+      if (typeof router?.refresh === 'function') router.refresh();
+    }
+  };
+
+  return () => {
+    try { bc.close(); } catch {}
+    bcRef.current = null;
+  };
+}, []);
+
   function addPending(key: string) {
   if (typeof window !== 'undefined') {
     try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
@@ -117,6 +145,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // listen for archive/unarchive from anywhere
   useMilestonesUpdated(loadProofs);
+
+  // cross-page payment sync
+const bcRef = useRef<BroadcastChannel | null>(null);
+useEffect(() => {
+  try { bcRef.current = new BroadcastChannel('mx-payments'); } catch {}
+  return () => { try { bcRef.current?.close(); } catch {} };
+}, []);
+useEffect(() => {
+  if (!bcRef.current) return;
+  bcRef.current.onmessage = (e: MessageEvent) => {
+    if (!e?.data || typeof e.data !== 'object') return;
+    const { type, bidId, milestoneIndex } = e.data as any;
+    if (type === 'mx:pay:queued' || type === 'mx:pay:done') {
+      // refresh + let our local logic hide buttons/chips
+      loadProofs(true);
+    }
+  };
+}, [loadProofs]);
 
   async function loadProofs(forceRefresh = false) {
     const CACHE_TTL = 0; // 30 seconds
@@ -255,7 +301,6 @@ for (const bid of rows || []) {
   }
 
   // ---- Helpers for milestone state ----
-  // ---- Helpers for milestone state ----
 function hasProof(m: any): boolean {
   if (!m?.proof) return false;
   try {
@@ -383,15 +428,19 @@ async function pollUntilPaid(
       const m = bid?.milestones?.[milestoneIndex];
 
       if (m && (isPaid(m) || hasSafeMarker(m))) {
+        // mark done locally + tell other pages
         removePending(key);
+        try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+
+        // merge just this milestone into the current row
         setBids(prev => prev.map(b => {
-  const match = ((b as any).bidId ?? (b as any).id) === bidId;
-  if (!match) return b;
-  const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-  const srvM = (bid as any)?.milestones?.[milestoneIndex];
-  if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-  return { ...b, milestones: ms };
-}));
+          const match = ((b as any).bidId ?? (b as any).id) === bidId;
+          if (!match) return b;
+          const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+          const srvM = (bid as any)?.milestones?.[milestoneIndex];
+          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+          return { ...b, milestones: ms };
+        }));
         try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
         if (typeof router?.refresh === 'function') router.refresh();
         return;
@@ -412,18 +461,26 @@ async function pollUntilPaid(
   try {
     const bid = await getBid(bidId);
     const m = bid?.milestones?.[milestoneIndex];
- if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
-  removePending(key);
-}
-setBids(prev => prev.map(b => {
-  const match = ((b as any).bidId ?? (b as any).id) === bidId;
-  if (!match) return b;
-  const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-  const srvM = (bid as any)?.milestones?.[milestoneIndex];
-  if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-  return { ...b, milestones: ms };
-}));
+
+    if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
+      // not paid/marked — clear pending only
+      removePending(key);
+    } else {
+      // paid/marked — broadcast "done" so other tabs clear too
+      try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+    }
+
+    // merge just this milestone into the current row
+    setBids(prev => prev.map(b => {
+      const match = ((b as any).bidId ?? (b as any).id) === bidId;
+      if (!match) return b;
+      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+      const srvM = (bid as any)?.milestones?.[milestoneIndex];
+      if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+      return { ...b, milestones: ms };
+    }));
   } catch { /* silent */ }
+
   if (typeof router?.refresh === 'function') router.refresh();
 }
 // ==== END POLL UNTIL PAID ====
@@ -768,7 +825,7 @@ setBids(prev => prev.map(b => {
                   const archived = isArchived(bid.bidId, origIdx);
                   const key = mkKey(bid.bidId, origIdx);
                   const showApprove = hasProof(m) && !isCompleted(m);
-                  const payIsPending = pendingPay.has(key) && !isPaid(m) && !hasSafeMarker(m);
+                  const payIsPending = pendingPay.has(key) && !hasSafeMarker(m);
                   const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarker(m);
                   
 
