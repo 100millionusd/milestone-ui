@@ -391,47 +391,100 @@ export default function ProjectDetailPage() {
   const acceptedBid = safeBids.find((b) => String(b?.status || '').toLowerCase() === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  // Manual (EOA) payment, synced
-  async function handleReleasePayment(idx: number) {
-    if (!acceptedBid) return;
-    const bidIdNum = Number(acceptedBid.bidId);
-    if (!Number.isFinite(bidIdNum)) return;
-    if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
-    const key = mkKey2(bidIdNum, idx);
-
+  // Re-usable poller for this page: clears "pending" when milestone shows paid/SAFE marker
+async function pollUntilPaidLocal(
+  bidIdNum: number,
+  idx: number,
+  tries = 20,
+  delay = 3000
+) {
+  const key = mkKey2(bidIdNum, idx);
+  for (let t = 0; t < tries; t++) {
     try {
-      setReleasingKey(`${bidIdNum}:${idx}`);
-      postQueued(bidIdNum, idx);
-      setPendingPay(prev => new Set(prev).add(key));
-      addPendingLS(key);
-
-      await payMilestone(bidIdNum, idx);
-
-      for (let t = 0; t < 20; t++) {
-        try {
-          const next = await getBids(projectIdNum);
-          const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
-          const m = row?.milestones?.[idx];
-          if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-            postDone(bidIdNum, idx);
-            setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-            removePendingLS(key);
-            setBids(Array.isArray(next) ? next : []);
-            break;
-          }
-        } catch {}
-        await new Promise(r => setTimeout(r, 3000));
+      const next = await getBids(projectIdNum);
+      const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+      const m = row?.milestones?.[idx];
+      if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+        // broadcast "done" so other tabs clear too
+        postDone(bidIdNum, idx);
+        // clear local pending + update bids
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+        try { removePendingLS(key); } catch {}
+        setBids(Array.isArray(next) ? next : []);
+        return true;
       }
-      alert('Payment released.');
-    } catch (e: any) {
-      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-      removePendingLS(key);
-      alert(e?.message || 'Failed to release payment.');
-    } finally {
-      setReleasingKey(null);
-      try { const next = await getBids(projectIdNum); setBids(Array.isArray(next) ? next : []); } catch {}
+    } catch {
+      // ignore and keep polling
     }
+    // wait
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise(r => setTimeout(r, delay));
   }
+  // timeout: clear local pending so it doesn't stick forever
+  setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+  try { removePendingLS(key); } catch {}
+  return false;
+}
+
+  onQueued={async () => {
+  const bidIdNum = Number(acceptedBid.bidId);
+  const key = mkKey2(bidIdNum, idx);
+
+  // Mark pending locally + persist + broadcast queued
+  setPendingPay(prev => new Set(prev).add(key));
+  addPendingLS(key);
+  postQueued(bidIdNum, idx);
+
+  // Start a local poll here too so this page clears "Payment Pending"
+  (async () => {
+    let cleared = false;
+    for (let t = 0; t < 20; t++) {
+      try {
+        const next = await getBids(projectIdNum);
+        const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+        const m = row?.milestones?.[idx];
+
+        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+          postDone(bidIdNum, idx);
+          setPendingPay(prev => {
+            const n = new Set(prev);
+            n.delete(key);
+            return n;
+          });
+          removePendingLS(key);
+          setBids(Array.isArray(next) ? next : []);
+          cleared = true;
+          break;
+        }
+      } catch {}
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    if (!cleared) {
+      setPendingPay(prev => {
+        const n = new Set(prev);
+        n.delete(key);
+        return n;
+      });
+      removePendingLS(key);
+      console.warn('SAFE polling timed out; UI will update when server shows paid.');
+    }
+  })().catch(() => {});
+
+  // Pull fresh server data ASAP
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
+}}
+
+  // Pull fresh server data ASAP
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
+}}
+
 
   // Files (declared once)
   const projectDocs = parseDocs(project?.docs) || [];
