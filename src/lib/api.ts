@@ -487,7 +487,7 @@ let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
 
 export function getAuthRoleOnce(): Promise<AuthInfo> {
   const now = Date.now();
-  if (_authRoleMainCache && now - _authRoleMainCache.at < 30_000) {
+  if (_authRoleMainCache && now - _authRoleMainCache.at < 3_000) {
     return Promise.resolve(_authRoleMainCache.data);
   }
   if (_authRoleMainInflight) return _authRoleMainInflight;
