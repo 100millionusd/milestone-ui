@@ -1,7 +1,7 @@
 // src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getProposal, getBids, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
@@ -11,15 +11,16 @@ import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 
-// 🔗 Unified payments sync helpers
+// Payments sync (shared with admin page)
 import {
   openPaymentsChannel,
   onPaymentsMessage,
   postQueued,
+  postDone,
   mkKey2,
   addPendingLS,
   removePendingLS,
-  pollUntilPaidLite,
+  listPendingLS,
   isPaidLite,
   hasSafeMarkerLite,
 } from '@/lib/paymentsSync';
@@ -32,15 +33,18 @@ const PINATA_GATEWAY = (() => {
     const host = raw1
       .replace(/^https?:\/\//i, '')
       .replace(/\/+$/, '')
-      .replace(/(?:\/ipfs)+$/i, '');
+      .replace(/(?:\/ipfs)+$/i, ''); // strip any trailing /ipfs
     return `https://${host}/ipfs`;
   }
+
   const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
-  const base = raw2.replace(/\/+$/, '').replace(/(?:\/ipfs)+$/i, '');
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, '');   // strip any trailing /ipfs
   return `${base}/ipfs`;
 })();
 
-// ⚠️ Proofs endpoint: force local API unless explicitly overridden
+// ⚠️ Proofs endpoint: force local API unless you explicitly override with NEXT_PUBLIC_PROOFS_ENDPOINT
 const PROOFS_ENDPOINT =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT && process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.trim() !== ''
     ? process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.replace(/\/+$/, '')
@@ -132,13 +136,13 @@ function parseDocs(raw: unknown): any[] {
 // 🔧 IPFS/Gateway normalizer — paste this directly under parseDocs()
 function normalizeIpfsUrl(input?: string, cid?: string) {
   const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // ensure no trailing slash
-  if (cid && (!input || /^\s*$/.test(input))) return GW + '/' + cid;
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
   if (!input) return '';
   let u = String(input).trim();
 
   // Bare CID (optionally with ?query)
   const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (m) return GW + '/' + m[1] + (m[2] || '');
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
 
   // ipfs:// and leading ipfs/ segments → strip
   u = u.replace(/^ipfs:\/\//i, '');
@@ -146,7 +150,7 @@ function normalizeIpfsUrl(input?: string, cid?: string) {
   u = u.replace(/^(?:ipfs\/)+/i, '');
 
   // If not absolute http(s), prefix gateway
-  if (!/^https?:\/\//i.test(u)) u = GW + '/' + u;
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
 
   // Collapse any repeated /ipfs/ipfs/
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
@@ -155,7 +159,11 @@ function normalizeIpfsUrl(input?: string, cid?: string) {
 
 function filesFromProofRecords(items: ProofRecord[]) {
   const isBad = (u?: string) =>
-    !u || u.includes('<gw>') || u.includes('<CID') || u.includes('>') || /^\s*$/.test(u);
+    !u ||
+    u.includes('<gw>') ||
+    u.includes('<CID') ||
+    u.includes('>') ||
+    /^\s*$/.test(u);
 
   const fixProtocol = (u: string) =>
     /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^https?:\/\//, '')}`;
@@ -172,10 +180,13 @@ function filesFromProofRecords(items: ProofRecord[]) {
 
     for (const raw of list) {
       let url: string | undefined;
-      if (typeof raw === 'string') url = raw;
-      else if (raw && typeof raw === 'object') {
+
+      if (typeof raw === 'string') {
+        url = raw;
+      } else if (raw && typeof raw === 'object') {
         url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
       }
+
       if (!url || isBad(url)) continue;
       url = fixProtocol(url);
 
@@ -198,6 +209,7 @@ function withFilename(url: string, name?: string) {
   if (!name) return url;
   try {
     const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//, '')}`);
+    // only add ?filename when path is exactly /ipfs/<cid> and there is no existing query
     if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
       u.search = `?filename=${encodeURIComponent(name)}`;
     }
@@ -232,42 +244,17 @@ export default function ProjectDetailPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
+  // track which (bidId:milestoneIndex) is releasing now
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
-  // ✅ payments pending (sync across tabs/pages via localStorage + BroadcastChannel)
+  // Payment sync (pending keys in this page)
   const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
-  const addPending = (key: string) => { addPendingLS(key); setPendingPay(prev => new Set(prev).add(key)); };
-  const removePending = (key: string) => {
-    removePendingLS(key);
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-  };
-
-  // ✅ Cross-page sync channel
-  const bcRef = useRef<BroadcastChannel | null>(null);
-  useEffect(() => {
-    bcRef.current = openPaymentsChannel(); // 'mx-payments'
-    return () => { try { bcRef.current?.close(); } catch {}; bcRef.current = null; };
-  }, []);
-  useEffect(() => {
-    const ch = bcRef.current;
-    if (!ch) return;
-    const off = onPaymentsMessage(ch, async (msg) => {
-      // Refresh both proofs & bids on any payment signal
-      await refreshProofs();
-      try {
-        const next = await getBids(projectIdNum);
-        setBids(Array.isArray(next) ? next : []);
-      } catch {}
-      if (msg.type === 'mx:pay:done') {
-        removePending(mkKey2(msg.bidId, msg.milestoneIndex));
-      }
-    });
-    return () => { try { off?.(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum]);
+  const payBcRef = useRef<BroadcastChannel | null>(null);
 
   // ✅ Null-safe view of bids
-  const safeBids = Array.isArray(bids) ? bids.filter((b): b is any => !!b && typeof b === 'object') : [];
+  const safeBids = Array.isArray(bids)
+    ? bids.filter((b): b is any => !!b && typeof b === 'object')
+    : [];
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
@@ -299,7 +286,43 @@ export default function ProjectDetailPage() {
     getAuthRoleOnce().then(setMe).catch(() => {});
   }, []);
 
-  // Fetch proofs (merged view)
+  // hydrate pending from LS
+  useEffect(() => {
+    try {
+      const keys = listPendingLS();
+      setPendingPay(new Set(Array.isArray(keys) ? keys : []));
+    } catch {}
+  }, []);
+
+  // open channel + listen
+  useEffect(() => {
+    if (!payBcRef.current) payBcRef.current = openPaymentsChannel();
+    const ch = payBcRef.current;
+    if (!ch) return;
+
+    const off = onPaymentsMessage(ch, async (msg) => {
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+
+      if (msg.type === 'mx:pay:queued') {
+        setPendingPay(prev => new Set(prev).add(k));
+        addPendingLS(k);
+      }
+      if (msg.type === 'mx:pay:done') {
+        setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; });
+        removePendingLS(k);
+      }
+
+      // pull fresh data so UI updates ASAP
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+      } catch {}
+    });
+
+    return () => { try { off?.(); } catch {}; try { ch?.close(); } catch {}; payBcRef.current = null; };
+  }, [projectIdNum]);
+
+  // Fetch proofs (merge from two sources)
   const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
@@ -313,6 +336,7 @@ export default function ProjectDetailPage() {
 
       // 2) External API (same source Admin tab uses)
       const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
+
       const adminReq = accepted
         ? getProofs(Number(accepted.bidId))
             .then(rows => {
@@ -398,7 +422,7 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // 🔔 Live-refresh Files tab when proofs are saved
+  // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
   useEffect(() => {
     const onAnyProofUpdate = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
@@ -415,15 +439,17 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
-  // instant local update when a proof is submitted
+  // instant local update when a proof is submitted (before server fetch returns)
   useEffect(() => {
     const onJustSent = (ev: any) => {
       const bidId = Number(ev?.detail?.bidId);
       const idx   = Number(ev?.detail?.milestoneIndex);
       if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
 
+      // 1) flip local flag for status/UX
       setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
 
+      // 2) patch current bids so the Milestones table status updates immediately
       setBids(prev => prev.map(b => {
         if (!b || typeof b !== 'object') return b;
         return Number(b.bidId) !== bidId
@@ -496,53 +522,63 @@ export default function ProjectDetailPage() {
     if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
   }, [proofs]);
 
-  // -------- Early returns ----------
-  if (loadingProject) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
-
   // -------- Derived -----------
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  // Admin action: release a milestone payment (EOA/manual)
+  // Admin action: release a milestone payment (NORMAL button) with sync
   async function handleReleasePayment(idx: number) {
     if (!acceptedBid) return;
     const bidIdNum = Number(acceptedBid.bidId);
-    const uiKey = `${bidIdNum}:${idx}`;
-    const pendKey = mkKey2(bidIdNum, idx);
     if (!Number.isFinite(bidIdNum)) return;
+    const key = mkKey2(bidIdNum, idx);
 
     if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
 
     try {
-      setReleasingKey(uiKey);
+      setReleasingKey(`${bidIdNum}:${idx}`);
 
-      // 🔔 broadcast queued + mark pending BEFORE API call
+      // broadcast + mark pending BEFORE calling API
       postQueued(bidIdNum, idx);
-      addPending(pendKey);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
 
       await payMilestone(bidIdNum, idx);
 
-      // refresh + poll; poller posts 'done' and we'll clear pending via listener
-      await refreshProofs();
+      // poll until paid/marked, then broadcast done + clear pending
+      await (async function poll(tries = 20, delay = 3000) {
+        for (let t = 0; t < tries; t++) {
+          try {
+            const next = await getBids(projectIdNum);
+            const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+            const m = row?.milestones?.[idx];
+            if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+              postDone(bidIdNum, idx);
+              setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+              removePendingLS(key);
+              setBids(Array.isArray(next) ? next : []);
+              return;
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, delay));
+        }
+        // timeout: clear local pending
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+        removePendingLS(key);
+      })();
+
+      alert('Payment released.');
+    } catch (e: any) {
+      // failure: undo local pending
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      alert(e?.message || 'Failed to release payment.');
+    } finally {
+      setReleasingKey(null);
       try {
         const next = await getBids(projectIdNum);
         setBids(Array.isArray(next) ? next : []);
       } catch {}
-
-      pollUntilPaidLite(
-        () => getBids(projectIdNum),
-        bidIdNum,
-        idx,
-        () => removePending(pendKey)
-      ).catch(() => {});
-
-      alert('Payment released.');
-    } catch (e: any) {
-      alert(e?.message || 'Failed to release payment.');
-      removePending(pendKey);
-    } finally {
-      setReleasingKey(null);
     }
   }
 
@@ -609,19 +645,33 @@ export default function ProjectDetailPage() {
   if (typeof window !== 'undefined') {
     (window as any).__FILES = allFiles.map((x) => {
       const name = x.doc?.name || null;
+
+      // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
       const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
-      return { scope: x.scope, href: normalized ? withFilename(normalized, name || undefined) : null, name };
+
+      return {
+        scope: x.scope,
+        href: normalized ? withFilename(normalized, name || undefined) : null,
+        name,
+      };
     });
   }
 
   function renderAttachment(doc: any, key: number) {
     if (!doc) return null;
+
+    // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
     const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
     if (!baseUrl) return null;
 
+    // filename for preview + nicer downloads
     const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
     const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+
+    // only adds ?filename= when safe; keeps URL clean
     const href = withFilename(baseUrl, name);
+
+    // detect image by name OR final href
     const looksImage = isImageName(name) || isImageName(href);
 
     if (looksImage) {
@@ -633,15 +683,25 @@ export default function ProjectDetailPage() {
           title={name}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+          <img
+            src={href}
+            alt={name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+          />
         </button>
       );
     }
 
+    // non-image: show as an "Open" link
     return (
       <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
-        <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+        <a
+          href={href.startsWith('http') ? href : `https://${href}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
           Open
         </a>
       </div>
@@ -659,12 +719,18 @@ export default function ProjectDetailPage() {
     return (
       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
         <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
         {isV2 && (
           <>
             {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
             <div className="text-sm">
               {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
-              {typeof a.confidence === 'number' && (<><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%</>)}
+              {typeof a.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
+                </>
+              )}
             </div>
             {!!a.risks?.length && (
               <div className="mt-2">
@@ -720,6 +786,9 @@ export default function ProjectDetailPage() {
   }
 
   // ----------------- Render -----------------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -905,9 +974,10 @@ export default function ProjectDetailPage() {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = isPaidLite(m);
+                      const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
 
+                      // mirror status logic
                       const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
                       const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
                       const status = paid
@@ -938,7 +1008,7 @@ export default function ProjectDetailPage() {
                 </table>
               </div>
 
-              {/* ✅ Proof widget */}
+              {/* ✅ Proof submission widget */}
               {(acceptedBid || safeBids[0]) && (
                 <div className="mt-6">
                   <MilestonePayments
@@ -1021,41 +1091,48 @@ export default function ProjectDetailPage() {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = isPaidLite(m);
+                      const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
 
-                      const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                      // mirror status logic from Milestones tab
+                      const k = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const hasProofNow = !!m.proof || !!proofJustSent[k];
+                      const status = paid
+                        ? 'paid'
+                        : completedRow
+                        ? 'completed'
+                        : hasProofNow
+                        ? 'submitted'
+                        : 'pending';
+
+                      // enable release when not paid and completed
                       const canRelease = !paid && completedRow;
 
-                      // pending across pages
-                      const payKey2 = mkKey2(Number(acceptedBid.bidId), idx);
-                      const isPendingHere = pendingPay.has(payKey2) && !paid;
-
-                      const statusForAdmin = isPendingHere ? 'payment_pending' :
-                        paid ? 'paid' :
-                        completedRow ? 'completed' :
-                        (!!m.proof ? 'submitted' : 'pending');
+                      const pendKey = mkKey2(Number(acceptedBid.bidId), idx);
+                      const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
 
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-2 pr-4">M{idx + 1}</td>
                           <td className="py-2 pr-4">{m.name || '—'}</td>
-                          <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                          <td className="py-2 pr-4">{statusForAdmin}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          <td className="py-2 pr-4">{status}</td>
                           <td className="py-2 pr-4">
                             {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
                           </td>
                           <td className="py-2 pr-4">
                             <div className="flex items-center gap-2">
-                              {/* Manual (EOA) */}
+                              {/* Manual (existing) */}
                               <button
                                 type="button"
                                 onClick={() => handleReleasePayment(idx)}
-                                disabled={!canRelease || releasingKey === key || isPendingHere}
+                                disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
                                 className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                                 title={canRelease ? 'Release payment' : 'Not ready for payment'}
                               >
-                                {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+                                {releasingKey === `${Number(acceptedBid.bidId)}:${idx}` ? 'Releasing…' : (payIsPending ? 'Payment Pending…' : 'RELEASE PAYMENT')}
                               </button>
 
                               {/* SAFE (multisig) */}
@@ -1063,27 +1140,17 @@ export default function ProjectDetailPage() {
                                 bidId={Number(acceptedBid.bidId)}
                                 milestoneIndex={idx}
                                 amountUSD={Number(m?.amount || 0)}
-                                disabled={!canRelease || releasingKey === key || isPendingHere || hasSafeMarkerLite(m) || paid}
+                                disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
                                 onQueued={async () => {
-                                  const bidIdNum = Number(acceptedBid.bidId);
-                                  const k2 = mkKey2(bidIdNum, idx);
-                                  // mark pending + broadcast queued
-                                  addPending(k2);
-                                  postQueued(bidIdNum, idx);
-
-                                  // light refresh + poll
-                                  await refreshProofs();
+                                  const key = mkKey2(Number(acceptedBid.bidId), idx);
+                                  setPendingPay(prev => new Set(prev).add(key));
+                                  addPendingLS(key);
+                                  postQueued(Number(acceptedBid.bidId), idx);
+                                  // refresh local view
                                   try {
                                     const next = await getBids(projectIdNum);
                                     setBids(Array.isArray(next) ? next : []);
                                   } catch {}
-
-                                  pollUntilPaidLite(
-                                    () => getBids(projectIdNum),
-                                    bidIdNum,
-                                    idx,
-                                    () => removePending(k2)
-                                  ).catch(() => {});
                                 }}
                               />
                             </div>
@@ -1131,12 +1198,11 @@ export default function ProjectDetailPage() {
 
 // ---------------- UI bits ----------------
 function Progress({ value }: { value: number }) {
-  const clamped = Math.min(100, Math.max(0, value));
   return (
     <div className="h-2 bg-gray-200 rounded">
       <div
         className="h-2 bg-black rounded transition-all"
-        style={{ width: clamped + '%' }}
+        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </div>
   );
