@@ -244,35 +244,68 @@ export default function ProjectDetailPage() {
   };
 
   // ✅ Cross-page sync channel
-  const bcRef = useRef<BroadcastChannel | null>(null);
-  useEffect(() => {
-    bcRef.current = openPaymentsChannel(); // 'mx-payments'
-    return () => { try { bcRef.current?.close(); } catch {}; bcRef.current = null; };
-  }, []);
+const bcRef = useRef<BroadcastChannel | null>(null);
+useEffect(() => {
+  bcRef.current = openPaymentsChannel(); // 'mx-payments'
+  console.log('ProjectDetailPage: BroadcastChannel initialized');
+  return () => { 
+    try { 
+      bcRef.current?.close(); 
+      console.log('ProjectDetailPage: BroadcastChannel closed');
+    } catch {}; 
+    bcRef.current = null; 
+  };
+}, []);
 
-  // ✅ Hydrate pending payments from localStorage on mount
-  useEffect(() => {
-    const pendingKeys = listPendingLS();
-    setPendingPay(new Set(pendingKeys));
-  }, []);
+// ✅ Hydrate pending payments from localStorage on mount
+useEffect(() => {
+  const pendingKeys = listPendingLS();
+  console.log('ProjectDetailPage: Hydrating pending payments:', pendingKeys);
+  setPendingPay(new Set(pendingKeys));
+}, []);
 
-  useEffect(() => {
-    const ch = bcRef.current;
-    if (!ch) return;
-    const off = onPaymentsMessage(ch, async (msg) => {
-      // Refresh both proofs & bids on any payment signal
-      await refreshProofs();
-      try {
-        const next = await getBids(projectIdNum);
-        setBids(Array.isArray(next) ? next : []);
-      } catch {}
-      if (msg.type === 'mx:pay:done') {
-        removePending(mkKey2(msg.bidId, msg.milestoneIndex));
-      }
-    });
-    return () => { try { off?.(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectIdNum]);
+useEffect(() => {
+  const ch = bcRef.current;
+  if (!ch) {
+    console.log('ProjectDetailPage: No BroadcastChannel available');
+    return;
+  }
+  
+  console.log('ProjectDetailPage: Setting up message listener');
+  const off = onPaymentsMessage(ch, async (msg) => {
+    console.log('ProjectDetailPage: Received message:', msg);
+    
+    if (msg.type === 'mx:pay:queued') {
+      const key = mkKey2(msg.bidId, msg.milestoneIndex);
+      console.log('ProjectDetailPage: Adding pending payment:', key);
+      addPending(key);
+    } else if (msg.type === 'mx:pay:done') {
+      const key = mkKey2(msg.bidId, msg.milestoneIndex);
+      console.log('ProjectDetailPage: Removing pending payment:', key);
+      removePending(key);
+    }
+
+    // Refresh both proofs & bids on any payment signal
+    console.log('ProjectDetailPage: Refreshing data after message');
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+      console.log('ProjectDetailPage: Bids refreshed');
+    } catch (error) {
+      console.error('ProjectDetailPage: Failed to refresh bids:', error);
+    }
+  });
+  
+  return () => { 
+    try { 
+      off?.(); 
+      console.log('ProjectDetailPage: Message listener cleaned up');
+    } catch (error) {
+      console.error('ProjectDetailPage: Error cleaning up listener:', error);
+    } 
+  };
+}, [projectIdNum]);
 
   // ✅ Null-safe view of bids
   const safeBids = Array.isArray(bids) ? bids.filter((b): b is any => !!b && typeof b === 'object') : [];

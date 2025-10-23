@@ -83,61 +83,86 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }>({ bids: [], lastUpdated: 0 });
 
   // cross-page payment sync
-  const bcRef = useRef<BroadcastChannel | null>(null);
+const bcRef = useRef<BroadcastChannel | null>(null);
 
-  // create once; tolerate StrictMode double-invoke in dev
-  useEffect(() => {
-    if (!bcRef.current) {
-      bcRef.current = openPaymentsChannel(); // 'mx-payments'
+// create once; tolerate StrictMode double-invoke in dev
+useEffect(() => {
+  if (!bcRef.current) {
+    bcRef.current = openPaymentsChannel(); // 'mx-payments'
+    console.log('Admin Client: BroadcastChannel initialized');
+  }
+  return () => {
+    try { 
+      bcRef.current?.close(); 
+      console.log('Admin Client: BroadcastChannel closed');
+    } catch {}
+    bcRef.current = null;
+  };
+}, []);
+
+// 🔄 Hydrate pending set from LS on mount (works even if page hard-refreshes)
+useEffect(() => {
+  const pendingKeys = listPendingLS();
+  console.log('Admin Client: Hydrating pending payments:', pendingKeys);
+  setPendingPay(new Set(pendingKeys));
+}, []);
+
+// listen for cross-page payment messages
+useEffect(() => {
+  const ch = bcRef.current;
+  if (!ch) {
+    console.log('Admin Client: No BroadcastChannel available');
+    return;
+  }
+
+  console.log('Admin Client: Setting up message listener');
+  const off = onPaymentsMessage(ch, async (msg) => {
+    console.log('Admin Client: Received message:', msg);
+
+    // 👈 Handle "queued" immediately so buttons hide in this tab too
+    if (msg.type === 'mx:pay:queued') {
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+      console.log('Admin Client: Adding pending payment:', k);
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.add(k);
+        console.log('Admin Client: Updated pendingPay set:', Array.from(next));
+        return next;
+      });
+      addPendingLS(k);
     }
-    return () => {
-      try { bcRef.current?.close(); } catch {}
-      bcRef.current = null;
-    };
-  }, []);
 
-  // 🔄 Hydrate pending set from LS on mount (works even if page hard-refreshes)
-  useEffect(() => {
-    const pendingKeys = listPendingLS();
-    setPendingPay(new Set(pendingKeys));
-  }, []);
+    // refresh data so chips/markers update ASAP
+    console.log('Admin Client: Refreshing data after message');
+    await loadProofs(true);
+    if (typeof router?.refresh === 'function') {
+      console.log('Admin Client: Refreshing router');
+      router.refresh();
+    }
 
-  // listen for cross-page payment messages
-  useEffect(() => {
-    const ch = bcRef.current;
-    if (!ch) return;
+    // existing: clear on "done"
+    if (msg.type === 'mx:pay:done') {
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+      console.log('Admin Client: Removing pending payment:', k);
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.delete(k);
+        console.log('Admin Client: Updated pendingPay set:', Array.from(next));
+        return next;
+      });
+      removePendingLS(k);
+    }
+  });
 
-    const off = onPaymentsMessage(ch, async (msg) => {
-      // 👈 NEW: reflect "queued" immediately so buttons hide in this tab too
-      if (msg.type === 'mx:pay:queued') {
-        const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => {
-          const next = new Set(prev);
-          next.add(k);
-          return next;
-        });
-        addPendingLS(k);
-      }
-
-      // refresh data so chips/markers update ASAP
-      await loadProofs(true);
-      if (typeof router?.refresh === 'function') router.refresh();
-
-      // existing: clear on "done"
-      if (msg.type === 'mx:pay:done') {
-        const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => {
-          const next = new Set(prev);
-          next.delete(k);
-          return next;
-        });
-        removePendingLS(k);
-      }
-    });
-
-    return () => { try { off?.(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  return () => { 
+    try { 
+      off?.(); 
+      console.log('Admin Client: Message listener cleaned up');
+    } catch (error) {
+      console.error('Admin Client: Error cleaning up listener:', error);
+    }
+  };
+}, [router]);
 
   // Only refetch on mount if server gave us nothing
   useEffect(() => {
