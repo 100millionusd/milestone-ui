@@ -19,6 +19,7 @@ import {
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
+import { useRouter } from "next/navigation";
 
 // Tabs
 const TABS = [
@@ -66,6 +67,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [bids, setBids] = useState<any[]>(initialBids);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const router = useRouter();
 
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
@@ -357,7 +359,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
-      await loadProofs();
+      await loadProofs(true);   // bypass client cache immediately
+      router.refresh();         // re-fetch server components so “Release Payment” appears
     } catch (e: any) {
       alert(e?.message || 'Failed to approve proof');
     } finally {
