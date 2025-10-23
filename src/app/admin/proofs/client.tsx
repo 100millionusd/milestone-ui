@@ -46,21 +46,10 @@ const PENDING_LS_KEY = 'mx_pay_pending';
 const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
 
 function loadPendingFromLS(): Set<string> {
-  try {
-    if (typeof window === 'undefined') return new Set();
-    const raw = localStorage.getItem(PENDING_LS_KEY);
-    const arr = raw ? (JSON.parse(raw) as string[]) : [];
-    return new Set(arr);
-  } catch {
-    return new Set();
-  }
+  return new Set(); // do not persist across reloads
 }
-
-function savePendingToLS(set: Set<string>) {
-  try {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(PENDING_LS_KEY, JSON.stringify([...set]));
-  } catch {}
+function savePendingToLS(_: Set<string>) {
+  /* no-op: deliberately not persisting to LS */
 }
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
