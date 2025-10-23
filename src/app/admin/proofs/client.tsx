@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import {
+  getBids,
   getBid,
   getBidsOnce,
   payMilestone,
@@ -29,10 +30,10 @@ import {
   mkKey2,
   addPendingLS,
   removePendingLS,
-  listPendingLS,
-  clearStalePendingKeys,
   isPaidLite,
   hasSafeMarkerLite,
+  listPendingLS,
+  clearStalePendingKeys,
 } from '@/lib/paymentsSync';
 
 // Tabs
@@ -76,7 +77,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
 
   // Client-side caching for bids data
-  const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({ bids: [], lastUpdated: 0 });
+  const [dataCache, setDataCache] = useState<{
+    bids: any[];
+    lastUpdated: number;
+  }>({ bids: [], lastUpdated: 0 });
 
   // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
@@ -94,10 +98,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // 🔄 Hydrate pending set from LS on mount (works even if page hard-refreshes)
   useEffect(() => {
-    try {
-      const keys = listPendingLS();
-      setPendingPay(new Set(Array.isArray(keys) ? keys : []));
-    } catch {}
+    const pendingKeys = listPendingLS();
+    setPendingPay(new Set(pendingKeys));
   }, []);
 
   // listen for cross-page payment messages
@@ -106,10 +108,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!ch) return;
 
     const off = onPaymentsMessage(ch, async (msg) => {
-      // reflect "queued" immediately so buttons hide in this tab too
+      // 👈 NEW: reflect "queued" immediately so buttons hide in this tab too
       if (msg.type === 'mx:pay:queued') {
         const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => { const next = new Set(prev); next.add(k); return next; });
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.add(k);
+          return next;
+        });
         addPendingLS(k);
       }
 
@@ -117,10 +123,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       await loadProofs(true);
       if (typeof router?.refresh === 'function') router.refresh();
 
-      // clear on "done"
+      // existing: clear on "done"
       if (msg.type === 'mx:pay:done') {
         const k = mkKey2(msg.bidId, msg.milestoneIndex);
-        setPendingPay(prev => { const next = new Set(prev); next.delete(k); return next; });
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(k);
+          return next;
+        });
         removePendingLS(k);
       }
     });
@@ -147,7 +157,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     const CACHE_TTL = 0; // disable client cache for freshest admin view
 
     // Use cache if available and not forcing refresh
-    if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
+    if (!forceRefresh && dataCache.bids.length > 0 &&
+        Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
       return;
@@ -160,7 +171,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const rows = Array.isArray(allBids) ? allBids : [];
 
       // Update cache
-      setDataCache({ bids: rows, lastUpdated: Date.now() });
+      setDataCache({
+        bids: rows,
+        lastUpdated: Date.now(),
+      });
+
       setBids(rows);
 
       // Clear local "pending" for milestones that are now paid OR show any Safe markers
@@ -169,7 +184,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         for (let i = 0; i < ms.length; i++) {
           if (isPaidLite(ms[i]) || hasSafeMarkerLite(ms[i])) {
             const k = mkKey2(bid.bidId, i);
-            setPendingPay(prev => { const next = new Set(prev); next.delete(k); return next; });
+            setPendingPay(prev => {
+              const next = new Set(prev);
+              next.delete(k);
+              return next;
+            });
             removePendingLS(k);
           }
         }
@@ -177,7 +196,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       // TTL auto-clear for stale local "pending"
       clearStalePendingKeys(pendingPay, 5 * 60 * 1000, (staleKey) => {
-        setPendingPay(prev => { const next = new Set(prev); next.delete(staleKey); return next; });
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(staleKey);
+          return next;
+        });
       });
 
       await hydrateArchiveStatuses(rows);
@@ -336,18 +359,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  // ==== POLL UNTIL PAID ====
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
+  // ==== POLL UNTIL PAID (via getBid; cookie/headers handled centrally) ====
+  async function pollUntilPaid(
+    bidId: number,
+    milestoneIndex: number,
+    tries = 20,
+    intervalMs = 3000
+  ) {
     const key = mkKey2(bidId, milestoneIndex);
 
     for (let i = 0; i < tries; i++) {
       try {
-        const bid = await getBid(bidId);
+        const bid = await getBid(bidId); // no-store is handled in lib/api
         const m = bid?.milestones?.[milestoneIndex];
 
         if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
           // mark done locally + tell other pages
-          setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+          setPendingPay(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
           removePendingLS(key);
           postDone(bidId, milestoneIndex);
 
@@ -365,13 +397,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
       } catch (err: any) {
-        // lost auth → unstick
+        // If we lost auth, unstick the chip so it doesn't hang forever.
         if (err?.status === 401 || err?.status === 403) {
-          setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+          setPendingPay(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
           removePendingLS(key);
           setError('Your session expired. Please sign in again.');
           return;
         }
+        // otherwise ignore and keep polling
       }
       await new Promise(r => setTimeout(r, intervalMs));
     }
@@ -383,10 +420,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
         // not paid/marked — clear pending only
-        setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
         removePendingLS(key);
       } else {
-        // paid/marked — broadcast "done"
+        // paid/marked — broadcast "done" so other tabs clear too
         postDone(bidId, milestoneIndex);
       }
 
@@ -410,8 +451,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
-      await loadProofs(true);
-      router.refresh();
+      await loadProofs(true);   // bypass client cache immediately
+      router.refresh();         // re-fetch server components so "Release Payment" appears
     } catch (e: any) {
       alert(e?.message || 'Failed to approve proof');
     } finally {
@@ -425,7 +466,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
 
-      // broadcast queued + mark pending BEFORE API call
+      // 🔔 broadcast queued + mark pending BEFORE API call
       postQueued(bidId, milestoneIndex);
       setPendingPay(prev => new Set(prev).add(key));
       addPendingLS(key);
@@ -436,7 +477,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      setPendingPay(prev => { const next = new Set(prev); next.delete(key); return next; });
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
       removePendingLS(key);
     } finally {
       setProcessing(null);
@@ -449,7 +494,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`reject-${bidId}-${milestoneIndex}`);
       await rejectMilestoneProof(bidId, milestoneIndex, reason);
-      setRejectedLocal(prev => { const next = new Set(prev); next.add(mkRejectKey(bidId, milestoneIndex)); return next; });
+      setRejectedLocal(prev => {
+        const next = new Set(prev);
+        next.add(mkRejectKey(bidId, milestoneIndex));
+        return next;
+      });
       await loadProofs();
     } catch (e: any) {
       alert(e?.message || 'Failed to reject proof');
@@ -635,7 +684,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               );
             })}
           </div>
-        )}
+        );
       </div>
     );
   };
