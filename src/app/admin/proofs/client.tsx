@@ -157,6 +157,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
+      // If something is still pending after refresh, resume polling so it can self-clear
+for (const bid of rows || []) {
+  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+  for (let i = 0; i < ms.length; i++) {
+    const key = mkKey(bid.bidId, i);
+    if (pendingPay.has(key) && !isPaid(ms[i])) {
+      // will auto-remove pending if it times out and no Safe markers exist
+      pollUntilPaid(bid.bidId, i).catch(() => {});
+    }
+  }
+}
+
       await hydrateArchiveStatuses(rows);
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
@@ -234,45 +246,49 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   // ---- Helpers for milestone state ----
-  function hasProof(m: any): boolean {
-    if (!m?.proof) return false;
-    try {
-      const p = JSON.parse(m.proof);
-      if (p && typeof p === 'object') {
-        if (typeof p.description === 'string' && p.description.trim()) return true;
-        if (Array.isArray(p.files) && p.files.length > 0) return true;
-      }
-    } catch {
-      if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
+  // ---- Helpers for milestone state ----
+function hasProof(m: any): boolean {
+  if (!m?.proof) return false;
+  try {
+    const p = JSON.parse(m.proof);
+    if (p && typeof p === 'object') {
+      if (typeof p.description === 'string' && p.description.trim()) return true;
+      if (Array.isArray(p.files) && p.files.length > 0) return true;
     }
-    return false;
+  } catch {
+    if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
   }
+  return false;
+}
 
-  function isCompleted(m: any): boolean {
-    return m?.completed === true || m?.approved === true || m?.status === 'completed';
-  }
+function isCompleted(m: any): boolean {
+  return m?.completed === true || m?.approved === true || m?.status === 'completed';
+}
 
-  function isPaid(m: any): boolean {
-    return !!(
-      m?.paymentTxHash ||
-      m?.paymentDate ||
-      m?.txHash ||
-      m?.paidAt ||
-      m?.paid === true ||
-      m?.isPaid === true ||
-      m?.status === 'paid'
-    );
-  }
-    // Consider any of these to mean "there is/was a Safe payment in flight/executed"
-  function hasSafeMarker(m: any): boolean {
-    return !!(
-      m?.safeTxHash || m?.safe_tx_hash ||
-      m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-      m?.safeNonce || m?.safe_nonce ||
-      m?.safeExecutedAt || m?.safe_executed_at ||
-      m?.safeStatus === 'executed' || m?.safe_status === 'executed'
-    );
-  }
+function isPaid(m: any): boolean {
+  const status = String(m?.status ?? '').toLowerCase();
+  return !!(
+    m?.paymentTxHash || m?.payment_tx_hash ||
+    m?.paymentDate   || m?.payment_date   ||
+    m?.txHash        || m?.tx_hash        ||
+    m?.paidAt        || m?.paid_at        ||
+    m?.paid === true || m?.isPaid === true ||
+    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' ||
+    m?.hash // legacy fallback
+  );
+}
+
+// Consider any Safe-* signal as "we have/had a Safe payment in flight/executed"
+function hasSafeMarker(m: any): boolean {
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  return !!(
+    m?.safeTxHash            || m?.safe_tx_hash ||
+    m?.safePaymentTxHash     || m?.safe_payment_tx_hash ||
+    m?.safeNonce             || m?.safe_nonce ||
+    m?.safeExecutedAt        || m?.safe_executed_at ||
+    (s && ['queued','pending','submitted','awaiting_exec','success','executed'].includes(s))
+  );
+}
 
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
