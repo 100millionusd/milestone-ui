@@ -263,6 +263,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       m?.status === 'paid'
     );
   }
+    // Consider any of these to mean "there is/was a Safe payment in flight/executed"
+  function hasSafeMarker(m: any): boolean {
+    return !!(
+      m?.safeTxHash || m?.safe_tx_hash ||
+      m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
+      m?.safeNonce || m?.safe_nonce ||
+      m?.safeExecutedAt || m?.safe_executed_at ||
+      m?.safeStatus === 'executed' || m?.safe_status === 'executed'
+    );
+  }
 
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
@@ -326,41 +336,50 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }, [bids, tab, query, archMap, pendingPay]);
 
  // EXACT REPLACEMENT
-async function pollUntilPaid(
-  bidId: number,
-  milestoneIndex: number,
-  tries = 20,
-  intervalMs = 3000
-) {
-  const key = mkKey(bidId, milestoneIndex);
+  async function pollUntilPaid(
+    bidId: number,
+    milestoneIndex: number,
+    tries = 20,
+    intervalMs = 3000
+  ) {
+    const key = mkKey(bidId, milestoneIndex);
 
-  for (let i = 0; i < tries; i++) {
-    try {
-      // Bypass any client/server cache and fetch ONLY this bid
-      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
-        method: 'GET',
-        cache: 'no-store',
-      });
-
-      if (res.ok) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        // FORCE fresh data; do not use getBid (which may be cached)
+        const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
         const bid = await res.json();
         const m = bid?.milestones?.[milestoneIndex];
 
-        if (m && isPaid(m)) {
+        if (m && (isPaid(m) || hasSafeMarker(m))) {
+          // If paid -> clear pending and update UI
+          // If Safe markers exist -> also stop showing the pay buttons immediately
           removePending(key);
-          // Update just this bid in-place
           setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
-          if (typeof router?.refresh === 'function') router.refresh(); // revalidate server comps
+          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+          router.refresh();
           return;
         }
-      } else {
-        console.warn('pollUntilPaid non-200', res.status);
+      } catch (error) {
+        console.error('Polling error:', error);
       }
-    } catch (err) {
-      console.error('Polling error:', err);
+
+      await new Promise(r => setTimeout(r, intervalMs));
     }
 
-    await new Promise(r => setTimeout(r, intervalMs));
+    // If we timed out: only clear "pending" when there is no Safe marker.
+    // (Prevents the buttons reappearing while Safe has actually been proposed/executed.)
+    try {
+      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
+      const bid = await res.json();
+      const m = bid?.milestones?.[milestoneIndex];
+      if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
+        removePending(key);
+      }
+      setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
+    } catch {
+      // if this fails, leave it pending rather than re-enabling the buttons
+    }
   }
 
   // Final attempt if polling times out
@@ -711,6 +730,7 @@ async function pollUntilPaid(
                   const showApprove = hasProof(m) && !isCompleted(m);
                   const payIsPending = pendingPay.has(key);
                   const showPay = isReadyToPay(m) && !payIsPending;
+                  !hasSafeMarker(m);
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
