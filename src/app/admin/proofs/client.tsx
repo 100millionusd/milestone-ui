@@ -351,7 +351,7 @@ function hasSafeMarker(m: any): boolean {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
- // ==== POLL UNTIL PAID (FIXED) ====
+// ==== POLL UNTIL PAID (AUTH-SAFE) ====
 async function pollUntilPaid(
   bidId: number,
   milestoneIndex: number,
@@ -359,26 +359,30 @@ async function pollUntilPaid(
   intervalMs = 3000
 ) {
   const key = mkKey(bidId, milestoneIndex);
+  const headers = await buildAuthHeaders();
+
+  // Prefer hitting the backend directly to avoid any proxy losing headers
+  const url = `${API_BASE}/bids/${bidId}?t=${Date.now()}`;
 
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
+      const res = await fetch(url, {
         method: 'GET',
         cache: 'no-store',
-        credentials: 'include',          // <-- IMPORTANT
+        credentials: 'include',
+        headers,
       });
 
       if (res.status === 401 || res.status === 403) {
         console.warn('pollUntilPaid unauthorized; stopping');
-        removePending(key);              // don’t keep UI stuck on “Payment Pending”
+        removePending(key); // don’t leave the chip stuck
         setError('Your session expired. Please sign in again.');
-        break;
+        return;
       }
 
       if (res.ok) {
         const bid = await res.json();
         const m = bid?.milestones?.[milestoneIndex];
-
         if (m && (isPaid(m) || hasSafeMarker(m))) {
           removePending(key);
           setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
@@ -392,15 +396,15 @@ async function pollUntilPaid(
     } catch (err) {
       console.error('Polling error:', err);
     }
-
     await new Promise(r => setTimeout(r, intervalMs));
   }
 
-  // Final check; also include credentials and stop on 401
+  // Final check (with auth)
   try {
-    const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
+    const res = await fetch(`${API_BASE}/bids/${bidId}?t=${Date.now()}`, {
       cache: 'no-store',
-      credentials: 'include',            // <-- IMPORTANT
+      credentials: 'include',
+      headers,
     });
     if (res.status === 401 || res.status === 403) {
       removePending(key);
@@ -412,10 +416,7 @@ async function pollUntilPaid(
       removePending(key);
     }
     setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
-  } catch {
-    // leave it pending rather than re-enabling buttons incorrectly
-  }
-
+  } catch {/* silent */}
   if (typeof router?.refresh === 'function') router.refresh();
 }
 // ==== END POLL UNTIL PAID ====
