@@ -19,7 +19,6 @@ import {
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
-import { useRouter } from "next/navigation";
 
 // Tabs
 const TABS = [
@@ -67,7 +66,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [bids, setBids] = useState<any[]>(initialBids);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-  const router = useRouter();
 
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
@@ -326,45 +324,40 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }, [bids, tab, query, archMap, pendingPay]);
 
   async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
-  const key = mkKey(bidId, milestoneIndex);
-
-  for (let i = 0; i < tries; i++) {
-    try {
-      // Bypass any caching
-      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
-      if (res.ok) {
-        const bid = await res.json();
+    const key = mkKey(bidId, milestoneIndex);
+    
+    for (let i = 0; i < tries; i++) {
+      try {
+        // Only fetch the specific bid, not all bids
+        const bid = await getBid(bidId);
         const m = bid?.milestones?.[milestoneIndex];
-
+        
         if (m && isPaid(m)) {
           removePending(key);
-          // update only this bid in-place
-          setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
-          router.refresh(); // make sure server components revalidate
+          // Only update this specific bid instead of reloading everything
+          setBids(prev => prev.map(b => 
+            b.bidId === bidId ? bid : b
+          ));
           return;
         }
-      } else {
-        console.warn('pollUntilPaid non-200', res.status);
+      } catch (error) {
+        console.error('Polling error:', error);
       }
-    } catch (err) {
-      console.error('Polling error:', err);
+      
+      await new Promise(r => setTimeout(r, intervalMs));
     }
-    await new Promise(r => setTimeout(r, intervalMs));
+    
+    // Final attempt with full refresh if polling fails
+    removePending(key);
+    await loadProofs();
   }
-
-  // last attempt: force a full refresh, and clear the sticky pending chip
-  removePending(key);
-  await loadProofs(true);
-  router.refresh();
-}
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
     try {
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
-      await loadProofs(true);
-      router.refresh(); 
+      await loadProofs();
     } catch (e: any) {
       alert(e?.message || 'Failed to approve proof');
     } finally {
