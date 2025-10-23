@@ -494,6 +494,28 @@ export default function ProjectDetailPage() {
   // Debug expose
   useEffect(() => { if (typeof window !== 'undefined') (window as any).__PROOFS = proofs; }, [proofs]);
 
+  // Clear any local "pending" keys for milestones that are now paid or carry a SAFE marker
+useEffect(() => {
+  if (!safeBids.length) return;
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    for (const b of safeBids) {
+      const bidId = Number(b?.bidId);
+      if (!Number.isFinite(bidId)) continue;
+      const ms = parseMilestones(b?.milestones);
+      ms.forEach((m, idx) => {
+        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+          const k = mkKey2(bidId, idx);
+          if (next.has(k)) next.delete(k);
+          try { removePendingLS(k); } catch {}
+        }
+      });
+    }
+    return next;
+  });
+}, [safeBids]);
+
+
   // ----------------- Render -----------------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
   if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
@@ -828,7 +850,7 @@ export default function ProjectDetailPage() {
                       const canRelease = !paid && completedRow;
 
                       const pendKey = mkKey2(Number(acceptedBid.bidId), idx);
-                      const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
+                      const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m) && !isPaidLite(m);
 
                       return (
                         <tr key={idx} className="border-t">
