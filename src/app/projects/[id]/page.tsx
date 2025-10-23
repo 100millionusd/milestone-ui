@@ -11,18 +11,18 @@ import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 
-// 🔗 Unified payments sync helpers
+// Payments sync (shared with admin page)
 import {
   openPaymentsChannel,
   onPaymentsMessage,
   postQueued,
+  postDone,
   mkKey2,
   addPendingLS,
   removePendingLS,
-  pollUntilPaidLite,
+  listPendingLS,
   isPaidLite,
   hasSafeMarkerLite,
-  listPendingLS,
 } from '@/lib/paymentsSync';
 
 // ---------------- Consts ----------------
@@ -33,15 +33,18 @@ const PINATA_GATEWAY = (() => {
     const host = raw1
       .replace(/^https?:\/\//i, '')
       .replace(/\/+$/, '')
-      .replace(/(?:\/ipfs)+$/i, '');
+      .replace(/(?:\/ipfs)+$/i, ''); // strip any trailing /ipfs
     return `https://${host}/ipfs`;
   }
+
   const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
-  const base = raw2.replace(/\/+$/, '').replace(/(?:\/ipfs)+$/i, '');
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, ''); // strip any trailing /ipfs
   return `${base}/ipfs`;
 })();
 
-// ⚠️ Proofs endpoint: force local API unless explicitly overridden
+// ⚠️ Proofs endpoint: force local API unless you explicitly override with NEXT_PUBLIC_PROOFS_ENDPOINT
 const PROOFS_ENDPOINT =
   process.env.NEXT_PUBLIC_PROOFS_ENDPOINT && process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.trim() !== ''
     ? process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.replace(/\/+$/, '')
@@ -96,16 +99,24 @@ type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin
 function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ');
 }
-
 function fmt(dt?: string | null) {
   if (!dt) return '';
   const d = new Date(dt);
   return isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
+// ALWAYS null-safe: returns a lowercased status string ('' if none)
+function statusOf(x: any): string {
+  if (!x || typeof x !== 'object') return '';
+  const raw = (x as any).status;
+  return typeof raw === 'string' ? raw.toLowerCase() : '';
+}
+
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
-  if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (a == null) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a) as any; } catch { return null; }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
@@ -130,26 +141,21 @@ function parseDocs(raw: unknown): any[] {
   return [];
 }
 
-// 🔧 IPFS/Gateway normalizer — paste this directly under parseDocs()
+// 🔧 IPFS/Gateway normalizer
 function normalizeIpfsUrl(input?: string, cid?: string) {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // ensure no trailing slash
-  if (cid && (!input || /^\s*$/.test(input))) return GW + '/' + cid;
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
   if (!input) return '';
   let u = String(input).trim();
 
-  // Bare CID (optionally with ?query)
   const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (m) return GW + '/' + m[1] + (m[2] || '');
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
 
-  // ipfs:// and leading ipfs/ segments → strip
   u = u.replace(/^ipfs:\/\//i, '');
   u = u.replace(/^\/+/, '');
   u = u.replace(/^(?:ipfs\/)+/i, '');
 
-  // If not absolute http(s), prefix gateway
-  if (!/^https?:\/\//i.test(u)) u = GW + '/' + u;
-
-  // Collapse any repeated /ipfs/ipfs/
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
   return u;
 }
@@ -173,10 +179,13 @@ function filesFromProofRecords(items: ProofRecord[]) {
 
     for (const raw of list) {
       let url: string | undefined;
-      if (typeof raw === 'string') url = raw;
-      else if (raw && typeof raw === 'object') {
+
+      if (typeof raw === 'string') {
+        url = raw;
+      } else if (raw && typeof raw === 'object') {
         url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
       }
+
       if (!url || isBad(url)) continue;
       url = fixProtocol(url);
 
@@ -193,7 +202,7 @@ function filesFromProofRecords(items: ProofRecord[]) {
   return rows;
 }
 
-// ----------- NEW: image/filename helpers -----------
+// ----------- image/filename helpers -----------
 function withFilename(url: string, name?: string) {
   if (!url) return url;
   if (!name) return url;
@@ -207,22 +216,20 @@ function withFilename(url: string, name?: string) {
     return url;
   }
 }
-
 function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
-// --- milestone key helper (for local "just submitted" flag)
+// milestone key helper
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
-  // ---- route param (plain) ----
   const params = useParams();
   const projectIdParam = (params as any)?.id;
   const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
 
-  // ---- hooks (fixed order; nothing conditional) ----
+  // state
   const [project, setProject] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
   const [proofs, setProofs] = useState<ProofRecord[]>([]);
@@ -235,85 +242,17 @@ export default function ProjectDetailPage() {
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
-  // ✅ payments pending (sync across tabs/pages via localStorage + BroadcastChannel)
+  // payment sync
   const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
-  const addPending = (key: string) => { addPendingLS(key); setPendingPay(prev => new Set(prev).add(key)); };
-  const removePending = (key: string) => {
-    removePendingLS(key);
-    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-  };
+  const payBcRef = useRef<BroadcastChannel | null>(null);
 
-  // ✅ Cross-page sync channel
-const bcRef = useRef<BroadcastChannel | null>(null);
-useEffect(() => {
-  bcRef.current = openPaymentsChannel(); // 'mx-payments'
-  console.log('ProjectDetailPage: BroadcastChannel initialized');
-  return () => { 
-    try { 
-      bcRef.current?.close(); 
-      console.log('ProjectDetailPage: BroadcastChannel closed');
-    } catch {}; 
-    bcRef.current = null; 
-  };
-}, []);
-
-// ✅ Hydrate pending payments from localStorage on mount
-useEffect(() => {
-  const pendingKeys = listPendingLS();
-  console.log('ProjectDetailPage: Hydrating pending payments:', pendingKeys);
-  setPendingPay(new Set(pendingKeys));
-}, []);
-
-useEffect(() => {
-  const ch = bcRef.current;
-  if (!ch) {
-    console.log('ProjectDetailPage: No BroadcastChannel available');
-    return;
-  }
-  
-  console.log('ProjectDetailPage: Setting up message listener');
-  const off = onPaymentsMessage(ch, async (msg) => {
-    console.log('ProjectDetailPage: Received message:', msg);
-    
-    if (msg.type === 'mx:pay:queued') {
-      const key = mkKey2(msg.bidId, msg.milestoneIndex);
-      console.log('ProjectDetailPage: Adding pending payment:', key);
-      addPending(key);
-    } else if (msg.type === 'mx:pay:done') {
-      const key = mkKey2(msg.bidId, msg.milestoneIndex);
-      console.log('ProjectDetailPage: Removing pending payment:', key);
-      removePending(key);
-    }
-
-    // Refresh both proofs & bids on any payment signal
-    console.log('ProjectDetailPage: Refreshing data after message');
-    await refreshProofs();
-    try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-      console.log('ProjectDetailPage: Bids refreshed');
-    } catch (error) {
-      console.error('ProjectDetailPage: Failed to refresh bids:', error);
-    }
-  });
-  
-  return () => { 
-    try { 
-      off?.(); 
-      console.log('ProjectDetailPage: Message listener cleaned up');
-    } catch (error) {
-      console.error('ProjectDetailPage: Error cleaning up listener:', error);
-    } 
-  };
-}, [projectIdNum]);
-
-  // ✅ Null-safe view of bids
+  // null-safe view
   const safeBids = Array.isArray(bids) ? bids.filter((b): b is any => !!b && typeof b === 'object') : [];
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
 
-  // Initial fetch: project + bids
+  // Initial fetch
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -340,20 +279,54 @@ useEffect(() => {
     getAuthRoleOnce().then(setMe).catch(() => {});
   }, []);
 
-  // Fetch proofs (merged view)
+  // hydrate pending from LS
+  useEffect(() => {
+    try {
+      const keys = listPendingLS();
+      setPendingPay(new Set(Array.isArray(keys) ? keys : []));
+    } catch {}
+  }, []);
+
+  // open channel + listen
+  useEffect(() => {
+    if (!payBcRef.current) payBcRef.current = openPaymentsChannel();
+    const ch = payBcRef.current;
+    if (!ch) return;
+
+    const off = onPaymentsMessage(ch, async (msg) => {
+      const k = mkKey2(msg.bidId, msg.milestoneIndex);
+
+      if (msg.type === 'mx:pay:queued') {
+        setPendingPay(prev => new Set(prev).add(k));
+        addPendingLS(k);
+      }
+      if (msg.type === 'mx:pay:done') {
+        setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; });
+        removePendingLS(k);
+      }
+
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+      } catch {}
+    });
+
+    return () => { try { off?.(); } catch {}; try { ch?.close(); } catch {}; payBcRef.current = null; };
+  }, [projectIdNum]);
+
+  // Fetch proofs
   const refreshProofs = async () => {
     if (!Number.isFinite(projectIdNum)) return;
     setLoadingProofs(true);
 
     try {
-      // 1) Local DB: /api/proofs?proposalId=...
       const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
       const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
         .then(r => (r.ok ? r.json() : []))
         .catch(() => []);
 
-      // 2) External API (same source Admin tab uses)
-      const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
+      const accepted = safeBids.find(b => statusOf(b) === 'approved') || safeBids[0] || null;
+
       const adminReq = accepted
         ? getProofs(Number(accepted.bidId))
             .then(rows => {
@@ -372,7 +345,6 @@ useEffect(() => {
 
       const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
 
-      // 3) Merge + de-dupe by milestone+url
       const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
       const seen = new Set<string>();
       const merged: any[] = [];
@@ -395,7 +367,6 @@ useEffect(() => {
       (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
       (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
 
-      // Group back by milestoneIndex
       const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
       for (const r of merged) {
         const ms = Number(r.milestoneIndex);
@@ -421,7 +392,7 @@ useEffect(() => {
       if (!alive) return;
     })();
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
   // Re-fetch when any page archives/unarchives a milestone
@@ -436,10 +407,10 @@ useEffect(() => {
   // Refresh proofs when opening Files tab
   useEffect(() => {
     if (tab === 'files') { refreshProofs(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // 🔔 Live-refresh Files tab when proofs are saved
+  // Live-refresh Files tab when proofs are saved
   useEffect(() => {
     const onAnyProofUpdate = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
@@ -453,7 +424,7 @@ useEffect(() => {
       window.removeEventListener('proofs:updated', onAnyProofUpdate);
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
   // instant local update when a proof is submitted
@@ -482,7 +453,7 @@ useEffect(() => {
     return () => window.removeEventListener('proofs:just-sent', onJustSent);
   }, []);
 
-  // Poll bids while AI analysis runs
+  // Poll bids while AI analysis runs (NULL-SAFE)
   useEffect(() => {
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
@@ -490,14 +461,15 @@ useEffect(() => {
     const needsMore = (rows: any[]) =>
       rows.some((row) => {
         const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
-        return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+        const st = String(a?.status ?? '').toLowerCase();
+        return !a || (st !== '' && st !== 'ready' && st !== 'error');
       });
 
     const tick = async () => {
       try {
         const next = await getBids(projectIdNum);
         const safeNext = Array.isArray(next) ? next.filter(x => !!x && typeof x === 'object') : [];
-        setBids(next);
+        setBids(Array.isArray(next) ? next : []);
         if (Date.now() - start < 90_000 && needsMore(safeNext)) {
           pollTimer.current = setTimeout(tick, 1500);
         } else {
@@ -537,54 +509,59 @@ useEffect(() => {
     if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
   }, [proofs]);
 
-  // -------- Early returns ----------
-  if (loadingProject) return <div className="p-6">Loading project...</div>;
-  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
-
   // -------- Derived -----------
-  const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
+  const acceptedBid = safeBids.find((b) => statusOf(b) === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  // Admin action: release a milestone payment (EOA/manual)
+  // Admin action: release a milestone payment (NORMAL button) with sync
   async function handleReleasePayment(idx: number) {
     if (!acceptedBid) return;
     const bidIdNum = Number(acceptedBid.bidId);
-    const uiKey = `${bidIdNum}:${idx}`;
-    const pendKey = mkKey2(bidIdNum, idx);
     if (!Number.isFinite(bidIdNum)) return;
+    const key = mkKey2(bidIdNum, idx);
 
     if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
 
     try {
-      setReleasingKey(uiKey);
+      setReleasingKey(`${bidIdNum}:${idx}`);
 
-      // 🔔 broadcast queued + mark pending BEFORE API call
       postQueued(bidIdNum, idx);
-      addPending(pendKey);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
 
       await payMilestone(bidIdNum, idx);
 
-      // refresh + poll; poller posts 'done' and we'll clear pending via listener
-      await refreshProofs();
+      await (async function poll(tries = 20, delay = 3000) {
+        for (let t = 0; t < tries; t++) {
+          try {
+            const next = await getBids(projectIdNum);
+            const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+            const m = row?.milestones?.[idx];
+            if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+              postDone(bidIdNum, idx);
+              setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+              removePendingLS(key);
+              setBids(Array.isArray(next) ? next : []);
+              return;
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, delay));
+        }
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+        removePendingLS(key);
+      })();
+
+      alert('Payment released.');
+    } catch (e: any) {
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      alert(e?.message || 'Failed to release payment.');
+    } finally {
+      setReleasingKey(null);
       try {
         const next = await getBids(projectIdNum);
         setBids(Array.isArray(next) ? next : []);
       } catch {}
-
-      const { pollUntilPaidLite } = await import('@/lib/paymentsSync');
-      pollUntilPaidLite(
-        () => getBids(projectIdNum),
-        bidIdNum,
-        idx,
-        () => removePending(pendKey)
-      ).catch(() => {});
-
-      alert('Payment released.');
-    } catch (e: any) {
-      alert(e?.message || 'Failed to release payment.');
-      removePending(pendKey);
-    } finally {
-      setReleasingKey(null);
     }
   }
 
@@ -597,7 +574,7 @@ useEffect(() => {
       String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
 
   const isCompleted = (() => {
-    if (project.status === 'completed') return true;
+    if (String(project?.status || '').toLowerCase() === 'completed') return true;
     if (!acceptedBid) return false;
     if (acceptedMilestones.length === 0) return false;
     return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
@@ -608,10 +585,10 @@ useEffect(() => {
   const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
 
   const lastActivity = (() => {
-    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
+    const dates: (string | undefined | null)[] = [project?.updatedAt, project?.createdAt];
     for (const b of safeBids) {
-      dates.push(b.createdAt, b.updatedAt);
-      const arr = parseMilestones(b.milestones);
+      dates.push(b?.createdAt, b?.updatedAt);
+      const arr = parseMilestones(b?.milestones);
       for (const m of arr) {
         dates.push(m.paymentDate, m.completionDate, m.dueDate);
       }
@@ -626,12 +603,12 @@ useEffect(() => {
 
   type EventItem = { at?: string | null; type: string; label: string; meta?: string };
   const timeline: EventItem[] = [];
-  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
-  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  if (project?.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project?.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
   for (const b of safeBids) {
-    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
-    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
-    const arr = parseMilestones(b.milestones);
+    if (b?.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (statusOf(b) === 'approved' && b?.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b?.milestones);
     arr.forEach((m, idx) => {
       if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
       if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined });
@@ -642,7 +619,7 @@ useEffect(() => {
   // Files (Project + Bid + Proofs)
   const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
   const bidFiles = safeBids.flatMap((b) => {
-    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+    const ds = (b?.docs || (b?.doc ? [b.doc] : [])).filter(Boolean);
     return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
   });
   const proofFiles = filesFromProofRecords(proofs);
@@ -652,17 +629,23 @@ useEffect(() => {
     (window as any).__FILES = allFiles.map((x) => {
       const name = x.doc?.name || null;
       const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
-      return { scope: x.scope, href: normalized ? withFilename(normalized, name || undefined) : null, name };
+      return {
+        scope: x.scope,
+        href: normalized ? withFilename(normalized, name || undefined) : null,
+        name,
+      };
     });
   }
 
   function renderAttachment(doc: any, key: number) {
     if (!doc) return null;
+
     const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
     if (!baseUrl) return null;
 
     const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
     const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+
     const href = withFilename(baseUrl, name);
     const looksImage = isImageName(name) || isImageName(href);
 
@@ -675,7 +658,11 @@ useEffect(() => {
           title={name}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+          <img
+            src={href}
+            alt={name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
+          />
         </button>
       );
     }
@@ -683,7 +670,12 @@ useEffect(() => {
     return (
       <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
         <p className="truncate" title={name}>{name}</p>
-        <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+        <a
+          href={href.startsWith('http') ? href : `https://${href}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
           Open
         </a>
       </div>
@@ -692,21 +684,30 @@ useEffect(() => {
 
   function renderAnalysis(raw: any) {
     const a = coerceAnalysis(raw);
-    const pending = !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+    const st = String(a?.status ?? '').toLowerCase();
+    const pending = !a || (st !== '' && st !== 'ready' && st !== 'error');
+
     if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
     if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-    const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
-    const isV1 = a.verdict || a.reasoning || a.suggestions;
+
+    const isV2 = !!(a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes);
+    const isV1 = !!(a.verdict || a.reasoning || (a as any).suggestions);
 
     return (
       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
         <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
         {isV2 && (
           <>
             {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
             <div className="text-sm">
               {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
-              {typeof a.confidence === 'number' && (<><span className="mx-1">·</span><span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%</>)}
+              {typeof a.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
+                </>
+              )}
             </div>
             {!!a.risks?.length && (
               <div className="mt-2">
@@ -724,7 +725,7 @@ useEffect(() => {
                 </ul>
               </div>
             )}
-            {typeof a.pdfUsed === 'boolean' && (
+            {Object.prototype.hasOwnProperty.call(a, 'pdfUsed') && (
               <div className="mt-3 text-[11px] text-gray-600 space-y-1">
                 <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
                 {a.pdfDebug?.url && (
@@ -748,9 +749,9 @@ useEffect(() => {
           <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
             {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
             {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
-            {!!a.suggestions?.length && (
+            {!!(a as any).suggestions?.length && (
               <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                {(a as any).suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
               </ul>
             )}
           </div>
@@ -762,6 +763,31 @@ useEffect(() => {
   }
 
   // ----------------- Render -----------------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
+
+  // files computed AFTER early return
+  const projectDocs = parseDocs(project?.docs) || [];
+  const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
+  const bidFiles = safeBids.flatMap((b) => {
+    const ds = (b?.docs || (b?.doc ? [b.doc] : [])).filter(Boolean);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+  const proofFiles = filesFromProofRecords(proofs);
+  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+
+  const msTotal = parseMilestones(acceptedBid?.milestones).length;
+  const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
+  const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
+
+  const isCompleted = (() => {
+    if (String(project?.status || '').toLowerCase() === 'completed') return true;
+    if (!acceptedBid) return false;
+    if (acceptedMilestones.length === 0) return false;
+    return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
+  })();
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -769,7 +795,10 @@ useEffect(() => {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{project.title}</h1>
-            {canEdit && (
+            {(me?.role === 'admin' ||
+              (!!project?.ownerWallet &&
+                !!me?.address &&
+                String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase())) && (
               <Link href={`/proposals/${projectIdNum}/edit`} className="px-3 py-1 rounded bg-indigo-600 text-white text-sm">
                 Edit
               </Link>
@@ -846,24 +875,27 @@ useEffect(() => {
             <h3 className="font-semibold mb-3">Bids snapshot</h3>
             {safeBids.length ? (
               <ul className="space-y-2 text-sm">
-                {safeBids.slice(0, 5).map((b) => (
-                  <li key={b.bidId} className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{b.vendorName}</div>
-                      <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
-                    </div>
-                    <span className={classNames(
-                      'px-2 py-1 rounded text-xs',
-                      b.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : b.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    )}>
-                      {b.status}
-                    </span>
-                  </li>
-                ))}
+                {safeBids.slice(0, 5).map((b) => {
+                  const st = statusOf(b);
+                  return (
+                    <li key={b.bidId} className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{b.vendorName}</div>
+                        <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                      </div>
+                      <span className={classNames(
+                        'px-2 py-1 rounded text-xs',
+                        st === 'approved'
+                          ? 'bg-green-100 text-green-800'
+                          : st === 'rejected'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      )}>
+                        {b.status || '—'}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             ) : <p className="text-sm text-gray-500">No bids yet.</p>}
           </div>
@@ -912,7 +944,7 @@ useEffect(() => {
                     <td className="py-2 pr-4">{b.vendorName}</td>
                     <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
                     <td className="py-2 pr-4">{b.days}</td>
-                    <td className="py-2 pr-4">{b.status}</td>
+                    <td className="py-2 pr-4">{b.status || '—'}</td>
                     <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
                     <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
                   </tr>
@@ -947,18 +979,16 @@ useEffect(() => {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = isPaidLite(m);
+                      const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
 
                       const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
                       const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
-                      const status = paid
-                        ? 'paid'
-                        : completedRow
-                          ? 'completed'
-                          : hasProofNow
-                            ? 'submitted'
-                            : 'pending';
+                      const status =
+                        paid ? 'paid'
+                        : completedRow ? 'completed'
+                        : hasProofNow ? 'submitted'
+                        : 'pending';
 
                       return (
                         <tr key={idx} className="border-t">
@@ -980,7 +1010,6 @@ useEffect(() => {
                 </table>
               </div>
 
-              {/* ✅ Proof widget */}
               {(acceptedBid || safeBids[0]) && (
                 <div className="mt-6">
                   <MilestonePayments
@@ -992,9 +1021,7 @@ useEffect(() => {
               )}
             </>
           ) : (
-            <p className="text-sm text-gray-500">
-              No milestones defined yet.
-            </p>
+            <p className="text-sm text-gray-500">No milestones defined yet.</p>
           )}
         </section>
       )}
@@ -1063,41 +1090,44 @@ useEffect(() => {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = isPaidLite(m);
+                      const paid = !!m.paymentTxHash;
                       const completedRow = paid || !!m.completed;
 
-                      const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const k = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const hasProofNow = !!m.proof || !!proofJustSent[k];
+                      const status =
+                        paid ? 'paid'
+                        : completedRow ? 'completed'
+                        : hasProofNow ? 'submitted'
+                        : 'pending';
+
                       const canRelease = !paid && completedRow;
 
-                      // pending across pages
-                      const payKey2 = mkKey2(Number(acceptedBid.bidId), idx);
-                      const isPendingHere = pendingPay.has(payKey2) && !paid;
-
-                      const statusForAdmin = isPendingHere ? 'payment_pending' :
-                        paid ? 'paid' :
-                        completedRow ? 'completed' :
-                        (!!m.proof ? 'submitted' : 'pending');
+                      const pendKey = mkKey2(Number(acceptedBid.bidId), idx);
+                      const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
 
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-2 pr-4">M{idx + 1}</td>
                           <td className="py-2 pr-4">{m.name || '—'}</td>
-                          <td className="py-2 pr-4">{m.amount ? currency.format(Number(m.amount)) : '—'}</td>
-                          <td className="py-2 pr-4">{statusForAdmin}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          <td className="py-2 pr-4">{status}</td>
                           <td className="py-2 pr-4">
                             {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
                           </td>
                           <td className="py-2 pr-4">
                             <div className="flex items-center gap-2">
-                              {/* Manual (EOA) */}
+                              {/* Manual (existing) */}
                               <button
                                 type="button"
                                 onClick={() => handleReleasePayment(idx)}
-                                disabled={!canRelease || releasingKey === key || isPendingHere}
+                                disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
                                 className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                                 title={canRelease ? 'Release payment' : 'Not ready for payment'}
                               >
-                                {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+                                {releasingKey === `${Number(acceptedBid.bidId)}:${idx}` ? 'Releasing…' : (payIsPending ? 'Payment Pending…' : 'RELEASE PAYMENT')}
                               </button>
 
                               {/* SAFE (multisig) */}
@@ -1105,28 +1135,16 @@ useEffect(() => {
                                 bidId={Number(acceptedBid.bidId)}
                                 milestoneIndex={idx}
                                 amountUSD={Number(m?.amount || 0)}
-                                disabled={!canRelease || releasingKey === key || isPendingHere || hasSafeMarkerLite(m) || paid}
+                                disabled={!canRelease || releasingKey === `${Number(acceptedBid.bidId)}:${idx}` || payIsPending}
                                 onQueued={async () => {
-                                  const bidIdNum = Number(acceptedBid.bidId);
-                                  const k2 = mkKey2(bidIdNum, idx);
-                                  // mark pending + broadcast queued
-                                  addPending(k2);
-                                  postQueued(bidIdNum, idx);
-
-                                  // light refresh + poll
-                                  await refreshProofs();
+                                  const key = mkKey2(Number(acceptedBid.bidId), idx);
+                                  setPendingPay(prev => new Set(prev).add(key));
+                                  addPendingLS(key);
+                                  postQueued(Number(acceptedBid.bidId), idx);
                                   try {
                                     const next = await getBids(projectIdNum);
                                     setBids(Array.isArray(next) ? next : []);
                                   } catch {}
-
-                                  const { pollUntilPaidLite } = await import('@/lib/paymentsSync');
-                                  pollUntilPaidLite(
-                                    () => getBids(projectIdNum),
-                                    bidIdNum,
-                                    idx,
-                                    () => removePending(k2)
-                                  ).catch(() => {});
                                 }}
                               />
                             </div>
@@ -1174,12 +1192,11 @@ useEffect(() => {
 
 // ---------------- UI bits ----------------
 function Progress({ value }: { value: number }) {
-  const clamped = Math.min(100, Math.max(0, value));
   return (
     <div className="h-2 bg-gray-200 rounded">
       <div
         className="h-2 bg-black rounded transition-all"
-        style={{ width: clamped + '%' }}
+        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </div>
   );
