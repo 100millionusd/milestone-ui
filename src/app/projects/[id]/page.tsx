@@ -23,7 +23,7 @@ import {
   listPendingLS,
   isPaidLite,
   hasSafeMarkerLite,
-  clearStalePendingKeys,
+  // DO NOT import clearStalePendingKeys statically; we’ll dynamic-import it
 } from '@/lib/paymentsSync';
 
 // ---------------- Consts ----------------
@@ -376,117 +376,34 @@ export default function ProjectDetailPage() {
     };
   }, [projectIdNum, safeBids]);
 
-  // TTL prune stuck pending chips
+  // TTL prune stuck pending chips (dynamic import so repo builds even if helper not exported)
   useEffect(() => {
-    clearStalePendingKeys?.(pendingPay, 5 * 60 * 1000, (staleKey) => {
-      setPendingPay(prev => {
-        const next = new Set(prev);
-        next.delete(staleKey);
-        return next;
-      });
-    });
+    (async () => {
+      try {
+        const mod = await import('@/lib/paymentsSync');
+        const fn = (mod as any).clearStalePendingKeys as
+          | ((s: Set<string>, maxAgeMs: number, onStale: (k: string) => void) => void)
+          | undefined;
+        if (typeof fn === 'function') {
+          fn(pendingPay, 5 * 60 * 1000, (staleKey) => {
+            setPendingPay(prev => {
+              const next = new Set(prev);
+              next.delete(staleKey);
+              return next;
+            });
+          });
+        }
+      } catch {
+        // ignore
+      }
+    })();
   }, [pendingPay]);
 
   // -------- Derived -----------
   const acceptedBid = safeBids.find((b) => String(b?.status || '').toLowerCase() === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  // Re-usable poller for this page: clears "pending" when milestone shows paid/SAFE marker
-async function pollUntilPaidLocal(
-  bidIdNum: number,
-  idx: number,
-  tries = 20,
-  delay = 3000
-) {
-  const key = mkKey2(bidIdNum, idx);
-  for (let t = 0; t < tries; t++) {
-    try {
-      const next = await getBids(projectIdNum);
-      const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
-      const m = row?.milestones?.[idx];
-      if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-        // broadcast "done" so other tabs clear too
-        postDone(bidIdNum, idx);
-        // clear local pending + update bids
-        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-        try { removePendingLS(key); } catch {}
-        setBids(Array.isArray(next) ? next : []);
-        return true;
-      }
-    } catch {
-      // ignore and keep polling
-    }
-    // wait
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise(r => setTimeout(r, delay));
-  }
-  // timeout: clear local pending so it doesn't stick forever
-  setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-  try { removePendingLS(key); } catch {}
-  return false;
-}
-
-  onQueued={async () => {
-  const bidIdNum = Number(acceptedBid.bidId);
-  const key = mkKey2(bidIdNum, idx);
-
-  // Mark pending locally + persist + broadcast queued
-  setPendingPay(prev => new Set(prev).add(key));
-  addPendingLS(key);
-  postQueued(bidIdNum, idx);
-
-  // Start a local poll here too so this page clears "Payment Pending"
-  (async () => {
-    let cleared = false;
-    for (let t = 0; t < 20; t++) {
-      try {
-        const next = await getBids(projectIdNum);
-        const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
-        const m = row?.milestones?.[idx];
-
-        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-          postDone(bidIdNum, idx);
-          setPendingPay(prev => {
-            const n = new Set(prev);
-            n.delete(key);
-            return n;
-          });
-          removePendingLS(key);
-          setBids(Array.isArray(next) ? next : []);
-          cleared = true;
-          break;
-        }
-      } catch {}
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    if (!cleared) {
-      setPendingPay(prev => {
-        const n = new Set(prev);
-        n.delete(key);
-        return n;
-      });
-      removePendingLS(key);
-      console.warn('SAFE polling timed out; UI will update when server shows paid.');
-    }
-  })().catch(() => {});
-
-  // Pull fresh server data ASAP
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-}}
-
-  // Pull fresh server data ASAP
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-}}
-
-
-  // Files (declared once)
+  // Files (compute ONCE, reuse everywhere)
   const projectDocs = parseDocs(project?.docs) || [];
   const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
   const bidFiles = safeBids.flatMap((b) => {
@@ -495,6 +412,69 @@ async function pollUntilPaidLocal(
   });
   const proofFiles = filesFromProofRecords(proofs);
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+
+  // Manual (EOA) payment, synced
+  async function handleReleasePayment(idx: number) {
+    if (!acceptedBid) return;
+    const bidIdNum = Number(acceptedBid.bidId);
+    if (!Number.isFinite(bidIdNum)) return;
+    if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+
+    const key = mkKey2(bidIdNum, idx);
+
+    try {
+      setReleasingKey(`${bidIdNum}:${idx}`);
+
+      // mark pending & broadcast BEFORE calling API
+      postQueued(bidIdNum, idx);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
+
+      await payMilestone(bidIdNum, idx);
+
+      // poll up to 20 times (3s) for paid or SAFE marker
+      let cleared = false;
+      for (let t = 0; t < 20; t++) {
+        try {
+          const next = await getBids(projectIdNum);
+          const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+          const m = row?.milestones?.[idx];
+          if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+            // broadcast done + clear local pending
+            postDone(bidIdNum, idx);
+            setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+            removePendingLS(key);
+            setBids(Array.isArray(next) ? next : []);
+            cleared = true;
+            break;
+          }
+        } catch { /* keep polling */ }
+        // wait 3s
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      if (!cleared) {
+        // timeout: clear local pending so "Payment Pending" doesn't stick forever
+        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+        removePendingLS(key);
+        console.warn('Payment polling timed out; UI will update when server shows paid.');
+      }
+
+      alert('Payment released.');
+    } catch (e: any) {
+      // failure: undo local pending
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      alert(e?.message || 'Failed to release payment.');
+    } finally {
+      setReleasingKey(null);
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+      } catch {}
+    }
+  }
 
   const canEdit =
     me?.role === 'admin' ||
@@ -548,26 +528,25 @@ async function pollUntilPaidLocal(
   useEffect(() => { if (typeof window !== 'undefined') (window as any).__PROOFS = proofs; }, [proofs]);
 
   // Clear any local "pending" keys for milestones that are now paid or carry a SAFE marker
-useEffect(() => {
-  if (!safeBids.length) return;
-  setPendingPay(prev => {
-    const next = new Set(prev);
-    for (const b of safeBids) {
-      const bidId = Number(b?.bidId);
-      if (!Number.isFinite(bidId)) continue;
-      const ms = parseMilestones(b?.milestones);
-      ms.forEach((m, idx) => {
-        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-          const k = mkKey2(bidId, idx);
-          if (next.has(k)) next.delete(k);
-          try { removePendingLS(k); } catch {}
-        }
-      });
-    }
-    return next;
-  });
-}, [safeBids]);
-
+  useEffect(() => {
+    if (!safeBids.length) return;
+    setPendingPay(prev => {
+      const next = new Set(prev);
+      for (const b of safeBids) {
+        const bidId = Number(b?.bidId);
+        if (!Number.isFinite(bidId)) continue;
+        const ms = parseMilestones(b?.milestones);
+        ms.forEach((m, idx) => {
+          if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+            const k = mkKey2(bidId, idx);
+            if (next.has(k)) next.delete(k);
+            try { removePendingLS(k); } catch {}
+          }
+        });
+      }
+      return next;
+    });
+  }, [safeBids]);
 
   // ----------------- Render -----------------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
@@ -614,7 +593,7 @@ useEffect(() => {
           <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
           <TabBtn id="bids" label={`Bids (${safeBids.length})`} tab={tab} setTab={setTab} />
           <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
-          <TabBtn id="files" label={`Files (${projectDocs.length + proofFiles.length + bidFiles.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
           {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
         </div>
       </div>
@@ -809,56 +788,45 @@ useEffect(() => {
             </button>
           </div>
 
-          {(() => {
-            const projectDocs = parseDocs(project?.docs) || [];
-            const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
-            const bidFiles = safeBids.flatMap((b) => {
-              const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-              return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-            });
-            const proofFiles = filesFromProofRecords(proofs);
-            const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+          {allFiles.length ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {allFiles.map((f, i) => {
+                const doc = f.doc;
+                if (!doc) return null;
+                const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+                if (!baseUrl) return null;
+                const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
+                const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
+                const href = withFilename(baseUrl, name);
+                const looksImage = isImageName(name) || isImageName(href);
 
-            return allFiles.length ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {allFiles.map((f, i) => {
-                  const doc = f.doc;
-                  if (!doc) return null;
-                  const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
-                  if (!baseUrl) return null;
-                  const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
-                  const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
-                  const href = withFilename(baseUrl, name);
-                  const looksImage = isImageName(name) || isImageName(href);
-
-                  return (
-                    <div key={i}>
-                      <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
-                      {looksImage ? (
-                        <button
-                          onClick={() => setLightbox(href)}
-                          className="group relative overflow-hidden rounded border"
-                          title={name}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
-                        </button>
-                      ) : (
-                        <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
-                          <p className="truncate" title={name}>{name}</p>
-                          <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                            Open
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No files yet.</p>
-            );
-          })()}
+                return (
+                  <div key={i}>
+                    <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
+                    {looksImage ? (
+                      <button
+                        onClick={() => setLightbox(href)}
+                        className="group relative overflow-hidden rounded border"
+                        title={name}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={href} alt={name} className="h-24 w-24 object-cover group-hover:scale-105 transition" />
+                      </button>
+                    ) : (
+                      <div className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+                        <p className="truncate" title={name}>{name}</p>
+                        <a href={href.startsWith('http') ? href : `https://${href}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                          Open
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No files yet.</p>
+          )}
         </section>
       )}
 
@@ -934,6 +902,35 @@ useEffect(() => {
                                   setPendingPay(prev => new Set(prev).add(key));
                                   addPendingLS(key);
                                   postQueued(Number(acceptedBid.bidId), idx);
+
+                                  // Start a local poll too so this page clears the chip
+                                  (async () => {
+                                    let cleared = false;
+                                    for (let t = 0; t < 20; t++) {
+                                      try {
+                                        const next = await getBids(projectIdNum);
+                                        const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === Number(acceptedBid.bidId));
+                                        const mm = row?.milestones?.[idx];
+                                        if (mm && (isPaidLite(mm) || hasSafeMarkerLite(mm))) {
+                                          postDone(Number(acceptedBid.bidId), idx);
+                                          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+                                          removePendingLS(key);
+                                          setBids(Array.isArray(next) ? next : []);
+                                          cleared = true;
+                                          break;
+                                        }
+                                      } catch {}
+                                      // eslint-disable-next-line no-await-in-loop
+                                      await new Promise(r => setTimeout(r, 3000));
+                                    }
+                                    if (!cleared) {
+                                      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+                                      removePendingLS(key);
+                                      console.warn('SAFE polling timed out; UI will update when server shows paid.');
+                                    }
+                                  })().catch(() => {});
+
+                                  // quick refresh
                                   try { const next = await getBids(projectIdNum); setBids(Array.isArray(next) ? next : []); } catch {}
                                 }}
                               />
