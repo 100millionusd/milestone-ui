@@ -175,6 +175,33 @@ function withFilename(url: string, name?: string) {
 function isImageName(n?: string) { return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n); }
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
+// Remove any "pending" chips for milestones that are now paid / SAFE-marked
+function sweepPendingAgainst(
+  rows: any[] | undefined,
+  setPendingPay: React.Dispatch<React.SetStateAction<Set<string>>>
+) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    for (const b of rows) {
+      const bidId = Number(b?.bidId);
+      if (!Number.isFinite(bidId)) continue;
+      const msArr = Array.isArray(b?.milestones) ? b.milestones : [];
+      msArr.forEach((m: any, idx: number) => {
+        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+          const key = mkKey2(bidId, idx);
+          if (next.has(key)) {
+            next.delete(key);
+            try { removePendingLS(key); } catch {}
+            try { postDone(bidId, idx); } catch {}
+          }
+        }
+      });
+    }
+    return next;
+  });
+}
+
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -233,12 +260,16 @@ export default function ProjectDetailPage() {
     const ch = payBcRef.current;
     if (!ch) return;
 
-    const off = onPaymentsMessage(ch, async (msg) => {
-      const k = mkKey2(msg.bidId, msg.milestoneIndex);
-      if (msg.type === 'mx:pay:queued') { setPendingPay(prev => new Set(prev).add(k)); addPendingLS(k); }
-      if (msg.type === 'mx:pay:done')  { setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; }); removePendingLS(k); }
-      try { const next = await getBids(projectIdNum); setBids(Array.isArray(next) ? next : []); } catch {}
-    });
+ const off = onPaymentsMessage(ch, async (msg) => {
+  const k = mkKey2(msg.bidId, msg.milestoneIndex);
+  if (msg.type === 'mx:pay:queued') { setPendingPay(prev => new Set(prev).add(k)); addPendingLS(k); }
+  if (msg.type === 'mx:pay:done')  { setPendingPay(prev => { const n = new Set(prev); n.delete(k); return n; }); removePendingLS(k); }
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+    sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay); 
+  } catch {}
+});
 
     return () => { try { off?.(); } catch {}; try { ch?.close(); } catch {}; payBcRef.current = null; };
   }, [projectIdNum]);
@@ -446,6 +477,7 @@ async function handleReleasePayment(idx: number) {
           setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
           removePendingLS(key);
           setBids(Array.isArray(next) ? next : []);
+          sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
           cleared = true;
           break;
         }
@@ -467,6 +499,7 @@ async function handleReleasePayment(idx: number) {
           setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
           removePendingLS(key);
           setBids(Array.isArray(next) ? next : []);
+          sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay); 
           cleared = true;
         }
       } catch {}
@@ -491,6 +524,7 @@ async function handleReleasePayment(idx: number) {
     try {
       const next = await getBids(projectIdNum);
       setBids(Array.isArray(next) ? next : []);
+      sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
     } catch {}
   }
 }
@@ -938,6 +972,7 @@ async function handleReleasePayment(idx: number) {
                                           setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
                                           removePendingLS(key);
                                           setBids(Array.isArray(next) ? next : []);
+                                          sweepPendingAgainst(Array.isArray(next) ? next : [], setPendingPay);
                                           cleared = true;
                                           break;
                                         }
