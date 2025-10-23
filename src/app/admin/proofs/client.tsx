@@ -147,15 +147,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       
       setBids(rows);
 
-      // Clear local "pending" for any milestones that are now paid
-      for (const bid of rows || []) {
-        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-        for (let i = 0; i < ms.length; i++) {
-          if (isPaid(ms[i])) {
-            removePending(mkKey(bid.bidId, i));
-          }
-        }
-      }
+ // Clear local "pending" for milestones that are now paid OR have Safe execution recorded
+for (const bid of rows || []) {
+  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+  for (let i = 0; i < ms.length; i++) {
+    if (isPaid(ms[i]) || hasSafeSuccess(ms[i])) {
+      removePending(mkKey(bid.bidId, i));
+    }
+  }
+}
 
       // If something is still pending after refresh, resume polling so it can self-clear
 for (const bid of rows || []) {
@@ -290,6 +290,19 @@ function hasSafeMarker(m: any): boolean {
   );
 }
 
+function hasSafeSuccess(m: any): boolean {
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  return !!(
+    m?.safeExecutedAt        || m?.safe_executed_at ||
+    m?.safePaymentTxHash     || m?.safe_payment_tx_hash ||
+    ['success','executed'].includes(s)
+  );
+}
+
+function isReadyToPay(m: any): boolean {
+  return isCompleted(m) && !isPaid(m);
+}
+
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
   }
@@ -351,7 +364,7 @@ function hasSafeMarker(m: any): boolean {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-// ==== POLL UNTIL PAID (AUTH-SAFE) ====
+// ==== POLL UNTIL PAID (via getBid; cookie/headers handled centrally) ====
 async function pollUntilPaid(
   bidId: number,
   milestoneIndex: number,
@@ -359,64 +372,40 @@ async function pollUntilPaid(
   intervalMs = 3000
 ) {
   const key = mkKey(bidId, milestoneIndex);
-  const headers = await buildAuthHeaders();
-
-  // Prefer hitting the backend directly to avoid any proxy losing headers
-  const url = `${API_BASE}/bids/${bidId}?t=${Date.now()}`;
 
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'include',
-        headers,
-      });
+      const bid = await getBid(bidId); // no-store is handled in lib/api
+      const m = bid?.milestones?.[milestoneIndex];
 
-      if (res.status === 401 || res.status === 403) {
-        console.warn('pollUntilPaid unauthorized; stopping');
-        removePending(key); // don’t leave the chip stuck
+      if (m && (isPaid(m) || hasSafeMarker(m))) {
+        removePending(key);
+        setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
+        try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+        if (typeof router?.refresh === 'function') router.refresh();
+        return;
+      }
+    } catch (err: any) {
+      // If we lost auth, unstick the chip so it doesn't hang forever.
+      if (err?.status === 401 || err?.status === 403) {
+        removePending(key);
         setError('Your session expired. Please sign in again.');
         return;
       }
-
-      if (res.ok) {
-        const bid = await res.json();
-        const m = bid?.milestones?.[milestoneIndex];
-        if (m && (isPaid(m) || hasSafeMarker(m))) {
-          removePending(key);
-          setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
-          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
-          if (typeof router?.refresh === 'function') router.refresh();
-          return;
-        }
-      } else {
-        console.warn('pollUntilPaid non-200', res.status);
-      }
-    } catch (err) {
-      console.error('Polling error:', err);
+      // otherwise ignore and keep polling
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
 
-  // Final check (with auth)
+  // Final check & cleanup
   try {
-    const res = await fetch(`${API_BASE}/bids/${bidId}?t=${Date.now()}`, {
-      cache: 'no-store',
-      credentials: 'include',
-      headers,
-    });
-    if (res.status === 401 || res.status === 403) {
-      removePending(key);
-      return;
-    }
-    const bid = await res.json();
+    const bid = await getBid(bidId);
     const m = bid?.milestones?.[milestoneIndex];
     if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
       removePending(key);
     }
     setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
-  } catch {/* silent */}
+  } catch { /* silent */ }
   if (typeof router?.refresh === 'function') router.refresh();
 }
 // ==== END POLL UNTIL PAID ====
@@ -784,11 +773,11 @@ async function pollUntilPaid(
                               </span>
                             )}
 
-                            {payIsPending && !isPaid(m) && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
-                                Payment Pending
-                              </span>
-                            )}
+ {payIsPending && !isPaid(m) && !hasSafeSuccess(m) && (
+  <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+    Payment Pending
+  </span>
+)}
 
                             {isPaid(m) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
