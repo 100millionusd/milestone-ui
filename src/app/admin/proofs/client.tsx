@@ -43,6 +43,7 @@ type ArchiveInfo = {
 
 // ===== Persist "payment pending" across refreshes =====
 const PENDING_LS_KEY = 'mx_pay_pending';
+const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
 
 function loadPendingFromLS(): Set<string> {
   try {
@@ -92,21 +93,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }>({ bids: [], lastUpdated: 0 });
 
   function addPending(key: string) {
-    setPendingPay(prev => {
-      const next = new Set(prev);
-      next.add(key);
-      savePendingToLS(next);
-      return next;
-    });
+  if (typeof window !== 'undefined') {
+    try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
   }
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    next.add(key);
+    savePendingToLS(next);
+    return next;
+  });
+}
   function removePending(key: string) {
-    setPendingPay(prev => {
-      const next = new Set(prev);
-      next.delete(key);
-      savePendingToLS(next);
-      return next;
-    });
+  if (typeof window !== 'undefined') {
+    try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
   }
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    next.delete(key);
+    savePendingToLS(next);
+    return next;
+  });
+}
 
   useEffect(() => {
     // Only refetch on mount if server gave us nothing
@@ -156,6 +163,19 @@ for (const bid of rows || []) {
     }
   }
 }
+
+// TTL auto-clear for stale local "pending" (e.g., Safe was executed outside the app and server hasn't echoed markers yet)
+try {
+  const now = Date.now();
+  const MAX_MS = 5 * 60 * 1000; // 5 minutes
+  for (const key of Array.from(pendingPay)) {
+    const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
+    const ts = tsRaw ? Number(tsRaw) : 0;
+    if (!ts || (now - ts) > MAX_MS) {
+      removePending(key);
+    }
+  }
+} catch {}
 
       // If something is still pending after refresh, resume polling so it can self-clear
 for (const bid of rows || []) {
@@ -296,10 +316,6 @@ function hasSafeMarker(m: any): boolean {
   // fallback: sometimes backends stash under nested "payment"/"safe" blobs or use "gnosis"
   const raw = JSON.stringify(m).toLowerCase();
   return raw.includes('"safe') || raw.includes('gnosis');
-}
-
-function isReadyToPay(m: any): boolean {
-  return isCompleted(m) && !isPaid(m);
 }
 
   function isReadyToPay(m: any): boolean {
@@ -763,7 +779,7 @@ setBids(prev => prev.map(b => {
                   const archived = isArchived(bid.bidId, origIdx);
                   const key = mkKey(bid.bidId, origIdx);
                   const showApprove = hasProof(m) && !isCompleted(m);
-                  const payIsPending = pendingPay.has(key);
+                  const payIsPending = pendingPay.has(key) && !isPaid(m) && !hasSafeMarker(m);
                   const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarker(m);
                   
 
