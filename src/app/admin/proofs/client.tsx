@@ -19,7 +19,21 @@ import {
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
-import { useRouter } from "next/navigation";
+import { useRouter } from 'next/navigation';
+
+// 🔗 Unified payments sync helpers (single source of truth)
+import {
+  openPaymentsChannel,
+  onPaymentsMessage,
+  postQueued,
+  postDone,
+  mkKey2,
+  addPendingLS,
+  removePendingLS,
+  clearStalePendingKeys,
+  isPaidLite,
+  hasSafeMarkerLite,
+} from '@/lib/paymentsSync';
 
 // Tabs
 const TABS = [
@@ -33,24 +47,12 @@ const TABS = [
 type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
-const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 type ArchiveInfo = {
   archived: boolean;
   archivedAt?: string | null;
   archiveReason?: string | null;
 };
-
-// ===== Persist "payment pending" across refreshes =====
-const PENDING_LS_KEY = 'mx_pay_pending';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
-
-function loadPendingFromLS(): Set<string> {
-  return new Set(); // do not persist across reloads
-}
-function savePendingToLS(_: Set<string>) {
-  /* no-op: deliberately not persisting to LS */
-}
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
@@ -70,10 +72,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // local "payment pending" while we poll the server after clicking Pay (persisted)
-  const [pendingPay, setPendingPay] = useState<Set<string>>(
-    () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
-  );
+  // local "payment pending" while we poll the server after clicking Pay
+  const [pendingPay, setPendingPay] = useState<Set<string>>(new Set());
 
   // Client-side caching for bids data
   const [dataCache, setDataCache] = useState<{
@@ -81,60 +81,82 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     lastUpdated: number;
   }>({ bids: [], lastUpdated: 0 });
 
-useEffect(() => {
-  if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
-  const bc = new BroadcastChannel('mx-pay');
-  bcRef.current = bc;
+  // cross-page payment sync
+  const bcRef = useRef<BroadcastChannel | null>(null);
 
-  bc.onmessage = (e: MessageEvent) => {
-    const msg = e?.data || {};
-    if (
-      (msg?.type === 'mx:pay:done') &&
-      Number.isFinite(msg.bidId) &&
-      Number.isFinite(msg.milestoneIndex)
-    ) {
-      // Clear pending locally and pull fresh data so the chip/buttons disappear
-      removePending(mkKey(msg.bidId, msg.milestoneIndex));
-      loadProofs(true);
-      if (typeof router?.refresh === 'function') router.refresh();
-    }
-  };
-
-  return () => {
-    try { bc.close(); } catch {}
-    bcRef.current = null;
-  };
-}, []);
-
-  function addPending(key: string) {
-  if (typeof window !== 'undefined') {
-    try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
-  }
-  setPendingPay(prev => {
-    const next = new Set(prev);
-    next.add(key);
-    savePendingToLS(next);
-    return next;
-  });
-}
-  function removePending(key: string) {
-  if (typeof window !== 'undefined') {
-    try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
-  }
-  setPendingPay(prev => {
-    const next = new Set(prev);
-    next.delete(key);
-    savePendingToLS(next);
-    return next;
-  });
-}
-
+  // create once; tolerate StrictMode double-invoke in dev
   useEffect(() => {
-    // Only refetch on mount if server gave us nothing
+    if (!bcRef.current) {
+      bcRef.current = openPaymentsChannel(); // 'mx-payments'
+    }
+    return () => {
+      try { bcRef.current?.close(); } catch {}
+      bcRef.current = null;
+    };
+  }, []);
+
+  // 🔄 Hydrate pending set from LS on mount (works even if page hard-refreshes)
+  useEffect(() => {
+    let done = false;
+    (async () => {
+      try {
+        const mod = await import('@/lib/paymentsSync');
+        const list = (mod as any).listPendingLS as undefined | (() => string[] | Set<string>);
+        if (typeof list === 'function') {
+          const keys = list();
+          const arr = Array.isArray(keys) ? keys : keys instanceof Set ? Array.from(keys) : [];
+          if (!done) setPendingPay(new Set(arr));
+        }
+      } catch {
+        // optional; ignore if not available
+      }
+    })();
+    return () => { done = true; };
+  }, []);
+
+  // listen for cross-page payment messages
+  useEffect(() => {
+    const ch = bcRef.current;
+    if (!ch) return;
+
+    const off = onPaymentsMessage(ch, async (msg) => {
+      // 👈 NEW: reflect "queued" immediately so buttons hide in this tab too
+      if (msg.type === 'mx:pay:queued') {
+        const k = mkKey2(msg.bidId, msg.milestoneIndex);
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.add(k);
+          return next;
+        });
+        addPendingLS(k);
+      }
+
+      // refresh data so chips/markers update ASAP
+      await loadProofs(true);
+      if (typeof router?.refresh === 'function') router.refresh();
+
+      // existing: clear on "done"
+      if (msg.type === 'mx:pay:done') {
+        const k = mkKey2(msg.bidId, msg.milestoneIndex);
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(k);
+          return next;
+        });
+        removePendingLS(k);
+      }
+    });
+
+    return () => { try { off?.(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
+
+  // Only refetch on mount if server gave us nothing
+  useEffect(() => {
     if (initialBids.length === 0) {
       loadProofs();
     } else {
-      // we still want to hydrate archive state for the given bids
+      // hydrate archive state for the given bids
       hydrateArchiveStatuses(initialBids).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,104 +165,55 @@ useEffect(() => {
   // listen for archive/unarchive from anywhere
   useMilestonesUpdated(loadProofs);
 
-  // cross-page payment sync
-const bcRef = useRef<BroadcastChannel | null>(null);
-
-// create once; tolerate StrictMode double-invoke in dev
-useEffect(() => {
-  if (!bcRef.current) {
-    try {
-      bcRef.current = new BroadcastChannel('mx-payments');
-    } catch {
-      // ignore if unavailable (SSR or unsupported browser)
-    }
-  }
-  return () => {
-    try {
-      bcRef.current?.close();
-    } catch {}
-    bcRef.current = null;
-  };
-}, []);
-
-useEffect(() => {
-  const ch = bcRef.current;
-  if (!ch) return;
-
-  const onMessage = (e: MessageEvent) => {
-    const data = e?.data;
-    if (!data || typeof data !== 'object') return;
-    const { type } = data as { type?: string; bidId?: number; milestoneIndex?: number };
-    if (type === 'mx:pay:queued' || type === 'mx:pay:done') {
-      // refresh; your UI should hide/update actions accordingly
-      loadProofs(true);
-    }
-  };
-
-  // use addEventListener so we can properly remove it
-  ch.addEventListener('message', onMessage);
-  return () => ch.removeEventListener('message', onMessage);
-}, [loadProofs]);
-
   async function loadProofs(forceRefresh = false) {
-    const CACHE_TTL = 0; // 30 seconds
-    
+    const CACHE_TTL = 0; // disable client cache for freshest admin view
+
     // Use cache if available and not forcing refresh
-    if (!forceRefresh && dataCache.bids.length > 0 && 
+    if (!forceRefresh && dataCache.bids.length > 0 &&
         Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
       return;
     }
-    
+
     setLoading(true);
     setError(null);
     try {
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
-      
+
       // Update cache
       setDataCache({
         bids: rows,
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
-      
+
       setBids(rows);
 
- // Clear local "pending" for milestones that are now paid OR show any Safe markers (queued→executed)
-for (const bid of rows || []) {
-  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-  for (let i = 0; i < ms.length; i++) {
-    if (isPaid(ms[i]) || hasSafeMarker(ms[i])) {
-      removePending(mkKey(bid.bidId, i));
-    }
-  }
-}
+      // Clear local "pending" for milestones that are now paid OR show any Safe markers
+      for (const bid of rows || []) {
+        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+        for (let i = 0; i < ms.length; i++) {
+          if (isPaidLite(ms[i]) || hasSafeMarkerLite(ms[i])) {
+            const k = mkKey2(bid.bidId, i);
+            setPendingPay(prev => {
+              const next = new Set(prev);
+              next.delete(k);
+              return next;
+            });
+            removePendingLS(k);
+          }
+        }
+      }
 
-// TTL auto-clear for stale local "pending" (e.g., Safe was executed outside the app and server hasn't echoed markers yet)
-try {
-  const now = Date.now();
-  const MAX_MS = 5 * 60 * 1000; // 5 minutes
-  for (const key of Array.from(pendingPay)) {
-    const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
-    const ts = tsRaw ? Number(tsRaw) : 0;
-    if (!ts || (now - ts) > MAX_MS) {
-      removePending(key);
-    }
-  }
-} catch {}
-
-      // If something is still pending after refresh, resume polling so it can self-clear
-for (const bid of rows || []) {
-  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-  for (let i = 0; i < ms.length; i++) {
-    const key = mkKey(bid.bidId, i);
-    if (pendingPay.has(key) && !isPaid(ms[i])) {
-      // will auto-remove pending if it times out and no Safe markers exist
-      pollUntilPaid(bid.bidId, i).catch(() => {});
-    }
-  }
-}
+      // TTL auto-clear for stale local "pending"
+      clearStalePendingKeys(pendingPay, 5 * 60 * 1000, (staleKey) => {
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(staleKey);
+          return next;
+        });
+      });
 
       await hydrateArchiveStatuses(rows);
     } catch (e: any) {
@@ -253,7 +226,7 @@ for (const bid of rows || []) {
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
-    
+
     if (uniqueBidIds.length === 0) {
       setArchMap({});
       return;
@@ -262,21 +235,21 @@ for (const bid of rows || []) {
     try {
       const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
       updateBulkArchiveCache(bulkArchiveStatus);
-      
+
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-      
+
       allBids.forEach(bid => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-        
+
         ms.forEach((_, index) => {
-          const key = mkKey(bid.bidId, index);
+          const key = mkKey2(bid.bidId, index);
           if (nextMap[key] === undefined) {
             nextMap[key] = bidArchiveStatus[index] || { archived: false };
           }
         });
       });
-      
+
       setArchMap(nextMap);
     } catch (error) {
       console.error('Failed to fetch bulk archive status:', error);
@@ -293,7 +266,7 @@ for (const bid of rows || []) {
     for (const bid of allBids || []) {
       const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
       for (let i = 0; i < ms.length; i++) {
-        const key = mkKey(bid.bidId, i);
+        const key = mkKey2(bid.bidId, i);
         if (nextMap[key] !== undefined) continue;
         tasks.push(
           (async () => {
@@ -319,63 +292,30 @@ for (const bid of rows || []) {
   }
 
   // ---- Helpers for milestone state ----
-function hasProof(m: any): boolean {
-  if (!m?.proof) return false;
-  try {
-    const p = JSON.parse(m.proof);
-    if (p && typeof p === 'object') {
-      if (typeof p.description === 'string' && p.description.trim()) return true;
-      if (Array.isArray(p.files) && p.files.length > 0) return true;
+  function hasProof(m: any): boolean {
+    if (!m?.proof) return false;
+    try {
+      const p = JSON.parse(m.proof);
+      if (p && typeof p === 'object') {
+        if (typeof p.description === 'string' && p.description.trim()) return true;
+        if (Array.isArray(p.files) && p.files.length > 0) return true;
+      }
+    } catch {
+      if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
     }
-  } catch {
-    if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
+    return false;
   }
-  return false;
-}
 
-function isCompleted(m: any): boolean {
-  return m?.completed === true || m?.approved === true || m?.status === 'completed';
-}
-
-function isPaid(m: any): boolean {
-  const status = String(m?.status ?? '').toLowerCase();
-  return !!(
-    m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.paymentDate   || m?.payment_date   ||
-    m?.txHash        || m?.tx_hash        ||
-    m?.paidAt        || m?.paid_at        ||
-    m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' ||
-    m?.hash // legacy fallback
-  );
-}
-
-// Consider any Safe-* signal as "we have/had a Safe payment in flight/executed"
-function hasSafeMarker(m: any): boolean {
-  if (!m) return false;
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-
-  // direct known fields
-  const direct =
-    m?.safeTxHash || m?.safe_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-    m?.safeNonce || m?.safe_nonce ||
-    m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && ['queued','pending','submitted','awaiting_exec','success','executed'].includes(s));
-
-  if (direct) return true;
-
-  // fallback: sometimes backends stash under nested "payment"/"safe" blobs or use "gnosis"
-  const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis');
-}
+  function isCompleted(m: any): boolean {
+    return m?.completed === true || m?.approved === true || m?.status === 'completed';
+  }
 
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !isPaid(m);
+    return isCompleted(m) && !isPaidLite(m);
   }
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
-    return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
+    return !!archMap[mkKey2(bidId, milestoneIndex)]?.archived;
   }
 
   function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
@@ -388,9 +328,9 @@ function hasSafeMarker(m: any): boolean {
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !hasSafeMarker(m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey2(bidId, idx)) && !hasSafeMarkerLite(m);
       case 'paid':
-        return isPaid(m);
+        return isPaidLite(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -431,77 +371,92 @@ function hasSafeMarker(m: any): boolean {
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-// ==== POLL UNTIL PAID (via getBid; cookie/headers handled centrally) ====
-async function pollUntilPaid(
-  bidId: number,
-  milestoneIndex: number,
-  tries = 20,
-  intervalMs = 3000
-) {
-  const key = mkKey(bidId, milestoneIndex);
+  // ==== POLL UNTIL PAID (via getBid; cookie/headers handled centrally) ====
+  async function pollUntilPaid(
+    bidId: number,
+    milestoneIndex: number,
+    tries = 20,
+    intervalMs = 3000
+  ) {
+    const key = mkKey2(bidId, milestoneIndex);
 
-  for (let i = 0; i < tries; i++) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const bid = await getBid(bidId); // no-store is handled in lib/api
+        const m = bid?.milestones?.[milestoneIndex];
+
+        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+          // mark done locally + tell other pages
+          setPendingPay(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+          removePendingLS(key);
+          postDone(bidId, milestoneIndex);
+
+          // merge just this milestone into the current row
+          setBids(prev => prev.map(b => {
+            const match = ((b as any).bidId ?? (b as any).id) === bidId;
+            if (!match) return b;
+            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+            const srvM = (bid as any)?.milestones?.[milestoneIndex];
+            if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+            return { ...b, milestones: ms };
+          }));
+          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+          if (typeof router?.refresh === 'function') router.refresh();
+          return;
+        }
+      } catch (err: any) {
+        // If we lost auth, unstick the chip so it doesn't hang forever.
+        if (err?.status === 401 || err?.status === 403) {
+          setPendingPay(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+          removePendingLS(key);
+          setError('Your session expired. Please sign in again.');
+          return;
+        }
+        // otherwise ignore and keep polling
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+
+    // Final check & cleanup
     try {
-      const bid = await getBid(bidId); // no-store is handled in lib/api
+      const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
 
-      if (m && (isPaid(m) || hasSafeMarker(m))) {
-        // mark done locally + tell other pages
-        removePending(key);
-        try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+      if (!m || (!isPaidLite(m) && !hasSafeMarkerLite(m))) {
+        // not paid/marked — clear pending only
+        setPendingPay(prev => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+        removePendingLS(key);
+      } else {
+        // paid/marked — broadcast "done" so other tabs clear too
+        postDone(bidId, milestoneIndex);
+      }
 
-        // merge just this milestone into the current row
-        setBids(prev => prev.map(b => {
-          const match = ((b as any).bidId ?? (b as any).id) === bidId;
-          if (!match) return b;
-          const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-          const srvM = (bid as any)?.milestones?.[milestoneIndex];
-          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-          return { ...b, milestones: ms };
-        }));
-        try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
-        if (typeof router?.refresh === 'function') router.refresh();
-        return;
-      }
-    } catch (err: any) {
-      // If we lost auth, unstick the chip so it doesn't hang forever.
-      if (err?.status === 401 || err?.status === 403) {
-        removePending(key);
-        setError('Your session expired. Please sign in again.');
-        return;
-      }
-      // otherwise ignore and keep polling
-    }
-    await new Promise(r => setTimeout(r, intervalMs));
+      // merge just this milestone into the current row
+      setBids(prev => prev.map(b => {
+        const match = ((b as any).bidId ?? (b as any).id) === bidId;
+        if (!match) return b;
+        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+        const srvM = (bid as any)?.milestones?.[milestoneIndex];
+        if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+        return { ...b, milestones: ms };
+      }));
+    } catch { /* silent */ }
+
+    if (typeof router?.refresh === 'function') router.refresh();
   }
-
-  // Final check & cleanup
-  try {
-    const bid = await getBid(bidId);
-    const m = bid?.milestones?.[milestoneIndex];
-
-    if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
-      // not paid/marked — clear pending only
-      removePending(key);
-    } else {
-      // paid/marked — broadcast "done" so other tabs clear too
-      try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
-    }
-
-    // merge just this milestone into the current row
-    setBids(prev => prev.map(b => {
-      const match = ((b as any).bidId ?? (b as any).id) === bidId;
-      if (!match) return b;
-      const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-      const srvM = (bid as any)?.milestones?.[milestoneIndex];
-      if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-      return { ...b, milestones: ms };
-    }));
-  } catch { /* silent */ }
-
-  if (typeof router?.refresh === 'function') router.refresh();
-}
-// ==== END POLL UNTIL PAID ====
+  // ==== END POLL UNTIL PAID ====
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -519,15 +474,27 @@ async function pollUntilPaid(
 
   const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
+    const key = mkKey2(bidId, milestoneIndex);
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
+
+      // 🔔 broadcast queued + mark pending BEFORE API call
+      postQueued(bidId, milestoneIndex);
+      setPendingPay(prev => new Set(prev).add(key));
+      addPendingLS(key);
+
       await payMilestone(bidId, milestoneIndex);
-      const key = mkKey(bidId, milestoneIndex);
-      addPending(key);
+
+      // start polling; will post 'done' on success
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      removePending(mkKey(bidId, milestoneIndex));
+      setPendingPay(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      removePendingLS(key);
     } finally {
       setProcessing(null);
     }
@@ -557,11 +524,10 @@ async function pollUntilPaid(
     try {
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
-      // Clear cache for this bid since archive status changed
       clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
-        [mkKey(bidId, milestoneIndex)]: {
+        [mkKey2(bidId, milestoneIndex)]: {
           archived: true,
           archiveReason: reason || null,
           archivedAt: new Date().toISOString(),
@@ -578,11 +544,10 @@ async function pollUntilPaid(
     try {
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
-      // Clear cache for this bid since archive status changed
       clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
-        [mkKey(bidId, milestoneIndex)]: {
+        [mkKey2(bidId, milestoneIndex)]: {
           archived: false,
           archiveReason: null,
           archivedAt: null,
@@ -605,7 +570,7 @@ async function pollUntilPaid(
         const bidId = Number(bidIdStr);
         const idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-          try { 
+          try {
             await unarchiveMilestone(bidId, idx);
             clearBulkArchiveCache(bidId);
           } catch {}
@@ -841,11 +806,10 @@ async function pollUntilPaid(
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const archived = isArchived(bid.bidId, origIdx);
-                  const key = mkKey(bid.bidId, origIdx);
+                  const pendKey = mkKey2(bid.bidId, origIdx);
                   const showApprove = hasProof(m) && !isCompleted(m);
-                  const payIsPending = pendingPay.has(key) && !hasSafeMarker(m);
-                  const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarker(m);
-                  
+                  const payIsPending = pendingPay.has(pendKey) && !hasSafeMarkerLite(m);
+                  const showPay = isReadyToPay(m) && !payIsPending && !hasSafeMarkerLite(m);
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -866,13 +830,13 @@ async function pollUntilPaid(
                               </span>
                             )}
 
- {payIsPending && !isPaid(m) && !hasSafeMarker(m) && (
-  <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
-    Payment Pending
-  </span>
-)}
+                            {payIsPending && !isPaidLite(m) && !hasSafeMarkerLite(m) && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+                                Payment Pending
+                              </span>
+                            )}
 
-                            {isPaid(m) && (
+                            {isPaidLite(m) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
                                 Paid
                               </span>
@@ -921,50 +885,54 @@ async function pollUntilPaid(
                                     onClick={() => handleReject(bid.bidId, origIdx)}
                                     disabled={disabled}
                                     className={[
-                                      "px-4 py-2 rounded disabled:opacity-50",
-                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                                               : "bg-red-600 hover:bg-red-700 text-white"
-                                    ].join(" ")}
+                                      'px-4 py-2 rounded disabled:opacity-50',
+                                      disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                               : 'bg-red-600 hover:bg-red-700 text-white'
+                                    ].join(' ')}
                                   >
-                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
+                                    {isProcessing ? 'Rejecting...' : (isLocked ? 'Rejected' : 'Reject')}
                                   </button>
                                 );
                               })()}
 
- {showPay && (
-  <div className="flex items-center gap-2">
-    {/* Manual (existing) */}
-    <button
-      type="button"
-      onClick={() => handlePay(bid.bidId, origIdx)}
-      disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-      className={[
-        "px-4 py-2 rounded text-white",
-        (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending)
-          ? "bg-green-600 opacity-60 cursor-not-allowed"
-          : "bg-green-600 hover:bg-green-700"
-      ].join(" ")}
-      title="Release payment manually (EOA)"
-    >
-      {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...'
-        : payIsPending ? 'Payment Pending…'
-        : 'Release Payment'}
-    </button>
+                              {showPay && (
+                                <div className="flex items-center gap-2">
+                                  {/* Manual (existing) */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePay(bid.bidId, origIdx)}
+                                    disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+                                    className={[
+                                      'px-4 py-2 rounded text-white',
+                                      (processing === `pay-${bid.bidId}-${origIdx}` || payIsPending)
+                                        ? 'bg-green-600 opacity-60 cursor-not-allowed'
+                                        : 'bg-green-600 hover:bg-green-700'
+                                    ].join(' ')}
+                                    title="Release payment manually (EOA)"
+                                  >
+                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...'
+                                      : payIsPending ? 'Payment Pending…'
+                                      : 'Release Payment'}
+                                  </button>
 
- <SafePayButton
-  bidId={bid.bidId}
-  milestoneIndex={origIdx}
-  amountUSD={Number(m?.amount || 0)}
-  disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
-  onQueued={() => {
-    const key = mkKey(bid.bidId, origIdx);
-    addPending(key);
-    pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-    router.refresh(); // pull fresh server data ASAP
-  }}
-/>
-  </div>
-)}
+                                  <SafePayButton
+                                    bidId={bid.bidId}
+                                    milestoneIndex={origIdx}
+                                    amountUSD={Number(m?.amount || 0)}
+                                    disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
+                                    onQueued={() => {
+                                      // Mark pending locally + persist + broadcast queued
+                                      const key = mkKey2(bid.bidId, origIdx);
+                                      setPendingPay(prev => new Set(prev).add(key));
+                                      addPendingLS(key);
+                                      postQueued(bid.bidId, origIdx);
+                                      // Start polling; will post 'done' on success
+                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+                                      router.refresh(); // pull fresh server data ASAP
+                                    }}
+                                  />
+                                </div>
+                              )}
                             </>
                           )}
 
