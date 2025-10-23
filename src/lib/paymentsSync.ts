@@ -1,126 +1,77 @@
 // src/lib/paymentsSync.ts
+const CHANNEL_NAME = 'mx-payments';
+const LS_KEY = 'mx:pay:pending';
 
-// ---- One channel everywhere ----
-const CH_NAME = 'mx-payments';
-let _ch: BroadcastChannel | null = null;
-
-export function openPaymentsChannel(): BroadcastChannel | null {
-  if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return null;
-  if (!_ch) {
-    try { _ch = new BroadcastChannel(CH_NAME); } catch { _ch = null; }
-  }
-  return _ch;
+export function openPaymentsChannel(): BroadcastChannel {
+  return new BroadcastChannel(CHANNEL_NAME);
 }
 
-type PaymentsMsg =
-  | { type: 'mx:pay:queued'; bidId: number; milestoneIndex: number }
-  | { type: 'mx:pay:done';   bidId: number; milestoneIndex: number };
+type PayMsg = { type: 'mx:pay:queued' | 'mx:pay:done'; bidId: number; milestoneIndex: number };
 
 export function onPaymentsMessage(
-  channel: BroadcastChannel,
-  handler: (msg: PaymentsMsg) => void
-): () => void {
-  const fn = (e: MessageEvent) => {
-    const m = e?.data;
-    if (!m || typeof m !== 'object') return;
-    const t = (m as any).type;
-    if (t === 'mx:pay:queued' || t === 'mx:pay:done') handler(m as PaymentsMsg);
+  ch: BroadcastChannel,
+  handler: (msg: PayMsg) => void
+) {
+  const fn = (ev: MessageEvent) => {
+    const m = ev?.data;
+    if (!m || (m.type !== 'mx:pay:queued' && m.type !== 'mx:pay:done')) return;
+    if (typeof m.bidId !== 'number' || typeof m.milestoneIndex !== 'number') return;
+    handler(m);
   };
-  channel.addEventListener('message', fn);
-  return () => channel.removeEventListener('message', fn);
+  ch.addEventListener('message', fn);
+  return () => ch.removeEventListener('message', fn);
 }
-
-function ch(): BroadcastChannel | null { return openPaymentsChannel(); }
 
 export function postQueued(bidId: number, milestoneIndex: number) {
-  try { ch()?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex } as PaymentsMsg); } catch {}
+  try {
+    new BroadcastChannel(CHANNEL_NAME).postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex });
+  } catch {}
 }
 export function postDone(bidId: number, milestoneIndex: number) {
-  try { ch()?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex } as PaymentsMsg); } catch {}
-}
-
-// ---- Keys + LocalStorage with timestamps ----
-export const mkKey2 = (bidId: number, milestoneIndex: number) => `${bidId}-${milestoneIndex}`;
-
-const PENDING_KEYS = 'mx_pay_pending_keys';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
-
-function readKeys(): Set<string> {
-  if (typeof window === 'undefined') return new Set();
   try {
-    const raw = localStorage.getItem(PENDING_KEYS);
-    const arr = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []);
-  } catch { return new Set(); }
-}
-function writeKeys(s: Set<string>) {
-  if (typeof window === 'undefined') return;
-  try { localStorage.setItem(PENDING_KEYS, JSON.stringify(Array.from(s))); } catch {}
+    new BroadcastChannel(CHANNEL_NAME).postMessage({ type: 'mx:pay:done', bidId, milestoneIndex });
+  } catch {}
 }
 
+export function mkKey2(bidId: number, milestoneIndex: number) {
+  return `${bidId}-${milestoneIndex}`;
+}
+
+// ---------- localStorage mirroring ----------
+function readLS(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
+  } catch { return []; }
+}
+function writeLS(keys: string[]) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(Array.from(new Set(keys)))); } catch {}
+}
 export function addPendingLS(key: string) {
-  if (typeof window !== 'undefined') {
-    try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
-  }
-  const s = readKeys();
-  s.add(key);
-  writeKeys(s);
+  const arr = readLS(); if (!arr.includes(key)) { arr.push(key); writeLS(arr); }
 }
 export function removePendingLS(key: string) {
-  if (typeof window !== 'undefined') {
-    try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
-  }
-  const s = readKeys();
-  if (s.delete(key)) writeKeys(s);
+  writeLS(readLS().filter(k => k !== key));
 }
-export function listPendingLS(): string[] {
-  return Array.from(readKeys());
-}
+export function listPendingLS(): string[] { return readLS(); }
 
-/** TTL cleanup helper */
+// Optional “cleanup” to keep state and LS consistent (no timestamps)
 export function clearStalePendingKeys(
-  stateSet: Set<string>,
-  maxAgeMs: number,
-  onStale?: (k: string) => void
+  current: Set<string>,
+  _maxAgeMs: number,
+  onStale: (k: string) => void
 ) {
-  const now = Date.now();
-  const union = new Set([...listPendingLS(), ...Array.from(stateSet || [])]);
-
-  union.forEach((k) => {
-    try {
-      const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${k}`) : null;
-      const ts = tsRaw ? Number(tsRaw) : 0;
-      if (!ts || now - ts > maxAgeMs) {
-        removePendingLS(k);
-        onStale?.(k);
-      }
-    } catch {}
-  });
+  const ls = new Set(readLS());
+  for (const k of current) { if (!ls.has(k)) onStale(k); }
+  for (const k of ls) { if (!current.has(k)) removePendingLS(k); }
 }
 
-// ---- Lightweight milestone state checks (shared) ----
+// ---------- small helpers to detect paid/markers ----------
 export function isPaidLite(m: any): boolean {
-  const status = String(m?.status ?? '').toLowerCase();
-  return !!(
-    m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.paymentDate   || m?.payment_date   ||
-    m?.txHash        || m?.tx_hash        ||
-    m?.paidAt        || m?.paid_at        ||
-    m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' ||
-    m?.hash
-  );
+  return !!(m?.paymentTxHash || m?.paid === true || String(m?.status || '').toLowerCase() === 'paid');
 }
 export function hasSafeMarkerLite(m: any): boolean {
-  if (!m) return false;
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const direct =
-    m?.safeTxHash || m?.safe_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-    m?.safeNonce || m?.safe_nonce ||
-    m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && ['queued','pending','submitted','awaiting_exec','success','executed'].includes(s));
-  if (direct) return true;
-  const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis');
+  // allow any of these to mark a “safe-queued/safe-paid” state
+  return !!(m?.safeTxHash || m?.safeQueued || m?.safeSubmitted);
 }
