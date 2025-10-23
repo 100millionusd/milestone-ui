@@ -1,847 +1,1136 @@
-// src/app/admin/bids/[id]/page.tsx
+// src/app/projects/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import * as api from '@/lib/api';
-import { API_BASE } from '@/lib/api';
-import Agent2Inline from '@/components/Agent2Inline';
-import BidChatAgent from '@/components/BidChatAgent';
+import Link from 'next/link';
+import { getProposal, getBids, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
+import AdminProofs from '@/components/AdminProofs';
+import MilestonePayments from '@/components/MilestonePayments';
+import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
+import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
+import SafePayButton from '@/components/SafePayButton';
 
-export default function AdminBidDetailPage(props: { params?: { id: string } }) {
-  const routeParams = useParams();
-  const bidId = Number((props.params as any)?.id ?? (routeParams as any)?.id);
-
-  const [loading, setLoading] = useState(true);
-  const [bid, setBid] = useState<any>(null);
-  const [proposal, setProposal] = useState<any>(null);
-  const [proofs, setProofs] = useState<any[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-
-  // local action locks (approve/reject) by milestone index
-  const [actedByIdx, setActedByIdx] = useState<Record<number, 'approved' | 'rejected'>>({});
-  const [lockByIdx, setLockByIdx] = useState<Record<number, boolean>>({});
-
-  // who am I (gate admin-only edit controls)
-  const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
-
-  // per-proof prompt + busy state
-  const [promptById, setPromptById] = useState<Record<number, string>>({});
-  const [busyById, setBusyById] = useState<Record<number, boolean>>({});
-  const [proofStatusByIdx, setProofStatusByIdx] = useState<Record<number, string>>({});
-
-  // latest proof_id per milestone (by max id — single source of truth)
-  const latestIdByIdx = useMemo(() => {
-    const ids: Record<number, number> = {};
-    for (const p of proofs) {
-      const idx = Number(p.milestoneIndex ?? p.milestone_index);
-      const pid = Number(p.proofId ?? p.id ?? 0);
-      if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
-      if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
-    }
-    return ids;
-  }, [proofs]);
-
-  // fallback latest *status* per milestone (by max id)
-  const fallbackLatestByIdx = useMemo(() => {
-    const out: Record<number, string> = {};
-    const ids: Record<number, number> = {};
-    for (const p of proofs) {
-      const idx = Number(p.milestoneIndex ?? p.milestone_index);
-      const pid = Number(p.proofId ?? p.id ?? 0);
-      if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
-      if (!ids[idx] || pid > ids[idx]) {
-        ids[idx] = pid;
-        out[idx] = String(p.status || 'pending');
-      }
-    }
-    return out;
-  }, [proofs]);
-
-  // only show the latest proof card per milestone in the UI
-  const visibleProofs = useMemo(() => {
-  const keep = new Set<number>(Object.values(latestIdByIdx));
-  return proofs.filter(p => {
-    const id = Number(p.proofId ?? p.id);
-    const status = String(p.status || '').toLowerCase();
-    return keep.has(id) && status !== 'rejected';
-  });
-}, [proofs, latestIdByIdx]);
-
-  // chat modal state (bid-level; opened from header or any proof)
-  const [chatOpen, setChatOpen] = useState(false);
-
-  // Initial load
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
-
-        // load role early to gate UI
-        api.getAuthRoleOnce().then(setMe).catch(() => {});
-
-        const b = await api.getBid(bidId);
-        setBid(b);
-
-        const p = await api.getProposal(b.proposalId);
-        setProposal(p);
-
-        const pf = await api.getProofs(bidId); // admin-only
-        setProofs(pf);
-      } catch (e: any) {
-        setErr(e?.message || 'Failed to load bid');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [bidId]);
-
-  // Fetch latest per-milestone status map (server truth)
-  useEffect(() => {
-    if (!bidId) return;
-    (async () => {
-      try {
-        const r = await fetch(
-          `${API_BASE}/bids/${bidId}/proofs/latest-status`,
-          { credentials: 'include', cache: 'no-store' } // prevent stale cache
-        );
-        const j = await r.json();
-        setProofStatusByIdx(j?.byIndex || {});
-      } catch (e) {
-        console.warn('latest-status fetch failed', e);
-        setProofStatusByIdx({});
-      }
-    })();
-  }, [bidId]);
-
-  // hydrate reject locks from localStorage so buttons stay disabled after refresh/navigation
-  useEffect(() => {
-    if (!bidId) return;
-    try {
-      const next: Record<number, boolean> = {};
-      for (const p of proofs) {
-        const idx = Number(p.milestoneIndex ?? p.milestone_index);
-        if (typeof window !== 'undefined' &&
-            localStorage.getItem(`rej:${bidId}:${idx}`) === '1') {
-          next[idx] = true;
-        }
-      }
-      setLockByIdx(next);
-    } catch { /* ignore */ }
-  }, [bidId, proofs]);
-
-  async function runProofAnalysis(proofId: number) {
-    try {
-      setBusyById((prev) => ({ ...prev, [proofId]: true }));
-      const prompt = promptById[proofId] || '';
-      const updated = await api.analyzeProof(proofId, prompt || undefined);
-      setProofs((prev) =>
-        prev.map((p) => (Number(p.proofId ?? p.id) === proofId ? updated : p))
-      );
-    } catch (e: any) {
-      alert(e?.message || 'Failed to run Agent 2 on proof');
-    } finally {
-      setBusyById((prev) => ({ ...prev, [proofId]: false }));
-    }
+// ---------------- Consts ----------------
+// Pinata gateway base — sanitize so we end with exactly one "/ipfs"
+const PINATA_GATEWAY = (() => {
+  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
+  if (raw1) {
+    const host = raw1
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .replace(/(?:\/ipfs)+$/i, ''); // strip any trailing /ipfs
+    return `https://${host}/ipfs`;
   }
 
-  // refresh latest status map AND the proofs list (no stale cache)
-async function refreshLatest() {
-  if (!bidId) return;
+  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, '');   // strip any trailing /ipfs
+  return `${base}/ipfs`;
+})();
+
+// ⚠️ Proofs endpoint: force local API unless you explicitly override with NEXT_PUBLIC_PROOFS_ENDPOINT
+const PROOFS_ENDPOINT =
+  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT && process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.trim() !== ''
+    ? process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.replace(/\/+$/, '')
+    : '/api/proofs';
+
+const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
+// ---------------- Types -----------------
+type AnalysisV2 = {
+  status?: 'ready' | 'error' | string;
+  summary?: string;
+  fit?: 'low' | 'medium' | 'high';
+  risks?: string[];
+  milestoneNotes?: string[];
+  confidence?: number;
+  pdfUsed?: boolean;
+  pdfDebug?: any;
+};
+
+type AnalysisV1 = {
+  verdict?: string;
+  reasoning?: string;
+  suggestions?: string[];
+  status?: 'ready' | 'error' | string;
+};
+
+type Milestone = {
+  name?: string;
+  amount?: number;
+  dueDate?: string;
+  completed?: boolean;
+  completionDate?: string | null;
+  paymentTxHash?: string | null;
+  paymentDate?: string | null;
+  proof?: string;
+  files?: Array<{ url?: string; cid?: string; name?: string } | string>;
+};
+
+type ProofFile = { url?: string; cid?: string; name?: string } | string;
+type ProofRecord = {
+  proposalId: number;
+  milestoneIndex?: number; // zero-based
+  note?: string;
+  files?: ProofFile[];
+  urls?: string[];
+  cids?: string[];
+};
+
+type TabKey = 'overview' | 'timeline' | 'bids' | 'milestones' | 'files' | 'admin';
+
+// -------------- Helpers (no hooks here) --------------
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
+}
+
+function fmt(dt?: string | null) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
+}
+
+function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
+  if (!a) return null;
+  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (typeof a === 'object') return a as any;
+  return null;
+}
+
+function parseMilestones(raw: unknown): Milestone[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as Milestone[];
   try {
-    const [statusRes, proofsRes] = await Promise.all([
-      fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
-        credentials: 'include',
-        cache: 'no-store',
-      }),
-      fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
-        credentials: 'include',
-        cache: 'no-store',
-      }),
-    ]);
-
-    const statusJson = await statusRes.json();
-    const proofsJson = await proofsRes.json();
-
-    setProofStatusByIdx(statusJson?.byIndex || {});
-    setProofs(Array.isArray(proofsJson) ? proofsJson : []);
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? (arr as Milestone[]) : [];
   } catch {
-    /* ignore */
+    return [];
   }
 }
 
-  // one-shot reject; disables button + persists lock + flips local status immediately
-  async function onRejectOnce(idx: number) {
-    // already locked in this session? bail
-    if (actedByIdx[idx] === 'rejected' || lockByIdx[idx]) return;
+function parseDocs(raw: unknown): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch { return []; }
+  }
+  return [];
+}
+
+// 🔧 IPFS/Gateway normalizer — paste this directly under parseDocs()
+function normalizeIpfsUrl(input?: string, cid?: string) {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // ensure no trailing slash
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
+  if (!input) return '';
+  let u = String(input).trim();
+
+  // Bare CID (optionally with ?query)
+  const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
+
+  // ipfs:// and leading ipfs/ segments → strip
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  // If not absolute http(s), prefix gateway
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+
+  // Collapse any repeated /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  return u;
+}
+
+function filesFromProofRecords(items: ProofRecord[]) {
+  const isBad = (u?: string) =>
+    !u ||
+    u.includes('<gw>') ||
+    u.includes('<CID') ||
+    u.includes('>') ||
+    /^\s*$/.test(u);
+
+  const fixProtocol = (u: string) =>
+    /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^https?:\/\//, '')}`;
+
+  const rows: Array<{ scope: string; doc: any }> = [];
+  for (const p of (items || [])) {
+    const mi = Number.isFinite(p?.milestoneIndex) ? Number(p.milestoneIndex) : undefined;
+    const scope = typeof mi === 'number' ? `Milestone ${mi + 1} proof` : 'Proofs';
+
+    const list: ProofFile[] = []
+      .concat(p.files || [])
+      .concat((p.urls || []) as ProofFile[])
+      .concat((p.cids || []) as ProofFile[]);
+
+    for (const raw of list) {
+      let url: string | undefined;
+
+      if (typeof raw === 'string') {
+        url = raw;
+      } else if (raw && typeof raw === 'object') {
+        url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
+      }
+
+      if (!url || isBad(url)) continue;
+      url = fixProtocol(url);
+
+      const nameFromUrl = decodeURIComponent((url.split('/').pop() || '').trim());
+      const explicitName =
+        typeof raw === 'object' && raw && (raw as any).name
+          ? String((raw as any).name)
+          : undefined;
+
+      const name = explicitName && explicitName.toLowerCase() !== 'file' ? explicitName : nameFromUrl || 'file';
+      rows.push({ scope, doc: { url, name } });
+    }
+  }
+  return rows;
+}
+
+// ----------- NEW: image/filename helpers -----------
+function withFilename(url: string, name?: string) {
+  if (!url) return url;
+  if (!name) return url;
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//, '')}`);
+    // only add ?filename when path is exactly /ipfs/<cid> and there is no existing query
+    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
+      u.search = `?filename=${encodeURIComponent(name)}`;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isImageName(n?: string) {
+  return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
+}
+
+// --- milestone key helper (for local “just submitted” flag)
+const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
+
+
+// -------------- Component ----------------
+export default function ProjectDetailPage() {
+  // ---- route param (plain) ----
+  const params = useParams();
+  const projectIdParam = (params as any)?.id;
+  const projectIdNum = Number(Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam);
+
+  // ---- hooks (fixed order; nothing conditional) ----
+  const [project, setProject] = useState<any>(null);
+  const [bids, setBids] = useState<any[]>([]);
+  const [proofs, setProofs] = useState<ProofRecord[]>([]);
+  const [loadingProject, setLoadingProject] = useState(true);
+  const [loadingProofs, setLoadingProofs] = useState(true);
+  const [me, setMe] = useState<{ address?: string; role?: 'admin'|'vendor'|'guest' }>({ role: 'guest' });
+  const [tab, setTab] = useState<TabKey>('overview');
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
+  // track which (bidId:milestoneIndex) is releasing now
+  const [releasingKey, setReleasingKey] = useState<string | null>(null);
+
+  // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
+  const safeBids = Array.isArray(bids)
+    ? bids.filter((b): b is any => !!b && typeof b === 'object')
+    : [];
+
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPoll = () => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } };
+
+  // Initial fetch: project + bids
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      if (!Number.isFinite(projectIdNum)) return;
+      try {
+        const [p, b] = await Promise.all([ getProposal(projectIdNum), getBids(projectIdNum) ]);
+        if (!alive) return;
+        setProject(p);
+        setBids(Array.isArray(b) ? b : []);
+        setErrorMsg(null);
+      } catch (e: any) {
+        if (!alive) return;
+        setErrorMsg(e?.message || 'Failed to load project');
+      } finally {
+        if (alive) setLoadingProject(false);
+      }
+    }
+    run();
+    return () => { alive = false; };
+  }, [projectIdNum]);
+
+  // Auth (for Admin tab & Edit btn)
+  useEffect(() => {
+    getAuthRoleOnce().then(setMe).catch(() => {});
+  }, []);
+
+  // Fetch proofs (always from local /api/proofs unless explicitly overridden)
+  // Fetch proofs from BOTH sources and merge so Files tab matches Admin
+  const refreshProofs = async () => {
+    if (!Number.isFinite(projectIdNum)) return;
+    setLoadingProofs(true);
 
     try {
-      await api.rejectProof(bidId, idx); // <-- use api.* (not a bare function)
-    } catch {
-      // non-fatal — we still lock locally to prevent repeat clicks
-    }
+      // 1) Local DB: /api/proofs?proposalId=...
+      const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
+      const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : []))
+        .catch(() => []);
 
-    // 1) lock locally & persist
-    setActedByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    setLockByIdx(prev => ({ ...prev, [idx]: true }));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`rej:${bidId}:${idx}`, '1');
-    }
+      // 2) External API (same source Admin tab uses)
+      const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
 
-    // 2) remove the latest rejected proof from local state immediately
-setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-setProofs(prev => {
-  let latestId = 0;
-  for (const q of prev) {
-    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-    const pid  = Number(q.proofId ?? q.id ?? 0);
-    if (qIdx === idx && pid > latestId) latestId = pid;
-  }
-  // drop that row entirely
-  return prev.filter(q => {
-    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-    const pid  = Number(q.proofId ?? q.id ?? 0);
-    return !(qIdx === idx && pid === latestId);
+      const adminReq = accepted
+        ? getProofs(Number(accepted.bidId))
+            .then(rows => {
+              return (Array.isArray(rows) ? rows : []).map((p: any) => ({
+                proposalId: projectIdNum,
+                milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
+                note: p?.description || p?.title || '',
+                files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
+                  url: f?.url || '',
+                  name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
+                })) : [],
+              }));
+            })
+            .catch(() => [])
+        : Promise.resolve([]);
+
+      const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
+
+      // 3) Merge + de-dupe by milestone+url
+      const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
+      const seen = new Set<string>();
+      const merged: any[] = [];
+
+      function pushRecord(r: any) {
+        const files = Array.isArray(r.files) ? r.files : [];
+        for (const f of files) {
+          const k = key(r, f);
+          if (!f?.url || seen.has(k)) continue;
+          seen.add(k);
+          merged.push({
+            proposalId: projectIdNum,
+            milestoneIndex: Number(r.milestoneIndex),
+            note: r.note || '',
+            files: [{ url: String(f.url), name: String(f.name || 'file') }],
+          });
+        }
+      }
+
+      (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
+      (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
+
+      // Group back by milestoneIndex
+      const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
+      for (const r of merged) {
+        const ms = Number(r.milestoneIndex);
+        if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
+        byMs.get(ms)!.files.push(...r.files);
+      }
+
+      setProofs(Array.from(byMs.values()));
+    } catch (e) {
+      console.warn('refreshProofs failed:', e);
+      setProofs([]);
+    } finally {
+      setLoadingProofs(false);
+    }
+  };
+
+  // Load proofs once on mount
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!Number.isFinite(projectIdNum)) return;
+      try { await refreshProofs(); } catch {}
+      if (!alive) return;
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectIdNum]);
+
+  // Re-fetch when any page archives/unarchives a milestone
+  useMilestonesUpdated(async () => {
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
   });
-});
 
-    // 3) refresh server truth (won’t re-enable the button, local state already flipped)
-    refreshLatest(); // fire-and-forget
+  // Refresh proofs when opening Files tab
+  useEffect(() => {
+    if (tab === 'files') { refreshProofs(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // 🔔 Live-refresh Files tab when proofs are saved (supports both event names)
+  useEffect(() => {
+    const onAnyProofUpdate = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      if (!Number.isFinite(pid) || pid === projectIdNum) {
+        refreshProofs();
+      }
+    };
+    window.addEventListener('proofs:updated', onAnyProofUpdate);
+    window.addEventListener('proofs:changed', onAnyProofUpdate);
+    return () => {
+      window.removeEventListener('proofs:updated', onAnyProofUpdate);
+      window.removeEventListener('proofs:changed', onAnyProofUpdate);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectIdNum]);
+
+  // instant local update when a proof is submitted (before server fetch returns)
+  useEffect(() => {
+    const onJustSent = (ev: any) => {
+      const bidId = Number(ev?.detail?.bidId);
+      const idx   = Number(ev?.detail?.milestoneIndex);
+      if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+
+      // 1) flip local flag for status/UX
+      setProofJustSent(prev => ({ ...prev, [msKey(bidId, idx)]: true }));
+
+      // 2) patch current bids so the Milestones table status updates immediately
+      setBids(prev => prev.map(b => {
+        if (!b || typeof b !== 'object') return b;
+        return Number(b.bidId) !== bidId
+          ? b
+          : {
+              ...b,
+              milestones: parseMilestones(b.milestones).map((m: any, i: number) =>
+                i === idx ? { ...m, proof: m.proof || '{}' } : m
+              ),
+            };
+      }));
+    };
+
+    window.addEventListener('proofs:just-sent', onJustSent);
+    return () => window.removeEventListener('proofs:just-sent', onJustSent);
+  }, []);
+
+  // Poll bids while AI analysis runs
+  useEffect(() => {
+    if (!Number.isFinite(projectIdNum)) return;
+    const start = Date.now();
+
+    const needsMore = (rows: any[]) =>
+      rows.some((row) => {
+        const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
+        return !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+      });
+
+    const tick = async () => {
+      try {
+        const next = await getBids(projectIdNum);
+        const safeNext = Array.isArray(next) ? next.filter(x => !!x && typeof x === 'object') : [];
+        setBids(next);
+        if (Date.now() - start < 90_000 && needsMore(safeNext)) {
+          pollTimer.current = setTimeout(tick, 1500);
+        } else {
+          clearPoll();
+        }
+      } catch {
+        if (Date.now() - start < 90_000) {
+          pollTimer.current = setTimeout(tick, 2000);
+        } else {
+          clearPoll();
+        }
+      }
+    };
+
+    if (needsMore(safeBids)) {
+      clearPoll();
+      pollTimer.current = setTimeout(tick, 1500);
+    }
+
+    const onFocus = () => {
+      if (needsMore(safeBids)) {
+        clearPoll();
+        pollTimer.current = setTimeout(tick, 0);
+      }
+    };
+    window.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearPoll();
+      window.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [projectIdNum, safeBids]);
+
+  // Expose for console debug
+  useEffect(() => {
+    if (typeof window !== 'undefined') (window as any).__PROOFS = proofs;
+  }, [proofs]);
+
+  // -------- Early returns ----------
+  if (loadingProject) return <div className="p-6">Loading project...</div>;
+  if (!project) return <div className="p-6">Project not found{errorMsg ? ` — ${errorMsg}` : ''}</div>;
+
+  // -------- Derived -----------
+  const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
+  const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
+  // Admin action: release a milestone payment
+async function handleReleasePayment(idx: number) {
+  if (!acceptedBid) return;
+  const bidIdNum = Number(acceptedBid.bidId);
+  const key = `${bidIdNum}:${idx}`;
+  if (!Number.isFinite(bidIdNum)) return;
+
+  if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+
+  try {
+    setReleasingKey(key);
+    await payMilestone(bidIdNum, idx);
+
+    // Refresh local views so status/tx update
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {
+      // ignore
+    }
+    alert('Payment released.');
+  } catch (e: any) {
+    alert(e?.message || 'Failed to release payment.');
+  } finally {
+    setReleasingKey(null);
+  }
+}
+
+  const projectDocs = parseDocs(project?.docs) || [];
+
+  const canEdit =
+    me?.role === 'admin' ||
+    (!!project?.ownerWallet &&
+      !!me?.address &&
+      String(project.ownerWallet).toLowerCase() === String(me.address).toLowerCase());
+
+  const isCompleted = (() => {
+    if (project.status === 'completed') return true;
+    if (!acceptedBid) return false;
+    if (acceptedMilestones.length === 0) return false;
+    return acceptedMilestones.every((m) => m?.completed === true || !!m?.paymentTxHash);
+  })();
+
+  const msTotal = acceptedMilestones.length;
+  const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
+  const msPaid = acceptedMilestones.filter((m) => m?.paymentTxHash).length;
+
+  const lastActivity = (() => {
+    const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
+    for (const b of safeBids) {
+      dates.push(b.createdAt, b.updatedAt);
+      const arr = parseMilestones(b.milestones);
+      for (const m of arr) {
+        dates.push(m.paymentDate, m.completionDate, m.dueDate);
+      }
+    }
+    const valid = dates
+      .filter(Boolean)
+      .map((s) => new Date(String(s)))
+      .filter((d) => !isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+    return valid[0] ? valid[0].toLocaleString() : '—';
+  })();
+
+  type EventItem = { at?: string | null; type: string; label: string; meta?: string };
+  const timeline: EventItem[] = [];
+  if (project.createdAt) timeline.push({ at: project.createdAt, type: 'proposal_created', label: 'Proposal created' });
+  if (project.updatedAt && project.updatedAt !== project.createdAt) timeline.push({ at: project.updatedAt, type: 'proposal_updated', label: 'Proposal updated' });
+  for (const b of safeBids) {
+    if (b.createdAt) timeline.push({ at: b.createdAt, type: 'bid_submitted', label: `Bid submitted by ${b.vendorName}`, meta: `${currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}` });
+    if (b.status === 'approved' && b.updatedAt) timeline.push({ at: b.updatedAt, type: 'bid_approved', label: `Bid approved (${b.vendorName})` });
+    const arr = parseMilestones(b.milestones);
+    arr.forEach((m, idx) => {
+      if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
+      if (m.paymentDate) timeline.push({ at: m.paymentDate, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: m.paymentTxHash ? `tx ${String(m.paymentTxHash).slice(0, 10)}…` : undefined });
+    });
+  }
+  timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
+
+  // Files (Project + Bid + Proofs)
+  const projectFiles = projectDocs.map((d: any) => ({ scope: 'Project', doc: d }));
+  const bidFiles = safeBids.flatMap((b) => {
+    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  });
+  const proofFiles = filesFromProofRecords(proofs);
+  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+
+  if (typeof window !== 'undefined') {
+    (window as any).__FILES = allFiles.map((x) => {
+      const name = x.doc?.name || null;
+
+      // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+      const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
+
+      return {
+        scope: x.scope,
+        href: normalized ? withFilename(normalized, name || undefined) : null,
+        name,
+      };
+    });
   }
 
-  if (loading) {
-    return (
-      <main className="max-w-5xl mx-auto p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-          <Link href="/admin/bids" className="underline">← Back</Link>
-        </div>
-        <div className="py-20 text-center text-gray-500">Loading…</div>
-      </main>
-    );
-  }
+  function renderAttachment(doc: any, key: number) {
+    if (!doc) return null;
 
-  if (err || !bid) {
-    return (
-      <main className="max-w-5xl mx-auto p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-          <Link href="/admin/bids" className="underline">← Back</Link>
-        </div>
-        <div className="p-4 rounded border bg-rose-50 text-rose-700">{err || 'Bid not found'}</div>
-      </main>
-    );
-  }
+    // ✅ Normalize first (fixes ipfs://, bare CID, and double /ipfs/)
+    const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+    if (!baseUrl) return null;
 
-  const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+    // filename for preview + nicer downloads
+    const nameFromUrl = decodeURIComponent((baseUrl.split('/').pop() || '').trim());
+    const name = (doc.name && String(doc.name)) || nameFromUrl || 'file';
 
-  return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-        <div className="flex items-center gap-2">
-          {/* Global bid-level chat button */}
-          <button
-            type="button"
-            onClick={() => setChatOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white"
-            title="Ask Agent 2 about this bid"
-          >
-            Ask Agent 2 (Chat)
-          </button>
-          <Link href="/admin/bids" className="underline">← Back</Link>
-        </div>
-      </div>
+    // only adds ?filename= when safe; keeps URL clean
+    const href = withFilename(baseUrl, name);
 
-      {/* Bid summary */}
-      <section className="rounded border p-4 bg-white">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <Info label="Project" value={`#${bid.proposalId}`} />
-          <Info label="Vendor" value={bid.vendorName} />
-          <Info
-            label="Price"
-            value={`$${Number(bid.priceUSD).toLocaleString()} ${bid.preferredStablecoin}`}
+    // detect image by name OR final href
+    const looksImage = isImageName(name) || isImageName(href);
+
+    if (looksImage) {
+      return (
+        <button
+          key={key}
+          onClick={() => setLightbox(href)}
+          className="group relative overflow-hidden rounded border"
+          title={name}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={href}
+            alt={name}
+            className="h-24 w-24 object-cover group-hover:scale-105 transition"
           />
-          <Info label="Timeline" value={`${bid.days} days`} />
-          <div className="sm:col-span-2">
-            <div className="text-sm text-gray-500">Notes</div>
-            <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
-          </div>
-        </div>
+        </button>
+      );
+    }
 
-        {/* Admin-only quick edits (non-milestone fields) */}
-        {me.role === 'admin' && (
-          <div className="mt-4 p-3 rounded-lg bg-slate-50 border">
-            <div className="text-sm font-semibold mb-3">Admin: Quick Edit</div>
-            <AdminBidEditor bid={bid} onUpdated={setBid} />
+    // non-image: show as an "Open" link
+    return (
+      <div key={key} className="p-2 rounded border bg-gray-50 text-xs text-gray-700">
+        <p className="truncate" title={name}>{name}</p>
+        <a
+          href={href.startsWith('http') ? href : `https://${href}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
+          Open
+        </a>
+      </div>
+    );
+  }
+
+  function renderAnalysis(raw: any) {
+    const a = coerceAnalysis(raw);
+    const pending = !a || (a.status && a.status !== 'ready' && a.status !== 'error');
+    if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+    if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
+    const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
+    const isV1 = a.verdict || a.reasoning || a.suggestions;
+
+    return (
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+        {isV2 && (
+          <>
+            {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
+            <div className="text-sm">
+              {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
+              {typeof a.confidence === 'number' && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
+                </>
+              )}
+            </div>
+            {!!a.risks?.length && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Risks</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+            {!!a.milestoneNotes?.length && (
+              <div className="mt-2">
+                <div className="font-medium text-sm">Milestone Notes</div>
+                <ul className="list-disc list-inside text-sm text-gray-700">
+                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {typeof a.pdfUsed === 'boolean' && (
+              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+                <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
+                {a.pdfDebug?.url && (
+                  <div>
+                    File:{' '}
+                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                      {a.pdfDebug.name || 'open'}
+                    </a>
+                  </div>
+                )}
+                {a.pdfDebug?.bytes !== undefined && <div>Bytes: {a.pdfDebug.bytes}</div>}
+                {a.pdfDebug?.first5 && <div>First bytes: {a.pdfDebug.first5}</div>}
+                {a.pdfDebug?.reason && <div>Reason: {a.pdfDebug.reason}</div>}
+                {a.pdfDebug?.error && <div className="text-rose-600">Error: {a.pdfDebug.error}</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        {isV1 && (
+          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+            {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
+            {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
+            {!!a.suggestions?.length && (
+              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+                {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
           </div>
         )}
 
-        {/* Milestones */}
-        <MilestonesSection
-          bid={bid}
-          canEdit={me.role === 'admin'}
-          onUpdated={(updatedBid) => setBid(updatedBid)}
-        />
-      </section>
+        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
+      </div>
+    );
+  }
 
-      {/* Agent 2 — inline analysis + run */}
-      {proposal && (
-        <section className="rounded border p-4 bg-white">
-          <Agent2Inline bid={bid} proposal={proposal as any} />
-        </section>
-      )}
-
-      {/* Proofs for this bid */}
-      <section className="rounded border p-4 bg-white">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold">Submitted Proofs</h2>
-          <Link
-            href={`/proposals/${bid.proposalId}/edit`}
-            className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
-          >
-            Edit Proposal
-          </Link>
+  // ----------------- Render -----------------
+  return (
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-2xl font-bold">{project.title}</h1>
+            {canEdit && (
+              <Link href={`/proposals/${projectIdNum}/edit`} className="px-3 py-1 rounded bg-indigo-600 text-white text-sm">
+                Edit
+              </Link>
+            )}
+            <span className={classNames(
+              'px-2 py-0.5 text-xs font-medium rounded-full',
+              isCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+            )}>
+              {isCompleted ? 'Completed' : 'Active'}
+            </span>
+          </div>
+          <p className="text-gray-600">{project.orgName}</p>
+          <div className="flex flex-wrap gap-4 mt-2 text-sm">
+            <span>Budget: <b>{currency.format(Number(project.amountUSD || 0))}</b></span>
+            <span>Last activity: <b>{lastActivity}</b></span>
+            {acceptedBid && (<span>Awarded: <b>{currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}</b></span>)}
+          </div>
         </div>
 
-        {visibleProofs.length === 0 && (
-  <div className="text-sm text-slate-500">No proofs submitted yet.</div>
-)}
+        {!isCompleted && (
+          <Link
+            href={`/bids/new?proposalId=${projectIdNum}`}
+            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
+          >
+            Submit Bid
+          </Link>
+        )}
+      </div>
 
-        {visibleProofs.map((p) => {
-          const id = Number(p.proofId ?? p.id);
-          const a = p.aiAnalysis ?? p.ai_analysis;
-          const idx = Number(p.milestoneIndex ?? p.milestone_index);
-          const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
-          const canReview = latestStatus === 'pending';
-          const rejectLocked =
-            !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
-          const isLatestCard = id === latestIdByIdx[idx];
+      {/* Tabs */}
+      <div className="border-b">
+        <div className="flex gap-2">
+          <TabBtn id="overview" label="Overview" tab={tab} setTab={setTab} />
+          <TabBtn id="timeline" label="Timeline" tab={tab} setTab={setTab} />
+          <TabBtn id="bids" label={`Bids (${safeBids.length})`} tab={tab} setTab={setTab} />
+          <TabBtn id="milestones" label={`Milestones${msTotal ? ` (${msPaid}/${msTotal} paid)` : ''}`} tab={tab} setTab={setTab} />
+          <TabBtn id="files" label={`Files (${allFiles.length})`} tab={tab} setTab={setTab} />
+          {me.role === 'admin' && <TabBtn id="admin" label="Admin" tab={tab} setTab={setTab} />}
+        </div>
+      </div>
 
-          return (
-            <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
-              <div className="flex items-center justify-between">
-                <div className="font-medium">
-                  {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
-                </div>
-                <span
-                  className={`text-xs rounded px-2 py-0.5 border ${
-                    latestStatus === 'approved'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                      : latestStatus === 'rejected'
-                      ? 'bg-rose-100 text-rose-800 border-rose-200'
-                      : 'bg-amber-100 text-amber-800 border-amber-200'
-                  }`}
-                >
-                  {latestStatus}
-                </span>
-              </div>
+      {/* Overview */}
+      {tab === 'overview' && (
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 border rounded p-4">
+            <h3 className="font-semibold mb-3">Project Description</h3>
+            <p className="text-gray-700">{project.summary || '—'}</p>
 
-              {p.description && (
-                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
-              )}
+            <div className="mt-6">
+              <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
+              <Progress value={msTotal ? Math.round((msCompleted / msTotal) * 100) : 0} />
+              <p className="text-xs text-gray-600 mt-1">
+                {msCompleted}/{msTotal} completed • {msPaid}/{msTotal} paid
+              </p>
+            </div>
 
-              {Array.isArray(p.files) && p.files.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {p.files.map((f: any, i: number) => (
-                    <li key={i} className="text-sm">
-                      <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
-                        {f.name || f.url}
-                      </a>
+            <div className="mt-6">
+              <h4 className="font-semibold mb-2">Latest activity</h4>
+              {timeline.length ? (
+                <ul className="text-sm space-y-1">
+                  {timeline.slice(-5).reverse().map((e, i) => (
+                    <li key={i}>
+                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
                     </li>
                   ))}
                 </ul>
-              )}
-
-              <div className="mt-4 rounded-md bg-slate-50 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-semibold">Agent 2 Analysis</div>
-                  {/* Per-proof chat opens the same bid-level chat modal */}
-                  <button
-                    type="button"
-                    onClick={() => setChatOpen(true)}
-                    className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
-                    title="Ask Agent 2 about this bid/proof"
-                  >
-                    Ask Agent 2 (Chat)
-                  </button>
-                </div>
-
-                {/* Actions — only on latest card, when status is pending, and not locally locked */}
-                {(isLatestCard && canReview && !rejectLocked) ? (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      className="px-4 py-2 rounded bg-amber-500 text-white"
-                      onClick={async () => {
-                        await api.approveProof(bidId, idx);   // <-- use api.*
-                        setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' })); // instant flip
-                        await refreshLatest();
-                      }}
-                    >
-                      Approve Proof
-                    </button>
-
-                    <button
-                      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-                      onClick={() => onRejectOnce(idx)}
-                      disabled={rejectLocked}
-                      aria-disabled={rejectLocked}
-                      title={rejectLocked ? 'Already rejected' : 'Reject'}
-                    >
-                      {rejectLocked ? 'Rejected' : 'Reject'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-slate-500">
-                    Latest proof is <span className="font-medium">{latestStatus}</span>.
-                  </div>
-                )}
-
-                {a ? (
-                  <AnalysisView a={a} />
-                ) : (
-                  <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
-                )}
-
-                <div className="mt-3">
-                  <textarea
-                    value={promptById[id] || ''}
-                    onChange={(e) => setPromptById((prev) => ({ ...prev, [id]: e.target.value }))}
-                    className="w-full p-2 rounded border"
-                    rows={3}
-                    placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
-                  />
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => runProofAnalysis(id)}
-                      disabled={!!busyById[id]}
-                      className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-                    >
-                      {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
-                    </button>
-                    {/* Secondary chat entry point beside the rerun button */}
-                    <button
-                      type="button"
-                      onClick={() => setChatOpen(true)}
-                      className="px-3 py-2 rounded-lg bg-blue-600 text-white"
-                    >
-                      Ask Agent 2 (Chat)
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </section>
-
-      {/* One chat modal for the whole page */}
-      <BidChatAgent
-        bidId={bidId}
-        proposal={proposal}
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-      />
-    </main>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="font-medium">{value}</div>
-    </div>
-  );
-}
-
-function AnalysisView({ a }: { a: any }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        {'fit' in a && (
-          <span>
-            Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b>
-          </span>
-        )}
-        {'confidence' in a && (
-          <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>
-        )}
-        {'pdfUsed' in a && (
-          <span className="text-slate-500">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>
-        )}
-      </div>
-
-      {a.summary && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Summary</div>
-          <p className="whitespace-pre-line text-sm leading-relaxed">{a.summary}</p>
-        </div>
-      )}
-
-      {Array.isArray(a.risks) && a.risks.length > 0 && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Risks</div>
-          <ul className="list-disc list-inside text-sm space-y-1">
-            {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Milestone Notes</div>
-          <ul className="list-disc list-inside text-sm space-y-1">
-            {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function fitColor(fit?: string) {
-  const f = String(fit || '').toLowerCase();
-  if (f === 'high') return 'text-emerald-700';
-  if (f === 'medium') return 'text-amber-700';
-  if (f === 'low') return 'text-rose-700';
-  return 'text-slate-600';
-}
-
-/** Admin inline editor for stablecoin, price, days, notes (NOT milestones) */
-function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void }) {
-  const [coin, setCoin]   = useState<'USDC'|'USDT'>(bid.preferredStablecoin || 'USDC');
-  const [price, setPrice] = useState<string>(String(bid.priceUSD ?? ''));
-  const [days, setDays]   = useState<string>(String(bid.days ?? ''));
-  const [notes, setNotes] = useState<string>(bid.notes || '');
-  const [saving, setSaving] = useState(false);
-
-  const dirty =
-    coin !== (bid.preferredStablecoin || 'USDC') ||
-    Number(price) !== Number(bid.priceUSD) ||
-    Number(days) !== Number(bid.days) ||
-    String(notes || '') !== String(bid.notes || '');
-
-  async function save() {
-    const parsedPrice = Number(price);
-    const parsedDays  = Number(days);
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      alert('Price must be a non-negative number'); return;
-    }
-    if (!Number.isFinite(parsedDays) || parsedDays < 0) {
-      alert('Days must be a non-negative number'); return;
-    }
-
-    setSaving(true);
-    try {
-      const patch: any = {
-        preferredStablecoin: coin,
-        priceUSD: parsedPrice,
-        days: parsedDays,
-        notes,
-      };
-      const updated = await api.updateBid(bid.bidId, patch);
-      onUpdated((prev:any) => ({
-        ...prev,
-        preferredStablecoin: updated.preferredStablecoin,
-        priceUSD: updated.priceUSD,
-        days: updated.days,
-        notes: updated.notes,
-      }));
-    } catch (e:any) {
-      alert(e?.message || 'Failed to update bid');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Stablecoin</label>
-        <select
-          className="border rounded px-2 py-1 text-sm"
-          value={coin}
-          onChange={(e) => setCoin(e.target.value as 'USDC'|'USDT')}
-        >
-          <option value="USDC">USDC</option>
-          <option value="USDT">USDT</option>
-        </select>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Price (USD)</label>
-        <input
-          type="number"
-          className="border rounded px-2 py-1 text-sm w-40"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          min={0}
-          step="0.01"
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Days</label>
-        <input
-          type="number"
-          className="border rounded px-2 py-1 text-sm w-32"
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-          min={0}
-          step="1"
-        />
-      </div>
-
-      <div className="sm:col-span-2">
-        <label className="block text-sm text-gray-600 mb-1">Notes</label>
-        <textarea
-          className="w-full border rounded px-2 py-1 text-sm"
-          rows={3}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-        />
-      </div>
-
-      <div className="sm:col-span-2 flex gap-2">
-        <button
-          className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
-          onClick={save}
-          disabled={!dirty || saving}
-        >
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
-        <button
-          className="px-3 py-1.5 rounded bg-slate-200"
-          onClick={() => {
-            setCoin(bid.preferredStablecoin || 'USDC');
-            setPrice(String(bid.priceUSD ?? ''));
-            setDays(String(bid.days ?? ''));
-            setNotes(bid.notes || '');
-          }}
-          disabled={saving}
-        >
-          Reset
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Milestones section with click-to-edit rows */
-function MilestonesSection({
-  bid,
-  canEdit,
-  onUpdated,
-}: {
-  bid: any;
-  canEdit: boolean;
-  onUpdated: (b:any)=>void;
-}) {
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const milestones = useMemo(() => (Array.isArray(bid.milestones) ? bid.milestones : []), [bid?.milestones]);
-
-  return (
-    <div className="mt-4">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-sm text-gray-500">Milestones</div>
-        {canEdit && editingIndex !== null && (
-          <button
-            className="text-xs underline"
-            onClick={() => setEditingIndex(null)}
-          >
-            Cancel edit
-          </button>
-        )}
-      </div>
-
-      {milestones.length === 0 ? (
-        <div className="text-sm text-slate-500">No milestones.</div>
-      ) : (
-        <ul className="space-y-2">
-          {milestones.map((m: any, i: number) => (
-            <li key={i} className="rounded border p-3">
-              {canEdit && editingIndex === i ? (
-                <MilestoneRowEditor
-                  bidId={bid.bidId}
-                  index={i}
-                  value={m}
-                  all={milestones}
-                  onDone={(updated) => { onUpdated(updated); setEditingIndex(null); }}
-                  onCancel={() => setEditingIndex(null)}
-                />
               ) : (
-                <MilestoneRowDisplay
-                  m={m}
-                  index={i}
-                  canEdit={canEdit}
-                  onEdit={() => canEdit && setEditingIndex(i)}
-                />
+                <p className="text-sm text-gray-500">No activity yet.</p>
               )}
-            </li>
-          ))}
-        </ul>
+            </div>
+          </div>
+
+          <div className="border rounded p-4">
+            <h3 className="font-semibold mb-3">Bids snapshot</h3>
+            {safeBids.length ? (
+              <ul className="space-y-2 text-sm">
+                {safeBids.slice(0, 5).map((b) => (
+                  <li key={b.bidId} className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{b.vendorName}</div>
+                      <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                    </div>
+                    <span className={classNames(
+                      'px-2 py-1 rounded text-xs',
+                      b.status === 'approved'
+                        ? 'bg-green-100 text-green-800'
+                        : b.status === 'rejected'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                    )}>
+                      {b.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+          </div>
+        </section>
+      )}
+
+      {/* Timeline */}
+      {tab === 'timeline' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Activity Timeline</h3>
+          {timeline.length ? (
+            <ol className="relative border-l pl-4">
+              {timeline.map((e, i) => (
+                <li key={i} className="mb-4">
+                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
+                  <div className="text-sm">
+                    <div className="font-medium">{e.label}</div>
+                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
+        </section>
+      )}
+
+      {/* Bids */}
+      {tab === 'bids' && (
+        <section className="border rounded p-4 overflow-x-auto">
+          <h3 className="font-semibold mb-3">All Bids</h3>
+          {safeBids.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600">
+                  <th className="py-2 pr-4">Vendor</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Days</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Submitted</th>
+                  <th className="py-2 pr-4">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {safeBids.map((b) => (
+                  <tr key={b.bidId} className="border-t">
+                    <td className="py-2 pr-4">{b.vendorName}</td>
+                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
+                    <td className="py-2 pr-4">{b.days}</td>
+                    <td className="py-2 pr-4">{b.status}</td>
+                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
+                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+        </section>
+      )}
+
+      {/* Milestones */}
+      {tab === 'milestones' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">
+            Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+          </h3>
+
+          {acceptedMilestones.length ? (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-600">
+                      <th className="py-2 pr-4">#</th>
+                      <th className="py-2 pr-4">Title</th>
+                      <th className="py-2 pr-4">Amount</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4">Completed</th>
+                      <th className="py-2 pr-4">Paid</th>
+                      <th className="py-2 pr-4">Tx</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acceptedMilestones.map((m, idx) => {
+                      const paid = !!m.paymentTxHash;
+                      const completedRow = paid || !!m.completed;
+
+                      // 👇 show "submitted" immediately after upload
+                      const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
+                      const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
+                      const status = paid
+                        ? 'paid'
+                        : completedRow
+                          ? 'completed'
+                          : hasProofNow
+                            ? 'submitted'
+                            : 'pending';
+
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 pr-4">M{idx + 1}</td>
+                          <td className="py-2 pr-4">{m.name || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          <td className="py-2 pr-4">{status}</td>
+                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                          <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ✅ Render the proof submission widget here */}
+              {(acceptedBid || safeBids[0]) && (
+                <div className="mt-6">
+                  <MilestonePayments
+                    bid={acceptedBid || safeBids[0]}      // show the widget even if the bid isn’t approved yet
+                    onUpdate={refreshProofs}
+                    proposalId={projectIdNum}         // ← REQUIRED so /api/proofs writes to the correct project
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-500">
+              No milestones defined yet.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Files */}
+      {tab === 'files' && (
+        <section className="border rounded p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">Files</h3>
+            <button
+              onClick={refreshProofs}
+              disabled={loadingProofs}
+              className="text-sm px-3 py-1 rounded bg-slate-900 text-white disabled:opacity-60"
+              title="Refresh milestone proofs"
+            >
+              {loadingProofs ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+
+          {allFiles.length ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {allFiles.map((f, i) => (
+                <div key={i}>
+                  <div className="text-xs text-gray-600 mb-1">{f.scope}</div>
+                  {renderAttachment(f.doc, i)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No files yet.</p>
+          )}
+        </section>
+      )}
+
+      {/* Admin (only for admins) */}
+      {tab === 'admin' && me.role === 'admin' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
+
+          <AdminProofs
+            bidIds={safeBids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+            proposalId={projectIdNum}
+            bids={safeBids}
+            onRefresh={refreshProofs}
+          />
+
+          <div className="mt-6">
+            <ChangeRequestsPanel proposalId={projectIdNum} />
+          </div>
+              <div className="mt-8">
+      <h4 className="font-semibold mb-2">Admin — Payments</h4>
+
+      {acceptedBid ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2 pr-4">#</th>
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Amount</th>
+                <th className="py-2 pr-4">Status</th>
+                <th className="py-2 pr-4">Tx</th>
+                <th className="py-2 pr-4">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {acceptedMilestones.map((m, idx) => {
+                const paid = !!m.paymentTxHash;
+                const completedRow = paid || !!m.completed;
+
+                // mirror status logic from Milestones tab
+                const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                const hasProofNow = !!m.proof || !!proofJustSent[key];
+                const status = paid
+                  ? 'paid'
+                  : completedRow
+                  ? 'completed'
+                  : hasProofNow
+                  ? 'submitted'
+                  : 'pending';
+
+                // enable release when not paid and either completed or at least submitted
+                const canRelease = !paid && completedRow;
+
+                return (
+                  <tr key={idx} className="border-t">
+                    <td className="py-2 pr-4">M{idx + 1}</td>
+                    <td className="py-2 pr-4">{m.name || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {m.amount ? currency.format(Number(m.amount)) : '—'}
+                    </td>
+                    <td className="py-2 pr-4">{status}</td>
+                    <td className="py-2 pr-4">
+                      {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                    </td>
+ <td className="py-2 pr-4">
+  <div className="flex items-center gap-2">
+    {/* Manual (existing) */}
+    <button
+      type="button"
+      onClick={() => handleReleasePayment(idx)}
+      disabled={!canRelease || releasingKey === key}
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+      title={canRelease ? 'Release payment' : 'Not ready for payment'}
+    >
+      {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+    </button>
+
+    {/* SAFE (multisig) */}
+    <SafePayButton
+      bidId={Number(acceptedBid.bidId)}
+      milestoneIndex={idx}
+      amountUSD={Number(m?.amount || 0)}
+      disabled={!canRelease || releasingKey === key || !!m?.paymentPending || m?.status === 'paid'}
+      onQueued={async () => {
+        // refresh like your manual flow
+        await refreshProofs();
+        try {
+          const next = await getBids(projectIdNum);
+          setBids(Array.isArray(next) ? next : []);
+        } catch {}
+      }}
+    />
+  </div>
+</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500">No approved bid yet.</p>
+      )}
+    </div>
+        </section>
+      )}
+
+      <div className="pt-2">
+        <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
+      </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="attachment preview"
+            className="max-h-full max-w-full rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
+            ✕
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
-function MilestoneRowDisplay({
-  m, index, canEdit, onEdit,
-}: {
-  m: any; index: number; canEdit: boolean; onEdit: ()=>void;
-}) {
+// ---------------- UI bits ----------------
+function Progress({ value }: { value: number }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="font-medium">
-          {m.name || `Milestone ${index + 1}`}
-          {m.completed ? ' · ✅ Completed' : ''}
-        </div>
-        <div className="text-sm text-gray-600">
-          Amount: ${Number(m.amount).toLocaleString()} · Due: {dateDisplay(m.dueDate)}
-        </div>
-      </div>
-      {canEdit && (
-        <button
-          type="button"
-          onClick={onEdit}
-          className="text-xs px-2 py-1 rounded bg-slate-900 text-white"
-          title="Edit milestone"
-        >
-          Edit
-        </button>
+    <div className="h-2 bg-gray-200 rounded">
+      <div className="h-2 bg-black rounded transition-all" style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+    </div>
+  );
+}
+
+function TabBtn({ id, label, tab, setTab }: { id: TabKey; label: string; tab: TabKey; setTab: (t: TabKey) => void }) {
+  const active = tab === id;
+  return (
+    <button
+      onClick={() => setTab(id)}
+      className={classNames(
+        'px-3 py-2 text-sm -mb-px border-b-2',
+        active ? 'border-black text-black' : 'border-transparent text-slate-600 hover:text-black'
       )}
-    </div>
+      aria-pressed={active}
+    >
+      {label}
+    </button>
   );
-}
-
-function MilestoneRowEditor({
-  bidId, index, value, all, onDone, onCancel,
-}: {
-  bidId: number;
-  index: number;
-  value: any;
-  all: any[];
-  onDone: (updatedBid:any)=>void;
-  onCancel: ()=>void;
-}) {
-  const [name, setName] = useState<string>(value?.name || `Milestone ${index + 1}`);
-  const [amount, setAmount] = useState<string>(String(value?.amount ?? '0'));
-  const [due, setDue] = useState<string>(toDateInput(value?.dueDate));
-  const [completed, setCompleted] = useState<boolean>(!!value?.completed);
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    // Validate
-    const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt < 0) { alert('Amount must be a non-negative number'); return; }
-    if (!due) { alert('Due date is required'); return; }
-
-    // Build new milestones array
-    const next = all.map((m, i) => i === index
-      ? {
-          ...m,
-          name: name || `Milestone ${index + 1}`,
-          amount: amt,
-          dueDate: new Date(due).toISOString(),
-          completed,
-        }
-      : m
-    );
-
-    setSaving(true);
-    try {
-      // Persist via dedicated endpoint
-      const updated = await api.updateBidMilestones(bidId, next);
-      onDone(updated);
-    } catch (e:any) {
-      alert(e?.message || 'Failed to update milestone');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="grid sm:grid-cols-2 gap-3">
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Name</label>
-        <input
-          className="border rounded px-2 py-1 text-sm w-full"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={`Milestone ${index + 1}`}
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Amount (USD)</label>
-        <input
-          type="number"
-          className="border rounded px-2 py-1 text-sm w-40"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          min={0}
-          step="0.01"
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Due Date</label>
-        <input
-          type="date"
-          className="border rounded px-2 py-1 text-sm w-48"
-          value={due}
-          onChange={(e) => setDue(e.target.value)}
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600 min-w-24">Completed</label>
-        <input
-          type="checkbox"
-          className="h-4 w-4"
-          checked={completed}
-          onChange={(e) => setCompleted(e.target.checked)}
-        />
-      </div>
-
-      <div className="sm:col-span-2 flex gap-2">
-        <button
-          className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
-          onClick={save}
-          disabled={saving}
-        >
-          {saving ? 'Saving…' : 'Save milestone'}
-        </button>
-        <button
-          className="px-3 py-1.5 rounded bg-slate-200"
-          onClick={onCancel}
-          disabled={saving}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- helpers ---------------- */
-
-function dateDisplay(d: any) {
-  try { return new Date(d).toLocaleDateString(); } catch { return '—'; }
-}
-
-function toDateInput(d: any) {
-  try {
-    const dt = new Date(d);
-    if (Number.isNaN(+dt)) return '';
-    // yyyy-mm-dd
-    const y = dt.getFullYear();
-    const m = String(dt.getMonth() + 1).padStart(2, '0');
-    const day = String(dt.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  } catch { return ''; }
 }
