@@ -148,20 +148,41 @@ useEffect(() => {
 
   // cross-page payment sync
 const bcRef = useRef<BroadcastChannel | null>(null);
+
+// create once; tolerate StrictMode double-invoke in dev
 useEffect(() => {
-  try { bcRef.current = new BroadcastChannel('mx-payments'); } catch {}
-  return () => { try { bcRef.current?.close(); } catch {} };
+  if (!bcRef.current) {
+    try {
+      bcRef.current = new BroadcastChannel('mx-payments');
+    } catch {
+      // ignore if unavailable (SSR or unsupported browser)
+    }
+  }
+  return () => {
+    try {
+      bcRef.current?.close();
+    } catch {}
+    bcRef.current = null;
+  };
 }, []);
+
 useEffect(() => {
-  if (!bcRef.current) return;
-  bcRef.current.onmessage = (e: MessageEvent) => {
-    if (!e?.data || typeof e.data !== 'object') return;
-    const { type, bidId, milestoneIndex } = e.data as any;
+  const ch = bcRef.current;
+  if (!ch) return;
+
+  const onMessage = (e: MessageEvent) => {
+    const data = e?.data;
+    if (!data || typeof data !== 'object') return;
+    const { type } = data as { type?: string; bidId?: number; milestoneIndex?: number };
     if (type === 'mx:pay:queued' || type === 'mx:pay:done') {
-      // refresh + let our local logic hide buttons/chips
+      // refresh; your UI should hide/update actions accordingly
       loadProofs(true);
     }
   };
+
+  // use addEventListener so we can properly remove it
+  ch.addEventListener('message', onMessage);
+  return () => ch.removeEventListener('message', onMessage);
 }, [loadProofs]);
 
   async function loadProofs(forceRefresh = false) {
