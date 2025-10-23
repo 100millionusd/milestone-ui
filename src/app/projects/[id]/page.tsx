@@ -414,67 +414,86 @@ export default function ProjectDetailPage() {
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
   // Manual (EOA) payment, synced
-  async function handleReleasePayment(idx: number) {
-    if (!acceptedBid) return;
-    const bidIdNum = Number(acceptedBid.bidId);
-    if (!Number.isFinite(bidIdNum)) return;
-    if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+  // Manual (EOA) payment, synced — with final guard after polling
+async function handleReleasePayment(idx: number) {
+  if (!acceptedBid) return;
+  const bidIdNum = Number(acceptedBid.bidId);
+  if (!Number.isFinite(bidIdNum)) return;
+  if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
 
-    const key = mkKey2(bidIdNum, idx);
+  const key = mkKey2(bidIdNum, idx);
 
-    try {
-      setReleasingKey(`${bidIdNum}:${idx}`);
+  try {
+    setReleasingKey(`${bidIdNum}:${idx}`);
 
-      // mark pending & broadcast BEFORE calling API
-      postQueued(bidIdNum, idx);
-      setPendingPay(prev => new Set(prev).add(key));
-      addPendingLS(key);
+    // mark pending + broadcast BEFORE API call
+    postQueued(bidIdNum, idx);
+    setPendingPay(prev => new Set(prev).add(key));
+    addPendingLS(key);
 
-      await payMilestone(bidIdNum, idx);
+    await payMilestone(bidIdNum, idx);
 
-      // poll up to 20 times (3s) for paid or SAFE marker
-      let cleared = false;
-      for (let t = 0; t < 20; t++) {
-        try {
-          const next = await getBids(projectIdNum);
-          const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
-          const m = row?.milestones?.[idx];
-          if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
-            // broadcast done + clear local pending
-            postDone(bidIdNum, idx);
-            setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-            removePendingLS(key);
-            setBids(Array.isArray(next) ? next : []);
-            cleared = true;
-            break;
-          }
-        } catch { /* keep polling */ }
-        // wait 3s
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise(r => setTimeout(r, 3000));
-      }
-
-      if (!cleared) {
-        // timeout: clear local pending so "Payment Pending" doesn't stick forever
-        setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-        removePendingLS(key);
-        console.warn('Payment polling timed out; UI will update when server shows paid.');
-      }
-
-      alert('Payment released.');
-    } catch (e: any) {
-      // failure: undo local pending
-      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
-      removePendingLS(key);
-      alert(e?.message || 'Failed to release payment.');
-    } finally {
-      setReleasingKey(null);
+    // poll for paid/Safe marker
+    let cleared = false;
+    for (let t = 0; t < 20; t++) {
       try {
         const next = await getBids(projectIdNum);
-        setBids(Array.isArray(next) ? next : []);
+        const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+        const m = row?.milestones?.[idx];
+
+        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+          postDone(bidIdNum, idx);
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+          removePendingLS(key);
+          setBids(Array.isArray(next) ? next : []);
+          cleared = true;
+          break;
+        }
+      } catch {}
+      // wait 3s between tries
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    // 🔒 FINAL GUARD: if loop timed out, do one last fast check and clear
+    if (!cleared) {
+      try {
+        const next = await getBids(projectIdNum);
+        const row = (Array.isArray(next) ? next : []).find(b => Number(b?.bidId) === bidIdNum);
+        const m = row?.milestones?.[idx];
+
+        if (m && (isPaidLite(m) || hasSafeMarkerLite(m))) {
+          postDone(bidIdNum, idx);
+          setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+          removePendingLS(key);
+          setBids(Array.isArray(next) ? next : []);
+          cleared = true;
+        }
       } catch {}
     }
+
+    // If still not cleared, drop the local pending so it doesn't stick forever
+    if (!cleared) {
+      setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+      removePendingLS(key);
+      // don't postDone here because we didn't observe paid/SAFE yet
+    }
+
+    alert('Payment released.');
+  } catch (e: any) {
+    // failure: undo local pending
+    setPendingPay(prev => { const n = new Set(prev); n.delete(key); return n; });
+    removePendingLS(key);
+    alert(e?.message || 'Failed to release payment.');
+  } finally {
+    setReleasingKey(null);
+    // refresh table regardless
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
   }
+}
 
   const canEdit =
     me?.role === 'admin' ||
@@ -529,24 +548,27 @@ export default function ProjectDetailPage() {
 
   // Clear any local "pending" keys for milestones that are now paid or carry a SAFE marker
   useEffect(() => {
-    if (!safeBids.length) return;
-    setPendingPay(prev => {
-      const next = new Set(prev);
-      for (const b of safeBids) {
-        const bidId = Number(b?.bidId);
-        if (!Number.isFinite(bidId)) continue;
-        const ms = parseMilestones(b?.milestones);
-        ms.forEach((m, idx) => {
-          if (isPaidLite(m) || hasSafeMarkerLite(m)) {
-            const k = mkKey2(bidId, idx);
-            if (next.has(k)) next.delete(k);
+  if (!safeBids.length) return;
+  setPendingPay(prev => {
+    const next = new Set(prev);
+    for (const b of safeBids) {
+      const bidId = Number(b?.bidId);
+      if (!Number.isFinite(bidId)) continue;
+      const ms = parseMilestones(b?.milestones);
+      ms.forEach((m, idx) => {
+        if (isPaidLite(m) || hasSafeMarkerLite(m)) {
+          const k = mkKey2(bidId, idx);
+          if (next.has(k)) {
+            next.delete(k);
             try { removePendingLS(k); } catch {}
+            try { postDone(bidId, idx); } catch {}
           }
-        });
-      }
-      return next;
-    });
-  }, [safeBids]);
+        }
+      });
+    }
+    return next;
+  });
+}, [safeBids]);
 
   // ----------------- Render -----------------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
