@@ -326,33 +326,37 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }, [bids, tab, query, archMap, pendingPay]);
 
   async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
-    const key = mkKey(bidId, milestoneIndex);
-    
-    for (let i = 0; i < tries; i++) {
-      try {
-        // Only fetch the specific bid, not all bids
-        const bid = await getBid(bidId);
+  const key = mkKey(bidId, milestoneIndex);
+
+  for (let i = 0; i < tries; i++) {
+    try {
+      // Bypass any caching
+      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        const bid = await res.json();
         const m = bid?.milestones?.[milestoneIndex];
-        
+
         if (m && isPaid(m)) {
           removePending(key);
-          // Only update this specific bid instead of reloading everything
-          setBids(prev => prev.map(b => 
-            b.bidId === bidId ? bid : b
-          ));
+          // update only this bid in-place
+          setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
+          router.refresh(); // make sure server components revalidate
           return;
         }
-      } catch (error) {
-        console.error('Polling error:', error);
+      } else {
+        console.warn('pollUntilPaid non-200', res.status);
       }
-      
-      await new Promise(r => setTimeout(r, intervalMs));
+    } catch (err) {
+      console.error('Polling error:', err);
     }
-    
-    // Final attempt with full refresh if polling fails
-    removePending(key);
-    await loadProofs();
+    await new Promise(r => setTimeout(r, intervalMs));
   }
+
+  // last attempt: force a full refresh, and clear the sticky pending chip
+  removePending(key);
+  await loadProofs(true);
+  router.refresh();
+}
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
