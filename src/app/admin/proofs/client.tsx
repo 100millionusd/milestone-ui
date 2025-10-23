@@ -573,7 +573,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   };
 
   // ---- Proof renderer (with lightbox support) ----
-  const [lightboxOpen, setLightboxOpen] = useState(false);
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
 
@@ -601,7 +600,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                       key={i}
                       onClick={() => {
                         setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
-                        setLightboxOpen(true);
                       }}
                       className="group relative overflow-hidden rounded border"
                     >
@@ -656,7 +654,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                     key={i}
                     onClick={() => {
                       setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
-                      setLightboxOpen(true);
                     }}
                     className="group relative overflow-hidden rounded border"
                   >
@@ -684,7 +681,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               );
             })}
           </div>
-        );
+        )}
       </div>
     );
   };
