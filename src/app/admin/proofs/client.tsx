@@ -81,9 +81,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     lastUpdated: number;
   }>({ bids: [], lastUpdated: 0 });
 
-  // Cross-page sync for payments (listen for "done" from other tabs/pages)
-const bcRef = useRef<BroadcastChannel | null>(null);
-
 useEffect(() => {
   if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
   const bc = new BroadcastChannel('mx-pay');
