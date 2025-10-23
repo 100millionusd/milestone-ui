@@ -335,58 +335,60 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
- // EXACT REPLACEMENT
-  async function pollUntilPaid(
-    bidId: number,
-    milestoneIndex: number,
-    tries = 20,
-    intervalMs = 3000
-  ) {
-    const key = mkKey(bidId, milestoneIndex);
+ // ==== POLL UNTIL PAID (EXACT REPLACEMENT) ====
+async function pollUntilPaid(
+  bidId: number,
+  milestoneIndex: number,
+  tries = 20,
+  intervalMs = 3000
+) {
+  const key = mkKey(bidId, milestoneIndex);
 
-    for (let i = 0; i < tries; i++) {
-      try {
-        // FORCE fresh data; do not use getBid (which may be cached)
-        const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
+  for (let i = 0; i < tries; i++) {
+    try {
+      // Force fresh data; do not use getBid (may be cached)
+      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
         const bid = await res.json();
         const m = bid?.milestones?.[milestoneIndex];
 
         if (m && (isPaid(m) || hasSafeMarker(m))) {
-          // If paid -> clear pending and update UI
-          // If Safe markers exist -> also stop showing the pay buttons immediately
           removePending(key);
           setBids(prev => prev.map(b => (b.bidId === bidId ? bid : b)));
           try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
-          router.refresh();
+          if (typeof router?.refresh === 'function') router.refresh();
           return;
         }
-      } catch (error) {
-        console.error('Polling error:', error);
+      } else {
+        console.warn('pollUntilPaid non-200', res.status);
       }
-
-      await new Promise(r => setTimeout(r, intervalMs));
+    } catch (err) {
+      console.error('Polling error:', err);
     }
 
-    // If we timed out: only clear "pending" when there is no Safe marker.
-    // (Prevents the buttons reappearing while Safe has actually been proposed/executed.)
-    try {
-      const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
-      const bid = await res.json();
-      const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
-        removePending(key);
-      }
-      setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
-    } catch {
-      // if this fails, leave it pending rather than re-enabling the buttons
-    }
+    await new Promise(r => setTimeout(r, intervalMs));
   }
 
-  // Final attempt if polling times out
-  removePending(key);
-  await loadProofs();
+  // Timed out: only clear "pending" when there is no Safe marker
+  try {
+    const res = await fetch(`/api/bids/${bidId}?t=${Date.now()}`, { cache: 'no-store' });
+    const bid = await res.json();
+    const m = bid?.milestones?.[milestoneIndex];
+    if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
+      removePending(key);
+    }
+    setBids(prev => prev.map(b => (b.bidId === bidId ? (bid || b) : b)));
+  } catch {
+    // leave it pending rather than re-enabling buttons incorrectly
+  }
+
   if (typeof router?.refresh === 'function') router.refresh();
 }
+// ==== END POLL UNTIL PAID ====
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
