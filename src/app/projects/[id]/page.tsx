@@ -107,8 +107,10 @@ function fmt(dt?: string | null) {
 }
 
 function coerceAnalysis(a: any): (AnalysisV2 & AnalysisV1) | null {
-  if (!a) return null;
-  if (typeof a === 'string') { try { return JSON.parse(a); } catch { return null; } }
+  if (a == null) return null;
+  if (typeof a === 'string') {
+    try { return JSON.parse(a) as any; } catch { return null; }
+  }
   if (typeof a === 'object') return a as any;
   return null;
 }
@@ -472,11 +474,12 @@ export default function ProjectDetailPage() {
     if (!Number.isFinite(projectIdNum)) return;
     const start = Date.now();
 
-    const needsMore = (rows: any[]) =>
+   const needsMore = (rows: any[]) =>
   rows.some((row) => {
     const a = coerceAnalysis(row?.aiAnalysis ?? row?.ai_analysis);
-    const st = String(a?.status || '').toLowerCase();
-    return !a || (st && st !== 'ready' && st !== 'error');
+    const st = String(a?.status ?? '').toLowerCase();
+    // keep polling if unknown OR explicitly not ready/error
+    return !a || (st !== '' && st !== 'ready' && st !== 'error');
   });
 
     const tick = async () => {
@@ -711,82 +714,84 @@ export default function ProjectDetailPage() {
   }
 
   function renderAnalysis(raw: any) {
-    const a = coerceAnalysis(raw);
-    const st = String(a?.status || '').toLowerCase();
-    const pending = !a || (st && st !== 'ready' && st !== 'error');
-    if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
-    if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
-    const isV2 = a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes;
-    const isV1 = a.verdict || a.reasoning || a.suggestions;
+  const a = coerceAnalysis(raw);
+  const st = String(a?.status ?? '').toLowerCase();
+  const pending = !a || (st !== '' && st !== 'ready' && st !== 'error');
 
-    return (
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-        <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+  if (pending) return <p className="mt-2 text-xs text-gray-400 italic">⏳ Analysis pending…</p>;
+  if (!a) return <p className="mt-2 text-xs text-gray-400 italic">No analysis.</p>;
 
-        {isV2 && (
-          <>
-            {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
-            <div className="text-sm">
-              {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
-              {typeof a.confidence === 'number' && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
-                </>
-              )}
-            </div>
-            {!!a.risks?.length && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Risks</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                </ul>
-              </div>
-            )}
-            {!!a.milestoneNotes?.length && (
-              <div className="mt-2">
-                <div className="font-medium text-sm">Milestone Notes</div>
-                <ul className="list-disc list-inside text-sm text-gray-700">
-                  {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-                </ul>
-              </div>
-            )}
-            {typeof a.pdfUsed === 'boolean' && (
-              <div className="mt-3 text-[11px] text-gray-600 space-y-1">
-                <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
-                {a.pdfDebug?.url && (
-                  <div>
-                    File:{' '}
-                    <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                      {a.pdfDebug.name || 'open'}
-                    </a>
-                  </div>
-                )}
-                {a.pdfDebug?.bytes !== undefined && <div>Bytes: {a.pdfDebug.bytes}</div>}
-                {a.pdfDebug?.first5 && <div>First bytes: {a.pdfDebug.first5}</div>}
-                {a.pdfDebug?.reason && <div>Reason: {a.pdfDebug.reason}</div>}
-                {a.pdfDebug?.error && <div className="text-rose-600">Error: {a.pdfDebug.error}</div>}
-              </div>
-            )}
-          </>
-        )}
+  const isV2 = !!(a.summary || a.fit || a.risks || a.confidence || a.milestoneNotes);
+  const isV1 = !!(a.verdict || a.reasoning || (a as any).suggestions);
 
-        {isV1 && (
-          <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
-            {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
-            {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
-            {!!a.suggestions?.length && (
-              <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
-                {a.suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
-              </ul>
+  return (
+    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+      <h4 className="font-semibold text-sm mb-1">Agent 2 Analysis</h4>
+
+      {isV2 && (
+        <>
+          {a.summary && <p className="text-sm mb-1">{a.summary}</p>}
+          <div className="text-sm">
+            {a.fit && (<><span className="font-medium">Fit:</span> {String(a.fit)} </>)}
+            {typeof a.confidence === 'number' && (
+              <>
+                <span className="mx-1">·</span>
+                <span className="font-medium">Confidence:</span> {Math.round(a.confidence * 100)}%
+              </>
             )}
           </div>
-        )}
+          {!!a.risks?.length && (
+            <div className="mt-2">
+              <div className="font-medium text-sm">Risks</div>
+              <ul className="list-disc list-inside text-sm text-gray-700">
+                {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {!!a.milestoneNotes?.length && (
+            <div className="mt-2">
+              <div className="font-medium text-sm">Milestone Notes</div>
+              <ul className="list-disc list-inside text-sm text-gray-700">
+                {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+              </ul>
+            </div>
+          )}
+          {Object.prototype.hasOwnProperty.call(a, 'pdfUsed') && (
+            <div className="mt-3 text-[11px] text-gray-600 space-y-1">
+              <div>PDF parsed: {a.pdfUsed ? 'Yes' : 'No'}</div>
+              {a.pdfDebug?.url && (
+                <div>
+                  File:{' '}
+                  <a href={a.pdfDebug.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    {a.pdfDebug.name || 'open'}
+                  </a>
+                </div>
+              )}
+              {a.pdfDebug?.bytes !== undefined && <div>Bytes: {a.pdfDebug.bytes}</div>}
+              {a.pdfDebug?.first5 && <div>First bytes: {a.pdfDebug.first5}</div>}
+              {a.pdfDebug?.reason && <div>Reason: {a.pdfDebug.reason}</div>}
+              {a.pdfDebug?.error && <div className="text-rose-600">Error: {a.pdfDebug.error}</div>}
+            </div>
+          )}
+        </>
+      )}
 
-        {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
-      </div>
-    );
-  }
+      {isV1 && (
+        <div className={isV2 ? 'mt-3 pt-3 border-t border-blue-100' : ''}>
+          {a.verdict && (<p className="text-sm"><span className="font-medium">Verdict:</span> {a.verdict}</p>)}
+          {a.reasoning && (<p className="text-sm"><span className="font-medium">Reasoning:</span> {a.reasoning}</p>)}
+          {!!(a as any).suggestions?.length && (
+            <ul className="list-disc list-inside mt-1 text-sm text-gray-700">
+              {(a as any).suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {!isV1 && !isV2 && <p className="text-xs text-gray-500 italic">Unknown analysis format.</p>}
+    </div>
+  );
+}
 
   // ----------------- Render -----------------
   if (loadingProject) return <div className="p-6">Loading project...</div>;
