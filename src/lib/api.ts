@@ -520,7 +520,7 @@ let _bidsCache: { at: number; data: Bid[] } | null = null;
 export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
   const now = Date.now();
   // 1) serve cached for 30s
-  if (_bidsCache && now - _bidsCache.at < 30_000) return _bidsCache.data;
+  if (_bidsCache && now - _bidsCache.at < 3_000) return _bidsCache.data;
   // 2) coalesce concurrent callers
   if (_bidsInflight) return _bidsInflight;
 
