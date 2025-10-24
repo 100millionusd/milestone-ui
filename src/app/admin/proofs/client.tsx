@@ -338,37 +338,45 @@ function isCompleted(m: any): boolean {
   return m?.completed === true || m?.approved === true || m?.status === 'completed';
 }
 
+// ---- replace your current isPaid with this
 function isPaid(m: any): boolean {
   const status = String(m?.status ?? '').toLowerCase();
+  const rawStr = JSON.stringify(m || {}).toLowerCase();
   return !!(
     m?.paymentTxHash || m?.payment_tx_hash ||
+    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||   // Safe paid hash
     m?.paymentDate   || m?.payment_date   ||
     m?.txHash        || m?.tx_hash        ||
     m?.paidAt        || m?.paid_at        ||
     m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' || status === 'released' ||
-    raw.includes('"payment_status":"released"') ||  
+    status === 'paid' || status === 'executed' || status === 'complete' ||
+    status === 'completed' || status === 'released' ||
+    rawStr.includes('"payment_status":"released"') ||     // backend variant
     m?.hash // legacy fallback
   );
 }
 
-// Consider any Safe-* signal as "we have/had a Safe payment in flight/executed"
+// ---- replace your current hasSafeMarker with this
 function hasSafeMarker(m: any): boolean {
   if (!m) return false;
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const s = String(
+    m?.safeStatus ?? m?.safe_status ?? m?.paymentStatus ?? m?.payment_status ?? ''
+  ).toLowerCase();
 
   const direct =
+    m?.paymentPending ||
     m?.safeTxHash || m?.safe_tx_hash ||
     m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.safeNonce || m?.safe_nonce ||
     m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s)); // 👈 broaden
+    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s));
 
   if (direct) return true;
 
-  const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis') || raw.includes('"payment_status":"released"'); // 👈 add
+  const rawStr = JSON.stringify(m).toLowerCase();
+  return rawStr.includes('"safe') || rawStr.includes('gnosis') || rawStr.includes('"payment_status":"released"');
 }
+
   function isReadyToPay(m: any): boolean {
     return isCompleted(m) && !isPaid(m);
   }
