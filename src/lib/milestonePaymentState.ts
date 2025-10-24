@@ -16,10 +16,10 @@ export function isApproved(m: any): boolean {
 export function isPaid(m: any): boolean {
   if (!m) return false;
 
-  const status       = String(m?.status ?? '').toLowerCase();
-  const payStatus    = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  const safeStatus   = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const raw          = JSON.stringify(m || {}).toLowerCase();
+  const status     = String(m?.status ?? '').toLowerCase();
+  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const raw        = JSON.stringify(m || {}).toLowerCase();
 
   return !!(
     // canonical tx markers
@@ -33,12 +33,13 @@ export function isPaid(m: any): boolean {
 
     // server status flags
     ['paid','executed','complete','completed','released','success'].includes(status) ||
-    ['released','success','paid','completed'].includes(payStatus) ||
+    ['released','success','paid','completed','complete'].includes(payStatus) ||
     ['executed','success','released'].includes(safeStatus) ||
 
-    // JSON blob variants
+    // JSON blob variants (be liberal)
     raw.includes('"payment_status":"released"') ||
-    raw.includes('"payment_status":"success"')
+    raw.includes('"payment_status":"success"') ||
+    raw.includes('"payment_status":"paid"')
   );
 }
 
@@ -47,19 +48,22 @@ export function hasSafeMarker(m: any): boolean {
   if (!m) return false;
   if (isPaid(m)) return false; // once paid, do NOT treat as in-flight
 
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const s   = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const ps  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
   const raw = JSON.stringify(m || {}).toLowerCase();
+
+  const inflightRegex =
+    /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
 
   const any =
     m?.paymentPending ||
     m?.safeTxHash || m?.safe_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.safeNonce || m?.safe_nonce ||
-    m?.safeExecutedAt || m?.safe_executed_at ||
-    /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s) ||
-    /queued|pending|submitted|awaiting|awaiting_exec/.test(ps) ||
-    raw.includes('"safe') || raw.includes('gnosis');
+    // note: if safePaymentTxHash/safeExecutedAt exist, isPaid() would already be true and we'd have returned above
+    inflightRegex.test(s) ||
+    inflightRegex.test(ps) ||
+    /"safe_(status|tx_hash|nonce)"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
+    /gnosis/.test(raw);
 
   return !!any;
 }
@@ -69,7 +73,7 @@ export function isPaymentPending(m: any, localPending?: boolean): boolean {
   return !isPaid(m) && (!!localPending || hasSafeMarker(m));
 }
 
-// Button visibility (the rule you asked for)
+// Button visibility for “Release Payment”
 export function canShowPayButtons(
   m: any,
   opts?: { approved?: boolean; localPending?: boolean }

@@ -20,6 +20,10 @@ import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import { useRouter } from "next/navigation";
+import {
+  isPaid as msIsPaid,
+  hasSafeMarker as msHasSafeMarker,
+} from '@/lib/milestonePaymentState';
 
 // Tabs
 const TABS = [
@@ -193,7 +197,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (isPaid(ms[i])) {
+          if (msIsPaid(ms[i])) {
             removePending(mkKey(bid.bidId, i));
           }
         }
@@ -211,7 +215,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           const b = rows.find((r: any) => Number(r.bidId) === Number(bidIdStr));
           const m = Array.isArray(b?.milestones) ? b.milestones[Number(idxStr)] : null;
 
-          const stillInFlight = m && !isPaid(m) && hasSafeMarker(m);
+          const stillInFlight = m && !msIsPaid(m) && msHasSafeMarker(m);
 
           if (!ts || (now - ts) > MAX_MS) {
             if (!stillInFlight) removePending(key);
@@ -224,7 +228,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !isPaid(ms[i])) {
+          if (pendingPay.has(key) && !msIsPaid(ms[i])) {
             pollUntilPaid(bid.bidId, i).catch(() => {});
           }
         }
@@ -323,60 +327,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return m?.completed === true || m?.approved === true || m?.status === 'completed';
   }
 
-  // ==== STRICT STATE MACHINE DETECTORS ====
-  function isPaid(m: any): boolean {
-    const status = String(m?.status ?? '').toLowerCase();
-    const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-    const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-    const raw = JSON.stringify(m || {}).toLowerCase();
-
-    const paidByStatus =
-      ['paid','executed','released','completed','complete','success'].includes(status) ||
-      ['released','success','paid','completed','complete'].includes(payStatus) ||
-      ['executed','success','released'].includes(safeStatus) ||
-      raw.includes('"payment_status":"released"') ||
-      raw.includes('"payment_status":"success"') ||
-      raw.includes('"payment_status":"paid"');
-
-    return !!(
-      m?.paymentTxHash || m?.payment_tx_hash ||
-      m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-      m?.txHash || m?.tx_hash ||
-      m?.paymentDate || m?.payment_date ||
-      m?.paidAt || m?.paid_at ||
-      m?.paid === true || m?.isPaid === true ||
-      m?.hash || // legacy
-      m?.safeExecutedAt || m?.safe_executed_at || // treat executed time as final
-      paidByStatus
-    );
-  }
-
-  function hasSafeMarker(m: any): boolean {
-    if (!m) return false;
-    if (isPaid(m)) return false; // once paid, never treat as in-flight
-
-    const s  = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-    const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-    const raw = JSON.stringify(m || {}).toLowerCase();
-
-    const inflightRe = /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
-
-    if (inflightRe.test(s) || inflightRe.test(ps)) return true;
-
-    // low-signal markers (queued/created but no final state yet)
-    if (!isPaid(m) && (m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash || m?.safeNonce || m?.safe_nonce)) {
-      return true;
-    }
-
-    // JSON blob versions (only match inflight words)
-    if (/"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
-    if (/"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution)"/.test(raw)) return true;
-
-    return false;
-  }
-
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !isPaid(m);
+    return isCompleted(m) && !msIsPaid(m);
   }
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
@@ -393,9 +345,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !hasSafeMarker(m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !msHasSafeMarker(m);
       case 'paid':
-        return isPaid(m);
+        return msIsPaid(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -451,7 +403,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
         if (!m) {
           // keep polling
-        } else if (isPaid(m)) {
+        } else if (msIsPaid(m)) {
           removePending(key);
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -465,7 +417,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (hasSafeMarker(m)) {
+        } else if (msHasSafeMarker(m)) {
           // still in-flight — keep pending
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -493,7 +445,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
+      if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
         removePending(key);
       }
       setBids(prev => prev.map(b => {
@@ -856,8 +808,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                   // strict state:
                   const approved = isCompleted(m);
-                  const paid = isPaid(m);
-                  const inflight = hasSafeMarker(m);
+                  const paid = msIsPaid(m);
+                  const inflight = msHasSafeMarker(m);
                   const localPending = pendingPay.has(key);
 
                   // chip:

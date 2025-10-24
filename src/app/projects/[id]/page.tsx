@@ -10,6 +10,10 @@ import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
+import {
+  isPaid as msIsPaid,
+  hasSafeMarker as msHasSafeMarker,
+} from '@/lib/milestonePaymentState';
 
 // ---------------- Consts ----------------
 const PINATA_GATEWAY = (() => {
@@ -177,54 +181,7 @@ function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
-// ---- payment helpers (Safe + manual) ----
-function isPaidMs(m: any): boolean {
-  const status     = String(m?.status ?? '').toLowerCase();
-  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const raw        = JSON.stringify(m || {}).toLowerCase();
-
-  const paidByStatus =
-    ['paid','executed','released','completed','complete','success'].includes(status) ||
-    ['released','success','paid','completed','complete'].includes(payStatus) ||
-    ['executed','success','released'].includes(safeStatus) ||
-    raw.includes('"payment_status":"released"') ||
-    raw.includes('"payment_status":"success"') ||
-    raw.includes('"payment_status":"paid"');
-
-  return !!(
-    m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-    m?.txHash || m?.tx_hash ||
-    m?.paymentDate || m?.payment_date ||
-    m?.paidAt || m?.paid_at ||
-    m?.paid === true || m?.isPaid === true ||
-    m?.hash ||
-    m?.safeExecutedAt || m?.safe_executed_at ||
-    paidByStatus
-  );
-}
-function hasSafeMarkerMs(m: any): boolean {
-  if (!m) return false;
-  if (isPaidMs(m)) return false;
-
-  const s  = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  const raw = JSON.stringify(m || {}).toLowerCase();
-
-  const inflightRe = /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
-
-  if (inflightRe.test(s) || inflightRe.test(ps)) return true;
-
-  if (!isPaidMs(m) && (m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash || m?.safeNonce || m?.safe_nonce)) {
-    return true;
-  }
-
-  if (/"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
-  if (/"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution)"/.test(raw)) return true;
-
-  return false;
-}
+// Use a consistent key format for (bidId, milestoneIndex)
 const msKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // -------------- Component ----------------
@@ -476,30 +433,30 @@ export default function ProjectDetailPage() {
   }, [projectIdNum]);
 
   useEffect(() => {
-  try {
-    const raw = localStorage.getItem('mx_pay_pending');
-    const arr: string[] = raw ? JSON.parse(raw) : [];
-    let changed = false;
+    try {
+      const raw = localStorage.getItem('mx_pay_pending');
+      const arr: string[] = raw ? JSON.parse(raw) : [];
+      let changed = false;
 
-    const migrated = arr.map(k => {
-      if (k.includes(':')) { changed = true; return k.replace(':','-'); }
-      return k;
-    });
-
-    if (changed) {
-      localStorage.setItem('mx_pay_pending', JSON.stringify(migrated));
-      // migrate timestamps
-      arr.forEach(oldK => {
-        if (!oldK.includes(':')) return;
-        const v = localStorage.getItem(`mx_pay_pending_ts:${oldK}`);
-        if (v) {
-          localStorage.setItem(`mx_pay_pending_ts:${oldK.replace(':','-')}`, v);
-          localStorage.removeItem(`mx_pay_pending_ts:${oldK}`);
-        }
+      const migrated = arr.map(k => {
+        if (k.includes(':')) { changed = true; return k.replace(':','-'); }
+        return k;
       });
-    }
-  } catch {}
-}, []);
+
+      if (changed) {
+        localStorage.setItem('mx_pay_pending', JSON.stringify(migrated));
+        // migrate timestamps
+        arr.forEach(oldK => {
+          if (!oldK.includes(':')) return;
+          const v = localStorage.getItem(`mx_pay_pending_ts:${oldK}`);
+          if (v) {
+            localStorage.setItem(`mx_pay_pending_ts:${oldK.replace(':','-')}`, v);
+            localStorage.removeItem(`mx_pay_pending_ts:${oldK}`);
+          }
+        });
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const onJustSent = (ev: any) => {
@@ -583,7 +540,7 @@ export default function ProjectDetailPage() {
       const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
       for (let i = 0; i < ms.length; i++) {
         const k = msKey(Number(bid.bidId), i);
-        if (isPaidMs(ms[i])) {
+        if (msIsPaid(ms[i])) {
           removeSafePending(k);
         }
       }
@@ -599,12 +556,12 @@ export default function ProjectDetailPage() {
           removeSafePending(k);
           continue;
         }
-        const [bidIdStr, idxStr] = k.split('-');
+        const [bidIdStr, idxStr] = k.split('-'); // keys are "bidId-idx"
         const bidId = Number(bidIdStr), idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
           const bid = rows.find((b: any) => Number(b.bidId) === bidId);
           const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
-          if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
+          if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
             pollUntilPaid(bidId, idx).catch(() => {});
           }
         }
@@ -635,7 +592,7 @@ export default function ProjectDetailPage() {
 
         if (!m) {
           // keep polling
-        } else if (isPaidMs(m)) {
+        } else if (msIsPaid(m)) {
           await refreshApproved(bidId);
           await refreshProofs();
           try {
@@ -646,7 +603,7 @@ export default function ProjectDetailPage() {
           removeSafePending(msKey(bidId, milestoneIndex));
           try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
           return;
-        } else if (hasSafeMarkerMs(m)) {
+        } else if (msHasSafeMarker(m)) {
           await refreshApproved(bidId);
           await refreshProofs();
           try {
@@ -666,7 +623,7 @@ export default function ProjectDetailPage() {
   async function handleReleasePayment(idx: number) {
     if (!acceptedBid) return;
     const bidIdNum = Number(acceptedBid.bidId);
-    const key = `${bidIdNum}:${idx}`;
+    const key = msKey(bidIdNum, idx);
     if (!Number.isFinite(bidIdNum)) return;
 
     if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
@@ -708,7 +665,7 @@ export default function ProjectDetailPage() {
 
   const msTotal = acceptedMilestones.length;
   const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMilestones.filter((m) => isPaidMs(m)).length;
+  const msPaid = acceptedMilestones.filter((m) => msIsPaid(m)).length;
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
@@ -737,7 +694,7 @@ export default function ProjectDetailPage() {
     const arr = parseMilestones(b.milestones);
     arr.forEach((m, idx) => {
       if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate || isPaidMs(m)) timeline.push({ at: m.paymentDate || m.paidAt || m.safeExecutedAt, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: (m.paymentTxHash || m.safePaymentTxHash) ? `tx ${String(m.paymentTxHash || m.safePaymentTxHash).slice(0, 10)}…` : undefined });
+      if (m.paymentDate || msIsPaid(m)) timeline.push({ at: m.paymentDate || m.paidAt || m.safeExecutedAt, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: (m.paymentTxHash || m.safePaymentTxHash) ? `tx ${String(m.paymentTxHash || m.safePaymentTxHash).slice(0, 10)}…` : undefined });
     });
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
@@ -1070,9 +1027,9 @@ export default function ProjectDetailPage() {
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
                       const key = msKey(Number(acceptedBid?.bidId || 0), idx);
-                      const paid = isPaidMs(src);
+                      const paid = msIsPaid(src);
                       const localPending = safePending.has(key);
-                      const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || localPending;
+                      const safeInFlight = msHasSafeMarker(src) || !!src?.paymentPending || localPending;
 
                       const completedRow = paid || !!src?.completed;
                       const hasProofNow = !!src?.proof || !!proofJustSent[key];
@@ -1162,9 +1119,9 @@ export default function ProjectDetailPage() {
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
                       const key = msKey(Number(acceptedBid.bidId), idx);
-                      const paid = isPaidMs(src);
+                      const paid = msIsPaid(src);
                       const pendingLocal = safePending.has(key);
-                      const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
+                      const safeInFlight = msHasSafeMarker(src) || !!src?.paymentPending || pendingLocal;
                       const completedRow = paid || !!src?.completed;
                       const hasProofNow = !!src?.proof || !!proofJustSent[key];
 
