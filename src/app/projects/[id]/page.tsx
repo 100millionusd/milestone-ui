@@ -261,11 +261,45 @@ export default function ProjectDetailPage() {
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
   // track Safe/EOA "queued" locally so buttons hide immediately
-const [safePending, setSafePending] = useState<Set<string>>(new Set());
-const addSafePending = (key: string) =>
-  setSafePending(prev => { const next = new Set(prev); next.add(key); return next; });
-const removeSafePending = (key: string) =>
-  setSafePending(prev => { const next = new Set(prev); next.delete(key); return next; });
+// ===== Persist "payment pending" across refreshes (Project page) =====
+const PENDING_LS_KEY = 'mx_pay_pending';
+const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
+
+function loadPendingFromLS(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(PENDING_LS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+function savePendingToLS(s: Set<string>) {
+  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
+}
+
+const [safePending, setSafePending] = useState<Set<string>>(
+  () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
+);
+const addSafePending = (key: string) => {
+  setSafePending(prev => {
+    const next = new Set(prev);
+    next.add(key);
+    savePendingToLS(next);
+    try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
+    return next;
+  });
+};
+const removeSafePending = (key: string) => {
+  setSafePending(prev => {
+    const next = new Set(prev);
+    next.delete(key);
+    savePendingToLS(next);
+    try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
+    return next;
+  });
+};
 
   // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
   const safeBids = Array.isArray(bids)
@@ -525,6 +559,45 @@ useEffect(() => {
       window.removeEventListener('focus', onFocus);
     };
   }, [projectIdNum, safeBids]);
+
+  // Reconcile "pending" after refresh: clear paid items and resume polling
+useEffect(() => {
+  const rows = Array.isArray(bids) ? bids : [];
+
+  // 1) Clear local pending if server now shows paid or any Safe marker
+  for (const bid of rows) {
+    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    for (let i = 0; i < ms.length; i++) {
+      const k = msKey(Number(bid.bidId), i);
+      if (isPaidMs(ms[i]) || hasSafeMarkerMs(ms[i])) {
+        removeSafePending(k);
+      }
+    }
+  }
+
+  // 2) TTL auto‑clear + resume polling for still‑pending items
+  try {
+    const now = Date.now();
+    const MAX_MS = 5 * 60 * 1000; // 5 minutes
+    for (const k of Array.from(safePending)) {
+      const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${k}`) : null;
+      const ts = tsRaw ? Number(tsRaw) : 0;
+      if (!ts || (now - ts) > MAX_MS) {
+        removeSafePending(k);
+        continue;
+      }
+      const [bidIdStr, idxStr] = k.split(':');
+      const bidId = Number(bidIdStr), idx = Number(idxStr);
+      if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+        const bid = rows.find((b: any) => Number(b.bidId) === bidId);
+        const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
+        if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
+          pollUntilPaid(bidId, idx).catch(() => {});
+        }
+      }
+    }
+  } catch {}
+}, [bids, safePending]);
 
   // Expose for console debug
   useEffect(() => {
@@ -1165,7 +1238,12 @@ const canRelease = !paid && completedRow && !safeInFlight;
   amountUSD={Number(m?.amount || 0)}
   disabled={!canRelease || releasingKey === key}
   onQueued={async () => {
-    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
+    const k = msKey(Number(acceptedBid.bidId), idx);
+    addSafePending(k);           // <-- mark locally so UI hides immediately
+    setReleasingKey(k);          // <-- match manual flow UX
+    try {
+      payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
+    } catch {}
     pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
     await refreshProofs();
     try {
