@@ -1131,10 +1131,7 @@ const canRelease = !paid && completedRow && !safeInFlight;
           ? 'submitted'
           : 'pending';
 
-  const safeInFlight = !!m.paymentPending || /"safe|gnosis|safe_status|safepaymenttxhash|awaiting|executed|success/.test(raw);
-const canRelease = !paid && completedRow && !safeInFlight;
-
-
+            const canRelease = !paid && completedRow && !safeInFlight;
 
                 return (
                   <tr key={idx} className="border-t">
