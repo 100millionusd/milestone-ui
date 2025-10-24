@@ -46,10 +46,17 @@ const PENDING_LS_KEY = 'mx_pay_pending';
 const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
 
 function loadPendingFromLS(): Set<string> {
-  return new Set(); // do not persist across reloads
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(PENDING_LS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
 }
-function savePendingToLS(_: Set<string>) {
-  /* no-op: deliberately not persisting to LS */
+function savePendingToLS(s: Set<string>) {
+  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
 }
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
@@ -945,9 +952,9 @@ setBids(prev => prev.map(b => {
   onQueued={() => {
     const key = mkKey(bid.bidId, origIdx);
     addPending(key);
-    emitPayQueued(bid.bidId, origIdx);
+    emitPayQueued(bid.bidId, origIdx);   // <-- broadcast to the other page
     pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-    router.refresh();
+    router.refresh();                    // pull fresh server data ASAP
   }}
 />
   </div>

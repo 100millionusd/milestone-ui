@@ -987,8 +987,10 @@ async function handleReleasePayment(idx: number) {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                      const paid = !!m.paymentTxHash;
-                      const completedRow = paid || !!m.completed;
+                    const raw = JSON.stringify(m || {}).toLowerCase();
+                    const paid = !!m.paymentTxHash || !!m.paymentDate || raw.includes('"status":"paid"');
+                    const completedRow = paid || !!m.completed;
+
 
                       // 👇 show "submitted" immediately after upload
                       const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
@@ -1120,7 +1122,9 @@ async function handleReleasePayment(idx: number) {
           ? 'submitted'
           : 'pending';
 
-  const canRelease = !paid && completedRow && !safeInFlight;
+  const safeInFlight = !!m.paymentPending || /"safe|gnosis|safe_status|safepaymenttxhash|awaiting|executed|success/.test(raw);
+const canRelease = !paid && completedRow && !safeInFlight;
+
 
 
                 return (
@@ -1149,23 +1153,21 @@ async function handleReleasePayment(idx: number) {
       </button>
 
       {/* SAFE (multisig) */}
-      <SafePayButton
-        bidId={Number(acceptedBid.bidId)}
-        milestoneIndex={idx}
-        amountUSD={Number(m?.amount || 0)}
-        disabled={releasingKey === key}
-        onQueued={async () => {
-          addSafePending(key);
-          setReleasingKey(key);
-          try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
-          pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-          await refreshProofs();
-          try {
-            const next = await getBids(projectIdNum);
-            setBids(Array.isArray(next) ? next : []);
-          } catch {}
-        }}
-      />
+ <SafePayButton
+  bidId={Number(acceptedBid.bidId)}
+  milestoneIndex={idx}
+  amountUSD={Number(m?.amount || 0)}
+  disabled={!canRelease || releasingKey === key}
+  onQueued={async () => {
+    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
+    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
+  }}
+/>
     </div>
   ) : (
     <>
