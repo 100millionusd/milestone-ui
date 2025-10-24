@@ -77,16 +77,25 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // local "payment pending" while we poll the server after clicking Pay (persisted)
+  // local "payment pending" (persisted)
   const [pendingPay, setPendingPay] = useState<Set<string>>(
     () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
   );
 
+  // 🔄 NEW: listen to storage events so other tabs update even if BroadcastChannel isn’t available
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (!e) return;
+      if (e.key === PENDING_LS_KEY || (e.key && e.key.startsWith(PENDING_TS_PREFIX))) {
+        setPendingPay(loadPendingFromLS());
+      }
+    };
+    try { window.addEventListener('storage', onStorage); } catch {}
+    return () => { try { window.removeEventListener('storage', onStorage); } catch {} };
+  }, []);
+
   // Client-side caching for bids data
-  const [dataCache, setDataCache] = useState<{
-    bids: any[];
-    lastUpdated: number;
-  }>({ bids: [], lastUpdated: 0 });
+  const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number; }>({ bids: [], lastUpdated: 0 });
 
   function addPending(key: string) {
     if (typeof window !== 'undefined') {
@@ -112,22 +121,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   useEffect(() => {
-    // Only refetch on mount if server gave us nothing
     if (initialBids.length === 0) {
       loadProofs();
     } else {
-      // we still want to hydrate archive state for the given bids
       hydrateArchiveStatuses(initialBids).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // listen for archive/unarchive from anywhere
   useMilestonesUpdated(loadProofs);
 
   // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
-  // ---- x-page sync helpers ----
   function emitPayQueued(bidId: number, milestoneIndex: number) {
     try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
   }
@@ -138,7 +143,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
     try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
   }
-  // one-liner to queue + poll (reuse everywhere)
   function queueBroadcast(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
     addPending(key);
@@ -146,7 +150,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     pollUntilPaid(bidId, milestoneIndex).catch(() => {});
   }
 
-  // cross-page payment sync (create + attach listener together)
   useEffect(() => {
     let bc: BroadcastChannel | null = null;
     try {
@@ -160,7 +163,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         if (!type) return;
 
         if (type === 'mx:pay:queued') {
-          addPending(mkKey(bidId, milestoneIndex));
+          const k = mkKey(bidId, milestoneIndex);
+          addPending(k);
           pollUntilPaid(bidId, milestoneIndex).catch(() => {});
           loadProofs(true);
         } else if (type === 'mx:pay:done') {
@@ -173,14 +177,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
 
     return () => { try { bc?.close(); } catch {} };
-  }, [loadProofs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function loadProofs(forceRefresh = false) {
     const CACHE_TTL = 0;
-
-    // Use cache if available and not forcing refresh
-    if (!forceRefresh && dataCache.bids.length > 0 &&
-        Date.now() - dataCache.lastUpdated < CACHE_TTL) {
+    if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
       return;
@@ -192,31 +194,23 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
 
-      // Update cache
-      setDataCache({
-        bids: rows,
-        lastUpdated: Date.now()
-      });
-
+      setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
 
       // Clear local "pending" ONLY for milestones that are now PAID
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (isPaid(ms[i])) {
-            removePending(mkKey(bid.bidId, i));   // clear ONLY when truly paid
-          }
+          if (isPaid(ms[i])) removePending(mkKey(bid.bidId, i));
         }
       }
 
-      // If something is still pending after refresh, resume polling so it can self-clear
+      // Resume polling for still-pending
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
           if (pendingPay.has(key) && !isPaid(ms[i])) {
-            // keep polling; will clear when paid
             pollUntilPaid(bid.bidId, i).catch(() => {});
           }
         }
@@ -233,39 +227,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
-
-    if (uniqueBidIds.length === 0) {
-      setArchMap({});
-      return;
-    }
+    if (uniqueBidIds.length === 0) { setArchMap({}); return; }
 
     try {
       const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
       updateBulkArchiveCache(bulkArchiveStatus);
 
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
       allBids.forEach(bid => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-
         ms.forEach((_, index) => {
           const key = mkKey(bid.bidId, index);
-          if (nextMap[key] === undefined) {
-            nextMap[key] = bidArchiveStatus[index] || { archived: false };
-          }
+          if (nextMap[key] === undefined) nextMap[key] = bidArchiveStatus[index] || { archived: false };
         });
       });
-
       setArchMap(nextMap);
     } catch (error) {
       console.error('Failed to fetch bulk archive status:', error);
-      // Fallback to individual requests if bulk fails
       await hydrateArchiveStatusesFallback(allBids);
     }
   }
 
-  // Fallback function for individual requests
   async function hydrateArchiveStatusesFallback(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
     const nextMap: Record<string, ArchiveInfo> = { ...archMap };
@@ -275,21 +258,19 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       for (let i = 0; i < ms.length; i++) {
         const key = mkKey(bid.bidId, i);
         if (nextMap[key] !== undefined) continue;
-        tasks.push(
-          (async () => {
-            try {
-              const j = await getMilestoneArchive(bid.bidId, i);
-              const mi = j?.milestone ?? j;
-              nextMap[key] = {
-                archived: !!mi?.archived,
-                archivedAt: mi?.archivedAt ?? null,
-                archiveReason: mi?.archiveReason ?? null,
-              };
-            } catch {
-              nextMap[key] = { archived: false };
-            }
-          })()
-        );
+        tasks.push((async () => {
+          try {
+            const j = await getMilestoneArchive(bid.bidId, i);
+            const mi = j?.milestone ?? j;
+            nextMap[key] = {
+              archived: !!mi?.archived,
+              archivedAt: mi?.archivedAt ?? null,
+              archiveReason: mi?.archiveReason ?? null,
+            };
+          } catch {
+            nextMap[key] = { archived: false };
+          }
+        })());
       }
     }
     if (tasks.length) {
@@ -298,7 +279,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {
     if (!m?.proof) return false;
     try {
@@ -317,7 +297,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return m?.completed === true || m?.approved === true || m?.status === 'completed';
   }
 
-  // ---- strict paid detector (manual + Safe) ----
   function isPaid(m: any): boolean {
     const low = (v: any) => String(v ?? '').trim().toLowerCase();
     const status = low(m?.status);
@@ -344,7 +323,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return !!(anyHash || anyDate || anyFlag || statusPaid || jsonReleased);
   }
 
-  // ---- Safe in-flight (pre-exec only). NEVER true once paid. ----
   function hasSafeMarker(m: any): boolean {
     if (!m) return false;
     if (isPaid(m)) return false;
@@ -379,7 +357,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
     const archived = isArchived(bidId, idx);
-
     if (tab === 'archived') return archived;
     if (archived) return false;
 
@@ -412,13 +389,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     [archMap]
   );
 
-  // Build a filtered view (preserve original milestone indexes)
   const filtered = useMemo(() => {
     return (bids || [])
       .filter(bidMatchesSearch)
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-        const withIdx = ms.map((m: any, idx: number) => ({ m, idx })); // keep original idx
+        const withIdx = ms.map((m: any, idx: number) => ({ m, idx }));
 
         const visibleWithIdx =
           tab === 'all'
@@ -430,7 +406,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay]);
 
-  // ==== POLL UNTIL PAID (via getBid; cookie/headers handled centrally) ====
   async function pollUntilPaid(
     bidId: number,
     milestoneIndex: number,
@@ -441,13 +416,13 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
     for (let i = 0; i < tries; i++) {
       try {
-        const bid = await getBid(bidId); // no-store is handled in lib/api
+        const bid = await getBid(bidId);
         const m = bid?.milestones?.[milestoneIndex];
 
         if (!m) {
           // keep polling
         } else if (isPaid(m)) {
-          removePending(key);                               // only clear on PAID
+          removePending(key);
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
             if (!match) return b;
@@ -458,10 +433,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           }));
           try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
-          emitPayDone(bidId, milestoneIndex);               // broadcast DONE only when PAID
+          emitPayDone(bidId, milestoneIndex);
           return;
         } else if (hasSafeMarker(m)) {
-          // queued/submitted/executing — keep local "pending" so both buttons stay hidden
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
             if (!match) return b;
@@ -472,26 +446,22 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           }));
           try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
-          // DO NOT removePending, DO NOT emitPayDone — keep polling
+          // keep polling
         }
-
       } catch (err: any) {
-        // If we lost auth, unstick the chip so it doesn't hang forever.
         if (err?.status === 401 || err?.status === 403) {
           removePending(key);
           setError('Your session expired. Please sign in again.');
           return;
         }
-        // otherwise ignore and keep polling
       }
       await new Promise(r => setTimeout(r, intervalMs));
     }
 
-    // Final reconciliation: don't auto-clear local pending; wait for paid signal
+    // Final reconciliation
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      // Merge the latest server milestone into local state
       setBids(prev => prev.map(b => {
         const match = ((b as any).bidId ?? (b as any).id) === bidId;
         if (!match) return b;
@@ -501,18 +471,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         return { ...b, milestones: ms };
       }));
       if (m && isPaid(m)) removePending(key);
-    } catch { /* silent */ }
+    } catch {}
     if (typeof router?.refresh === 'function') router.refresh();
   }
-  // ==== END POLL UNTIL PAID ====
 
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
     try {
       setProcessing(`approve-${bidId}-${milestoneIndex}`);
       await completeMilestone(bidId, milestoneIndex, proof);
-      await loadProofs(true);   // bypass client cache immediately
-      router.refresh();         // re-fetch server components so “Release Payment” appears
+      await loadProofs(true);
+      router.refresh();
     } catch (e: any) {
       alert(e?.message || 'Failed to approve proof');
     } finally {
@@ -527,7 +496,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       await payMilestone(bidId, milestoneIndex);
       const key = mkKey(bidId, milestoneIndex);
       addPending(key);
-      // broadcast + poll
       emitPayQueued(bidId, milestoneIndex);
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
@@ -562,7 +530,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
-      // Clear cache for this bid since archive status changed
       clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
@@ -572,9 +539,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           archivedAt: new Date().toISOString(),
         },
       }));
-
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: true, reason });
-
     } catch (e: any) {
       alert(e?.message || 'Archive failed');
     } finally {
@@ -586,7 +551,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
-      // Clear cache for this bid since archive status changed
       clearBulkArchiveCache(bidId);
       setArchMap(prev => ({
         ...prev,
@@ -596,9 +560,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           archivedAt: null,
         },
       }));
-
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: false });
-
     } catch (e: any) {
       alert(e?.message || 'Unarchive failed');
     } finally {
@@ -616,14 +578,13 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const bidId = Number(bidIdStr);
         const idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-          try {
+          try { 
             await unarchiveMilestone(bidId, idx);
             clearBulkArchiveCache(bidId);
           } catch {}
         }
       }
       await hydrateArchiveStatuses(bids);
-      // tell other tabs to refresh
       emitMilestonesUpdated({ bulk: true });
     } catch (e: any) {
       alert(e?.message || 'Unarchive all failed');
@@ -632,7 +593,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   };
 
-  // ---- Proof renderer (with lightbox support) ----
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
@@ -749,7 +709,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     );
   };
 
-  // ---- UI ----
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto py-12">
@@ -795,7 +754,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       </div>
 
-      {/* Archive Controls (server) */}
+      {/* Archive Controls */}
       {tab === 'archived' && archivedCount > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
@@ -946,7 +905,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                               {showPay && (
                                 <div className="flex items-center gap-2">
-                                  {/* Manual (existing) */}
+                                  {/* Manual */}
                                   <button
                                     type="button"
                                     onClick={() => handlePay(bid.bidId, origIdx)}
@@ -964,6 +923,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                       : 'Release Payment'}
                                   </button>
 
+                                  {/* SAFE */}
                                   <SafePayButton
                                     bidId={bid.bidId}
                                     milestoneIndex={origIdx}
@@ -972,9 +932,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                     onQueued={() => {
                                       const key = mkKey(bid.bidId, origIdx);
                                       addPending(key);
-                                      emitPayQueued(bid.bidId, origIdx);   // broadcast to the other page
+                                      try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId: bid.bidId, milestoneIndex: origIdx }); } catch {}
                                       pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh();                    // pull fresh server data ASAP
+                                      router.refresh();
                                     }}
                                   />
                                 </div>
@@ -1025,7 +985,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             className="max-h-full max-w-full rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
-
           {lightbox.index > 0 && (
             <button
               className="absolute left-4 text-white text-3xl font-bold"
