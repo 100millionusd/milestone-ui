@@ -560,43 +560,15 @@ useEffect(() => {
     };
   }, [projectIdNum, safeBids]);
 
-  // Reconcile "pending" after refresh: clear paid items and resume polling
+ // Reconcile "pending" after refresh: resume polling for local-pending items
 useEffect(() => {
-  const rows = Array.isArray(bids) ? bids : [];
-
-  // 1) Clear local pending if server now shows paid or any Safe marker
-  for (const bid of rows) {
-    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-    for (let i = 0; i < ms.length; i++) {
-      const k = msKey(Number(bid.bidId), i);
-      if (isPaidMs(ms[i]) || hasSafeMarkerMs(ms[i])) {
-        removeSafePending(k);
-      }
+  for (const k of Array.from(safePending)) {
+    const [bidIdStr, idxStr] = k.split(':');
+    const bidId = Number(bidIdStr), idx = Number(idxStr);
+    if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+      pollUntilPaid(bidId, idx).catch(() => {});
     }
   }
-
-  // 2) TTL auto‑clear + resume polling for still‑pending items
-  try {
-    const now = Date.now();
-    const MAX_MS = 5 * 60 * 1000; // 5 minutes
-    for (const k of Array.from(safePending)) {
-      const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${k}`) : null;
-      const ts = tsRaw ? Number(tsRaw) : 0;
-      if (!ts || (now - ts) > MAX_MS) {
-        removeSafePending(k);
-        continue;
-      }
-      const [bidIdStr, idxStr] = k.split(':');
-      const bidId = Number(bidIdStr), idx = Number(idxStr);
-      if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-        const bid = rows.find((b: any) => Number(b.bidId) === bidId);
-        const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
-        if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
-          pollUntilPaid(bidId, idx).catch(() => {});
-        }
-      }
-    }
-  } catch {}
 }, [bids, safePending]);
 
   // Expose for console debug
@@ -612,26 +584,41 @@ useEffect(() => {
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
+  async function pollUntilPaid(
+  bidId: number,
+  milestoneIndex: number,
+  tries = 100,                // poll longer
+  intervalMs = 3000
+) {
   for (let i = 0; i < tries; i++) {
     try {
       const bid = await getBid(bidId);
-      const m = bid?.milestones?.[milestoneIndex];
 
-      const status = String(m?.status || '').toLowerCase();
-      const paid = !!m?.paymentTxHash || !!m?.paymentDate || m?.paid === true || status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed';
-      const hasSafeMarker =
-        !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash || /"safe|gnosis"/i.test(JSON.stringify(m || {}));
+      // normalize milestone shape (stringified vs array)
+      const arr = parseMilestones(bid?.milestones);
+      const m =
+        Array.isArray(arr) ? arr[milestoneIndex] :
+        (Array.isArray((bid as any)?.milestones) ? (bid as any).milestones[milestoneIndex] :
+        (bid as any)?.milestones?.[milestoneIndex]);
 
-      if (paid || hasSafeMarker) {
+      const paid = isPaidMs(m);
+      const inflight = hasSafeMarkerMs(m);
+
+      if (paid) {
+        // ✅ only mark DONE when actually paid
+        removeSafePending(msKey(bidId, milestoneIndex));
         await refreshProofs();
         try {
           const next = await getBids(projectIdNum);
           setBids(Array.isArray(next) ? next : []);
         } catch {}
-        removeSafePending(msKey(bidId, milestoneIndex));
         try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
         return;
+      }
+
+      if (inflight) {
+        // still queued/awaiting/exec — keep everyone pending
+        try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
       }
     } catch {
       // ignore, keep polling
