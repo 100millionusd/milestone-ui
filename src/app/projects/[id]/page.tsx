@@ -214,25 +214,27 @@ function isPaidMs(m: any): boolean {
   const status = String(m?.status ?? '').toLowerCase();
   return !!(
     m?.paymentTxHash || m?.payment_tx_hash ||
+    m?.safePaymentTxHash || m?.safe_payment_tx_hash || // ✅ Safe-specific
     m?.paymentDate   || m?.payment_date   ||
     m?.txHash        || m?.tx_hash        ||
     m?.paidAt        || m?.paid_at        ||
     m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed'
+    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' || status === 'released' // ✅ cover server “released”
   );
 }
 function hasSafeMarkerMs(m: any): boolean {
   if (!m) return false;
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const s = String(m?.safeStatus ?? m?.safe_status ?? m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
   if (
     m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash ||
     m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.safeNonce || m?.safe_nonce ||
     m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && /queued|pending|submitted|awaiting_exec|executed|success/.test(s))
+    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s)) // ✅ include released/success
   ) return true;
+
   const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis');
+  return raw.includes('"safe') || raw.includes('gnosis') || /"payment_status":"released"/.test(raw); // ✅ released marker
 }
 
 // --- milestone key helper (for local “just submitted” flag)
@@ -560,15 +562,43 @@ useEffect(() => {
     };
   }, [projectIdNum, safeBids]);
 
- // Reconcile "pending" after refresh: resume polling for local-pending items
+ // Reconcile "pending" after refresh: clear paid items and resume polling
 useEffect(() => {
-  for (const k of Array.from(safePending)) {
-    const [bidIdStr, idxStr] = k.split(':');
-    const bidId = Number(bidIdStr), idx = Number(idxStr);
-    if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-      pollUntilPaid(bidId, idx).catch(() => {});
+  const rows = Array.isArray(bids) ? bids : [];
+
+  // 1) Clear local pending if server now shows paid or any Safe marker
+  for (const bid of rows) {
+    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    for (let i = 0; i < ms.length; i++) {
+      const k = msKey(Number(bid.bidId), i);
+      if (isPaidMs(ms[i]) || hasSafeMarkerMs(ms[i])) {
+        removeSafePending(k);
+      }
     }
   }
+
+  // 2) TTL auto-clear + resume polling for still-pending items
+  try {
+    const now = Date.now();
+    const MAX_MS = 30 * 60 * 1000; // ✅ 30 minutes
+    for (const k of Array.from(safePending)) {
+      const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${k}`) : null;
+      const ts = tsRaw ? Number(tsRaw) : 0;
+      if (!ts || (now - ts) > MAX_MS) {
+        removeSafePending(k);
+        continue;
+      }
+      const [bidIdStr, idxStr] = k.split(':');
+      const bidId = Number(bidIdStr), idx = Number(idxStr);
+      if (Number.isFinite(bidId) && Number.isFinite(idx)) {
+        const bid = rows.find((b: any) => Number(b.bidId) === bidId);
+        const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
+        if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
+          pollUntilPaid(bidId, idx).catch(() => {});
+        }
+      }
+    }
+  } catch {}
 }, [bids, safePending]);
 
   // Expose for console debug
@@ -592,35 +622,34 @@ useEffect(() => {
 ) {
   for (let i = 0; i < tries; i++) {
     try {
-      const bid = await getBid(bidId);
+  const bid = await getBid(bidId);
+  const m = bid?.milestones?.[milestoneIndex];
 
-      // normalize milestone shape (stringified vs array)
-      const arr = parseMilestones(bid?.milestones);
-      const m =
-        Array.isArray(arr) ? arr[milestoneIndex] :
-        (Array.isArray((bid as any)?.milestones) ? (bid as any).milestones[milestoneIndex] :
-        (bid as any)?.milestones?.[milestoneIndex]);
+  const raw = JSON.stringify(m || {}).toLowerCase();
+  const status = String(m?.status || '').toLowerCase();
 
-      const paid = isPaidMs(m);
-      const inflight = hasSafeMarkerMs(m);
+  const paid = !!m?.paymentTxHash || !!m?.paymentDate ||
+               !!m?.safePaymentTxHash || status === 'paid' || status === 'executed' ||
+               status === 'complete' || status === 'completed' || status === 'released' ||
+               /"payment_status":"released"/.test(raw);
 
-      if (paid) {
-        // ✅ only mark DONE when actually paid
-        removeSafePending(msKey(bidId, milestoneIndex));
-        await refreshProofs();
-        try {
-          const next = await getBids(projectIdNum);
-          setBids(Array.isArray(next) ? next : []);
-        } catch {}
-        try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
-        return;
-      }
+  const hasSafeMarker =
+    !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash ||
+    /"safe|gnosis|safe_status|awaiting|executed|success|released/.test(raw);
 
-      if (inflight) {
-        // still queued/awaiting/exec — keep everyone pending
-        try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
-      }
-    } catch {
+  if (paid || hasSafeMarker) {
+    await refreshProofs();
+    try {
+      // ✅ bust any fetch cache the api layer may hold
+      try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
+    removeSafePending(msKey(bidId, milestoneIndex));
+    try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+    return;
+  }
+} catch {
       // ignore, keep polling
     }
     await new Promise(r => setTimeout(r, intervalMs));
@@ -1047,17 +1076,13 @@ async function handleReleasePayment(idx: number) {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
- const raw = JSON.stringify(m || {}).toLowerCase();
-const paid = !!m.paymentTxHash || !!m.paymentDate || raw.includes('"status":"paid"');
-const completedRow = paid || !!m.completed;
-
-// mirror status logic from Milestones tab
-const key = `${Number(acceptedBid.bidId)}:${idx}`;
-const hasProofNow = !!m.proof || !!proofJustSent[key];
+ const key = `${Number(acceptedBid.bidId)}:${idx}`;
+const paid = isPaidMs(m);
+const completedRow = paid || !!m?.completed;
+const hasProofNow = !!m?.proof || !!proofJustSent[key];
 
 const safeInFlight =
-  !!m.paymentPending ||
-  /"safe|gnosis|safe_status|safepaymenttxhash|awaiting|executed|success/.test(raw);
+  hasSafeMarkerMs(m) || !!m?.paymentPending || safePending.has(key);
 
 const status = paid
   ? 'paid'
@@ -1225,19 +1250,23 @@ const canRelease = !paid && completedRow && !safeInFlight;
   amountUSD={Number(m?.amount || 0)}
   disabled={!canRelease || releasingKey === key}
   onQueued={async () => {
-    const k = msKey(Number(acceptedBid.bidId), idx);
-    addSafePending(k);           // <-- mark locally so UI hides immediately
-    setReleasingKey(k);          // <-- match manual flow UX
-    try {
-      payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
-    } catch {}
-    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-    await refreshProofs();
-    try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-  }}
+  const k = msKey(Number(acceptedBid.bidId), idx);
+  addSafePending(k);
+  setReleasingKey(k);
+  try {
+    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
+  } catch {}
+  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+
+  // ✅ bust cache so the next fetch sees updated milestone_payments state
+  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+
+  await refreshProofs();
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
+}}
 />
     </div>
   ) : (
