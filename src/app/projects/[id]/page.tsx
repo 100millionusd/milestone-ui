@@ -225,7 +225,7 @@ function hasSafeMarkerMs(m: any): boolean {
 
   return false;
 }
-const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
+const msKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
@@ -474,6 +474,32 @@ export default function ProjectDetailPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
+
+  useEffect(() => {
+  try {
+    const raw = localStorage.getItem('mx_pay_pending');
+    const arr: string[] = raw ? JSON.parse(raw) : [];
+    let changed = false;
+
+    const migrated = arr.map(k => {
+      if (k.includes(':')) { changed = true; return k.replace(':','-'); }
+      return k;
+    });
+
+    if (changed) {
+      localStorage.setItem('mx_pay_pending', JSON.stringify(migrated));
+      // migrate timestamps
+      arr.forEach(oldK => {
+        if (!oldK.includes(':')) return;
+        const v = localStorage.getItem(`mx_pay_pending_ts:${oldK}`);
+        if (v) {
+          localStorage.setItem(`mx_pay_pending_ts:${oldK.replace(':','-')}`, v);
+          localStorage.removeItem(`mx_pay_pending_ts:${oldK}`);
+        }
+      });
+    }
+  } catch {}
+}, []);
 
   useEffect(() => {
     const onJustSent = (ev: any) => {
