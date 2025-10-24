@@ -10,6 +10,7 @@ import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
+import { isPaidMs, hasSafeMarkerMs } from '@/lib/milestonePaymentState';
 
 // ---------------- Consts ----------------
 // Pinata gateway base — sanitize so we end with exactly one "/ipfs"
@@ -209,39 +210,8 @@ function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
-// ---- payment helpers (Safe + manual) ----
-function isPaidMs(m: any): boolean {
-  const status = String(m?.status ?? '').toLowerCase();
-  const raw = JSON.stringify(m || {}).toLowerCase();
-  return !!(
-    m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash || // ✅ Safe-specific
-    m?.paymentDate   || m?.payment_date   ||
-    m?.txHash        || m?.tx_hash        ||
-    m?.paidAt        || m?.paid_at        ||
-    m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' || status === 'released' ||
-    /"payment_status":"released"/.test(raw)
-  );
-}
-function hasSafeMarkerMs(m: any): boolean {
-  if (!m) return false;
-  const s = String(m?.safeStatus ?? m?.safe_status ?? m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  if (
-    m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-    m?.safeNonce || m?.safe_nonce ||
-    m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s))
-  ) return true;
-
-  const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis') || /"payment_status":"released"/.test(raw);
-}
-
 // --- milestone key helper (for local “just submitted” flag)
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
-
 
 // -------------- Component ----------------
 export default function ProjectDetailPage() {
