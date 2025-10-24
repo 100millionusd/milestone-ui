@@ -262,6 +262,21 @@ export default function ProjectDetailPage() {
   // track which (bidId:milestoneIndex) is releasing now
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
+  // Full approved bid (includes paymentPending/safe* fields that /bids omits)
+const [approvedFull, setApprovedFull] = useState<any>(null);
+
+// Track the approved bid id from the lightweight /bids list
+const approvedBidId =
+  Array.isArray(bids) ? Number((bids.find((b: any) => b?.status === 'approved') || {}).bidId) : NaN;
+
+// Keep approvedFull in sync (NEEDS to be before any early return)
+useEffect(() => {
+  if (!Number.isFinite(approvedBidId)) { setApprovedFull(null); return; }
+  getBid(approvedBidId)
+    .then(setApprovedFull)
+    .catch(() => setApprovedFull(null));
+}, [approvedBidId]);
+
   // track Safe/EOA "queued" locally so buttons hide immediately
 // ===== Persist "payment pending" across refreshes (Project page) =====
 const PENDING_LS_KEY = 'mx_pay_pending';
@@ -1076,13 +1091,17 @@ async function handleReleasePayment(idx: number) {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
- const key = `${Number(acceptedBid.bidId)}:${idx}`;
-const paid = isPaidMs(m);
-const completedRow = paid || !!m?.completed;
-const hasProofNow = !!m?.proof || !!proofJustSent[key];
+// Prefer full milestone (from /bids/:id) when available; fall back to light one
+const src =
+  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+
+const key = `${Number(acceptedBid.bidId)}:${idx}`;
+const paid = isPaidMs(src);
+const completedRow = paid || !!src?.completed;
+const hasProofNow = !!src?.proof || !!proofJustSent[key];
 
 const safeInFlight =
-  hasSafeMarkerMs(m) || !!m?.paymentPending || safePending.has(key);
+  hasSafeMarkerMs(src) || !!src?.paymentPending || safePending.has(key);
 
 const status = paid
   ? 'paid'
@@ -1094,8 +1113,9 @@ const status = paid
         ? 'submitted'
         : 'pending';
 
-// enable release only when not paid and not in Safe flow
+// (non-admin table: no action buttons here; keeping for parity)
 const canRelease = !paid && completedRow && !safeInFlight;
+
 
                       return (
                         <tr key={idx} className="border-t">
@@ -1108,7 +1128,9 @@ const canRelease = !paid && completedRow && !safeInFlight;
                           <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
                           <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                           <td className="py-2 pr-4">
-                            {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                            {(src.paymentTxHash || src.safePaymentTxHash)
+  ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
+  : '—'}
                           </td>
                         </tr>
                       );
@@ -1198,25 +1220,28 @@ const canRelease = !paid && completedRow && !safeInFlight;
               </tr>
             </thead>
             <tbody>
- {acceptedMilestones.map((m, idx) => {
-  const key = `${Number(acceptedBid.bidId)}:${idx}`;
-  const paid = isPaidMs(m);
-  const pendingLocal = safePending.has(key);
-  const safeInFlight = hasSafeMarkerMs(m) || !!m?.paymentPending || pendingLocal;
-  const completedRow = paid || !!m?.completed;
+ // Prefer full milestone (has Safe markers) else fall back
+const src =
+  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-  const hasProofNow = !!m?.proof || !!proofJustSent[key];
-  const status = paid
-    ? 'paid'
-    : safeInFlight
-      ? 'payment_pending'
-      : completedRow
-        ? 'completed'
-        : hasProofNow
-          ? 'submitted'
-          : 'pending';
+const key = `${Number(acceptedBid.bidId)}:${idx}`;
+const paid = isPaidMs(src);
+const pendingLocal = safePending.has(key);
+const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
+const completedRow = paid || !!src?.completed;
 
-            const canRelease = !paid && completedRow && !safeInFlight;
+const hasProofNow = !!src?.proof || !!proofJustSent[key];
+const status = paid
+  ? 'paid'
+  : safeInFlight
+    ? 'payment_pending'
+    : completedRow
+      ? 'completed'
+      : hasProofNow
+        ? 'submitted'
+        : 'pending';
+
+const canRelease = !paid && completedRow && !safeInFlight;
 
                 return (
                   <tr key={idx} className="border-t">
@@ -1227,7 +1252,9 @@ const canRelease = !paid && completedRow && !safeInFlight;
                     </td>
                     <td className="py-2 pr-4">{status}</td>
                     <td className="py-2 pr-4">
-                      {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
+                      {(src.paymentTxHash || src.safePaymentTxHash)
+  ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
+  : '—'}
                     </td>
  <td className="py-2 pr-4">
   {canRelease ? (
