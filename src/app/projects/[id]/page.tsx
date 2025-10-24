@@ -599,7 +599,7 @@ export default function ProjectDetailPage() {
           removeSafePending(k);
           continue;
         }
-        const [bidIdStr, idxStr] = k.split(':');
+        const [bidIdStr, idxStr] = k.split('-');
         const bidId = Number(bidIdStr), idx = Number(idxStr);
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
           const bid = rows.find((b: any) => Number(b.bidId) === bidId);
@@ -1069,7 +1069,7 @@ export default function ProjectDetailPage() {
                       const src =
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-                      const key = `${Number(acceptedBid?.bidId || 0)}:${idx}`;
+                      const key = msKey(Number(acceptedBid?.bidId || 0), idx);
                       const paid = isPaidMs(src);
                       const localPending = safePending.has(key);
                       const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || localPending;
@@ -1161,7 +1161,7 @@ export default function ProjectDetailPage() {
                       const src =
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-                      const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const key = msKey(Number(acceptedBid.bidId), idx);
                       const paid = isPaidMs(src);
                       const pendingLocal = safePending.has(key);
                       const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
