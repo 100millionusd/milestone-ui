@@ -1134,7 +1134,7 @@ const canRelease = !paid && completedRow && !safeInFlight;
                           </td>
                         </tr>
                       );
-                    })}
+                    })
                   </tbody>
                 </table>
               </div>
@@ -1308,7 +1308,7 @@ const canRelease = !paid && completedRow && !safeInFlight;
 </td>
                   </tr>
                 );
-              })}
+              })
             </tbody>
           </table>
         </div>
