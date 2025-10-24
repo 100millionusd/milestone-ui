@@ -212,6 +212,7 @@ function isImageName(n?: string) {
 // ---- payment helpers (Safe + manual) ----
 function isPaidMs(m: any): boolean {
   const status = String(m?.status ?? '').toLowerCase();
+  const raw = JSON.stringify(m || {}).toLowerCase();
   return !!(
     m?.paymentTxHash || m?.payment_tx_hash ||
     m?.safePaymentTxHash || m?.safe_payment_tx_hash || // ✅ Safe-specific
@@ -219,7 +220,8 @@ function isPaidMs(m: any): boolean {
     m?.txHash        || m?.tx_hash        ||
     m?.paidAt        || m?.paid_at        ||
     m?.paid === true || m?.isPaid === true ||
-    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' || status === 'released' // ✅ cover server “released”
+    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed' || status === 'released' ||
+    /"payment_status":"released"/.test(raw)
   );
 }
 function hasSafeMarkerMs(m: any): boolean {
@@ -230,11 +232,11 @@ function hasSafeMarkerMs(m: any): boolean {
     m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.safeNonce || m?.safe_nonce ||
     m?.safeExecutedAt || m?.safe_executed_at ||
-    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s)) // ✅ include released/success
+    (s && /queued|pending|submitted|awaiting|awaiting_exec|executed|success|released/.test(s))
   ) return true;
 
   const raw = JSON.stringify(m).toLowerCase();
-  return raw.includes('"safe') || raw.includes('gnosis') || /"payment_status":"released"/.test(raw); // ✅ released marker
+  return raw.includes('"safe') || raw.includes('gnosis') || /"payment_status":"released"/.test(raw);
 }
 
 // --- milestone key helper (for local “just submitted” flag)
@@ -263,66 +265,65 @@ export default function ProjectDetailPage() {
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
 
   // Full approved bid (includes paymentPending/safe* fields that /bids omits)
-const [approvedFull, setApprovedFull] = useState<any>(null);
+  const [approvedFull, setApprovedFull] = useState<any>(null);
 
-// Track the approved bid id from the lightweight /bids list
-const approvedBidId =
-  Array.isArray(bids) ? Number((bids.find((b: any) => b?.status === 'approved') || {}).bidId) : NaN;
+  // Track the approved bid id from the lightweight /bids list
+  const approvedBidId =
+    Array.isArray(bids) ? Number((bids.find((b: any) => b?.status === 'approved') || {}).bidId) : NaN;
 
-// Keep approvedFull in sync (NEEDS to be before any early return)
-useEffect(() => {
-  if (!Number.isFinite(approvedBidId)) { setApprovedFull(null); return; }
-  getBid(approvedBidId)
-    .then(setApprovedFull)
-    .catch(() => setApprovedFull(null));
-}, [approvedBidId]);
+  // Keep approvedFull in sync (NEEDS to be before any early return)
+  useEffect(() => {
+    if (!Number.isFinite(approvedBidId)) { setApprovedFull(null); return; }
+    getBid(approvedBidId)
+      .then(setApprovedFull)
+      .catch(() => setApprovedFull(null));
+  }, [approvedBidId]);
 
-async function refreshApproved(bidId?: number) {
-  const id = Number(bidId ?? approvedBidId);
-  if (!Number.isFinite(id)) return;
-  try { setApprovedFull(await getBid(id)); } catch {}
-}
-
-  // track Safe/EOA "queued" locally so buttons hide immediately
-// ===== Persist "payment pending" across refreshes (Project page) =====
-const PENDING_LS_KEY = 'mx_pay_pending';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
-
-function loadPendingFromLS(): Set<string> {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = localStorage.getItem(PENDING_LS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(arr) ? arr : []);
-  } catch {
-    return new Set();
+  async function refreshApproved(bidId?: number) {
+    const id = Number(bidId ?? approvedBidId);
+    if (!Number.isFinite(id)) return;
+    try { setApprovedFull(await getBid(id)); } catch {}
   }
-}
-function savePendingToLS(s: Set<string>) {
-  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
-}
 
-const [safePending, setSafePending] = useState<Set<string>>(
-  () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
-);
-const addSafePending = (key: string) => {
-  setSafePending(prev => {
-    const next = new Set(prev);
-    next.add(key);
-    savePendingToLS(next);
-    try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
-    return next;
-  });
-};
-const removeSafePending = (key: string) => {
-  setSafePending(prev => {
-    const next = new Set(prev);
-    next.delete(key);
-    savePendingToLS(next);
-    try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
-    return next;
-  });
-};
+  // ===== Persist "payment pending" across refreshes (Project page) =====
+  const PENDING_LS_KEY = 'mx_pay_pending';
+  const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
+
+  function loadPendingFromLS(): Set<string> {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem(PENDING_LS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  }
+  function savePendingToLS(s: Set<string>) {
+    try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
+  }
+
+  const [safePending, setSafePending] = useState<Set<string>>(
+    () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
+  );
+  const addSafePending = (key: string) => {
+    setSafePending(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      savePendingToLS(next);
+      try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
+      return next;
+    });
+  };
+  const removeSafePending = (key: string) => {
+    setSafePending(prev => {
+      const next = new Set(prev);
+      next.delete(key);
+      savePendingToLS(next);
+      try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
+      return next;
+    });
+  };
 
   // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
   const safeBids = Array.isArray(bids)
@@ -454,34 +455,34 @@ const removeSafePending = (key: string) => {
     } catch {}
   });
 
-  // Cross‑page payment sync
-const payChanRef = useRef<BroadcastChannel | null>(null);
-useEffect(() => {
-  try { payChanRef.current = new BroadcastChannel('mx-payments'); } catch {}
-  const bc = payChanRef.current;
-  if (bc) {
-  bc.onmessage = async (e: MessageEvent) => {
-    const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-    if (!type) return;
+  // Cross-page payment sync
+  const payChanRef = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    try { payChanRef.current = new BroadcastChannel('mx-payments'); } catch {}
+    const bc = payChanRef.current;
+    if (bc) {
+      bc.onmessage = async (e: MessageEvent) => {
+        const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+        if (!type) return;
 
- if (type === 'mx:pay:queued') {
-  addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-  pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
-}
-if (type === 'mx:pay:done') {
-  removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-}
+        if (type === 'mx:pay:queued') {
+          addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+          pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+        }
+        if (type === 'mx:pay:done') {
+          removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+        }
 
-await refreshApproved(bidId);    // 👈 add this
-await refreshProofs();
-    try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-  };
-}
-  return () => { try { bc?.close(); } catch {} };
-}, [projectIdNum]);
+        await refreshApproved(bidId);
+        await refreshProofs();
+        try {
+          const next = await getBids(projectIdNum);
+          setBids(Array.isArray(next) ? next : []);
+        } catch {}
+      };
+    }
+    return () => { try { bc?.close(); } catch {} };
+  }, [projectIdNum]);
 
   // Refresh proofs when opening Files tab
   useEffect(() => {
@@ -584,44 +585,43 @@ await refreshProofs();
     };
   }, [projectIdNum, safeBids]);
 
- // Reconcile "pending" after refresh: clear paid items and resume polling
-useEffect(() => {
-  const rows = Array.isArray(bids) ? bids : [];
+  // Reconcile "pending" after refresh: clear paid items and resume polling
+  useEffect(() => {
+    const rows = Array.isArray(bids) ? bids : [];
 
-  // 1) Clear local pending if server now shows paid or any Safe marker
-  for (const bid of rows) {
-    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-    for (let i = 0; i < ms.length; i++) {
-      const k = msKey(Number(bid.bidId), i);
-      if (isPaidMs(ms[i])) {
-  removeSafePending(k);    // only clear when truly paid
-}
-    }
-  }
-
-  // 2) TTL auto-clear + resume polling for still-pending items
-  try {
-    const now = Date.now();
-    const MAX_MS = 30 * 60 * 1000; // ✅ 30 minutes
-    for (const k of Array.from(safePending)) {
-      const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${k}`) : null;
-      const ts = tsRaw ? Number(tsRaw) : 0;
-      if (!ts || (now - ts) > MAX_MS) {
-        removeSafePending(k);
-        continue;
-      }
-      const [bidIdStr, idxStr] = k.split(':');
-      const bidId = Number(bidIdStr), idx = Number(idxStr);
-      if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-        const bid = rows.find((b: any) => Number(b.bidId) === bidId);
-        const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
-        if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
-          pollUntilPaid(bidId, idx).catch(() => {});
+    // 1) Clear local pending if server now shows PAID
+    for (const bid of rows) {
+      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+      for (let i = 0; i < ms.length; i++) {
+        const k = msKey(Number(bid.bidId), i);
+        if (isPaidMs(ms[i])) {
+          removeSafePending(k);    // clear ONLY when truly paid
         }
       }
     }
-  } catch {}
-}, [bids, safePending]);
+
+    // 2) Resume polling only (NO TTL auto-clear)
+    try {
+      for (const k of Array.from(safePending)) {
+        const [bidIdStr, idxStr] = k.split(':');
+        const bidId = Number(bidIdStr), idx = Number(idxStr);
+        if (!Number.isFinite(bidId) || !Number.isFinite(idx)) continue;
+
+        const bid = rows.find((b: any) => Number(b.bidId) === bidId);
+        const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
+
+        if (m && isPaidMs(m)) {
+          removeSafePending(k); // paid → clear
+          continue;
+        }
+
+        // keep the local lock; ensure polling is active
+        if (m && !hasSafeMarkerMs(m)) {
+          pollUntilPaid(bidId, idx).catch(() => {});
+        }
+      }
+    } catch {}
+  }, [bids, safePending]);
 
   // Expose for console debug
   useEffect(() => {
@@ -637,89 +637,88 @@ useEffect(() => {
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
 
   async function pollUntilPaid(
-  bidId: number,
-  milestoneIndex: number,
-  tries = 100,                // poll longer
-  intervalMs = 3000
-) {
-  for (let i = 0; i < tries; i++) {
-    try {
-  const bid = await getBid(bidId);
-  const m = bid?.milestones?.[milestoneIndex];
+    bidId: number,
+    milestoneIndex: number,
+    tries = 100,                // poll longer
+    intervalMs = 3000
+  ) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const bid = await getBid(bidId);
+        const m = bid?.milestones?.[milestoneIndex];
 
-  const raw = JSON.stringify(m || {}).toLowerCase();
-  const status = String(m?.status || '').toLowerCase();
+        const raw = JSON.stringify(m || {}).toLowerCase();
+        const status = String(m?.status || '').toLowerCase();
 
-  const paid = !!m?.paymentTxHash || !!m?.paymentDate ||
-               !!m?.safePaymentTxHash || status === 'paid' || status === 'executed' ||
-               status === 'complete' || status === 'completed' || status === 'released' ||
-               /"payment_status":"released"/.test(raw);
+        const paid = !!m?.paymentTxHash || !!m?.paymentDate ||
+                    !!m?.safePaymentTxHash || status === 'paid' || status === 'executed' ||
+                    status === 'complete' || status === 'completed' || status === 'released' ||
+                    /"payment_status":"released"/.test(raw);
 
-  const hasSafeMarker =
-    !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash ||
-    /"safe|gnosis|safe_status|awaiting|executed|success|released/.test(raw);
+        const hasSafeMarker =
+          !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash ||
+          /"safe|gnosis|safe_status|awaiting|executed|success|released/.test(raw);
 
- if (paid) {
-  await refreshApproved(bidId);   // 👈 add (see step 3)
-  await refreshProofs();
-  try {
-    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-  removeSafePending(msKey(bidId, milestoneIndex));  // clear only when paid
-  try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
-  return;
-}
+        if (paid) {
+          await refreshApproved(bidId);
+          await refreshProofs();
+          try {
+            try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+            const next = await getBids(projectIdNum);
+            setBids(Array.isArray(next) ? next : []);
+          } catch {}
+          removeSafePending(msKey(bidId, milestoneIndex));  // clear only when paid
+          try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+          return;
+        }
 
-if (hasSafeMarker) {
-  // still in-flight (queued/submitted/executing) → keep local pending, don’t post "done"
-  await refreshApproved(bidId);   // 👈 add (see step 3)
-  await refreshProofs();
-  try {
-    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-  // NOTE: no removeSafePending, no mx:pay:done yet
-}
-} catch {
-      // ignore, keep polling
+        if (hasSafeMarker) {
+          // still in-flight → keep local pending
+          await refreshApproved(bidId);
+          await refreshProofs();
+          try {
+            try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+            const next = await getBids(projectIdNum);
+            setBids(Array.isArray(next) ? next : []);
+          } catch {}
+        }
+      } catch {
+        // ignore, keep polling
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
     }
-    await new Promise(r => setTimeout(r, intervalMs));
   }
-}
 
   // Admin action: release a milestone payment
-async function handleReleasePayment(idx: number) {
-  if (!acceptedBid) return;
-  const bidIdNum = Number(acceptedBid.bidId);
-  const key = `${bidIdNum}:${idx}`;
-  if (!Number.isFinite(bidIdNum)) return;
+  async function handleReleasePayment(idx: number) {
+    if (!acceptedBid) return;
+    const bidIdNum = Number(acceptedBid.bidId);
+    const key = `${bidIdNum}:${idx}`;
+    if (!Number.isFinite(bidIdNum)) return;
 
-  if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
+    if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
 
-  try {
-    setReleasingKey(key);
-    await payMilestone(bidIdNum, idx);
-
-    // ✨ NEW:
-    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: bidIdNum, milestoneIndex: idx }); } catch {}
-    pollUntilPaid(bidIdNum, idx).catch(() => {});
-
-    // refresh local
-    await refreshProofs();
     try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-    alert('Payment released.');
-  } catch (e: any) {
-    alert(e?.message || 'Failed to release payment.');
-  } finally {
-    setReleasingKey(null);
+      setReleasingKey(key);
+      await payMilestone(bidIdNum, idx);
+
+      // queued → hide buttons immediately, begin polling, broadcast
+      try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: bidIdNum, milestoneIndex: idx }); } catch {}
+      pollUntilPaid(bidIdNum, idx).catch(() => {});
+
+      // refresh local
+      await refreshProofs();
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+      } catch {}
+      alert('Payment released.');
+    } catch (e: any) {
+      alert(e?.message || 'Failed to release payment.');
+    } finally {
+      setReleasingKey(null);
+    }
   }
-}
 
   const projectDocs = parseDocs(project?.docs) || [];
 
@@ -1110,31 +1109,30 @@ async function handleReleasePayment(idx: number) {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-// Prefer full milestone (from /bids/:id) when available; fall back to light one
-const src =
-  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+                      // Prefer full milestone (from /bids/:id) when available; fall back to light one
+                      const src =
+                        (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-const key = `${Number(acceptedBid.bidId)}:${idx}`;
-const paid = isPaidMs(src);
-const completedRow = paid || !!src?.completed;
-const hasProofNow = !!src?.proof || !!proofJustSent[key];
+                      const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const paid = isPaidMs(src);
+                      const completedRow = paid || !!src?.completed;
+                      const hasProofNow = !!src?.proof || !!proofJustSent[key];
 
-const safeInFlight =
-  hasSafeMarkerMs(src) || !!src?.paymentPending || safePending.has(key);
+                      const safeInFlight =
+                        hasSafeMarkerMs(src) || !!src?.paymentPending || safePending.has(key);
 
-const status = paid
-  ? 'paid'
-  : safeInFlight
-    ? 'payment_pending'
-    : completedRow
-      ? 'completed'
-      : hasProofNow
-        ? 'submitted'
-        : 'pending';
+                      const status = paid
+                        ? 'paid'
+                        : safeInFlight
+                          ? 'payment_pending'
+                          : completedRow
+                            ? 'completed'
+                            : hasProofNow
+                              ? 'submitted'
+                              : 'pending';
 
-// (non-admin table: no action buttons here; keeping for parity)
-const canRelease = !paid && completedRow && !safeInFlight;
-
+                      // (non-admin table: no action buttons here; keeping for parity)
+                      const canRelease = !paid && completedRow && !safeInFlight;
 
                       return (
                         <tr key={idx} className="border-t">
@@ -1148,8 +1146,8 @@ const canRelease = !paid && completedRow && !safeInFlight;
                           <td className="py-2 pr-4">{fmt(m.paymentDate) || '—'}</td>
                           <td className="py-2 pr-4">
                             {(src.paymentTxHash || src.safePaymentTxHash)
-  ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
-  : '—'}
+                              ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
+                              : '—'}
                           </td>
                         </tr>
                       );
@@ -1222,119 +1220,120 @@ const canRelease = !paid && completedRow && !safeInFlight;
           <div className="mt-6">
             <ChangeRequestsPanel proposalId={projectIdNum} />
           </div>
-              <div className="mt-8">
-      <h4 className="font-semibold mb-2">Admin — Payments</h4>
 
-      {acceptedBid ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-2 pr-4">#</th>
-                <th className="py-2 pr-4">Title</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Tx</th>
-                <th className="py-2 pr-4">Action</th>
-              </tr>
-            </thead>
- <tbody>
-  {acceptedMilestones.map((m, idx) => {
-    // Prefer full milestone (has Safe markers) else fall back
-    const src =
-      (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+          <div className="mt-8">
+            <h4 className="font-semibold mb-2">Admin — Payments</h4>
 
-    const key = `${Number(acceptedBid.bidId)}:${idx}`;
-    const paid = isPaidMs(src);
-    const pendingLocal = safePending.has(key);
-    const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
-    const completedRow = paid || !!src?.completed;
+            {acceptedBid ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-600">
+                      <th className="py-2 pr-4">#</th>
+                      <th className="py-2 pr-4">Title</th>
+                      <th className="py-2 pr-4">Amount</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4">Tx</th>
+                      <th className="py-2 pr-4">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acceptedMilestones.map((m, idx) => {
+                      // Prefer full milestone (has Safe markers) else fall back
+                      const src =
+                        (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-    const hasProofNow = !!src?.proof || !!proofJustSent[key];
-    const status = paid
-      ? 'paid'
-      : safeInFlight
-        ? 'payment_pending'
-        : completedRow
-          ? 'completed'
-          : hasProofNow
-            ? 'submitted'
-            : 'pending';
+                      const key = `${Number(acceptedBid.bidId)}:${idx}`;
+                      const paid = isPaidMs(src);
+                      const pendingLocal = safePending.has(key);
+                      const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
+                      const completedRow = paid || !!src?.completed;
 
-    const canRelease = !paid && completedRow && !safeInFlight;
+                      const hasProofNow = !!src?.proof || !!proofJustSent[key];
+                      const status = paid
+                        ? 'paid'
+                        : safeInFlight
+                          ? 'payment_pending'
+                          : completedRow
+                            ? 'completed'
+                            : hasProofNow
+                              ? 'submitted'
+                              : 'pending';
 
-    return (
-      <tr key={idx} className="border-t">
-        <td className="py-2 pr-4">M{idx + 1}</td>
-        <td className="py-2 pr-4">{m.name || '—'}</td>
-        <td className="py-2 pr-4">
-          {m.amount ? currency.format(Number(m.amount)) : '—'}
-        </td>
-        <td className="py-2 pr-4">{status}</td>
-        <td className="py-2 pr-4">
-          {(src.paymentTxHash || src.safePaymentTxHash)
-            ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
-            : '—'}
-        </td>
-        <td className="py-2 pr-4">
-          {canRelease ? (
-            <div className="flex items-center gap-2">
-              {/* Manual */}
-              <button
-                type="button"
-                onClick={() => handleReleasePayment(idx)}
-                disabled={releasingKey === key}
-                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                title="Release payment"
-              >
-                {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
-              </button>
+                      const canRelease = !paid && completedRow && !safeInFlight;
 
-              {/* SAFE (multisig) */}
-              <SafePayButton
-                bidId={Number(acceptedBid.bidId)}
-                milestoneIndex={idx}
-                amountUSD={Number(m?.amount || 0)}
-                disabled={!canRelease || releasingKey === key}
-onQueued={async () => {
-  const k = msKey(Number(acceptedBid.bidId), idx);
-  addSafePending(k);
-  setReleasingKey(k);
-  try {
-    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
-  } catch {}
-  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 pr-4">M{idx + 1}</td>
+                          <td className="py-2 pr-4">{m.name || '—'}</td>
+                          <td className="py-2 pr-4">
+                            {m.amount ? currency.format(Number(m.amount)) : '—'}
+                          </td>
+                          <td className="py-2 pr-4">{status}</td>
+                          <td className="py-2 pr-4">
+                            {(src.paymentTxHash || src.safePaymentTxHash)
+                              ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
+                              : '—'}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {canRelease ? (
+                              <div className="flex items-center gap-2">
+                                {/* Manual */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleReleasePayment(idx)}
+                                  disabled={releasingKey === key}
+                                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                  title="Release payment"
+                                >
+                                  {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+                                </button>
 
-  await refreshApproved(acceptedBid.bidId);   // 👈 add this
-  await refreshProofs();
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-                }}
-              />
-            </div>
-          ) : (
-            <>
-              {paid ? (
-                <span className="text-green-700 text-xs font-medium">Paid</span>
-              ) : safeInFlight ? (
-                <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
-              ) : null}
-            </>
-          )}
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-sm text-gray-500">No approved bid yet.</p>
-      )}
-    </div>
+                                {/* SAFE (multisig) */}
+                                <SafePayButton
+                                  bidId={Number(acceptedBid.bidId)}
+                                  milestoneIndex={idx}
+                                  amountUSD={Number(m?.amount || 0)}
+                                  disabled={!canRelease || releasingKey === key}
+                                  onQueued={async () => {
+                                    const k = msKey(Number(acceptedBid.bidId), idx);
+                                    addSafePending(k);
+                                    setReleasingKey(k);
+                                    try {
+                                      payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
+                                    } catch {}
+                                    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+                                    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+
+                                    await refreshApproved(acceptedBid.bidId);
+                                    await refreshProofs();
+                                    try {
+                                      const next = await getBids(projectIdNum);
+                                      setBids(Array.isArray(next) ? next : []);
+                                    } catch {}
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                {paid ? (
+                                  <span className="text-green-700 text-xs font-medium">Paid</span>
+                                ) : safeInFlight ? (
+                                  <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
+                                ) : null}
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No approved bid yet.</p>
+            )}
+          </div>
         </section>
       )}
 
