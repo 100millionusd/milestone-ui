@@ -341,30 +341,28 @@ function isCompleted(m: any): boolean {
 // ---- replace your current isPaid with this
 function isPaid(m: any): boolean {
   const status = String(m?.status ?? '').toLowerCase();
-  const rawStr = JSON.stringify(m || {}).toLowerCase();
+  const raw = JSON.stringify(m || {}).toLowerCase();
+
   return !!(
     m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||   // Safe paid hash
+    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||   // Safe hash counts as paid
     m?.paymentDate   || m?.payment_date   ||
     m?.txHash        || m?.tx_hash        ||
     m?.paidAt        || m?.paid_at        ||
     m?.paid === true || m?.isPaid === true ||
     status === 'paid' || status === 'executed' || status === 'complete' ||
-    status === 'completed' || status === 'released' ||
-    rawStr.includes('"payment_status":"released"') ||     // backend variant
-    m?.hash // legacy fallback
+    status === 'completed' || status === 'released' ||                // released = paid
+    raw.includes('"payment_status":"released"') ||                    // backend variant
+    m?.hash // legacy
   );
 }
 
 // ---- replace your current hasSafeMarker with this
 function hasSafeMarker(m: any): boolean {
   if (!m) return false;
-  const s = String(
-    m?.safeStatus ?? m?.safe_status ?? m?.paymentStatus ?? m?.payment_status ?? ''
-  ).toLowerCase();
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
 
   const direct =
-    m?.paymentPending ||
     m?.safeTxHash || m?.safe_tx_hash ||
     m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.safeNonce || m?.safe_nonce ||
@@ -373,8 +371,8 @@ function hasSafeMarker(m: any): boolean {
 
   if (direct) return true;
 
-  const rawStr = JSON.stringify(m).toLowerCase();
-  return rawStr.includes('"safe') || rawStr.includes('gnosis') || rawStr.includes('"payment_status":"released"');
+  const raw = JSON.stringify(m || {}).toLowerCase();
+  return raw.includes('"safe') || raw.includes('gnosis') || raw.includes('"payment_status":"released"');
 }
 
   function isReadyToPay(m: any): boolean {
@@ -452,21 +450,37 @@ async function pollUntilPaid(
       const bid = await getBid(bidId); // no-store is handled in lib/api
       const m = bid?.milestones?.[milestoneIndex];
 
- if (!m) { /* keep polling */ }
-else if (isPaid(m)) {
-  removePending(key);                                  // paid -> clear local pending
-  setBids(prev => { /* merge server milestone */ });
+ if (!m) {
+  // keep polling
+} else if (isPaid(m)) {
+  removePending(key);                               // only clear on PAID
+  setBids(prev => prev.map(b => {
+    const match = ((b as any).bidId ?? (b as any).id) === bidId;
+    if (!match) return b;
+    const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+    const srvM = (m as any);
+    ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+    return { ...b, milestones: ms };
+  }));
   try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
   if (typeof router?.refresh === 'function') router.refresh();
-  emitPayDone(bidId, milestoneIndex);                  // broadcast DONE only when paid
+  emitPayDone(bidId, milestoneIndex);               // broadcast DONE only when PAID
   return;
 } else if (hasSafeMarker(m)) {
-  // queued/submitted/executing — keep local pending so button stays hidden
-  setBids(prev => { /* merge server milestone */ });   // refresh UI with Safe markers
+  // queued/submitted/executing — keep local "pending" so both buttons stay hidden
+  setBids(prev => prev.map(b => {
+    const match = ((b as any).bidId ?? (b as any).id) === bidId;
+    if (!match) return b;
+    const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+    const srvM = (m as any);
+    ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+    return { ...b, milestones: ms };
+  }));
   try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
   if (typeof router?.refresh === 'function') router.refresh();
-  // do NOT removePending, do NOT emitPayDone — continue polling
+  // DO NOT removePending, DO NOT emitPayDone — keep polling
 }
+
     } catch (err: any) {
       // If we lost auth, unstick the chip so it doesn't hang forever.
       if (err?.status === 401 || err?.status === 403) {
