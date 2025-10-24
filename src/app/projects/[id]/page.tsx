@@ -987,21 +987,30 @@ async function handleReleasePayment(idx: number) {
                   </thead>
                   <tbody>
                     {acceptedMilestones.map((m, idx) => {
-                    const raw = JSON.stringify(m || {}).toLowerCase();
-                    const paid = !!m.paymentTxHash || !!m.paymentDate || raw.includes('"status":"paid"');
-                    const completedRow = paid || !!m.completed;
+ const raw = JSON.stringify(m || {}).toLowerCase();
+const paid = !!m.paymentTxHash || !!m.paymentDate || raw.includes('"status":"paid"');
+const completedRow = paid || !!m.completed;
 
+// mirror status logic from Milestones tab
+const key = `${Number(acceptedBid.bidId)}:${idx}`;
+const hasProofNow = !!m.proof || !!proofJustSent[key];
 
-                      // 👇 show "submitted" immediately after upload
-                      const key = acceptedBid ? msKey(Number(acceptedBid.bidId), idx) : null;
-                      const hasProofNow = !!m.proof || (key ? !!proofJustSent[key] : false);
-                      const status = paid
-                        ? 'paid'
-                        : completedRow
-                          ? 'completed'
-                          : hasProofNow
-                            ? 'submitted'
-                            : 'pending';
+const safeInFlight =
+  !!m.paymentPending ||
+  /"safe|gnosis|safe_status|safepaymenttxhash|awaiting|executed|success/.test(raw);
+
+const status = paid
+  ? 'paid'
+  : safeInFlight
+    ? 'payment_pending'
+    : completedRow
+      ? 'completed'
+      : hasProofNow
+        ? 'submitted'
+        : 'pending';
+
+// enable release only when not paid and not in Safe flow
+const canRelease = !paid && completedRow && !safeInFlight;
 
                       return (
                         <tr key={idx} className="border-t">
