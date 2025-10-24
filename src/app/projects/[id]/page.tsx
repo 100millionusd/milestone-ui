@@ -209,6 +209,32 @@ function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
+// ---- payment helpers (Safe + manual) ----
+function isPaidMs(m: any): boolean {
+  const status = String(m?.status ?? '').toLowerCase();
+  return !!(
+    m?.paymentTxHash || m?.payment_tx_hash ||
+    m?.paymentDate   || m?.payment_date   ||
+    m?.txHash        || m?.tx_hash        ||
+    m?.paidAt        || m?.paid_at        ||
+    m?.paid === true || m?.isPaid === true ||
+    status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed'
+  );
+}
+function hasSafeMarkerMs(m: any): boolean {
+  if (!m) return false;
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  if (
+    m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash ||
+    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
+    m?.safeNonce || m?.safe_nonce ||
+    m?.safeExecutedAt || m?.safe_executed_at ||
+    (s && /queued|pending|submitted|awaiting_exec|executed|success/.test(s))
+  ) return true;
+  const raw = JSON.stringify(m).toLowerCase();
+  return raw.includes('"safe') || raw.includes('gnosis');
+}
+
 // --- milestone key helper (for local “just submitted” flag)
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
@@ -233,6 +259,13 @@ export default function ProjectDetailPage() {
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   // track which (bidId:milestoneIndex) is releasing now
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
+
+  // track Safe/EOA "queued" locally so buttons hide immediately
+const [safePending, setSafePending] = useState<Set<string>>(new Set());
+const addSafePending = (key: string) =>
+  setSafePending(prev => { const next = new Set(prev); next.add(key); return next; });
+const removeSafePending = (key: string) =>
+  setSafePending(prev => { const next = new Set(prev); next.delete(key); return next; });
 
   // ✅ Null-safe view of bids (prevents `Cannot read properties of null`)
   const safeBids = Array.isArray(bids)
@@ -370,21 +403,25 @@ useEffect(() => {
   try { payChanRef.current = new BroadcastChannel('mx-payments'); } catch {}
   const bc = payChanRef.current;
   if (bc) {
-    bc.onmessage = async (e: MessageEvent) => {
-      const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-      if (!type) return;
+  bc.onmessage = async (e: MessageEvent) => {
+    const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+    if (!type) return;
 
-      // Always refresh views when we hear about payments/archives
-      if (type === 'mx:pay:queued') {
-        pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
-      }
-      await refreshProofs();
-      try {
-        const next = await getBids(projectIdNum);
-        setBids(Array.isArray(next) ? next : []);
-      } catch {}
-    };
-  }
+    if (type === 'mx:pay:queued') {
+      addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+      pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+    }
+    if (type === 'mx:pay:done') {
+      removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+    }
+
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
+  };
+}
   return () => { try { bc?.close(); } catch {} };
 }, [projectIdNum]);
 
@@ -519,6 +556,7 @@ useEffect(() => {
           const next = await getBids(projectIdNum);
           setBids(Array.isArray(next) ? next : []);
         } catch {}
+        removeSafePending(msKey(bidId, milestoneIndex));
         try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
         return;
       }
@@ -1064,23 +1102,26 @@ async function handleReleasePayment(idx: number) {
               </tr>
             </thead>
             <tbody>
-              {acceptedMilestones.map((m, idx) => {
-                const paid = !!m.paymentTxHash;
-                const completedRow = paid || !!m.completed;
+ {acceptedMilestones.map((m, idx) => {
+  const key = `${Number(acceptedBid.bidId)}:${idx}`;
+  const paid = isPaidMs(m);
+  const pendingLocal = safePending.has(key);
+  const safeInFlight = hasSafeMarkerMs(m) || !!m?.paymentPending || pendingLocal;
+  const completedRow = paid || !!m?.completed;
 
-                // mirror status logic from Milestones tab
-                const key = `${Number(acceptedBid.bidId)}:${idx}`;
-                const hasProofNow = !!m.proof || !!proofJustSent[key];
-                const status = paid
-                  ? 'paid'
-                  : completedRow
-                  ? 'completed'
-                  : hasProofNow
-                  ? 'submitted'
-                  : 'pending';
+  const hasProofNow = !!m?.proof || !!proofJustSent[key];
+  const status = paid
+    ? 'paid'
+    : safeInFlight
+      ? 'payment_pending'
+      : completedRow
+        ? 'completed'
+        : hasProofNow
+          ? 'submitted'
+          : 'pending';
 
-                // enable release when not paid and either completed or at least submitted
-                const canRelease = !paid && completedRow;
+  const canRelease = !paid && completedRow && !safeInFlight;
+
 
                 return (
                   <tr key={idx} className="border-t">
@@ -1094,34 +1135,47 @@ async function handleReleasePayment(idx: number) {
                       {m.paymentTxHash ? `${String(m.paymentTxHash).slice(0, 10)}…` : '—'}
                     </td>
  <td className="py-2 pr-4">
-  <div className="flex items-center gap-2">
-    {/* Manual (existing) */}
-    <button
-      type="button"
-      onClick={() => handleReleasePayment(idx)}
-      disabled={!canRelease || releasingKey === key}
-      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-      title={canRelease ? 'Release payment' : 'Not ready for payment'}
-    >
-      {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
-    </button>
+  {canRelease ? (
+    <div className="flex items-center gap-2">
+      {/* Manual */}
+      <button
+        type="button"
+        onClick={() => handleReleasePayment(idx)}
+        disabled={releasingKey === key}
+        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+        title="Release payment"
+      >
+        {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+      </button>
 
-    {/* SAFE (multisig) */}
- <SafePayButton
-  bidId={Number(acceptedBid.bidId)}
-  milestoneIndex={idx}
-  amountUSD={Number(m?.amount || 0)}
-  onQueued={async () => {
-    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
-    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-    await refreshProofs();
-    try {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-  }}
-    />
-  </div>
+      {/* SAFE (multisig) */}
+      <SafePayButton
+        bidId={Number(acceptedBid.bidId)}
+        milestoneIndex={idx}
+        amountUSD={Number(m?.amount || 0)}
+        disabled={releasingKey === key}
+        onQueued={async () => {
+          addSafePending(key);
+          setReleasingKey(key);
+          try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
+          pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+          await refreshProofs();
+          try {
+            const next = await getBids(projectIdNum);
+            setBids(Array.isArray(next) ? next : []);
+          } catch {}
+        }}
+      />
+    </div>
+  ) : (
+    <>
+      {paid ? (
+        <span className="text-green-700 text-xs font-medium">Paid</span>
+      ) : safeInFlight ? (
+        <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
+      ) : null}
+    </>
+  )}
 </td>
                   </tr>
                 );

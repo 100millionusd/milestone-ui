@@ -945,11 +945,8 @@ setBids(prev => prev.map(b => {
   onQueued={() => {
     const key = mkKey(bid.bidId, origIdx);
     addPending(key);
-    // broadcast so the other page sees "queued" immediately
     emitPayQueued(bid.bidId, origIdx);
-    // start local polling too
     pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-    // pull fresh server data ASAP
     router.refresh();
   }}
 />
