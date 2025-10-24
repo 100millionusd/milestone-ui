@@ -139,33 +139,33 @@ function queueBroadcast(bidId: number, milestoneIndex: number) {
   pollUntilPaid(bidId, milestoneIndex).catch(() => {});
 }
 
+// cross-page payment sync (create + attach listener together)
 useEffect(() => {
-  try { bcRef.current = new BroadcastChannel('mx-payments'); } catch {}
-  return () => { try { bcRef.current?.close(); } catch {} };
-}, []);
-useEffect(() => {
-  if (!bcRef.current) return;
-  bcRef.current.onmessage = (e: MessageEvent) => {
-    if (!e?.data || typeof e.data !== 'object') return;
-    const { type, bidId, milestoneIndex } = e.data as any;
+  let bc: BroadcastChannel | null = null;
+  try {
+    bc = new BroadcastChannel('mx-payments');
+    bcRef.current = bc;
+  } catch {}
 
-    if (type === 'mx:pay:queued') {
-      // mirror pending + start polling here too
-      addPending(mkKey(bidId, milestoneIndex));
-      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-      loadProofs(true);
-      return;
-    }
-    if (type === 'mx:pay:done') {
-      removePending(mkKey(bidId, milestoneIndex));
-      loadProofs(true);
-      return;
-    }
-    if (type === 'mx:ms:updated') {
-      loadProofs(true);
-      return;
-    }
-  };
+  if (bc) {
+    bc.onmessage = (e: MessageEvent) => {
+      const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+      if (!type) return;
+
+      if (type === 'mx:pay:queued') {
+        addPending(mkKey(bidId, milestoneIndex));
+        pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+        loadProofs(true);
+      } else if (type === 'mx:pay:done') {
+        removePending(mkKey(bidId, milestoneIndex));
+        loadProofs(true);
+      } else if (type === 'mx:ms:updated') {
+        loadProofs(true);
+      }
+    };
+  }
+
+  return () => { try { bc?.close(); } catch {} };
 }, [loadProofs]);
 
   async function loadProofs(forceRefresh = false) {
@@ -941,13 +941,16 @@ setBids(prev => prev.map(b => {
   bidId={bid.bidId}
   milestoneIndex={origIdx}
   amountUSD={Number(m?.amount || 0)}
-  onQueued={() => queueBroadcast(bid.bidId, origIdx)}
   disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
   onQueued={() => {
     const key = mkKey(bid.bidId, origIdx);
     addPending(key);
+    // broadcast so the other page sees "queued" immediately
+    emitPayQueued(bid.bidId, origIdx);
+    // start local polling too
     pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-    router.refresh(); // pull fresh server data ASAP
+    // pull fresh server data ASAP
+    router.refresh();
   }}
 />
   </div>
