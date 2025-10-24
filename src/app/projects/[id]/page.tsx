@@ -1134,7 +1134,7 @@ const canRelease = !paid && completedRow && !safeInFlight;
                           </td>
                         </tr>
                       );
-                    })
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1219,97 +1219,95 @@ const canRelease = !paid && completedRow && !safeInFlight;
                 <th className="py-2 pr-4">Action</th>
               </tr>
             </thead>
-            <tbody>
- // Prefer full milestone (has Safe markers) else fall back
-const src =
-  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+ <tbody>
+  {acceptedMilestones.map((m, idx) => {
+    // Prefer full milestone (has Safe markers) else fall back
+    const src =
+      (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-const key = `${Number(acceptedBid.bidId)}:${idx}`;
-const paid = isPaidMs(src);
-const pendingLocal = safePending.has(key);
-const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
-const completedRow = paid || !!src?.completed;
+    const key = `${Number(acceptedBid.bidId)}:${idx}`;
+    const paid = isPaidMs(src);
+    const pendingLocal = safePending.has(key);
+    const safeInFlight = hasSafeMarkerMs(src) || !!src?.paymentPending || pendingLocal;
+    const completedRow = paid || !!src?.completed;
 
-const hasProofNow = !!src?.proof || !!proofJustSent[key];
-const status = paid
-  ? 'paid'
-  : safeInFlight
-    ? 'payment_pending'
-    : completedRow
-      ? 'completed'
-      : hasProofNow
-        ? 'submitted'
-        : 'pending';
+    const hasProofNow = !!src?.proof || !!proofJustSent[key];
+    const status = paid
+      ? 'paid'
+      : safeInFlight
+        ? 'payment_pending'
+        : completedRow
+          ? 'completed'
+          : hasProofNow
+            ? 'submitted'
+            : 'pending';
 
-const canRelease = !paid && completedRow && !safeInFlight;
+    const canRelease = !paid && completedRow && !safeInFlight;
 
-                return (
-                  <tr key={idx} className="border-t">
-                    <td className="py-2 pr-4">M{idx + 1}</td>
-                    <td className="py-2 pr-4">{m.name || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {m.amount ? currency.format(Number(m.amount)) : '—'}
-                    </td>
-                    <td className="py-2 pr-4">{status}</td>
-                    <td className="py-2 pr-4">
-                      {(src.paymentTxHash || src.safePaymentTxHash)
-  ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
-  : '—'}
-                    </td>
- <td className="py-2 pr-4">
-  {canRelease ? (
-    <div className="flex items-center gap-2">
-      {/* Manual */}
-      <button
-        type="button"
-        onClick={() => handleReleasePayment(idx)}
-        disabled={releasingKey === key}
-        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-        title="Release payment"
-      >
-        {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
-      </button>
+    return (
+      <tr key={idx} className="border-t">
+        <td className="py-2 pr-4">M{idx + 1}</td>
+        <td className="py-2 pr-4">{m.name || '—'}</td>
+        <td className="py-2 pr-4">
+          {m.amount ? currency.format(Number(m.amount)) : '—'}
+        </td>
+        <td className="py-2 pr-4">{status}</td>
+        <td className="py-2 pr-4">
+          {(src.paymentTxHash || src.safePaymentTxHash)
+            ? `${String(src.paymentTxHash || src.safePaymentTxHash).slice(0, 10)}…`
+            : '—'}
+        </td>
+        <td className="py-2 pr-4">
+          {canRelease ? (
+            <div className="flex items-center gap-2">
+              {/* Manual */}
+              <button
+                type="button"
+                onClick={() => handleReleasePayment(idx)}
+                disabled={releasingKey === key}
+                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                title="Release payment"
+              >
+                {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
+              </button>
 
-      {/* SAFE (multisig) */}
- <SafePayButton
-  bidId={Number(acceptedBid.bidId)}
-  milestoneIndex={idx}
-  amountUSD={Number(m?.amount || 0)}
-  disabled={!canRelease || releasingKey === key}
-  onQueued={async () => {
-  const k = msKey(Number(acceptedBid.bidId), idx);
-  addSafePending(k);
-  setReleasingKey(k);
-  try {
-    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
-  } catch {}
-  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-
-  // ✅ bust cache so the next fetch sees updated milestone_payments state
-  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-
-  await refreshProofs();
-  try {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  } catch {}
-}}
-/>
-    </div>
-  ) : (
-    <>
-      {paid ? (
-        <span className="text-green-700 text-xs font-medium">Paid</span>
-      ) : safeInFlight ? (
-        <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
-      ) : null}
-    </>
-  )}
-</td>
-                  </tr>
-                );
-              })
-            </tbody>
+              {/* SAFE (multisig) */}
+              <SafePayButton
+                bidId={Number(acceptedBid.bidId)}
+                milestoneIndex={idx}
+                amountUSD={Number(m?.amount || 0)}
+                disabled={!canRelease || releasingKey === key}
+                onQueued={async () => {
+                  const k = msKey(Number(acceptedBid.bidId), idx);
+                  addSafePending(k);
+                  setReleasingKey(k);
+                  try {
+                    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
+                  } catch {}
+                  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+                  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+                  await refreshProofs();
+                  try {
+                    const next = await getBids(projectIdNum);
+                    setBids(Array.isArray(next) ? next : []);
+                  } catch {}
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              {paid ? (
+                <span className="text-green-700 text-xs font-medium">Paid</span>
+              ) : safeInFlight ? (
+                <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
+              ) : null}
+            </>
+          )}
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
           </table>
         </div>
       ) : (
