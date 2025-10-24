@@ -277,6 +277,12 @@ useEffect(() => {
     .catch(() => setApprovedFull(null));
 }, [approvedBidId]);
 
+async function refreshApproved(bidId?: number) {
+  const id = Number(bidId ?? approvedBidId);
+  if (!Number.isFinite(id)) return;
+  try { setApprovedFull(await getBid(id)); } catch {}
+}
+
   // track Safe/EOA "queued" locally so buttons hide immediately
 // ===== Persist "payment pending" across refreshes (Project page) =====
 const PENDING_LS_KEY = 'mx_pay_pending';
@@ -458,15 +464,16 @@ useEffect(() => {
     const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
     if (!type) return;
 
-    if (type === 'mx:pay:queued') {
-      addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-      pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
-    }
-    if (type === 'mx:pay:done') {
-      removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-    }
+ if (type === 'mx:pay:queued') {
+  addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+  pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+}
+if (type === 'mx:pay:done') {
+  removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
+}
 
-    await refreshProofs();
+await refreshApproved(bidId);    // 👈 add this
+await refreshProofs();
     try {
       const next = await getBids(projectIdNum);
       setBids(Array.isArray(next) ? next : []);
@@ -586,9 +593,9 @@ useEffect(() => {
     const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
     for (let i = 0; i < ms.length; i++) {
       const k = msKey(Number(bid.bidId), i);
-      if (isPaidMs(ms[i]) || hasSafeMarkerMs(ms[i])) {
-        removeSafePending(k);
-      }
+      if (isPaidMs(ms[i])) {
+  removeSafePending(k);    // only clear when truly paid
+}
     }
   }
 
@@ -652,18 +659,30 @@ useEffect(() => {
     !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash ||
     /"safe|gnosis|safe_status|awaiting|executed|success|released/.test(raw);
 
-  if (paid || hasSafeMarker) {
-    await refreshProofs();
-    try {
-      // ✅ bust any fetch cache the api layer may hold
-      try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    } catch {}
-    removeSafePending(msKey(bidId, milestoneIndex));
-    try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
-    return;
-  }
+ if (paid) {
+  await refreshApproved(bidId);   // 👈 add (see step 3)
+  await refreshProofs();
+  try {
+    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
+  removeSafePending(msKey(bidId, milestoneIndex));  // clear only when paid
+  try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+  return;
+}
+
+if (hasSafeMarker) {
+  // still in-flight (queued/submitted/executing) → keep local pending, don’t post "done"
+  await refreshApproved(bidId);   // 👈 add (see step 3)
+  await refreshProofs();
+  try {
+    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
+  // NOTE: no removeSafePending, no mx:pay:done yet
+}
 } catch {
       // ignore, keep polling
     }
@@ -1277,20 +1296,22 @@ const canRelease = !paid && completedRow && !safeInFlight;
                 milestoneIndex={idx}
                 amountUSD={Number(m?.amount || 0)}
                 disabled={!canRelease || releasingKey === key}
-                onQueued={async () => {
-                  const k = msKey(Number(acceptedBid.bidId), idx);
-                  addSafePending(k);
-                  setReleasingKey(k);
-                  try {
-                    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
-                  } catch {}
-                  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
-                  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-                  await refreshProofs();
-                  try {
-                    const next = await getBids(projectIdNum);
-                    setBids(Array.isArray(next) ? next : []);
-                  } catch {}
+onQueued={async () => {
+  const k = msKey(Number(acceptedBid.bidId), idx);
+  addSafePending(k);
+  setReleasingKey(k);
+  try {
+    payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
+  } catch {}
+  pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+
+  await refreshApproved(acceptedBid.bidId);   // 👈 add this
+  await refreshProofs();
+  try {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  } catch {}
                 }}
               />
             </div>
