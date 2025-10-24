@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
+import { getProposal, getBids, getBid, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
@@ -364,6 +364,30 @@ export default function ProjectDetailPage() {
     } catch {}
   });
 
+  // Cross‑page payment sync
+const payChanRef = useRef<BroadcastChannel | null>(null);
+useEffect(() => {
+  try { payChanRef.current = new BroadcastChannel('mx-payments'); } catch {}
+  const bc = payChanRef.current;
+  if (bc) {
+    bc.onmessage = async (e: MessageEvent) => {
+      const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+      if (!type) return;
+
+      // Always refresh views when we hear about payments/archives
+      if (type === 'mx:pay:queued') {
+        pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+      }
+      await refreshProofs();
+      try {
+        const next = await getBids(projectIdNum);
+        setBids(Array.isArray(next) ? next : []);
+      } catch {}
+    };
+  }
+  return () => { try { bc?.close(); } catch {} };
+}, [projectIdNum]);
+
   // Refresh proofs when opening Files tab
   useEffect(() => {
     if (tab === 'files') { refreshProofs(); }
@@ -477,6 +501,34 @@ export default function ProjectDetailPage() {
   // -------- Derived -----------
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
+
+  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 20, intervalMs = 3000) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const bid = await getBid(bidId);
+      const m = bid?.milestones?.[milestoneIndex];
+
+      const status = String(m?.status || '').toLowerCase();
+      const paid = !!m?.paymentTxHash || !!m?.paymentDate || m?.paid === true || status === 'paid' || status === 'executed' || status === 'complete' || status === 'completed';
+      const hasSafeMarker =
+        !!m?.paymentPending || !!m?.safeTxHash || !!m?.safePaymentTxHash || /"safe|gnosis"/i.test(JSON.stringify(m || {}));
+
+      if (paid || hasSafeMarker) {
+        await refreshProofs();
+        try {
+          const next = await getBids(projectIdNum);
+          setBids(Array.isArray(next) ? next : []);
+        } catch {}
+        try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+        return;
+      }
+    } catch {
+      // ignore, keep polling
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+}
+
   // Admin action: release a milestone payment
 async function handleReleasePayment(idx: number) {
   if (!acceptedBid) return;
@@ -490,14 +542,16 @@ async function handleReleasePayment(idx: number) {
     setReleasingKey(key);
     await payMilestone(bidIdNum, idx);
 
-    // Refresh local views so status/tx update
+    // ✨ NEW:
+    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: bidIdNum, milestoneIndex: idx }); } catch {}
+    pollUntilPaid(bidIdNum, idx).catch(() => {});
+
+    // refresh local
     await refreshProofs();
     try {
       const next = await getBids(projectIdNum);
       setBids(Array.isArray(next) ? next : []);
-    } catch {
-      // ignore
-    }
+    } catch {}
     alert('Payment released.');
   } catch (e: any) {
     alert(e?.message || 'Failed to release payment.');
@@ -1053,19 +1107,19 @@ async function handleReleasePayment(idx: number) {
     </button>
 
     {/* SAFE (multisig) */}
-    <SafePayButton
-      bidId={Number(acceptedBid.bidId)}
-      milestoneIndex={idx}
-      amountUSD={Number(m?.amount || 0)}
-      disabled={!canRelease || releasingKey === key || !!m?.paymentPending || m?.status === 'paid'}
-      onQueued={async () => {
-        // refresh like your manual flow
-        await refreshProofs();
-        try {
-          const next = await getBids(projectIdNum);
-          setBids(Array.isArray(next) ? next : []);
-        } catch {}
-      }}
+ <SafePayButton
+  bidId={Number(acceptedBid.bidId)}
+  milestoneIndex={idx}
+  amountUSD={Number(m?.amount || 0)}
+  onQueued={async () => {
+    try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
+    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+    await refreshProofs();
+    try {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    } catch {}
+  }}
     />
   </div>
 </td>

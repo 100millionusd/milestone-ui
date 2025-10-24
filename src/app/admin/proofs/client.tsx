@@ -120,6 +120,25 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // cross-page payment sync
 const bcRef = useRef<BroadcastChannel | null>(null);
+// ---- x‑page sync helpers ----
+function emitPayQueued(bidId: number, milestoneIndex: number) {
+  try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
+}
+function emitPayDone(bidId: number, milestoneIndex: number) {
+  try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+}
+function emitMilestonesUpdated(detail: any) {
+  try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
+  try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
+}
+// one-liner to queue + poll (reuse everywhere)
+function queueBroadcast(bidId: number, milestoneIndex: number) {
+  const key = mkKey(bidId, milestoneIndex);
+  addPending(key);
+  emitPayQueued(bidId, milestoneIndex);
+  pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+}
+
 useEffect(() => {
   try { bcRef.current = new BroadcastChannel('mx-payments'); } catch {}
   return () => { try { bcRef.current?.close(); } catch {} };
@@ -129,9 +148,22 @@ useEffect(() => {
   bcRef.current.onmessage = (e: MessageEvent) => {
     if (!e?.data || typeof e.data !== 'object') return;
     const { type, bidId, milestoneIndex } = e.data as any;
-    if (type === 'mx:pay:queued' || type === 'mx:pay:done') {
-      // refresh + let our local logic hide buttons/chips
+
+    if (type === 'mx:pay:queued') {
+      // mirror pending + start polling here too
+      addPending(mkKey(bidId, milestoneIndex));
+      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
       loadProofs(true);
+      return;
+    }
+    if (type === 'mx:pay:done') {
+      removePending(mkKey(bidId, milestoneIndex));
+      loadProofs(true);
+      return;
+    }
+    if (type === 'mx:ms:updated') {
+      loadProofs(true);
+      return;
     }
   };
 }, [loadProofs]);
@@ -412,6 +444,7 @@ async function pollUntilPaid(
 }));
         try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
         if (typeof router?.refresh === 'function') router.refresh();
+        emitPayDone(bidId, milestoneIndex);
         return;
       }
     } catch (err: any) {
@@ -461,20 +494,22 @@ setBids(prev => prev.map(b => {
   };
 
   const handlePay = async (bidId: number, milestoneIndex: number) => {
-    if (!confirm('Release payment for this milestone?')) return;
-    try {
-      setProcessing(`pay-${bidId}-${milestoneIndex}`);
-      await payMilestone(bidId, milestoneIndex);
-      const key = mkKey(bidId, milestoneIndex);
-      addPending(key);
-      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-    } catch (e: any) {
-      alert(e?.message || 'Payment failed');
-      removePending(mkKey(bidId, milestoneIndex));
-    } finally {
-      setProcessing(null);
-    }
-  };
+  if (!confirm('Release payment for this milestone?')) return;
+  try {
+    setProcessing(`pay-${bidId}-${milestoneIndex}`);
+    await payMilestone(bidId, milestoneIndex);
+    const key = mkKey(bidId, milestoneIndex);
+    addPending(key);
+    // ✨ NEW:
+    emitPayQueued(bidId, milestoneIndex);
+    pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+  } catch (e: any) {
+    alert(e?.message || 'Payment failed');
+    removePending(mkKey(bidId, milestoneIndex));
+  } finally {
+    setProcessing(null);
+  }
+};
 
   const handleReject = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Reason for rejection (optional):') || '';
@@ -510,6 +545,9 @@ setBids(prev => prev.map(b => {
           archivedAt: new Date().toISOString(),
         },
       }));
+
+      emitMilestonesUpdated({ bidId, milestoneIndex, archived: true, reason });
+
     } catch (e: any) {
       alert(e?.message || 'Archive failed');
     } finally {
@@ -531,6 +569,9 @@ setBids(prev => prev.map(b => {
           archivedAt: null,
         },
       }));
+
+      emitMilestonesUpdated({ bidId, milestoneIndex, archived: false });
+
     } catch (e: any) {
       alert(e?.message || 'Unarchive failed');
     } finally {
@@ -555,6 +596,8 @@ setBids(prev => prev.map(b => {
         }
       }
       await hydrateArchiveStatuses(bids);
+      // ✨ tell other tabs to refresh
+     emitMilestonesUpdated({ bulk: true });
     } catch (e: any) {
       alert(e?.message || 'Unarchive all failed');
     } finally {
@@ -898,6 +941,7 @@ setBids(prev => prev.map(b => {
   bidId={bid.bidId}
   milestoneIndex={origIdx}
   amountUSD={Number(m?.amount || 0)}
+  onQueued={() => queueBroadcast(bid.bidId, origIdx)}
   disabled={processing === `pay-${bid.bidId}-${origIdx}` || payIsPending}
   onQueued={() => {
     const key = mkKey(bid.bidId, origIdx);
