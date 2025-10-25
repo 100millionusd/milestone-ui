@@ -1,4 +1,3 @@
-// src/app/projects/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -14,10 +13,6 @@ import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
-
-// ---- use centralized helpers (keep old names used in file)
-const isPaidMs = msIsPaid;
-const hasSafeMarkerMs = msHasSafeMarker;
 
 // ---------------- Consts ----------------
 const PINATA_GATEWAY = (() => {
@@ -185,7 +180,7 @@ function isImageName(n?: string) {
   return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
 }
 
-// key for local pending map
+// ---- local helpers: keys ----
 const msKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // -------------- Component ----------------
@@ -205,6 +200,26 @@ export default function ProjectDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
+
+  // --- SINGLE-POLL + DEBOUNCED REFRESH HELPERS ---
+  const activePollsRef = useRef<Set<string>>(new Set());
+  const makeKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
+  function startPollUntilPaid(bidId: number, idx: number, tries = 100, intervalMs = 3000) {
+    const k = makeKey(bidId, idx);
+    if (activePollsRef.current.has(k)) return;
+    activePollsRef.current.add(k);
+    pollUntilPaid(bidId, idx, tries, intervalMs)
+      .catch(() => {})
+      .finally(() => activePollsRef.current.delete(k));
+  }
+  const refreshDebounceRef = useRef<number | null>(null);
+  function requestDebouncedRefresh(run: () => void | Promise<void>, delay = 500) {
+    if (refreshDebounceRef.current) return;
+    refreshDebounceRef.current = window.setTimeout(() => {
+      refreshDebounceRef.current = null;
+      Promise.resolve(run()).catch(() => {});
+    }, delay);
+  }
 
   // Full approved bid
   const [approvedFull, setApprovedFull] = useState<any>(null);
@@ -380,10 +395,10 @@ export default function ProjectDetailPage() {
   // Re-fetch on archive/unarchive
   useMilestonesUpdated(async () => {
     await refreshProofs();
-    try {
+    requestDebouncedRefresh(async () => {
       const next = await getBids(projectIdNum);
       setBids(Array.isArray(next) ? next : []);
-    } catch {}
+    }, 500);
   });
 
   // Cross-page payment sync
@@ -398,18 +413,17 @@ export default function ProjectDetailPage() {
 
         if (type === 'mx:pay:queued') {
           addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-          pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+          startPollUntilPaid(Number(bidId), Number(milestoneIndex));
         }
         if (type === 'mx:pay:done') {
           removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
         }
 
-        await refreshApproved(bidId);
         await refreshProofs();
-        try {
+        requestDebouncedRefresh(async () => {
           const next = await getBids(projectIdNum);
           setBids(Array.isArray(next) ? next : []);
-        } catch {}
+        }, 500);
       };
     }
     return () => { try { bc?.close(); } catch {} };
@@ -437,30 +451,30 @@ export default function ProjectDetailPage() {
   }, [projectIdNum]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('mx_pay_pending');
-      const arr: string[] = raw ? JSON.parse(raw) : [];
-      let changed = false;
+  try {
+    const raw = localStorage.getItem('mx_pay_pending');
+    const arr: string[] = raw ? JSON.parse(raw) : [];
+    let changed = false;
 
-      const migrated = arr.map(k => {
-        if (k.includes(':')) { changed = true; return k.replace(':','-'); }
-        return k;
+    const migrated = arr.map(k => {
+      if (k.includes(':')) { changed = true; return k.replace(':','-'); }
+      return k;
+    });
+
+    if (changed) {
+      localStorage.setItem('mx_pay_pending', JSON.stringify(migrated));
+      // migrate timestamps
+      arr.forEach(oldK => {
+        if (!oldK.includes(':')) return;
+        const v = localStorage.getItem(`mx_pay_pending_ts:${oldK}`);
+        if (v) {
+          localStorage.setItem(`mx_pay_pending_ts:${oldK.replace(':','-')}`, v);
+          localStorage.removeItem(`mx_pay_pending_ts:${oldK}`);
+        }
       });
-
-      if (changed) {
-        localStorage.setItem('mx_pay_pending', JSON.stringify(migrated));
-        // migrate timestamps
-        arr.forEach(oldK => {
-          if (!oldK.includes(':')) return;
-          const v = localStorage.getItem(`mx_pay_pending_ts:${oldK}`);
-          if (v) {
-            localStorage.setItem(`mx_pay_pending_ts:${oldK.replace(':','-')}`, v);
-            localStorage.removeItem(`mx_pay_pending_ts:${oldK}`);
-          }
-        });
-      }
-    } catch {}
-  }, []);
+    }
+  } catch {}
+}, []);
 
   useEffect(() => {
     const onJustSent = (ev: any) => {
@@ -544,7 +558,7 @@ export default function ProjectDetailPage() {
       const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
       for (let i = 0; i < ms.length; i++) {
         const k = msKey(Number(bid.bidId), i);
-        if (isPaidMs(ms[i])) {
+        if (msIsPaid(ms[i])) {
           removeSafePending(k);
         }
       }
@@ -565,8 +579,8 @@ export default function ProjectDetailPage() {
         if (Number.isFinite(bidId) && Number.isFinite(idx)) {
           const bid = rows.find((b: any) => Number(b.bidId) === bidId);
           const m = Array.isArray(bid?.milestones) ? bid.milestones[idx] : null;
-          if (!m || (!isPaidMs(m) && !hasSafeMarkerMs(m))) {
-            pollUntilPaid(bidId, idx).catch(() => {});
+          if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
+            startPollUntilPaid(bidId, idx);
           }
         }
       }
@@ -596,24 +610,28 @@ export default function ProjectDetailPage() {
 
         if (!m) {
           // keep polling
-        } else if (isPaidMs(m)) {
+        } else if (msIsPaid(m)) {
           await refreshApproved(bidId);
           await refreshProofs();
           try {
             try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-            const next = await getBids(projectIdNum);
-            setBids(Array.isArray(next) ? next : []);
+            requestDebouncedRefresh(async () => {
+              const next = await getBids(projectIdNum);
+              setBids(Array.isArray(next) ? next : []);
+            }, 500);
           } catch {}
           removeSafePending(msKey(bidId, milestoneIndex));
           try { payChanRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
           return;
-        } else if (hasSafeMarkerMs(m)) {
+        } else if (msHasSafeMarker(m)) {
           await refreshApproved(bidId);
           await refreshProofs();
           try {
             try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-            const next = await getBids(projectIdNum);
-            setBids(Array.isArray(next) ? next : []);
+            requestDebouncedRefresh(async () => {
+              const next = await getBids(projectIdNum);
+              setBids(Array.isArray(next) ? next : []);
+            }, 500);
           } catch {}
         }
       } catch {
@@ -627,7 +645,7 @@ export default function ProjectDetailPage() {
   async function handleReleasePayment(idx: number) {
     if (!acceptedBid) return;
     const bidIdNum = Number(acceptedBid.bidId);
-    const key = msKey(bidIdNum, idx); // use hyphenated key
+    const key = `${bidIdNum}:${idx}`;
     if (!Number.isFinite(bidIdNum)) return;
 
     if (!confirm(`Release payment for milestone #${idx + 1}?`)) return;
@@ -637,13 +655,13 @@ export default function ProjectDetailPage() {
       await payMilestone(bidIdNum, idx);
 
       try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: bidIdNum, milestoneIndex: idx }); } catch {}
-      pollUntilPaid(bidIdNum, idx).catch(() => {});
+      startPollUntilPaid(bidIdNum, idx);
 
       await refreshProofs();
-      try {
+      requestDebouncedRefresh(async () => {
         const next = await getBids(projectIdNum);
         setBids(Array.isArray(next) ? next : []);
-      } catch {}
+      }, 500);
       alert('Payment released.');
     } catch (e: any) {
       alert(e?.message || 'Failed to release payment.');
@@ -669,7 +687,7 @@ export default function ProjectDetailPage() {
 
   const msTotal = acceptedMilestones.length;
   const msCompleted = acceptedMilestones.filter((m) => m?.completed || m?.paymentTxHash).length;
-  const msPaid = acceptedMilestones.filter((m) => isPaidMs(m)).length;
+  const msPaid = acceptedMilestones.filter((m) => msIsPaid(m)).length;
 
   const lastActivity = (() => {
     const dates: (string | undefined | null)[] = [project.updatedAt, project.createdAt];
@@ -698,7 +716,7 @@ export default function ProjectDetailPage() {
     const arr = parseMilestones(b.milestones);
     arr.forEach((m, idx) => {
       if (m.completionDate) timeline.push({ at: m.completionDate, type: 'milestone_completed', label: `Milestone ${idx + 1} completed (${m.name || 'Untitled'})` });
-      if (m.paymentDate || isPaidMs(m)) timeline.push({ at: m.paymentDate || (m as any).paidAt || (m as any).safeExecutedAt, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: ((m as any).paymentTxHash || (m as any).safePaymentTxHash) ? `tx ${String((m as any).paymentTxHash || (m as any).safePaymentTxHash).slice(0, 10)}…` : undefined });
+      if (m.paymentDate || msIsPaid(m)) timeline.push({ at: m.paymentDate || (m as any).paidAt || (m as any).safeExecutedAt, type: 'milestone_paid', label: `Milestone ${idx + 1} paid`, meta: ((m as any).paymentTxHash || (m as any).safePaymentTxHash) ? `tx ${String((m as any).paymentTxHash || (m as any).safePaymentTxHash).slice(0, 10)}…` : undefined });
     });
   }
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
@@ -1031,9 +1049,9 @@ export default function ProjectDetailPage() {
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
                       const key = msKey(Number(acceptedBid?.bidId || 0), idx);
-                      const paid = isPaidMs(src);
+                      const paid = msIsPaid(src);
                       const localPending = safePending.has(key);
-                      const safeInFlight = hasSafeMarkerMs(src) || !!(src as any)?.paymentPending || localPending;
+                      const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
 
                       const completedRow = paid || !!(src as any)?.completed;
                       const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
@@ -1123,9 +1141,9 @@ export default function ProjectDetailPage() {
                         (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
                       const key = msKey(Number(acceptedBid.bidId), idx);
-                      const paid = isPaidMs(src);
+                      const paid = msIsPaid(src);
                       const pendingLocal = safePending.has(key);
-                      const safeInFlight = hasSafeMarkerMs(src) || !!(src as any)?.paymentPending || pendingLocal;
+                      const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || pendingLocal;
                       const completedRow = paid || !!(src as any)?.completed;
                       const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
 
@@ -1178,15 +1196,15 @@ export default function ProjectDetailPage() {
                                     try {
                                       payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
                                     } catch {}
-                                    pollUntilPaid(Number(acceptedBid.bidId), idx).catch(() => {});
+                                    startPollUntilPaid(Number(acceptedBid.bidId), idx);
                                     try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
 
                                     await refreshApproved(acceptedBid.bidId);
                                     await refreshProofs();
-                                    try {
+                                    requestDebouncedRefresh(async () => {
                                       const next = await getBids(projectIdNum);
                                       setBids(Array.isArray(next) ? next : []);
-                                    } catch {}
+                                    }, 500);
                                   }}
                                 />
                               </div>

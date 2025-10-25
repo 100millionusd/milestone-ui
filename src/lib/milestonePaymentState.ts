@@ -1,5 +1,3 @@
-// src/lib/milestonePaymentState.ts
-
 // Approved/completed gate (aka “milestone ready to pay”)
 export function isApproved(m: any): boolean {
   const s = String(m?.status ?? '').toLowerCase();
@@ -13,14 +11,18 @@ export function isApproved(m: any): boolean {
 }
 
 // Final “PAID” detector: treat as paid if any strong indicator is present.
+// Includes: paymentTxHash/safePaymentTxHash/txHash/paymentDate/paidAt,
+//           paid/isPaid/released booleans,
+//           status or payment_status in {paid, executed, complete, completed, released, success},
+//           or JSON blob containing "payment_status":"released" (or executed).
 export function isPaid(m: any): boolean {
   if (!m) return false;
 
-  const status     = String(m?.status ?? '').toLowerCase();
-  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const status = String(m?.status ?? '').toLowerCase();
+  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
   const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
 
-  // Strong explicit fields/flags
+  // Strong explicit flags or fields
   if (
     m?.paid === true ||
     m?.isPaid === true ||
@@ -30,21 +32,19 @@ export function isPaid(m: any): boolean {
     !!(m?.txHash || m?.tx_hash) ||
     !!(m?.paymentDate || m?.payment_date) ||
     !!(m?.paidAt || m?.paid_at) ||
-    !!(m?.safeExecutedAt || m?.safe_executed_at) ||
-    !!m?.hash // legacy
+    !!(m?.safeExecutedAt || m?.safe_executed_at)
   ) {
     return true;
   }
 
-  // Final states from any of the status fields
-  const finals = new Set(['paid','executed','complete','completed','released','success']);
+  const finals = new Set(['paid', 'executed', 'complete', 'completed', 'released', 'success']);
   if (finals.has(status) || finals.has(payStatus) || finals.has(safeStatus)) return true;
 
-  // JSON fallbacks (when server squirts raw blobs)
+  // JSON fallbacks
   try {
     const raw = JSON.stringify(m || {}).toLowerCase();
-    if (/"payment_status"\s*:\s*"(released|success|paid|completed|complete)"/.test(raw)) return true;
-    if (/"safe_status"\s*:\s*"(executed|released|success|paid)"/.test(raw)) return true;
+    if (/"payment_status"\s*:\s*"released"/.test(raw)) return true;
+    if (/"payment_status"\s*:\s*"executed"/.test(raw)) return true;
     if (/"status"\s*:\s*"(paid|executed|complete|completed|released|success)"/.test(raw)) return true;
   } catch {}
 
@@ -58,26 +58,25 @@ export function hasSafeMarker(m: any): boolean {
 
   const s   = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
   const ps  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const raw = JSON.stringify(m || {}).toLowerCase();
 
   // Only pre-execution stages are in-flight
   const inflightRegex =
     /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
 
-  if (inflightRegex.test(s) || inflightRegex.test(ps)) return true;
+  const any =
+    m?.paymentPending ||
+    m?.safeTxHash || m?.safe_tx_hash || // proposed/queued but not executed
+    m?.safeNonce || m?.safe_nonce ||
+    inflightRegex.test(s) ||
+    inflightRegex.test(ps) ||
+    /"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
+    /"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
+    // Broad fallback: any SAFE/Gnosis hint in raw blob while not in a final state
+    // (final states are already caught by isPaid(...) above)
+    /\bgnosis\b/.test(raw) || /\bsafe\b/.test(raw);
 
-  // Low-signal markers (proposed/queued but not executed)
-  if (m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash || m?.safeNonce || m?.safe_nonce) {
-    return true;
-  }
-
-  // JSON blob variants (only match inflight words)
-  try {
-    const raw = JSON.stringify(m || {}).toLowerCase();
-    if (/"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
-    if (/"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
-  } catch {}
-
-  return false;
+  return !!any;
 }
 
 // UI-level pending: show chip & hide buttons while in flight or locally queued
