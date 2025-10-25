@@ -12,36 +12,44 @@ export function isApproved(m: any): boolean {
   );
 }
 
-// Final “PAID” detector
+// Final “PAID” detector: treat as paid if any strong indicator is present.
+// Includes: paymentTxHash/safePaymentTxHash/txHash/paymentDate/paidAt,
+//           paid/isPaid/released booleans,
+//           status or payment_status in {paid, executed, complete, completed, released, success},
+//           or JSON blob containing "payment_status":"released" (or executed).
 export function isPaid(m: any): boolean {
   if (!m) return false;
 
-  const status     = String(m?.status ?? '').toLowerCase();
-  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-  const raw        = JSON.stringify(m || {}).toLowerCase();
+  const status = String(m?.status ?? '').toLowerCase();
+  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
 
-  return !!(
-    // canonical tx/timestamp markers
-    m?.paymentTxHash || m?.payment_tx_hash ||
-    m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
-    m?.txHash || m?.tx_hash ||
-    m?.paymentDate || m?.payment_date ||
-    m?.paidAt || m?.paid_at ||
-    m?.safeExecutedAt || m?.safe_executed_at || // ← important: executed == final
-    m?.paid === true || m?.isPaid === true ||
-    m?.hash /* legacy */ ||
+  // Strong explicit flags or fields
+  if (
+    m?.paid === true ||
+    m?.isPaid === true ||
+    m?.released === true ||
+    !!(m?.paymentTxHash || m?.payment_tx_hash) ||
+    !!(m?.safePaymentTxHash || m?.safe_payment_tx_hash) ||
+    !!(m?.txHash || m?.tx_hash) ||
+    !!(m?.paymentDate || m?.payment_date) ||
+    !!(m?.paidAt || m?.paid_at) ||
+    !!(m?.safeExecutedAt || m?.safe_executed_at)
+  ) {
+    return true;
+  }
 
-    // server status flags
-    ['paid','executed','complete','completed','released','success'].includes(status) ||
-    ['released','success','paid','completed','complete'].includes(payStatus) ||
-    ['executed','success','released'].includes(safeStatus) ||
+  const finals = new Set(['paid', 'executed', 'complete', 'completed', 'released', 'success']);
+  if (finals.has(status) || finals.has(payStatus)) return true;
 
-    // JSON blob variants
-    raw.includes('"payment_status":"released"') ||
-    raw.includes('"payment_status":"success"') ||
-    raw.includes('"payment_status":"paid"')
-  );
+  // JSON fallbacks
+  try {
+    const raw = JSON.stringify(m || {}).toLowerCase();
+    if (/"payment_status"\s*:\s*"released"/.test(raw)) return true;
+    if (/"payment_status"\s*:\s*"executed"/.test(raw)) return true;
+    if (/"status"\s*:\s*"(paid|executed|complete|completed|released)"/.test(raw)) return true;
+  } catch {}
+
+  return false;
 }
 
 // Any SAFE signal that means “in flight” (but only if not already paid)
@@ -65,7 +73,10 @@ export function hasSafeMarker(m: any): boolean {
     inflightRegex.test(s) ||
     inflightRegex.test(ps) ||
     /"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
-    /"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution)"/.test(raw);
+    /"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
+    // Broad fallback: any SAFE/Gnosis hint in raw blob while not in a final state
+    // (final states are already caught by isPaid(...) above)
+    /\bgnosis\b/.test(raw) || /\bsafe\b/.test(raw);
 
   return !!any;
 }
@@ -75,7 +86,7 @@ export function isPaymentPending(m: any, localPending?: boolean): boolean {
   return !isPaid(m) && (!!localPending || hasSafeMarker(m));
 }
 
-// Button visibility for “Release Payment”
+// Button visibility for Pay actions (manual or SAFE)
 export function canShowPayButtons(
   m: any,
   opts?: { approved?: boolean; localPending?: boolean }
