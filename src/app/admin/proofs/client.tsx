@@ -64,13 +64,15 @@ function savePendingToLS(s: Set<string>) {
   } catch {}
 }
 
-/** ---------- STRICT local detectors for this page (UI) ---------- */
 // Strong “final paid” check used by this page regardless of server quirks
 function isPaidStrict(m: any): boolean {
   if (!m) return false;
-  const status = String(m?.status ?? '').toLowerCase();
-  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
 
+  const status     = String(m?.status ?? '').toLowerCase();
+  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+
+  // Strong explicit flags or fields
   if (
     m?.paid === true ||
     m?.isPaid === true ||
@@ -85,12 +87,15 @@ function isPaidStrict(m: any): boolean {
     return true;
   }
 
+  // Treat these as final in ANY of: status, payment_status, safe_status
   const finals = new Set(['paid', 'executed', 'complete', 'completed', 'released', 'success']);
-  if (finals.has(status) || finals.has(payStatus)) return true;
+  if (finals.has(status) || finals.has(payStatus) || finals.has(safeStatus)) return true;
 
+  // JSON fallbacks (handles blobbed fields)
   try {
     const raw = JSON.stringify(m || {}).toLowerCase();
     if (/"payment_status"\s*:\s*"(released|executed|paid|success)"/.test(raw)) return true;
+    if (/"safe_status"\s*:\s*"(released|executed|success)"/.test(raw)) return true;
     if (/"status"\s*:\s*"(paid|executed|complete|completed|released|success)"/.test(raw)) return true;
   } catch {}
 
@@ -102,7 +107,7 @@ function hasSafeMarkerStrict(m: any): boolean {
   if (!m) return false;
   if (isPaidStrict(m) || msIsPaid(m)) return false;
 
-  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const s  = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
   const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
 
   // pre-exec / pre-release states
