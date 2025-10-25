@@ -1,3 +1,4 @@
+// src/app/admin/proofs/Client.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -17,10 +18,10 @@ import {
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
-import { useRouter } from "next/navigation";
+import { useRouter } from 'next/navigation';
 import {
   isPaid as msIsPaid,
-  hasSafeMarker as msHasSafeMarker,
+  hasSafeMarker as msHasSafeMarker, // still imported, but we use stricter local checks below for the UI
 } from '@/lib/milestonePaymentState';
 
 // Tabs
@@ -32,7 +33,7 @@ const TABS = [
   { key: 'no-proof', label: 'No Proof' },
   { key: 'archived', label: 'Archived' },
 ] as const;
-type TabKey = typeof TABS[number]['key'];
+type TabKey = (typeof TABS)[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
 const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
@@ -58,8 +59,67 @@ function loadPendingFromLS(): Set<string> {
   }
 }
 function savePendingToLS(s: Set<string>) {
-  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
+  try {
+    localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s)));
+  } catch {}
 }
+
+/** ---------- STRICT local detectors for this page (UI) ---------- */
+// Strong “final paid” check used by this page regardless of server quirks
+function isPaidStrict(m: any): boolean {
+  if (!m) return false;
+  const status = String(m?.status ?? '').toLowerCase();
+  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+
+  if (
+    m?.paid === true ||
+    m?.isPaid === true ||
+    m?.released === true ||
+    !!(m?.paymentTxHash || m?.payment_tx_hash) ||
+    !!(m?.safePaymentTxHash || m?.safe_payment_tx_hash) ||
+    !!(m?.txHash || m?.tx_hash) ||
+    !!(m?.paymentDate || m?.payment_date) ||
+    !!(m?.paidAt || m?.paid_at) ||
+    !!(m?.safeExecutedAt || m?.safe_executed_at)
+  ) {
+    return true;
+  }
+
+  const finals = new Set(['paid', 'executed', 'complete', 'completed', 'released', 'success']);
+  if (finals.has(status) || finals.has(payStatus)) return true;
+
+  try {
+    const raw = JSON.stringify(m || {}).toLowerCase();
+    if (/"payment_status"\s*:\s*"(released|executed|paid|success)"/.test(raw)) return true;
+    if (/"status"\s*:\s*"(paid|executed|complete|completed|released|success)"/.test(raw)) return true;
+  } catch {}
+
+  return false;
+}
+
+// Only pre-execution SAFE states count as “in flight” here
+function hasSafeMarkerStrict(m: any): boolean {
+  if (!m) return false;
+  if (isPaidStrict(m) || msIsPaid(m)) return false;
+
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+
+  // pre-exec / pre-release states
+  const inflight = /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
+
+  // DO NOT treat executed/released/success as in-flight
+  if (/(executed|released|success)/.test(s)) return false;
+
+  return (
+    m?.paymentPending === true ||
+    !!(m?.safeTxHash || m?.safe_tx_hash) ||
+    !!(m?.safeNonce || m?.safe_nonce) ||
+    inflight.test(s) ||
+    inflight.test(ps)
+  );
+}
+/** --------------------------------------------------------------- */
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
@@ -79,22 +139,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // local "payment pending" while we poll the server after clicking Pay (persisted)
+  // local "payment pending" while we poll
   const [pendingPay, setPendingPay] = useState<Set<string>>(
     () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
   );
 
   // Client-side caching for bids data
-  const [dataCache, setDataCache] = useState<{
-    bids: any[];
-    lastUpdated: number;
-  }>({ bids: [], lastUpdated: 0 });
+  const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({
+    bids: [],
+    lastUpdated: 0,
+  });
 
   function addPending(key: string) {
     if (typeof window !== 'undefined') {
-      try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
+      try {
+        localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
+      } catch {}
     }
-    setPendingPay(prev => {
+    setPendingPay((prev) => {
       const next = new Set(prev);
       next.add(key);
       savePendingToLS(next);
@@ -103,9 +165,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
   function removePending(key: string) {
     if (typeof window !== 'undefined') {
-      try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
+      try {
+        localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
+      } catch {}
     }
-    setPendingPay(prev => {
+    setPendingPay((prev) => {
       const next = new Set(prev);
       next.delete(key);
       savePendingToLS(next);
@@ -147,14 +211,22 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
   function emitPayQueued(bidId: number, milestoneIndex: number) {
-    try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex });
+    } catch {}
   }
   function emitPayDone(bidId: number, milestoneIndex: number) {
-    try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex });
+    } catch {}
   }
   function emitMilestonesUpdated(detail: any) {
-    try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
-    try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
+    } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail });
+    } catch {}
   }
   function queueBroadcast(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
@@ -188,14 +260,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       };
     }
 
-    return () => { try { bc?.close(); } catch {} };
+    return () => {
+      try {
+        bc?.close();
+      } catch {}
+    };
   }, []);
 
   async function loadProofs(forceRefresh = false) {
     const CACHE_TTL = 0;
 
-    if (!forceRefresh && dataCache.bids.length > 0 &&
-        Date.now() - dataCache.lastUpdated < CACHE_TTL) {
+    if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
       return;
@@ -214,7 +289,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (msIsPaid(ms[i])) {
+          if (msIsPaid(ms[i]) || isPaidStrict(ms[i])) {
             removePending(mkKey(bid.bidId, i));
           }
         }
@@ -225,16 +300,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const now = Date.now();
         const MAX_MS = 30 * 60 * 1000; // 30 minutes
         for (const key of Array.from(pendingPay)) {
-          const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
+          const tsRaw =
+            typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
           const ts = tsRaw ? Number(tsRaw) : 0;
 
           const [bidIdStr, idxStr] = key.split('-');
           const b = rows.find((r: any) => Number(r.bidId) === Number(bidIdStr));
           const m = Array.isArray(b?.milestones) ? b.milestones[Number(idxStr)] : null;
 
-          const stillInFlight = m && !msIsPaid(m) && msHasSafeMarker(m);
+          // Only keep the local pending if the server still looks in-flight by STRICT rules
+          const stillInFlight = m && !isPaidStrict(m) && hasSafeMarkerStrict(m);
 
-          if (!ts || (now - ts) > MAX_MS) {
+          if (!ts || now - ts > MAX_MS) {
             if (!stillInFlight) removePending(key);
           }
         }
@@ -245,7 +322,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !msIsPaid(ms[i])) {
+          if (pendingPay.has(key) && !isPaidStrict(ms[i]) && !msIsPaid(ms[i])) {
             startPollUntilPaid(bid.bidId, i);
           }
         }
@@ -261,7 +338,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function hydrateArchiveStatuses(allBids: any[]) {
-    const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
+    const uniqueBidIds = [...new Set(allBids.map((bid) => bid.bidId))];
 
     if (uniqueBidIds.length === 0) {
       setArchMap({});
@@ -274,7 +351,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
 
-      allBids.forEach(bid => {
+      allBids.forEach((bid) => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
 
@@ -345,7 +422,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !msIsPaid(m);
+    return isCompleted(m) && !(msIsPaid(m) || isPaidStrict(m));
   }
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
@@ -362,9 +439,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !msHasSafeMarker(m);
+        // IMPORTANT: ignore stale local pending; only hide if STRICT in-flight
+        return isReadyToPay(m) && !hasSafeMarkerStrict(m);
       case 'paid':
-        return msIsPaid(m);
+        return msIsPaid(m) || isPaidStrict(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -376,14 +454,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   function bidMatchesSearch(bid: any): boolean {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
-    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
-      .some((m: any) => (m?.name || '').toLowerCase().includes(q));
+    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${
+      bid.walletAddress || ''
+    }`.toLowerCase();
+    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : []).some((m: any) =>
+      (m?.name || '').toLowerCase().includes(q)
+    );
     return hay.includes(q) || msMatch;
   }
 
   const archivedCount = useMemo(
-    () => Object.values(archMap).filter(v => v.archived).length,
+    () => Object.values(archMap).filter((v) => v.archived).length,
     [archMap]
   );
 
@@ -420,33 +501,38 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
         if (!m) {
           // keep polling
-        } else if (msIsPaid(m)) {
+        } else if (msIsPaid(m) || isPaidStrict(m)) {
           removePending(key);
-          setBids(prev => prev.map(b => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-            const srvM = (m as any);
-            ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          }));
-          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...(m as any) };
+              return { ...b, milestones: ms };
+            })
+          );
+          try {
+            (await import('@/lib/api')).invalidateBidsCache?.();
+          } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (msHasSafeMarker(m)) {
-          // still in-flight — keep pending
-          setBids(prev => prev.map(b => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-            const srvM = (m as any);
-            ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          }));
-          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+        } else if (hasSafeMarkerStrict(m) || msHasSafeMarker(m)) {
+          // still in-flight — keep pending, but update row data
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...(m as any) };
+              return { ...b, milestones: ms };
+            })
+          );
+          try {
+            (await import('@/lib/api')).invalidateBidsCache?.();
+          } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
-          // do not clear pending
         }
       } catch (err: any) {
         if (err?.status === 401 || err?.status === 403) {
@@ -455,24 +541,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
       }
-      await new Promise(r => setTimeout(r, intervalMs));
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
 
-    // Final check & cleanup (only clear if neither paid nor in-flight)
+    // Final check & cleanup (only clear if neither paid nor in-flight by STRICT rules)
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
+      if (!m || (!isPaidStrict(m) && !hasSafeMarkerStrict(m))) {
         removePending(key);
       }
-      setBids(prev => prev.map(b => {
-        const match = ((b as any).bidId ?? (b as any).id) === bidId;
-        if (!match) return b;
-        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-        const srvM = (bid as any)?.milestones?.[milestoneIndex];
-        if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-        return { ...b, milestones: ms };
-      }));
+      setBids((prev) =>
+        prev.map((b) => {
+          const match = ((b as any).bidId ?? (b as any).id) === bidId;
+          if (!match) return b;
+          const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+          const srvM = (bid as any)?.milestones?.[milestoneIndex];
+          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+          return { ...b, milestones: ms };
+        })
+      );
     } catch {}
     if (typeof router?.refresh === 'function') router.refresh();
   }
@@ -514,7 +602,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`reject-${bidId}-${milestoneIndex}`);
       await rejectMilestoneProof(bidId, milestoneIndex, reason);
-      setRejectedLocal(prev => {
+      setRejectedLocal((prev) => {
         const next = new Set(prev);
         next.add(mkRejectKey(bidId, milestoneIndex));
         return next;
@@ -533,7 +621,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
+      setArchMap((prev) => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: true,
@@ -543,7 +631,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       }));
 
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: true, reason });
-
     } catch (e: any) {
       alert(e?.message || 'Archive failed');
     } finally {
@@ -556,7 +643,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
+      setArchMap((prev) => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: false,
@@ -566,7 +653,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       }));
 
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: false });
-
     } catch (e: any) {
       alert(e?.message || 'Unarchive failed');
     } finally {
@@ -578,7 +664,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!confirm('Unarchive ALL archived milestones?')) return;
     try {
       setProcessing('unarchive-all');
-      const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
+      const keys = Object.entries(archMap)
+        .filter(([, v]) => v.archived)
+        .map(([k]) => k);
       for (const k of keys) {
         const [bidIdStr, idxStr] = k.split('-');
         const bidId = Number(bidIdStr);
@@ -605,14 +693,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!m?.proof) return null;
 
     let parsed: any = null;
-    try { parsed = JSON.parse(m.proof); } catch {}
+    try {
+      parsed = JSON.parse(m.proof);
+    } catch {}
 
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && (
-            <p className="text-sm text-gray-700">{parsed.description}</p>
-          )}
+          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
           {parsed.files?.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {parsed.files.map((f: any, i: number) => {
@@ -647,12 +735,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                 return (
                   <div key={i} className="p-3 rounded border bg-gray-50">
                     <p className="truncate text-sm">{f?.name || 'Attachment'}</p>
-                    <a
-                      href={f?.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:underline"
-                    >
+                    <a href={f?.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
                       Open
                     </a>
                   </div>
@@ -688,23 +771,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                     className="group relative overflow-hidden rounded border"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={url}
-                      alt={`Proof ${i}`}
-                      className="h-32 w-full object-cover group-hover:scale-105 transition"
-                    />
+                    <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
                   </button>
                 );
               }
               return (
                 <div key={i} className="p-3 rounded border bg-gray-50">
                   <p className="truncate text-sm">Attachment</p>
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline"
-                  >
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
                     Open
                   </a>
                 </div>
@@ -762,7 +836,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       </div>
 
-      {/* Archive Controls (server) */}
+      {/* Archive Controls */}
       {tab === 'archived' && archivedCount > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
@@ -792,9 +866,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <div className="text-5xl mb-3">
-            {tab === 'archived' ? '📁' : '🗂️'}
-          </div>
+          <div className="text-5xl mb-3">{tab === 'archived' ? '📁' : '🗂️'}</div>
           <p className="text-slate-700">
             {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
           </p>
@@ -823,17 +895,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   const archived = isArchived(bid.bidId, origIdx);
                   const key = mkKey(bid.bidId, origIdx);
 
-                  // strict state:
+                  // strict state for THIS PAGE:
                   const approved = isCompleted(m);
-                  const paid = msIsPaid(m);
-                  const inflight = msHasSafeMarker(m);
-                  const localPending = pendingPay.has(key);
+                  const paid = isPaidStrict(m) || msIsPaid(m);
+                  const inflight = hasSafeMarkerStrict(m);
+                  const localPending = pendingPay.has(key); // may linger; we won't *block* UI just for this
 
-                  // chip:
-                  const showPendingChip = !paid && (inflight || localPending);
+                  // chip: only show if actually in-flight now (ignore stale localPending alone)
+                  const showPendingChip = !paid && inflight;
 
-                  // buttons:
-                  const canShowButtons = approved && !paid && !inflight && !localPending;
+                  // buttons: allow if approved & not paid & not actually in-flight (ignore stale localPending)
+                  const canShowButtons = approved && !paid && !inflight;
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -878,10 +950,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               Paid ✅ Tx: {(m as any).paymentTxHash || (m as any).txHash || (m as any).hash}
                             </p>
                           )}
+
                           {!hasProof(m) && !isCompleted(m) && (
-                            <p className="text-sm text-amber-600 mt-2">
-                              No proof submitted yet.
-                            </p>
+                            <p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>
                           )}
                         </div>
 
@@ -894,30 +965,34 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                   disabled={processing === `approve-${bid.bidId}-${origIdx}`}
                                   className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
                                 >
-                                  {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
+                                  {processing === `approve-${bid.bidId}-${origIdx}`
+                                    ? 'Approving...'
+                                    : 'Approve Proof'}
                                 </button>
                               )}
 
-                              {hasProof(m) && !isCompleted(m) && (() => {
-                                const rKey = mkRejectKey(bid.bidId, origIdx);
-                                const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
-                                const isLocked = rejectedLocal.has(rKey);
-                                const disabled = isProcessing || isLocked;
+                              {hasProof(m) && !isCompleted(m) &&
+                                (() => {
+                                  const rKey = mkRejectKey(bid.bidId, origIdx);
+                                  const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
+                                  const isLocked = rejectedLocal.has(rKey);
+                                  const disabled = isProcessing || isLocked;
 
-                                return (
-                                  <button
-                                    onClick={() => handleReject(bid.bidId, origIdx)}
-                                    disabled={disabled}
-                                    className={[
-                                      "px-4 py-2 rounded disabled:opacity-50",
-                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                                               : "bg-red-600 hover:bg-red-700 text-white"
-                                    ].join(" ")}
-                                  >
-                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
-                                  </button>
-                                );
-                              })()}
+                                  return (
+                                    <button
+                                      onClick={() => handleReject(bid.bidId, origIdx)}
+                                      disabled={disabled}
+                                      className={[
+                                        'px-4 py-2 rounded disabled:opacity-50',
+                                        disabled
+                                          ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                          : 'bg-red-600 hover:bg-red-700 text-white',
+                                      ].join(' ')}
+                                    >
+                                      {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
+                                    </button>
+                                  );
+                                })()}
 
                               {canShowButtons && (
                                 <div className="flex items-center gap-2">
@@ -927,11 +1002,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                     onClick={() => handlePay(bid.bidId, origIdx)}
                                     disabled={processing === `pay-${bid.bidId}-${origIdx}`}
                                     className={[
-                                      "px-4 py-2 rounded text-white",
-                                      (processing === `pay-${bid.bidId}-${origIdx}`)
-                                        ? "bg-green-600 opacity-60 cursor-not-allowed"
-                                        : "bg-green-600 hover:bg-green-700"
-                                    ].join(" ")}
+                                      'px-4 py-2 rounded text-white',
+                                      processing === `pay-${bid.bidId}-${origIdx}`
+                                        ? 'bg-green-600 opacity-60 cursor-not-allowed'
+                                        : 'bg-green-600 hover:bg-green-700',
+                                    ].join(' ')}
                                     title="Release payment manually (EOA)"
                                   >
                                     {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
@@ -1024,10 +1099,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             </button>
           )}
 
-          <button
-            className="absolute top-4 right-4 text-white text-2xl"
-            onClick={() => setLightbox(null)}
-          >
+          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>
             ✕
           </button>
         </div>
