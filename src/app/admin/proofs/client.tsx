@@ -20,12 +20,9 @@ import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import { useRouter } from "next/navigation";
-
-// central state helpers
 import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
-  isApproved as msIsApproved,
 } from '@/lib/milestonePaymentState';
 
 // Tabs
@@ -66,49 +63,12 @@ function savePendingToLS(s: Set<string>) {
   try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
 }
 
-// ---------- EXTRA-ROBUST DETECTORS (wrapping centralized ones) ----------
-// Some backends only fill a subset of fields after SAFE execution.
-// These wrappers keep UI & polling correct even when fields are inconsistent.
-
-function paidPlus(m: any): boolean {
-  if (msIsPaid(m)) return true;
-
-  const status    = String(m?.status ?? '').toLowerCase();
-  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-  const safeStatus= String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-
-  // Final-ish words anywhere
-  const finalWord = /(paid|executed|success|released|complete|completed|confirmed)/;
-
-  // Any explicit SAFE execution evidence
-  if (m?.safePaymentTxHash || m?.safe_payment_tx_hash) return true;
-  if ((m?.safeTxHash || m?.safe_tx_hash) && (m?.safeExecutedAt || m?.safe_executed_at)) return true;
-
-  // Status fallbacks
-  if (finalWord.test(status) || finalWord.test(payStatus) || finalWord.test(safeStatus)) return true;
-
-  // JSON blob fallbacks
-  try {
-    const raw = JSON.stringify(m || {}).toLowerCase();
-    if (/"safe_status"\s*:\s*"(executed|success|released|confirmed)"/.test(raw)) return true;
-    if (/"payment_status"\s*:\s*"(released|success|paid|completed)"/.test(raw)) return true;
-    if (/"status"\s*:\s*"(paid|executed|complete|completed|released)"/.test(raw)) return true;
-  } catch {}
-
-  return false;
-}
-
-function inflightPlus(m: any, localPending = false): boolean {
-  if (paidPlus(m)) return false;
-  if (msHasSafeMarker(m)) return true;
-
-  // If we have a SAFE tx hash but no final marker yet, keep it "pending".
-  if ((m?.safeTxHash || m?.safe_tx_hash) && !paidPlus(m)) return true;
-
-  return !!localPending;
-}
-
-// ----------------------------------------------------------------------
+// --- Safe-pay local helper: treat SAFE final states as paid even if hashes lag ---
+const paidBySafeStatus = (m: any) => {
+  const s = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  return s === 'executed' || s === 'success' || s === 'released' || s === 'paid';
+};
+const isPaidLocal = (m: any) => msIsPaid(m) || paidBySafeStatus(m);
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
@@ -244,7 +204,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (paidPlus(ms[i])) {
+          if (isPaidLocal(ms[i])) {
             removePending(mkKey(bid.bidId, i));
           }
         }
@@ -262,7 +222,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           const b = rows.find((r: any) => Number(r.bidId) === Number(bidIdStr));
           const m = Array.isArray(b?.milestones) ? b.milestones[Number(idxStr)] : null;
 
-          const stillInFlight = m && !paidPlus(m) && inflightPlus(m);
+          const stillInFlight = m && !isPaidLocal(m) && msHasSafeMarker(m);
 
           if (!ts || (now - ts) > MAX_MS) {
             if (!stillInFlight) removePending(key);
@@ -275,7 +235,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !paidPlus(ms[i])) {
+          if (pendingPay.has(key) && !isPaidLocal(ms[i])) {
             pollUntilPaid(bid.bidId, i).catch(() => {});
           }
         }
@@ -371,11 +331,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   function isCompleted(m: any): boolean {
-    return m?.completed === true || m?.approved === true || m?.status === 'completed' || msIsApproved(m);
+    return m?.completed === true || m?.approved === true || m?.status === 'completed';
   }
 
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !paidPlus(m);
+    return isCompleted(m) && !isPaidLocal(m);
   }
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
@@ -392,9 +352,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !inflightPlus(m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !msHasSafeMarker(m);
       case 'paid':
-        return paidPlus(m);
+        return isPaidLocal(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -450,7 +410,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
         if (!m) {
           // keep polling
-        } else if (paidPlus(m)) {
+        } else if (isPaidLocal(m)) {
           removePending(key);
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -464,8 +424,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (inflightPlus(m)) {
-          // still in-flight — keep pending and sync latest fields
+        } else if (msHasSafeMarker(m)) {
+          // still in-flight — keep pending, but sync any new fields
           setBids(prev => prev.map(b => {
             const match = ((b as any).bidId ?? (b as any).id) === bidId;
             if (!match) return b;
@@ -492,7 +452,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!paidPlus(m) && !inflightPlus(m))) {
+      if (!m || (!isPaidLocal(m) && !msHasSafeMarker(m))) {
         removePending(key);
       }
       setBids(prev => prev.map(b => {
@@ -853,10 +813,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   const archived = isArchived(bid.bidId, origIdx);
                   const key = mkKey(bid.bidId, origIdx);
 
-                  // strict state via robust wrappers:
-                  const approved     = isCompleted(m);
-                  const paid         = paidPlus(m);
-                  const inflight     = inflightPlus(m, pendingPay.has(key));
+                  // strict state:
+                  const approved = isCompleted(m);
+                  const paid = isPaidLocal(m);
+                  const inflight = msHasSafeMarker(m);
                   const localPending = pendingPay.has(key);
 
                   // chip:
