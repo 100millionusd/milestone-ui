@@ -19,11 +19,15 @@ import {
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
-import { useRouter } from "next/navigation";
+import { useRouter } from 'next/navigation';
 import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
+
+// ---- alias centralized helpers so the rest of the file can keep old names
+const isPaid = msIsPaid;
+const hasSafeMarker = msHasSafeMarker;
 
 // Tabs
 const TABS = [
@@ -60,7 +64,9 @@ function loadPendingFromLS(): Set<string> {
   }
 }
 function savePendingToLS(s: Set<string>) {
-  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
+  try {
+    localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s)));
+  } catch {}
 }
 
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
@@ -83,7 +89,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // local "payment pending" while we poll the server after clicking Pay (persisted)
   const [pendingPay, setPendingPay] = useState<Set<string>>(
-    () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
+    () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set()),
   );
 
   // Client-side caching for bids data
@@ -94,9 +100,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   function addPending(key: string) {
     if (typeof window !== 'undefined') {
-      try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
+      try {
+        localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
+      } catch {}
     }
-    setPendingPay(prev => {
+    setPendingPay((prev) => {
       const next = new Set(prev);
       next.add(key);
       savePendingToLS(next);
@@ -105,9 +113,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
   function removePending(key: string) {
     if (typeof window !== 'undefined') {
-      try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
+      try {
+        localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
+      } catch {}
     }
-    setPendingPay(prev => {
+    setPendingPay((prev) => {
       const next = new Set(prev);
       next.delete(key);
       savePendingToLS(next);
@@ -130,14 +140,22 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
   function emitPayQueued(bidId: number, milestoneIndex: number) {
-    try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex });
+    } catch {}
   }
   function emitPayDone(bidId: number, milestoneIndex: number) {
-    try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex });
+    } catch {}
   }
   function emitMilestonesUpdated(detail: any) {
-    try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
-    try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
+    } catch {}
+    try {
+      bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail });
+    } catch {}
   }
   function queueBroadcast(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
@@ -171,14 +189,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       };
     }
 
-    return () => { try { bc?.close(); } catch {} };
+    return () => {
+      try {
+        bc?.close();
+      } catch {}
+    };
   }, []);
 
   async function loadProofs(forceRefresh = false) {
     const CACHE_TTL = 0;
 
-    if (!forceRefresh && dataCache.bids.length > 0 &&
-        Date.now() - dataCache.lastUpdated < CACHE_TTL) {
+    if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
       return;
@@ -197,7 +218,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (msIsPaid(ms[i])) {
+          if (isPaid(ms[i])) {
             removePending(mkKey(bid.bidId, i));
           }
         }
@@ -208,16 +229,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const now = Date.now();
         const MAX_MS = 30 * 60 * 1000; // 30 minutes
         for (const key of Array.from(pendingPay)) {
-          const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
+          const tsRaw =
+            typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
           const ts = tsRaw ? Number(tsRaw) : 0;
 
           const [bidIdStr, idxStr] = key.split('-');
           const b = rows.find((r: any) => Number(r.bidId) === Number(bidIdStr));
           const m = Array.isArray(b?.milestones) ? b.milestones[Number(idxStr)] : null;
 
-          const stillInFlight = m && !msIsPaid(m) && msHasSafeMarker(m);
+          const stillInFlight = m && !isPaid(m) && hasSafeMarker(m);
 
-          if (!ts || (now - ts) > MAX_MS) {
+          if (!ts || now - ts > MAX_MS) {
             if (!stillInFlight) removePending(key);
           }
         }
@@ -228,7 +250,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !msIsPaid(ms[i])) {
+          if (pendingPay.has(key) && !isPaid(ms[i])) {
             pollUntilPaid(bid.bidId, i).catch(() => {});
           }
         }
@@ -244,7 +266,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function hydrateArchiveStatuses(allBids: any[]) {
-    const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
+    const uniqueBidIds = [...new Set(allBids.map((bid) => bid.bidId))];
 
     if (uniqueBidIds.length === 0) {
       setArchMap({});
@@ -257,7 +279,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
 
-      allBids.forEach(bid => {
+      allBids.forEach((bid) => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
 
@@ -298,7 +320,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             } catch {
               nextMap[key] = { archived: false };
             }
-          })()
+          })(),
         );
       }
     }
@@ -328,7 +350,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   function isReadyToPay(m: any): boolean {
-    return isCompleted(m) && !msIsPaid(m);
+    return isCompleted(m) && !isPaid(m);
   }
 
   function isArchived(bidId: number, milestoneIndex: number): boolean {
@@ -345,9 +367,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !msHasSafeMarker(m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !hasSafeMarker(m);
       case 'paid':
-        return msIsPaid(m);
+        return isPaid(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -359,15 +381,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   function bidMatchesSearch(bid: any): boolean {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
-    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
-      .some((m: any) => (m?.name || '').toLowerCase().includes(q));
+    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${
+      bid.walletAddress || ''
+    }`.toLowerCase();
+    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : []).some((m: any) =>
+      (m?.name || '').toLowerCase().includes(q),
+    );
     return hay.includes(q) || msMatch;
   }
 
   const archivedCount = useMemo(
-    () => Object.values(archMap).filter(v => v.archived).length,
-    [archMap]
+    () => Object.values(archMap).filter((v) => v.archived).length,
+    [archMap],
   );
 
   const filtered = useMemo(() => {
@@ -392,7 +417,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     bidId: number,
     milestoneIndex: number,
     tries = 60,
-    intervalMs = 3000
+    intervalMs = 3000,
   ) {
     const key = mkKey(bidId, milestoneIndex);
 
@@ -403,31 +428,39 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
         if (!m) {
           // keep polling
-        } else if (msIsPaid(m)) {
+        } else if (isPaid(m)) {
           removePending(key);
-          setBids(prev => prev.map(b => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-            const srvM = (m as any);
-            ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          }));
-          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              const srvM = m as any;
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+              return { ...b, milestones: ms };
+            }),
+          );
+          try {
+            (await import('@/lib/api')).invalidateBidsCache?.();
+          } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (msHasSafeMarker(m)) {
+        } else if (hasSafeMarker(m)) {
           // still in-flight — keep pending
-          setBids(prev => prev.map(b => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-            const srvM = (m as any);
-            ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          }));
-          try { (await import("@/lib/api")).invalidateBidsCache?.(); } catch {}
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              const srvM = m as any;
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+              return { ...b, milestones: ms };
+            }),
+          );
+          try {
+            (await import('@/lib/api')).invalidateBidsCache?.();
+          } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
           // do not clear pending
         }
@@ -438,24 +471,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
       }
-      await new Promise(r => setTimeout(r, intervalMs));
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
 
     // Final check & cleanup (only clear if neither paid nor in-flight)
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
+      if (!m || (!isPaid(m) && !hasSafeMarker(m))) {
         removePending(key);
       }
-      setBids(prev => prev.map(b => {
-        const match = ((b as any).bidId ?? (b as any).id) === bidId;
-        if (!match) return b;
-        const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
-        const srvM = (bid as any)?.milestones?.[milestoneIndex];
-        if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-        return { ...b, milestones: ms };
-      }));
+      setBids((prev) =>
+        prev.map((b) => {
+          const match = ((b as any).bidId ?? (b as any).id) === bidId;
+          if (!match) return b;
+          const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+          const srvM = (bid as any)?.milestones?.[milestoneIndex];
+          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+          return { ...b, milestones: ms };
+        }),
+      );
     } catch {}
     if (typeof router?.refresh === 'function') router.refresh();
   }
@@ -497,7 +532,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`reject-${bidId}-${milestoneIndex}`);
       await rejectMilestoneProof(bidId, milestoneIndex, reason);
-      setRejectedLocal(prev => {
+      setRejectedLocal((prev) => {
         const next = new Set(prev);
         next.add(mkRejectKey(bidId, milestoneIndex));
         return next;
@@ -516,7 +551,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
+      setArchMap((prev) => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: true,
@@ -526,7 +561,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       }));
 
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: true, reason });
-
     } catch (e: any) {
       alert(e?.message || 'Archive failed');
     } finally {
@@ -539,7 +573,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
       clearBulkArchiveCache(bidId);
-      setArchMap(prev => ({
+      setArchMap((prev) => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: false,
@@ -549,7 +583,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       }));
 
       emitMilestonesUpdated({ bidId, milestoneIndex, archived: false });
-
     } catch (e: any) {
       alert(e?.message || 'Unarchive failed');
     } finally {
@@ -561,7 +594,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!confirm('Unarchive ALL archived milestones?')) return;
     try {
       setProcessing('unarchive-all');
-      const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
+      const keys = Object.entries(archMap)
+        .filter(([, v]) => v.archived)
+        .map(([k]) => k);
       for (const k of keys) {
         const [bidIdStr, idxStr] = k.split('-');
         const bidId = Number(bidIdStr);
@@ -588,21 +623,23 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!m?.proof) return null;
 
     let parsed: any = null;
-    try { parsed = JSON.parse(m.proof); } catch {}
+    try {
+      parsed = JSON.parse(m.proof);
+    } catch {}
 
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && (
-            <p className="text-sm text-gray-700">{parsed.description}</p>
-          )}
+          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
           {parsed.files?.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {parsed.files.map((f: any, i: number) => {
                 const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
                 if (isImage) {
                   const imageUrls = parsed.files
-                    .filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
+                    .filter((ff: any) =>
+                      /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''),
+                    )
                     .map((ff: any) => ff.url);
                   const startIndex = imageUrls.findIndex((u: string) => u === f.url);
 
@@ -775,9 +812,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <div className="text-5xl mb-3">
-            {tab === 'archived' ? '📁' : '🗂️'}
-          </div>
+          <div className="text-5xl mb-3">{tab === 'archived' ? '📁' : '🗂️'}</div>
           <p className="text-slate-700">
             {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
           </p>
@@ -802,167 +837,213 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               </div>
 
               <div className="space-y-4">
-                {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
-                  const archived = isArchived(bid.bidId, origIdx);
-                  const key = mkKey(bid.bidId, origIdx);
+                {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(
+                  ({ m, idx: origIdx }) => {
+                    const archived = isArchived(bid.bidId, origIdx);
+                    const key = mkKey(bid.bidId, origIdx);
 
-                  // strict state:
-                  const approved = isCompleted(m);
-                  const paid = msIsPaid(m);
-                  const inflight = msHasSafeMarker(m);
-                  const localPending = pendingPay.has(key);
+                    // strict state:
+                    const approved = isCompleted(m);
+                    const paid = isPaid(m);
+                    const inflight = hasSafeMarker(m);
+                    const localPending = pendingPay.has(key);
 
-                  // chip:
-                  const showPendingChip = !paid && (inflight || localPending);
+                    // chip:
+                    const showPendingChip = !paid && (inflight || localPending);
 
-                  // buttons:
-                  const canShowButtons = approved && !paid && !inflight && !localPending;
+                    // buttons:
+                    const canShowButtons = approved && !paid && !inflight && !localPending;
 
-                  return (
-                    <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium">{m.name}</p>
+                    return (
+                      <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{m.name}</p>
 
-                            {archived && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
-                                Archived
-                              </span>
+                              {archived && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">
+                                  Archived
+                                </span>
+                              )}
+
+                              {approved && !paid && !inflight && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
+                                  Approved
+                                </span>
+                              )}
+
+                              {showPendingChip && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+                                  Payment Pending
+                                </span>
+                              )}
+
+                              {paid && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                                  Paid
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-sm text-gray-600">
+                              Amount: ${m.amount} | Due: {m.dueDate}
+                            </p>
+
+                            {renderProof(m)}
+
+                            {m.paymentTxHash && (
+                              <p className="text-sm text-green-600 mt-2 break-all">
+                                Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}
+                              </p>
                             )}
-
-                            {approved && !paid && !inflight && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
-                                Approved
-                              </span>
-                            )}
-
-                            {showPendingChip && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
-                                Payment Pending
-                              </span>
-                            )}
-
-                            {paid && (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                                Paid
-                              </span>
+                            {!hasProof(m) && !isCompleted(m) && (
+                              <p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>
                             )}
                           </div>
 
-                          <p className="text-sm text-gray-600">
-                            Amount: ${m.amount} | Due: {m.dueDate}
-                          </p>
-
-                          {renderProof(m)}
-
-                          {m.paymentTxHash && (
-                            <p className="text-sm text-green-600 mt-2 break-all">
-                              Paid ✅ Tx: {m.paymentTxHash || m.txHash || m.hash}
-                            </p>
-                          )}
-                          {!hasProof(m) && !isCompleted(m) && (
-                            <p className="text-sm text-amber-600 mt-2">
-                              No proof submitted yet.
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                          {tab !== 'archived' && (
-                            <>
-                              {hasProof(m) && !isCompleted(m) && (
-                                <button
-                                  onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
-                                  disabled={processing === `approve-${bid.bidId}-${origIdx}`}
-                                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                                >
-                                  {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
-                                </button>
-                              )}
-
-                              {hasProof(m) && !isCompleted(m) && (() => {
-                                const rKey = mkRejectKey(bid.bidId, origIdx);
-                                const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
-                                const isLocked = rejectedLocal.has(rKey);
-                                const disabled = isProcessing || isLocked;
-
-                                return (
+                          <div className="flex flex-col gap-2">
+                            {tab !== 'archived' && (
+                              <>
+                                {hasProof(m) && !isCompleted(m) && (
                                   <button
-                                    onClick={() => handleReject(bid.bidId, origIdx)}
-                                    disabled={disabled}
-                                    className={[
-                                      "px-4 py-2 rounded disabled:opacity-50",
-                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                                               : "bg-red-600 hover:bg-red-700 text-white"
-                                    ].join(" ")}
+                                    onClick={() =>
+                                      handleApprove(bid.bidId, origIdx, m.proof)
+                                    }
+                                    disabled={
+                                      processing === `approve-${bid.bidId}-${origIdx}`
+                                    }
+                                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded disabled:opacity-50"
                                   >
-                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
+                                    {processing === `approve-${bid.bidId}-${origIdx}`
+                                      ? 'Approving...'
+                                      : 'Approve Proof'}
                                   </button>
-                                );
-                              })()}
+                                )}
 
-                              {canShowButtons && (
-                                <div className="flex items-center gap-2">
-                                  {/* Manual */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePay(bid.bidId, origIdx)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    className={[
-                                      "px-4 py-2 rounded text-white",
-                                      (processing === `pay-${bid.bidId}-${origIdx}`)
-                                        ? "bg-green-600 opacity-60 cursor-not-allowed"
-                                        : "bg-green-600 hover:bg-green-700"
-                                    ].join(" ")}
-                                    title="Release payment manually (EOA)"
-                                  >
-                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
-                                  </button>
+                                {hasProof(m) &&
+                                  !isCompleted(m) &&
+                                  (() => {
+                                    const rKey = mkRejectKey(bid.bidId, origIdx);
+                                    const isProcessing =
+                                      processing === `reject-${bid.bidId}-${origIdx}`;
+                                    const isLocked = rejectedLocal.has(rKey);
+                                    const disabled = isProcessing || isLocked;
 
-                                  {/* SAFE */}
-                                  <SafePayButton
-                                    bidId={bid.bidId}
-                                    milestoneIndex={origIdx}
-                                    amountUSD={Number(m?.amount || 0)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    onQueued={() => {
-                                      const k = mkKey(bid.bidId, origIdx);
-                                      addPending(k);
-                                      emitPayQueued(bid.bidId, origIdx);
-                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh();
-                                    }}
-                                  />
-                                </div>
-                              )}
-                            </>
-                          )}
+                                    return (
+                                      <button
+                                        onClick={() =>
+                                          handleReject(bid.bidId, origIdx)
+                                        }
+                                        disabled={disabled}
+                                        className={[
+                                          'px-4 py-2 rounded disabled:opacity-50',
+                                          disabled
+                                            ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                            : 'bg-red-600 hover:bg-red-700 text-white',
+                                        ].join(' ')}
+                                      >
+                                        {isProcessing
+                                          ? 'Rejecting...'
+                                          : isLocked
+                                          ? 'Rejected'
+                                          : 'Reject'}
+                                      </button>
+                                    );
+                                  })()}
 
-                          {!archived ? (
-                            <button
-                              onClick={() => handleArchive(bid.bidId, origIdx)}
-                              disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                              className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                              title="Hide this milestone from default views (server archived)"
-                            >
-                              {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleUnarchive(bid.bidId, origIdx)}
-                              disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
-                              className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded disabled:opacity-50"
-                              title="Return this milestone to default views"
-                            >
-                              {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
-                            </button>
-                          )}
+                                {canShowButtons && (
+                                  <div className="flex items-center gap-2">
+                                    {/* Manual */}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handlePay(bid.bidId, origIdx)
+                                      }
+                                      disabled={
+                                        processing ===
+                                        `pay-${bid.bidId}-${origIdx}`
+                                      }
+                                      className={[
+                                        'px-4 py-2 rounded text-white',
+                                        processing ===
+                                        `pay-${bid.bidId}-${origIdx}`
+                                          ? 'bg-green-600 opacity-60 cursor-not-allowed'
+                                          : 'bg-green-600 hover:bg-green-700',
+                                      ].join(' ')}
+                                      title="Release payment manually (EOA)"
+                                    >
+                                      {processing ===
+                                      `pay-${bid.bidId}-${origIdx}`
+                                        ? 'Paying...'
+                                        : 'Release Payment'}
+                                    </button>
+
+                                    {/* SAFE */}
+                                    <SafePayButton
+                                      bidId={bid.bidId}
+                                      milestoneIndex={origIdx}
+                                      amountUSD={Number(m?.amount || 0)}
+                                      disabled={
+                                        processing ===
+                                        `pay-${bid.bidId}-${origIdx}`
+                                      }
+                                      onQueued={() => {
+                                        const k = mkKey(bid.bidId, origIdx);
+                                        addPending(k);
+                                        emitPayQueued(bid.bidId, origIdx);
+                                        pollUntilPaid(bid.bidId, origIdx).catch(
+                                          () => {},
+                                        );
+                                        router.refresh();
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {!archived ? (
+                              <button
+                                onClick={() =>
+                                  handleArchive(bid.bidId, origIdx)
+                                }
+                                disabled={
+                                  processing ===
+                                  `archive-${bid.bidId}-${origIdx}`
+                                }
+                                className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                                title="Hide this milestone from default views (server archived)"
+                              >
+                                {processing ===
+                                `archive-${bid.bidId}-${origIdx}`
+                                  ? 'Archiving…'
+                                  : 'Archive'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() =>
+                                  handleUnarchive(bid.bidId, origIdx)
+                                }
+                                disabled={
+                                  processing ===
+                                  `unarchive-${bid.bidId}-${origIdx}`
+                                }
+                                className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded disabled:opacity-50"
+                                title="Return this milestone to default views"
+                              >
+                                {processing ===
+                                `unarchive-${bid.bidId}-${origIdx}`
+                                  ? 'Unarchiving…'
+                                  : 'Unarchive'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  },
+                )}
               </div>
             </div>
           ))}

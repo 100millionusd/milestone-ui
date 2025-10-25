@@ -14,6 +14,10 @@ import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
+// keep existing isPaidMs / hasSafeMarkerMs call-sites working:
+const isPaidMs = msIsPaid;
+const hasSafeMarkerMs = msHasSafeMarker;
+
 
 // ---------------- Consts ----------------
 const PINATA_GATEWAY = (() => {
