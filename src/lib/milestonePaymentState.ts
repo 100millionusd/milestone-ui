@@ -22,12 +22,13 @@ export function isPaid(m: any): boolean {
   const raw        = JSON.stringify(m || {}).toLowerCase();
 
   return !!(
-    // canonical tx markers
+    // canonical tx/timestamp markers
     m?.paymentTxHash || m?.payment_tx_hash ||
     m?.safePaymentTxHash || m?.safe_payment_tx_hash ||
     m?.txHash || m?.tx_hash ||
     m?.paymentDate || m?.payment_date ||
     m?.paidAt || m?.paid_at ||
+    m?.safeExecutedAt || m?.safe_executed_at || // ← important: executed == final
     m?.paid === true || m?.isPaid === true ||
     m?.hash /* legacy */ ||
 
@@ -36,7 +37,7 @@ export function isPaid(m: any): boolean {
     ['released','success','paid','completed','complete'].includes(payStatus) ||
     ['executed','success','released'].includes(safeStatus) ||
 
-    // JSON blob variants (be liberal)
+    // JSON blob variants
     raw.includes('"payment_status":"released"') ||
     raw.includes('"payment_status":"success"') ||
     raw.includes('"payment_status":"paid"')
@@ -52,18 +53,19 @@ export function hasSafeMarker(m: any): boolean {
   const ps  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
   const raw = JSON.stringify(m || {}).toLowerCase();
 
+  // Only pre-execution stages are in-flight
   const inflightRegex =
     /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
 
+  // Low-signal markers that indicate something was queued, but avoid final markers here
   const any =
     m?.paymentPending ||
-    m?.safeTxHash || m?.safe_tx_hash ||
+    m?.safeTxHash || m?.safe_tx_hash || // proposed/queued but not executed
     m?.safeNonce || m?.safe_nonce ||
-    // note: if safePaymentTxHash/safeExecutedAt exist, isPaid() would already be true and we'd have returned above
     inflightRegex.test(s) ||
     inflightRegex.test(ps) ||
-    /"safe_(status|tx_hash|nonce)"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
-    /gnosis/.test(raw);
+    /"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw) ||
+    /"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution)"/.test(raw);
 
   return !!any;
 }
