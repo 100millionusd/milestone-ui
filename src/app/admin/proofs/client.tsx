@@ -22,7 +22,7 @@ import {
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 
-// 🔐 Use centralized detectors only
+// Centralized detectors (kept), but we harden locally below.
 import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
@@ -46,7 +46,8 @@ const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // Persist local “queued/in-flight” across refreshes
 const PENDING_LS_KEY = 'mx_pay_pending';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // we still write a timestamp, but we no longer TTL-clear
+const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // we no longer TTL-clear
+
 function loadPendingFromLS(): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {
@@ -59,6 +60,93 @@ function loadPendingFromLS(): Set<string> {
 }
 function savePendingToLS(s: Set<string>) {
   try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
+}
+
+/** -------------------------------------------
+ * STRICT LOCAL DETECTORS (page-only patch)
+ * Ensures Safe final states are treated as PAID.
+ * ------------------------------------------ */
+
+// Treat these as final “paid” across *all* status fields.
+const FINAL_STATES = new Set([
+  'paid',
+  'executed',
+  'complete',
+  'completed',
+  'released',
+  'success',
+]);
+
+const INFLIGHT_RE = /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/;
+
+/** Paid if:
+ * - any tx/date/boolean paid fields exist
+ * - status/payment_status/safe_status ∈ FINAL_STATES
+ * - raw blobs include "payment_status":"released|executed|paid" or "safe_status":"released|executed|paid"
+ * - safePaymentTxHash present
+ */
+function isPaidStrict(m: any): boolean {
+  if (!m) return false;
+
+  // Honor central detector first.
+  if (msIsPaid(m)) return true;
+
+  const status     = String(m?.status ?? '').toLowerCase();
+  const payStatus  = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+
+  // Strong signals
+  if (
+    m?.paid === true || m?.isPaid === true || m?.released === true ||
+    !!(m?.paymentTxHash || m?.payment_tx_hash) ||
+    !!(m?.safePaymentTxHash || m?.safe_payment_tx_hash) || // ✅ treat as final
+    !!(m?.txHash || m?.tx_hash) ||
+    !!(m?.paymentDate || m?.payment_date) ||
+    !!(m?.paidAt || m?.paid_at) ||
+    !!(m?.safeExecutedAt || m?.safe_executed_at)
+  ) {
+    return true;
+  }
+
+  if (FINAL_STATES.has(status) || FINAL_STATES.has(payStatus) || FINAL_STATES.has(safeStatus)) {
+    return true;
+  }
+
+  try {
+    const raw = JSON.stringify(m || {}).toLowerCase();
+    if (/"payment_status"\s*:\s*"(released|executed|paid)"/.test(raw)) return true;
+    if (/"safe_status"\s*:\s*"(released|executed|paid)"/.test(raw)) return true;
+  } catch {}
+
+  return false;
+}
+
+/** In-flight if:
+ * - NOT paid (per isPaidStrict)
+ * - safe/payment status is a pre-exec value (INFLIGHT_RE)
+ * - safeTxHash/safeNonce present
+ * - raw shows inflight words on safe/payment statuses
+ * NOTE: *excludes* final words (executed/success/released) because those are paid above.
+ */
+function hasSafeMarkerStrict(m: any): boolean {
+  if (!m || isPaidStrict(m)) return false;
+
+  const s  = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
+  const ps = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
+
+  if (INFLIGHT_RE.test(s) || INFLIGHT_RE.test(ps)) return true;
+
+  if (m?.paymentPending || m?.safeTxHash || m?.safe_tx_hash || m?.safeNonce || m?.safe_nonce) {
+    return true;
+  }
+
+  try {
+    const raw = JSON.stringify(m || {}).toLowerCase();
+    if (/"safe_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
+    if (/"payment_status"\s*:\s*"(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)"/.test(raw)) return true;
+  } catch {}
+
+  return false;
 }
 
 // ---------------- Component ----------------
@@ -79,7 +167,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // local “payment pending” — ONLY cleared once server reports PAID
+  // local “payment pending” — ONLY cleared once server/strict says PAID
   const [pendingPay, setPendingPay] = useState<Set<string>>(
     () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
   );
@@ -129,7 +217,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return m?.completed === true || m?.approved === true || s === 'completed' || s === 'approved' || s === 'complete';
   }
 
-  const isReadyToPay = (m: any) => isCompleted(m) && !msIsPaid(m);
+  const isReadyToPay = (m: any) => isCompleted(m) && !isPaidStrict(m);
 
   // ---------- lifecycle ----------
   useEffect(() => {
@@ -209,17 +297,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
 
-      // ✅ IMPORTANT: Only clear local pending once the server shows PAID for that milestone.
+      // ✅ Only clear local pending when STRICT paid is true
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (msIsPaid(ms[i])) {
+          if (isPaidStrict(ms[i])) {
             removePending(mkKey(bid.bidId, i));
           }
         }
       }
 
-      // ❌ No TTL cleanup anymore — prevents buttons reappearing mid-flight.
+      // ❌ No TTL cleanup — prevents buttons reappearing mid-flight
 
       await hydrateArchiveStatuses(rows);
     } catch (e: any) {
@@ -301,7 +389,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
         if (!m) {
           // keep polling
-        } else if (msIsPaid(m)) {
+        } else if (isPaidStrict(m)) {
           removePending(key);
           setBids(prev =>
             prev.map(b => {
@@ -314,7 +402,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           router.refresh?.();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (msHasSafeMarker(m)) {
+        } else if (hasSafeMarkerStrict(m)) {
           // still in-flight — mirror latest server shape, keep local pending
           setBids(prev =>
             prev.map(b => {
@@ -340,7 +428,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       const bid = await getBid(bidId);
       const m = bid?.milestones?.[milestoneIndex];
-      if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
+      if (!m || (!isPaidStrict(m) && !hasSafeMarkerStrict(m))) {
         removePending(key);
       }
       setBids(prev =>
@@ -499,9 +587,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !msHasSafeMarker(m);
+        return isReadyToPay(m) && !pendingPay.has(mkKey(bidId, idx)) && !hasSafeMarkerStrict(m);
       case 'paid':
-        return msIsPaid(m);
+        return isPaidStrict(m);
       case 'no-proof':
         return !hasProof(m) && !isCompleted(m);
       case 'all':
@@ -608,11 +696,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
-                  const archived = isArchived(bid.bidId, origIdx);
+                  const archived = !!archMap[key]?.archived;
 
                   const approved = isCompleted(m);
-                  const paid = msIsPaid(m);
-                  const inflight = msHasSafeMarker(m);
+                  const paid = isPaidStrict(m);
+                  const inflight = hasSafeMarkerStrict(m);
                   const localPending = pendingPay.has(key);
 
                   const showPendingChip = !paid && (inflight || localPending);
@@ -654,7 +742,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                             Amount: ${m.amount} | Due: {m.dueDate}
                           </p>
 
-                          {/* minimal proof render (unchanged UI behavior) */}
+                          {/* proof render (unchanged) */}
                           {(() => {
                             if (!m?.proof) return null;
                             let parsed: any = null;
@@ -787,38 +875,42 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 );
                               })()}
 
-                              {canShowButtons && (
-                                <div className="flex items-center gap-2">
-                                  {/* Manual */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePay(bid.bidId, origIdx)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    className={[
-                                      'px-4 py-2 rounded text-white',
-                                      processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700',
-                                    ].join(' ')}
-                                    title="Release payment manually (EOA)"
-                                  >
-                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
-                                  </button>
+                              {(() => {
+                                const canShow = approved && !paid && !inflight && !localPending;
+                                if (!canShow) return null;
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    {/* Manual */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePay(bid.bidId, origIdx)}
+                                      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                      className={[
+                                        'px-4 py-2 rounded text-white',
+                                        processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700',
+                                      ].join(' ')}
+                                      title="Release payment manually (EOA)"
+                                    >
+                                      {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
+                                    </button>
 
-                                  {/* SAFE */}
-                                  <SafePayButton
-                                    bidId={bid.bidId}
-                                    milestoneIndex={origIdx}
-                                    amountUSD={Number(m?.amount || 0)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    onQueued={() => {
-                                      const k = mkKey(bid.bidId, origIdx);
-                                      addPending(k);
-                                      emitPayQueued(bid.bidId, origIdx);
-                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh?.();
-                                    }}
-                                  />
-                                </div>
-                              )}
+                                    {/* SAFE */}
+                                    <SafePayButton
+                                      bidId={bid.bidId}
+                                      milestoneIndex={origIdx}
+                                      amountUSD={Number(m?.amount || 0)}
+                                      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                      onQueued={() => {
+                                        const k = mkKey(bid.bidId, origIdx);
+                                        addPending(k);
+                                        emitPayQueued(bid.bidId, origIdx);
+                                        pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+                                        router.refresh?.();
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })()}
                             </>
                           )}
 
