@@ -54,6 +54,7 @@ const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 // ===== Persist local "pending" and "paid override" =====
 const PENDING_LS_KEY = 'mx_pay_pending';
 const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // kept for compatibility (not used for TTL any more)
+const PAID_OVERRIDE_LS_KEY = 'mx_paid_override';
 
 function loadSet(key: string): Set<string> {
   if (typeof window === 'undefined') return new Set();
@@ -93,6 +94,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // Local "payment pending" (persisted)
   const [pendingPay, setPendingPay] = useState<Set<string>>(
     () => (typeof window !== 'undefined' ? loadSet(PENDING_LS_KEY) : new Set())
+  );
+  // Local "paid override" (persisted) — used when Safe executed but DB hasn't updated yet
+  const [paidOverride, setPaidOverride] = useState<Set<string>>(
+    () => (typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set())
   );
 
   // Cache for /safe/tx lookups to avoid hammering
@@ -152,6 +157,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const next = new Set(prev);
       next.delete(key);
       saveSet(PENDING_LS_KEY, next);
+      return next;
+    });
+  }
+
+  // Helpers: local paid override
+  function setPaidOverrideKey(key: string, on: boolean) {
+    setPaidOverride((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      saveSet(PAID_OVERRIDE_LS_KEY, next);
       return next;
     });
   }
@@ -223,6 +239,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           if (msIsPaid(ms[i])) {
             const key = mkKey(bid.bidId, i);
             removePending(key);
+            setPaidOverrideKey(key, false); // server is source of truth once paid
           }
         }
       }
@@ -370,7 +387,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   async function callReconcileSafe(): Promise<void> {
     try {
-      console.log('🔄 FORCING reconciliation...');
+      console.log('🔄 FORCING Safe reconciliation...');
       const response = await fetch(apiUrl('/admin/oversight/reconcile-safe'), {
         method: 'POST',
         credentials: 'include',
@@ -382,12 +399,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Reconciliation completed:', result);
+        console.log('✅ Safe reconciliation completed:', result);
       } else {
-        console.error('❌ Reconciliation failed:', response.status);
+        console.error('❌ Safe reconciliation failed:', response.status);
       }
     } catch (error) {
-      console.error('❌ Reconciliation error:', error);
+      console.error('❌ Safe reconciliation error:', error);
     }
   }
 
@@ -414,20 +431,20 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  // ==== SIMPLE POLL UNTIL PAID ====
+  // ==== SAFE PAYMENT POLLING ONLY ====
   async function pollUntilPaid(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
     if (pollers.current.has(key)) return;
     pollers.current.add(key);
 
-    console.log(`🚀 Starting payment status check for ${key}`);
+    console.log(`🚀 Starting SAFE payment status check for ${key}`);
 
     try {
-      // Poll for up to 10 minutes
+      // Poll for up to 10 minutes (ONLY for Safe payments)
       for (let i = 0; i < 120; i++) {
-        console.log(`📡 Check ${i + 1}/120 for ${key}`);
+        console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
         
-        // 1) Trigger reconciliation to update status
+        // 1) Trigger reconciliation to update Safe payment status
         await callReconcileSafe();
         
         // 2) Get fresh bid data
@@ -444,10 +461,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         
         const m = bid?.milestones?.[milestoneIndex];
         
-        // 3) Check if payment is now marked as paid/released
+        // 3) Check if Safe payment is now marked as paid/released
         if (m && msIsPaid(m)) {
-          console.log('🎉 PAYMENT CONFIRMED! Updating UI...');
+          console.log('🎉 SAFE PAYMENT CONFIRMED! Updating UI...');
           removePending(key);
+          setPaidOverrideKey(key, false);
           
           // Update local state
           setBids((prev) =>
@@ -484,7 +502,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         await new Promise((r) => setTimeout(r, 5000));
       }
 
-      console.log('🛑 Stopping payment status check - time limit reached');
+      console.log('🛑 Stopping Safe payment status check - time limit reached');
       removePending(key);
     } finally {
       pollers.current.delete(key);
@@ -621,7 +639,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (archived) return false;
 
     const approved = msIsApproved(m) || isCompleted(m);
-    const paid = msIsPaid(m);
+    const paid = msIsPaid(m) || paidOverride.has(key);
     const inflight = msHasSafeMarker(m);
     const localPending = pendingPay.has(key);
 
@@ -667,7 +685,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
-  }, [bids, tab, query, archMap, pendingPay]);
+  }, [bids, tab, query, archMap, pendingPay, paidOverride]);
 
   // ---- UI helpers ----
   const renderProof = (m: any) => {
@@ -865,7 +883,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                   // strict state w/ local override
                   const approved = msIsApproved(m) || isCompleted(m);
-                  const paid = msIsPaid(m);
+                  const paid = msIsPaid(m) || paidOverride.has(key);
                   const inflight = msHasSafeMarker(m);
                   const localPending = pendingPay.has(key);
 

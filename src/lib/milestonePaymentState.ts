@@ -16,24 +16,20 @@ export function isPaid(m: any): boolean {
 
   // Check if backend marked it as paid after reconciliation
   if (m?.paid === true) {
-    console.log('✅ isPaid: TRUE - Backend marked as paid');
     return true;
   }
 
   // Check if paymentTxHash is set (this happens after reconciliation)
   if (m?.paymentTxHash || m?.payment_tx_hash) {
-    console.log('✅ isPaid: TRUE - paymentTxHash found');
     return true;
   }
 
   // Check if status is 'released' (what your reconciliation sets)
   const status = String(m?.status ?? '').toLowerCase();
   if (status === 'released') {
-    console.log('✅ isPaid: TRUE - status is released');
     return true;
   }
 
-  console.log('❌ isPaid: FALSE - No payment indicators found');
   return false;
 }
 
