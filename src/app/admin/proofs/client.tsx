@@ -1,4 +1,4 @@
-// src/app/admin/proofs/Client.tsx
+// src/app/admin/proofs/client.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -15,7 +15,7 @@ import {
   getBulkArchiveStatus,
   updateBulkArchiveCache,
   clearBulkArchiveCache,
-  getProofs, // ← NEW
+  getProofs,
 } from '@/lib/api';
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
@@ -32,11 +32,12 @@ import {
 // -------------------------------
 // Config / endpoints (best-effort)
 // -------------------------------
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
+const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE = RAW_API_BASE;
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
 
-// hard backend target to avoid same-origin rewrites
-const BACKEND = (process.env.NEXT_PUBLIC_API_BASE || 'https://milestone-api-production.up.railway.app').replace(/\/+$/,'');
+// Always prefer real backend origin for reconcile (prevents Netlify hits)
+const BACKEND = (RAW_API_BASE || 'https://milestone-api-production.up.railway.app').replace(/\/+$/, '');
 
 // Tabs
 const TABS = [
@@ -139,8 +140,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // Helpers: local pending
   function addPending(key: string) {
     try {
-      if (typeof window === 'undefined') return;
-      localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
+      }
     } catch {}
     setPendingPay((prev) => {
       const next = new Set(prev);
@@ -151,8 +153,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
   function removePending(key: string) {
     try {
-      if (typeof window === 'undefined') return;
-      localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
+      }
     } catch {}
     setPendingPay((prev) => {
       const next = new Set(prev);
@@ -253,7 +256,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // 🔽 NEW: hydrate milestones lacking `proof` from the proofs table
+      // Hydrate milestones lacking `proof` from the proofs table
       let merged = rows;
       try {
         merged = await mergeLatestProofsFromTable(rows);
@@ -359,9 +362,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
   }
 
-  // ---- NEW: backfill missing milestone.proof from /proofs ----
+  // ---- backfill missing milestone.proof from /proofs ----
   async function mergeLatestProofsFromTable(rows: any[]) {
-    // Deep-ish clone bids → milestones so we can safely mutate
     const out = (rows || []).map((b) => ({
       ...b,
       milestones: Array.isArray(b?.milestones) ? [...b.milestones] : [],
@@ -386,7 +388,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             const r = await getProofs(bid.bidId);
             list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
           } catch {
-            // ignore fetch errors; we'll just leave milestones as-is
             return;
           }
           if (!Array.isArray(list) || list.length === 0) return;
@@ -397,7 +398,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             );
             if (candidates.length === 0) continue;
 
-            // Sort newest first by any reasonable timestamp field
             candidates.sort((a: any, b: any) => {
               const at =
                 new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
@@ -422,13 +422,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             try {
               ms[mi] = {
                 ...ms[mi],
-                proof: JSON.stringify({
-                  description,
-                  files,
-                }),
+                proof: JSON.stringify({ description, files }),
               };
             } catch {
-              // If stringify fails, just skip
+              // ignore
             }
           }
         })()
@@ -451,32 +448,36 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function callReconcileSafe(): Promise<void> {
-  // Always hit backend origin explicitly (prevents Netlify same-origin requests)
-  if (!BACKEND) return;
+    if (!BACKEND) return;
+    console.log('🔄 FORCING Safe reconciliation...');
 
-  console.log('🔄 FORCING Safe reconciliation...');
-  const candidates = [
-    `${BACKEND}/admin/oversight/reconcile-safe`,
-    `${BACKEND}/oversight/reconcile-safe`,
-  ];
+    const candidates = [
+      `${BACKEND}/admin/oversight/reconcile-safe`,
+      `${BACKEND}/oversight/reconcile-safe`,
+    ];
 
-  for (const url of candidates) {
-    try {
-      const res = await fetch(url, { method: 'POST', credentials: 'include' });
-      if (res.ok) {
-        try { console.log('✅ Safe reconciliation completed:', await res.json()); }
-        catch { console.log('✅ Safe reconciliation completed (no JSON).'); }
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, { method: 'POST', credentials: 'include' });
+        if (res.ok) {
+          try {
+            const body = await res.json();
+            console.log('✅ Safe reconciliation completed:', body);
+          } catch {
+            console.log('✅ Safe reconciliation completed (no JSON).');
+          }
+          return;
+        }
+        if (res.status === 404) {
+          console.warn(`ℹ️ Safe reconcile endpoint not found at ${url}.`);
+          continue;
+        }
+        console.error('❌ Safe reconciliation failed:', res.status);
+        return;
+      } catch (error: any) {
+        console.error('❌ Safe reconciliation error:', error?.message || error);
         return;
       }
-      if (res.status === 404) {
-        console.warn(`ℹ️ Safe reconcile endpoint not found at ${url}.`);
-        continue; // try next candidate once
-      }
-      console.error('❌ Safe reconciliation failed:', res.status);
-      return;
-    } catch (e) {
-      console.error('❌ Safe reconciliation error:', (e as any)?.message || e);
-      return;
     }
   }
 
@@ -515,11 +516,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       // Poll for up to 10 minutes (ONLY for Safe payments)
       for (let i = 0; i < 120; i++) {
         console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
-        
-        // 1) Trigger reconciliation to update Safe payment status
+
         await callReconcileSafe();
-        
-        // 2) Get fresh bid data
+
         let bid: any | null = null;
         try {
           bid = await getBid(bidId);
@@ -530,16 +529,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             break;
           }
         }
-        
+
         const m = bid?.milestones?.[milestoneIndex];
-        
-        // 3) Check if Safe payment is now marked as paid/released
+
         if (m && msIsPaid(m)) {
           console.log('🎉 SAFE PAYMENT CONFIRMED! Updating UI...');
           removePending(key);
           setPaidOverrideKey(key, false);
-          
-          // Update local state
+
           setBids((prev) =>
             prev.map((b) => {
               const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -549,8 +546,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               return { ...b, milestones: ms };
             })
           );
-          
-          // Refresh everything
+
           try {
             (await import('@/lib/api')).invalidateBidsCache?.();
           } catch {}
@@ -559,18 +555,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
 
-        // 4) Check Safe transaction status directly as backup
         const safeHash = m ? readSafeTxHash(m) : null;
         if (safeHash) {
           const safeStatus = await fetchSafeTx(safeHash);
           if (safeStatus?.isExecuted) {
             console.log('🔍 Safe transaction executed, waiting for reconciliation...');
-            // Transaction is executed but reconciliation hasn't caught up yet
-            // Continue polling to let reconciliation update the status
           }
         }
 
-        // Wait 5 seconds between checks
         await new Promise((r) => setTimeout(r, 5000));
       }
 
@@ -899,8 +891,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       </div>
 
-      {/* Archive Controls (server) */}
-      {/* ...only shown on archived tab */}
+      {/* Archive Controls */}
       {tab === 'archived' && archivedCount > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
@@ -953,7 +944,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
 
-                  // strict state w/ local override
                   const approved = msIsApproved(m) || isCompleted(m);
                   const paid = msIsPaid(m) || paidOverride.has(key);
                   const localPending = pendingPay.has(key);
@@ -1049,7 +1039,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                       const k = mkKey(bid.bidId, origIdx);
                                       addPending(k);
                                       emitPayQueued(bid.bidId, origIdx);
-                                      // Start aggressive reconcile + Safe polling
                                       pollUntilPaid(bid.bidId, origIdx).catch(() => {});
                                       router.refresh();
                                     }}
