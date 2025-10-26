@@ -35,6 +35,9 @@ import {
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
 
+// hard backend target to avoid same-origin rewrites
+const BACKEND = (process.env.NEXT_PUBLIC_API_BASE || 'https://milestone-api-production.up.railway.app').replace(/\/+$/,'');
+
 // Tabs
 const TABS = [
   { key: 'all', label: 'All' },
@@ -448,21 +451,32 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function callReconcileSafe(): Promise<void> {
+  // Always hit backend origin explicitly (prevents Netlify same-origin requests)
+  if (!BACKEND) return;
+
+  console.log('🔄 FORCING Safe reconciliation...');
+  const candidates = [
+    `${BACKEND}/admin/oversight/reconcile-safe`,
+    `${BACKEND}/oversight/reconcile-safe`,
+  ];
+
+  for (const url of candidates) {
     try {
-      console.log('🔄 FORCING Safe reconciliation...');
-      const response = await fetch(apiUrl('/admin/oversight/reconcile-safe'), {
-        method: 'POST',
-        credentials: 'include',
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ Safe reconciliation completed:', result);
-      } else {
-        console.error('❌ Safe reconciliation failed:', response.status);
+      const res = await fetch(url, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        try { console.log('✅ Safe reconciliation completed:', await res.json()); }
+        catch { console.log('✅ Safe reconciliation completed (no JSON).'); }
+        return;
       }
-    } catch (error) {
-      console.error('❌ Safe reconciliation error:', error);
+      if (res.status === 404) {
+        console.warn(`ℹ️ Safe reconcile endpoint not found at ${url}.`);
+        continue; // try next candidate once
+      }
+      console.error('❌ Safe reconciliation failed:', res.status);
+      return;
+    } catch (e) {
+      console.error('❌ Safe reconciliation error:', (e as any)?.message || e);
+      return;
     }
   }
 
