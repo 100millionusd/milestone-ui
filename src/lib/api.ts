@@ -537,6 +537,12 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
   return _bidsInflight;
 }
 
+// force the next getBidsOnce() to refetch from the server immediately
+export function invalidateBidsCache() {
+  _bidsCache = null;
+  _bidsInflight = null;
+}
+
 /**
  * Exchange a signed nonce for a JWT cookie (and token).
  * Call flow:
