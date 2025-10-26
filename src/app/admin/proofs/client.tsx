@@ -24,6 +24,8 @@ import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
   isApproved as msIsApproved,
+  canShowPayButtons as msCanShowPayButtons,
+  isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
 // -------------------------------
@@ -747,7 +749,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               );
             })}
           </div>
-        )}
+        );
       </div>
     );
   };
@@ -853,11 +855,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   // strict state w/ local override
                   const approved = msIsApproved(m) || isCompleted(m);
                   const paid = msIsPaid(m) || paidOverride.has(key);
-                  const inflight = msHasSafeMarker(m);
                   const localPending = pendingPay.has(key);
-
-                  const showPendingChip = !paid && (inflight || localPending);
-                  const canShowButtons = approved && !paid && !inflight && !localPending;
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -870,11 +868,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">Archived</span>
                             )}
 
-                            {approved && !paid && !inflight && !localPending && (
+                            {approved && !paid && !msHasSafeMarker(m) && !localPending && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">Approved</span>
                             )}
 
-                            {showPendingChip && (
+                            {msIsPaymentPending(m, localPending) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">Payment Pending</span>
                             )}
 
@@ -927,7 +925,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 );
                               })()}
 
-                              {canShowButtons && (
+                              {msCanShowPayButtons(m, { approved, localPending }) && (
                                 <div className="flex items-center gap-2">
                                   {/* Manual payment */}
                                   <button
