@@ -33,28 +33,29 @@ function textIncludes(v: any, needle: string): boolean {
   return !!s && s.includes(needle);
 }
 
-// --- API per your state machine --------------------------------------------
+// --- API per spec ----------------------------------------------------------
 //
-// PAID if ANY of these are present (from backend):
+// PAID iff ANY of these are present (from backend):
 // - paymentTxHash / payment_tx_hash
 // - paymentDate / payment_date
 // - txHash / tx_hash
 // - paidAt / paid_at
 // - paid === true / isPaid === true
-// - status in ['paid','executed','complete','completed','released']  <-- TOP-LEVEL status only
+// - status in ['paid','executed','complete','completed','released']  <-- top-level status only
 // - JSON blob contains "payment_status":"released"
 //
-// IMPORTANT: `safePaymentTxHash` / `safe_payment_tx_hash` are NOT proof of paid.
-// They are SAFE in-flight markers only.
-//
-// IN-FLIGHT (NOT paid) if any Safe indicators present:
-// - safeTxHash, safePaymentTxHash, safeNonce, safeExecutedAt
-// - safeStatus/safe_status matches queued|pending|submitted|awaiting|awaiting_exec|executed|success|released
-// - raw/meta/blob text mentions "safe" or "gnosis"
+// IMPORTANT: DO NOT treat Safe markers as paid.
+// safeTxHash / safePaymentTxHash / safeNonce / safeExecutedAt / safeStatus => IN-FLIGHT ONLY.
 
 export function isApproved(m: any): boolean {
   const s = lo(m?.status);
-  return !!(m?.approved === true || m?.completed === true || s === 'approved' || s === 'completed' || s === 'complete');
+  return !!(
+    m?.approved === true ||
+    m?.completed === true ||
+    s === 'approved' ||
+    s === 'completed' ||
+    s === 'complete'
+  );
 }
 
 export function isPaid(m: any): boolean {
@@ -63,7 +64,7 @@ export function isPaid(m: any): boolean {
   // booleans
   if (hasTruthy(m?.paid, m?.isPaid)) return true;
 
-  // transaction / date markers (NO safePaymentTxHash here!)
+  // transaction / date markers (NO SAFE FIELDS HERE!)
   if (
     hasAny(m, [
       'paymentTxHash',
@@ -110,7 +111,7 @@ export function hasSafeMarker(m: any): boolean {
   if (!m) return false;
   if (isPaid(m)) return false; // paid supersedes "in-flight"
 
-  // explicit safe hints
+  // explicit safe hints => IN-FLIGHT
   const hasHashes =
     !!(m?.safeTxHash || m?.safe_tx_hash || m?.safePaymentTxHash || m?.safe_payment_tx_hash);
   const hasNonce = !!(m?.safeNonce || m?.safe_nonce);
@@ -127,7 +128,7 @@ export function hasSafeMarker(m: any): boolean {
     'executed',
     'success',
     'released',
-  ]; // even executed/released here do NOT imply paid
+  ]; // executed/released here still ≠ paid
   const hasSafeStatus = inflightWords.includes(safeStatus);
 
   // raw text cues
