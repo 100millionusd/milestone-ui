@@ -20,14 +20,11 @@ import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import { useRouter } from 'next/navigation';
-
-// Import the functions directly to avoid the undefined error
-import * as milestonePaymentState from '@/lib/milestonePaymentState';
-
-// Create aliases for the functions
-const msIsPaid = milestonePaymentState.isPaid;
-const msHasSafeMarker = milestonePaymentState.hasSafeMarker;
-const msIsApproved = milestonePaymentState.isApproved;
+import {
+  isPaid as msIsPaid,
+  hasSafeMarker as msHasSafeMarker,
+  isApproved as msIsApproved,
+} from '@/lib/milestonePaymentState';
 
 // -------------------------------
 // Config / endpoints (best-effort)
@@ -352,37 +349,13 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // -------- Safe helpers / reconciliation --------
   function readSafeTxHash(m: any): string | null {
-    // Check all possible Safe transaction hash fields
-    const possibleFields = [
-      'safeTxHash', 'safe_tx_hash', 
-      'safePaymentTxHash', 'safe_payment_tx_hash',
-      'safeTransactionHash', 'safe_transaction_hash'
-    ];
-    
-    for (const field of possibleFields) {
-      if (m?.[field]) {
-        console.log(`🔍 Found Safe hash in field ${field}:`, m[field]);
-        return m[field];
-      }
-    }
-    
-    // Also check in payment data
-    if (m?.paymentData) {
-      try {
-        const paymentData = typeof m.paymentData === 'string' ? JSON.parse(m.paymentData) : m.paymentData;
-        for (const field of possibleFields) {
-          if (paymentData?.[field]) {
-            console.log(`🔍 Found Safe hash in paymentData.${field}:`, paymentData[field]);
-            return paymentData[field];
-          }
-        }
-      } catch (e) {
-        // Not JSON, continue
-      }
-    }
-    
-    console.log('❌ No Safe hash found in milestone data');
-    return null;
+    return (
+      m?.safeTxHash ||
+      m?.safe_tx_hash ||
+      m?.safePaymentTxHash ||
+      m?.safe_payment_tx_hash ||
+      null
+    );
   }
 
   async function callReconcileSafe(): Promise<void> {
@@ -391,10 +364,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const response = await fetch(apiUrl('/admin/oversight/reconcile-safe'), {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
       });
       
       if (response.ok) {
@@ -913,13 +882,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           </div>
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
-
-                          {/* Debug info */}
-                          <div className="text-xs text-gray-500 mt-1">
-                            Status: {m?.status} | Paid: {m?.paid ? 'YES' : 'NO'} | 
-                            TxHash: {m?.paymentTxHash ? 'SET' : 'NOT SET'} |
-                            SafeHash: {readSafeTxHash(m) ? 'SET' : 'NOT SET'}
-                          </div>
 
                           {/* Proof */}
                           {renderProof(m)}

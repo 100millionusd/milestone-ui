@@ -10,9 +10,12 @@ export function isApproved(m: any): boolean {
   );
 }
 
-// Final "PAID" detector: ONLY check what the backend actually sets
+// Final "PAID" detector: treat as paid if any strong indicator is present.
 export function isPaid(m: any): boolean {
   if (!m) return false;
+
+  const status = String(m?.status ?? '').toLowerCase();
+  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
 
   // Check if backend marked it as paid after reconciliation
   if (m?.paid === true) {
@@ -25,7 +28,6 @@ export function isPaid(m: any): boolean {
   }
 
   // Check if status is 'released' (what your reconciliation sets)
-  const status = String(m?.status ?? '').toLowerCase();
   if (status === 'released') {
     return true;
   }
