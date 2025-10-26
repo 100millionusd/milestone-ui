@@ -36,9 +36,6 @@ const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLI
 const API_BASE = RAW_API_BASE;
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
 
-// Always prefer real backend origin for reconcile (prevents Netlify hits)
-const BACKEND = (RAW_API_BASE || 'https://milestone-api-production.up.railway.app').replace(/\/+$/, '');
-
 // Tabs
 const TABS = [
   { key: 'all', label: 'All' },
@@ -57,8 +54,12 @@ const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // ===== Persist local "pending" and "paid override" =====
 const PENDING_LS_KEY = 'mx_pay_pending';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // kept for compatibility (not used for TTL any more)
+const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // kept for compatibility
 const PAID_OVERRIDE_LS_KEY = 'mx_paid_override';
+
+// Stale "pending" auto-expiry (defaults to 24h)
+const PENDING_TTL_MINUTES = Number(process.env.NEXT_PUBLIC_PENDING_TTL_MINUTES || 1440);
+const PENDING_TTL_MS = PENDING_TTL_MINUTES * 60 * 1000;
 
 function loadSet(key: string): Set<string> {
   if (typeof window === 'undefined') return new Set();
@@ -176,6 +177,25 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     });
   }
 
+  // Prune stale local pending (TTL)
+  function prunePendingStale() {
+    if (typeof window === 'undefined') return;
+    const now = Date.now();
+    setPendingPay((prev) => {
+      const next = new Set(prev);
+      for (const key of Array.from(next)) {
+        const tsRaw = localStorage.getItem(`${PENDING_TS_PREFIX}${key}`);
+        const ts = tsRaw ? parseInt(tsRaw, 10) : 0;
+        if (!ts || Number.isNaN(ts) || now - ts > PENDING_TTL_MS) {
+          next.delete(key);
+          try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
+        }
+      }
+      saveSet(PENDING_LS_KEY, next);
+      return next;
+    });
+  }
+
   // Init
   useEffect(() => {
     let bc: BroadcastChannel | null = null;
@@ -204,14 +224,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       };
     }
 
+    // prune old local pending markers before first load
+    prunePendingStale();
+
     if (initialBids.length === 0) {
       loadProofs();
     } else {
       hydrateArchiveStatuses(initialBids).catch(() => {});
     }
 
-    // listen for archive/unarchive from anywhere
-    // (this hook fires loadProofs)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -245,13 +266,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // Resume polling for any still pending
+      // Resume polling only if it still looks in-flight or we have a hash
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !msIsPaid(ms[i])) {
-            pollUntilPaid(bid.bidId, i).catch(() => {});
+          const m = ms[i];
+
+          if (pendingPay.has(key)) {
+            if (msIsPaid(m)) {
+              removePending(key);
+              setPaidOverrideKey(key, false);
+            } else {
+              const inflight = msHasSafeMarker(m);
+              const safeHash = readSafeTxHash(m);
+              if (!inflight && !safeHash) {
+                // stale local pending → clear, don't poll
+                removePending(key);
+              } else {
+                // still in-flight → resume polling
+                pollUntilPaid(bid.bidId, i).catch(() => {});
+              }
+            }
           }
         }
       }
@@ -436,7 +472,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return out;
   }
 
-  // -------- Safe helpers / reconciliation --------
+  // -------- Safe helpers --------
   function readSafeTxHash(m: any): string | null {
     return (
       m?.safeTxHash ||
@@ -445,40 +481,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       m?.safe_payment_tx_hash ||
       null
     );
-  }
-
-  async function callReconcileSafe(): Promise<void> {
-    if (!BACKEND) return;
-    console.log('🔄 FORCING Safe reconciliation...');
-
-    const candidates = [
-      `${BACKEND}/admin/oversight/reconcile-safe`,
-      `${BACKEND}/oversight/reconcile-safe`,
-    ];
-
-    for (const url of candidates) {
-      try {
-        const res = await fetch(url, { method: 'POST', credentials: 'include' });
-        if (res.ok) {
-          try {
-            const body = await res.json();
-            console.log('✅ Safe reconciliation completed:', body);
-          } catch {
-            console.log('✅ Safe reconciliation completed (no JSON).');
-          }
-          return;
-        }
-        if (res.status === 404) {
-          console.warn(`ℹ️ Safe reconcile endpoint not found at ${url}.`);
-          continue;
-        }
-        console.error('❌ Safe reconciliation failed:', res.status);
-        return;
-      } catch (error: any) {
-        console.error('❌ Safe reconciliation error:', error?.message || error);
-        return;
-      }
-    }
   }
 
   async function fetchSafeTx(hash: string): Promise<{ isExecuted: boolean; txHash?: string | null } | null> {
@@ -505,93 +507,98 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   // ==== SAFE PAYMENT POLLING ONLY ====
-  // ==== SAFE PAYMENT POLLING ONLY ====
-// Calls reconcile ONCE, then relies on getBid() + /safe/tx polling (no per-tick reconcile).
-async function pollUntilPaid(bidId: number, milestoneIndex: number) {
-  const key = mkKey(bidId, milestoneIndex);
-  if (pollers.current.has(key)) return;
-  pollers.current.add(key);
+  async function pollUntilPaid(bidId: number, milestoneIndex: number) {
+    const key = mkKey(bidId, milestoneIndex);
+    if (pollers.current.has(key)) return;
+    pollers.current.add(key);
 
-  console.log(`🚀 Starting SAFE payment status check for ${key}`);
+    console.log(`🚀 Starting SAFE payment status check for ${key}`);
 
-  try {
-   
+    try {
+      let executedStreak = 0; // require 2 consecutive "executed" ticks to avoid a fluke
 
-    let executedStreak = 0; // require 2 consecutive "executed" ticks to avoid a fluke
+      // Poll for up to 10 minutes (120 * 5s)
+      for (let i = 0; i < 120; i++) {
+        console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
 
-    // Poll for up to 10 minutes (120 * 5s)
-    for (let i = 0; i < 120; i++) {
-      console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
+        // 1) Get fresh bid from the server
+        let bid: any | null = null;
+        try {
+          bid = await getBid(bidId);
+        } catch (err: any) {
+          console.error('Error fetching bid:', err);
+          if (err?.status === 401 || err?.status === 403) {
+            setError('Your session expired. Please sign in again.');
+            break;
+          }
+        }
 
-      // 1) Get fresh bid from the server
-      let bid: any | null = null;
-      try {
-        bid = await getBid(bidId);
-      } catch (err: any) {
-        console.error('Error fetching bid:', err);
-        if (err?.status === 401 || err?.status === 403) {
-          setError('Your session expired. Please sign in again.');
+        const m = bid?.milestones?.[milestoneIndex];
+
+        // Early bail if nothing to do
+        if (!m) { removePending(key); break; }
+        const inflight = msHasSafeMarker(m);
+        const safeHash = m ? readSafeTxHash(m) : null;
+        if (!inflight && !safeHash && !msIsPaid(m)) {
+          console.log('🛑 No Safe markers/hash → stop polling');
+          removePending(key);
           break;
         }
-      }
 
-      const m = bid?.milestones?.[milestoneIndex];
+        // 2) If server already shows paid → finish
+        if (m && msIsPaid(m)) {
+          console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
+          removePending(key);
+          setPaidOverrideKey(key, false);
 
-      // 2) If server already shows paid → finish
-      if (m && msIsPaid(m)) {
-        console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
-        removePending(key);
-        setPaidOverrideKey(key, false);
+          // Update local state
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
+              return { ...b, milestones: ms };
+            })
+          );
 
-        // Update local state
-        setBids((prev) =>
-          prev.map((b) => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
-            ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
-            return { ...b, milestones: ms };
-          })
-        );
-
-        try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-        router.refresh();
-        emitPayDone(bidId, milestoneIndex);
-        return;
-      }
-
-      // 3) Check Safe execution directly; if executed twice consecutively → mark Paid locally
-      const safeHash = m ? readSafeTxHash(m) : null;
-      if (safeHash) {
-        const safeStatus = await fetchSafeTx(safeHash);
-        if (safeStatus?.isExecuted) {
-          executedStreak++;
-          if (executedStreak >= 2) {
-            console.log('✅ SAFE EXECUTED ON-CHAIN → mark Paid (local override).');
-            setPaidOverrideKey(key, true);   // flip chip to Paid now
-            removePending(key);
-            emitPayDone(bidId, milestoneIndex);
-            router.refresh();
-
-            // gentle refresh later to pick up server reconcile if it lags
-            setTimeout(() => loadProofs(true), 15000);
-            return;
-          }
-        } else {
-          executedStreak = 0;
+          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+          router.refresh();
+          emitPayDone(bidId, milestoneIndex);
+          return;
         }
+
+        // 3) Check Safe execution directly; if executed twice consecutively → mark Paid locally
+        if (safeHash) {
+          const safeStatus = await fetchSafeTx(safeHash);
+          if (safeStatus?.isExecuted) {
+            executedStreak++;
+            if (executedStreak >= 2) {
+              console.log('✅ SAFE EXECUTED ON-CHAIN → mark Paid (local override).');
+              setPaidOverrideKey(key, true);   // flip chip to Paid now
+              removePending(key);
+              emitPayDone(bidId, milestoneIndex);
+              router.refresh();
+
+              // gentle refresh later to pick up server reconcile if it lags
+              setTimeout(() => loadProofs(true), 15000);
+              return;
+            }
+          } else {
+            executedStreak = 0;
+          }
+        }
+
+        // 4) Wait 5s
+        await new Promise((r) => setTimeout(r, 5000));
       }
 
-      // 4) Wait 5s
-      await new Promise((r) => setTimeout(r, 5000));
+      console.log('🛑 Stopping Safe payment status check - time limit reached');
+      removePending(key);
+    } finally {
+      pollers.current.delete(key);
     }
-
-    console.log('🛑 Stopping Safe payment status check - time limit reached');
-    removePending(key);
-  } finally {
-    pollers.current.delete(key);
   }
-}
 
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
