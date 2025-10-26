@@ -515,8 +515,7 @@ async function pollUntilPaid(bidId: number, milestoneIndex: number) {
   console.log(`🚀 Starting SAFE payment status check for ${key}`);
 
   try {
-    // 🔧 Optional: kick a single server-side reconcile, then stop calling it.
-    try { await callReconcileSafe(); } catch {}
+   
 
     let executedStreak = 0; // require 2 consecutive "executed" ticks to avoid a fluke
 
