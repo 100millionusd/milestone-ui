@@ -16,6 +16,7 @@ import {
   updateBulkArchiveCache,
   clearBulkArchiveCache,
   getProofs,
+  invalidateBidsCache,
 } from '@/lib/api';
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
@@ -262,7 +263,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             })
           );
 
-          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+          try { invalidateBidsCache(); } catch {}
           router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
