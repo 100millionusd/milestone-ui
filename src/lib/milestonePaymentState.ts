@@ -33,11 +33,10 @@ function textIncludes(v: any, needle: string): boolean {
   return !!s && s.includes(needle);
 }
 
-// --- API per your spec -----------------------------------------------------
+// --- API per your state machine --------------------------------------------
 //
-// Paid if ANY of these are present (from backend):
+// PAID if ANY of these are present (from backend):
 // - paymentTxHash / payment_tx_hash
-// - safePaymentTxHash / safe_payment_tx_hash
 // - paymentDate / payment_date
 // - txHash / tx_hash
 // - paidAt / paid_at
@@ -45,11 +44,13 @@ function textIncludes(v: any, needle: string): boolean {
 // - status in ['paid','executed','complete','completed','released']  <-- TOP-LEVEL status only
 // - JSON blob contains "payment_status":"released"
 //
-// In-flight if NOT paid AND any Safe indicators present:
+// IMPORTANT: `safePaymentTxHash` / `safe_payment_tx_hash` are NOT proof of paid.
+// They are SAFE in-flight markers only.
+//
+// IN-FLIGHT (NOT paid) if any Safe indicators present:
 // - safeTxHash, safePaymentTxHash, safeNonce, safeExecutedAt
 // - safeStatus/safe_status matches queued|pending|submitted|awaiting|awaiting_exec|executed|success|released
-// - any raw/meta/blob text mentions "safe" or "gnosis"
-// (Important: in-flight ≠ paid; do NOT mark paid on these alone)
+// - raw/meta/blob text mentions "safe" or "gnosis"
 
 export function isApproved(m: any): boolean {
   const s = lo(m?.status);
@@ -62,13 +63,11 @@ export function isPaid(m: any): boolean {
   // booleans
   if (hasTruthy(m?.paid, m?.isPaid)) return true;
 
-  // transaction / date markers
+  // transaction / date markers (NO safePaymentTxHash here!)
   if (
     hasAny(m, [
       'paymentTxHash',
       'payment_tx_hash',
-      'safePaymentTxHash',
-      'safe_payment_tx_hash',
       'txHash',
       'tx_hash',
       'paymentDate',
@@ -128,7 +127,7 @@ export function hasSafeMarker(m: any): boolean {
     'executed',
     'success',
     'released',
-  ]; // per your spec, even executed/released here do NOT imply paid
+  ]; // even executed/released here do NOT imply paid
   const hasSafeStatus = inflightWords.includes(safeStatus);
 
   // raw text cues
