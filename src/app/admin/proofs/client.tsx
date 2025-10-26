@@ -175,40 +175,64 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // Init
   useEffect(() => {
-    let bc: BroadcastChannel | null = null;
+  let bc: BroadcastChannel | null = null;
+  try {
+    bc = new BroadcastChannel('mx-payments');
+    bcRef.current = bc;
+  } catch {}
+
+  if (bc) {
+    bc.onmessage = (e: MessageEvent) => {
+      const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+      if (!type) return;
+
+      if (type === 'mx:pay:queued') {
+        const key = mkKey(bidId, milestoneIndex);
+        addPending(key);
+        // start polling immediately
+        pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+        loadProofs(true);
+      } else if (type === 'mx:pay:done') {
+        removePending(mkKey(bidId, milestoneIndex));
+        loadProofs(true);
+      } else if (type === 'mx:ms:updated') {
+        loadProofs(true);
+      }
+    };
+  }
+
+  if (initialBids.length === 0) {
+    // No SSR data → normal fetch path
+    loadProofs();
+  } else {
+    // We DO have SSR data; hydrate AND kick polls for any Safe-in-flight rows
+    hydrateArchiveStatuses(initialBids).catch(() => {});
+
     try {
-      bc = new BroadcastChannel('mx-payments');
-      bcRef.current = bc;
-    } catch {}
+      for (const bid of initialBids) {
+        const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+        for (let i = 0; i < ms.length; i++) {
+          const key = mkKey(bid.bidId, i);
 
-    if (bc) {
-      bc.onmessage = (e: MessageEvent) => {
-        const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-        if (!type) return;
+          // If server already says PAID, clear any local flags
+          if (msIsPaid(ms[i])) {
+            removePending(key);
+            setPaidOverrideKey(key, false);
+            continue;
+          }
 
-        if (type === 'mx:pay:queued') {
-          const key = mkKey(bidId, milestoneIndex);
-          addPending(key);
-          // start polling
-          pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-          loadProofs(true);
-        } else if (type === 'mx:pay:done') {
-          removePending(mkKey(bidId, milestoneIndex));
-          loadProofs(true);
-        } else if (type === 'mx:ms:updated') {
-          loadProofs(true);
+          // NEW: also poll if Safe markers are present even WITHOUT localPending
+          const needsPoll = pendingPay.has(key) || msHasSafeMarker(ms[i]);
+          if (needsPoll && !pollers.current.has(key)) {
+            pollUntilPaid(bid.bidId, i).catch(() => {});
+          }
         }
-      };
-    }
+      }
+    } catch {}
+  }
 
-    if (initialBids.length === 0) {
-      loadProofs();
-    } else {
-      hydrateArchiveStatuses(initialBids).catch(() => {});
-    }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   useMilestonesUpdated(loadProofs);
 
@@ -240,16 +264,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // Resume polling for any still pending
-      for (const bid of rows || []) {
-        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-        for (let i = 0; i < ms.length; i++) {
-          const key = mkKey(bid.bidId, i);
-          if (pendingPay.has(key) && !msIsPaid(ms[i])) {
-            pollUntilPaid(bid.bidId, i).catch(() => {});
-          }
-        }
-      }
+      // Resume polling for any still pending OR any milestone that shows Safe markers
+for (const bid of rows || []) {
+  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+  for (let i = 0; i < ms.length; i++) {
+    const key = mkKey(bid.bidId, i);
+
+    // Skip if server already says PAID — and clear local flags
+    if (msIsPaid(ms[i])) {
+      removePending(key);
+      setPaidOverrideKey(key, false);
+      continue;
+    }
+
+    // NEW: also poll when Safe markers exist (even without localPending)
+    const needsPoll = pendingPay.has(key) || msHasSafeMarker(ms[i]);
+    if (needsPoll && !pollers.current.has(key)) {
+      pollUntilPaid(bid.bidId, i).catch(() => {});
+    }
+  }
+}
 
       // Hydrate milestones lacking `proof` from the proofs table
       let merged = rows;
