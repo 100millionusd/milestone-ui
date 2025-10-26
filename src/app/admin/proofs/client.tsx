@@ -1,4 +1,3 @@
-```tsx
 // src/app/admin/proofs/Client.tsx
 'use client';
 
