@@ -1,111 +1,83 @@
-// src/lib/milestonePaymentState.ts
+// ==== SAFE PAYMENT POLLING ONLY ====
+async function pollUntilPaid(bidId: number, milestoneIndex: number) {
+  const key = mkKey(bidId, milestoneIndex);
+  if (pollers.current.has(key)) return;
+  pollers.current.add(key);
 
-// Approved/completed gate (aka "milestone ready to pay")
-export function isApproved(m: any): boolean {
-  const s = String(m?.status ?? '').toLowerCase();
-  return !!(
-    m?.approved === true ||
-    m?.completed === true ||
-    s === 'approved' ||
-    s === 'completed' ||
-    s === 'complete'
-  );
-}
+  console.log(`🚀 Starting SAFE payment status check for ${key}`);
 
-/**
- * Final "PAID" detector.
- *
- * Important adjustments:
- * - DO NOT treat 'executed' (Safe) as paid; we wait for server reconciliation.
- * - DO NOT treat 'complete'/'completed' as paid; that’s approval/completion, not payment.
- */
-export function isPaid(m: any): boolean {
-  if (!m) return false;
+  try {
+    let executedStreak = 0; // require 2 consecutive "executed" to avoid a fluke
 
-  // Strong booleans
-  if (m?.paid === true || m?.isPaid === true) return true;
+    // Poll for up to 10 minutes
+    for (let i = 0; i < 120; i++) {
+      console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
 
-  // Any explicit tx hash (EOA or Safe) means paid on-chain (server may lag, but this is authoritative)
-  if (
-    m?.paymentTxHash ||
-    m?.payment_tx_hash ||
-    m?.safePaymentTxHash ||
-    m?.safe_payment_tx_hash ||
-    m?.txHash ||
-    m?.tx_hash
-  ) {
-    return true;
+      // 1) Fetch fresh bid from the server
+      let bid: any | null = null;
+      try {
+        bid = await getBid(bidId);
+      } catch (err: any) {
+        console.error('Error fetching bid:', err);
+        if (err?.status === 401 || err?.status === 403) {
+          setError('Your session expired. Please sign in again.');
+          break;
+        }
+      }
+
+      const m = bid?.milestones?.[milestoneIndex];
+
+      // 2) If server already thinks it's paid → finish
+      if (m && msIsPaid(m)) {
+        console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
+        removePending(key);
+        setPaidOverrideKey(key, false);
+
+        // update local copy of this milestone
+        setBids((prev) =>
+          prev.map((b) => {
+            const match = ((b as any).bidId ?? (b as any).id) === bidId;
+            if (!match) return b;
+            const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+            ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
+            return { ...b, milestones: ms };
+          })
+        );
+
+        try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+        router.refresh();
+        emitPayDone(bidId, milestoneIndex);
+        return;
+      }
+
+      // 3) Check Safe execution directly; if executed twice consecutively → flip UI locally
+      const safeHash = m ? readSafeTxHash(m) : null;
+      if (safeHash) {
+        const safeStatus = await fetchSafeTx(safeHash);
+        if (safeStatus?.isExecuted) {
+          executedStreak++;
+          if (executedStreak >= 2) {
+            console.log('✅ SAFE EXECUTED ON-CHAIN → Optimistically marking Paid (local override).');
+            setPaidOverrideKey(key, true);
+            removePending(key);
+            emitPayDone(bidId, milestoneIndex);
+            router.refresh();
+            // optional: gentle refresh later to pick up server reconcile if it lags
+            setTimeout(() => loadProofs(true), 15000);
+            return;
+          }
+        } else {
+          executedStreak = 0;
+        }
+      }
+
+      // 4) Wait 5s and try again
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+
+    console.log('🛑 Stopping Safe payment status check - time limit reached');
+    removePending(key);
+  } finally {
+    pollers.current.delete(key);
   }
-
-  // Any explicit payment date flags as paid
-  if (m?.paymentDate || m?.payment_date || m?.paidAt || m?.paid_at) return true;
-
-  // Status fields
-  const status = String(m?.status ?? '').toLowerCase();
-  const payStatus = String(m?.paymentStatus ?? m?.payment_status ?? '').toLowerCase();
-
-  // Treat only true payment states as paid
-  if (['paid', 'released', 'settled'].includes(status)) return true;
-  if (['paid', 'released', 'settled'].includes(payStatus)) return true;
-
-  // NOTE: deliberately NOT treating 'executed' as paid (Safe exec pending reconciliation)
-  // NOTE: deliberately NOT treating 'complete'/'completed' as paid
-
-  return false;
-}
-
-/**
- * Detects if a Safe payment is in-flight (created/submitted/queued/executed but not reconciled).
- * If already paid (per isPaid), returns false.
- */
-export function hasSafeMarker(m: any): boolean {
-  if (!m) return false;
-
-  // If already paid, no in-flight marker
-  if (isPaid(m)) return false;
-
-  // Safe signals
-  const hasSafeHash = !!(m?.safeTxHash || m?.safe_tx_hash || m?.safeNonce || m?.safe_nonce);
-  const hasSafePaymentHash = !!(m?.safePaymentTxHash || m?.safe_payment_tx_hash);
-
-  // If a Safe payment hash exists but we're not paid yet, it's in-flight
-  if (hasSafePaymentHash && !isPaid(m)) return true;
-
-  // Safe status text
-  const safeStatus = String(m?.safeStatus ?? m?.safe_status ?? '').toLowerCase();
-
-  // Treat these as in-flight (NOT final paid)
-  const safeStatusPending = new Set([
-    'proposed',
-    'queued',
-    'pending',
-    'submitted',
-    'awaiting',
-    'awaiting_exec',
-    'needs_signatures',
-    'next',
-    'executed', // executed on Safe, but backend may not have reconciled → still show pending
-  ]);
-
-  if (safeStatus && safeStatusPending.has(safeStatus)) return true;
-
-  // Any Safe indicator + not paid ⇒ likely in-flight
-  return hasSafeHash && !isPaid(m);
-}
-
-// UI-level pending: show chip & hide buttons while in flight or locally queued
-export function isPaymentPending(m: any, localPending?: boolean): boolean {
-  return !isPaid(m) && (!!localPending || hasSafeMarker(m));
-}
-
-// Button visibility for Pay actions (manual or SAFE)
-export function canShowPayButtons(
-  m: any,
-  opts?: { approved?: boolean; localPending?: boolean }
-): boolean {
-  const approved = typeof opts?.approved === 'boolean' ? opts.approved : isApproved(m);
-  const localPending = !!opts?.localPending;
-
-  // Only show buttons if: approved AND not paid AND not in-flight AND not locally pending
-  return approved && !isPaid(m) && !hasSafeMarker(m) && !localPending;
 }
