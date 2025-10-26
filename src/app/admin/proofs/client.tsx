@@ -370,15 +370,19 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   async function callReconcileSafe(): Promise<void> {
     try {
-      console.log('🔄 Calling reconciliation endpoint...');
+      console.log('🔄 FORCING reconciliation...');
       const response = await fetch(apiUrl('/admin/oversight/reconcile-safe'), {
         method: 'POST',
         credentials: 'include',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       });
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Reconciliation result:', result);
+        console.log('✅ Reconciliation completed:', result);
       } else {
         console.error('❌ Reconciliation failed:', response.status);
       }
@@ -410,37 +414,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  // ==== POLL UNTIL PAID (with Safe reconcile & local override) ====
-  async function pollUntilPaid(
-    bidId: number,
-    milestoneIndex: number,
-    tries = 200, // Increased to allow more time for reconciliation
-    intervalMs = 3000
-  ) {
+  // ==== SIMPLE POLL UNTIL PAID ====
+  async function pollUntilPaid(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
     if (pollers.current.has(key)) return;
     pollers.current.add(key);
 
-    console.log(`🚀 Starting polling for ${key}, max tries: ${tries}`);
+    console.log(`🚀 Starting payment status check for ${key}`);
 
     try {
-      for (let i = 0; i < tries; i++) {
-        console.log(`📡 Poll attempt ${i + 1}/${tries} for ${key}`);
+      // Poll for up to 10 minutes
+      for (let i = 0; i < 120; i++) {
+        console.log(`📡 Check ${i + 1}/120 for ${key}`);
         
-        // 1) CRITICAL: Trigger reconciliation FIRST - this updates 'pending' → 'released'
-        console.log('🔄 Triggering Safe reconciliation...');
+        // 1) Trigger reconciliation to update status
         await callReconcileSafe();
-
-        // 2) Wait a moment for reconciliation to process
-        await new Promise(r => setTimeout(r, 1000));
-
-        // 3) Pull latest bid data AFTER reconciliation
+        
+        // 2) Get fresh bid data
         let bid: any | null = null;
         try {
           bid = await getBid(bidId);
-          console.log('📋 Bid data received after reconciliation:', bid);
         } catch (err: any) {
-          console.error('❌ Error fetching bid:', err);
+          console.error('Error fetching bid:', err);
           if (err?.status === 401 || err?.status === 403) {
             setError('Your session expired. Please sign in again.');
             break;
@@ -448,62 +443,51 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
         
         const m = bid?.milestones?.[milestoneIndex];
-        console.log('🎯 Milestone data after reconciliation:', m);
-
-        // 4) Check if reconciliation marked the payment as 'released'
-        const isCurrentlyPaid = m ? msIsPaid(m) : false;
-        console.log('💰 Payment status after reconciliation:', { isCurrentlyPaid });
-
-        if (isCurrentlyPaid) {
-          console.log('✅ Payment marked as RELEASED by reconciliation!');
+        
+        // 3) Check if payment is now marked as paid/released
+        if (m && msIsPaid(m)) {
+          console.log('🎉 PAYMENT CONFIRMED! Updating UI...');
           removePending(key);
           
-          // Update local state with the reconciled data
+          // Update local state
           setBids((prev) =>
             prev.map((b) => {
               const match = ((b as any).bidId ?? (b as any).id) === bidId;
               if (!match) return b;
               const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
-              ms[milestoneIndex] = { ...ms[milestoneIndex], ...(m as any) };
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
               return { ...b, milestones: ms };
             })
           );
           
-          // Clear cache and refresh
+          // Refresh everything
           try {
             (await import('@/lib/api')).invalidateBidsCache?.();
           } catch {}
-          if (typeof router?.refresh === 'function') router.refresh();
+          router.refresh();
           emitPayDone(bidId, milestoneIndex);
-          console.log('✅ Payment flow completed successfully');
           return;
         }
 
-        // 5) Also check Safe transaction status directly as backup
+        // 4) Check Safe transaction status directly as backup
         const safeHash = m ? readSafeTxHash(m) : null;
-        console.log('🔍 Safe hash detected:', safeHash);
-        
         if (safeHash) {
-          const safe = await fetchSafeTx(safeHash);
-          console.log('🔍 Safe transaction status:', safe);
-          
-          if (safe?.isExecuted && safe?.txHash) {
-            console.log('✅ Safe transaction executed, but reconciliation not yet processed');
-            // Transaction is executed but reconciliation hasn't run yet
-            // We'll continue polling to let reconciliation catch up
+          const safeStatus = await fetchSafeTx(safeHash);
+          if (safeStatus?.isExecuted) {
+            console.log('🔍 Safe transaction executed, waiting for reconciliation...');
+            // Transaction is executed but reconciliation hasn't caught up yet
+            // Continue polling to let reconciliation update the status
           }
         }
 
-        console.log('⏳ Waiting for reconciliation to process...');
-        await new Promise((r) => setTimeout(r, intervalMs));
+        // Wait 5 seconds between checks
+        await new Promise((r) => setTimeout(r, 5000));
       }
 
-      console.log('🛑 Polling ended - max attempts reached');
-      // Even if polling ends, remove pending to allow retry
+      console.log('🛑 Stopping payment status check - time limit reached');
       removePending(key);
     } finally {
       pollers.current.delete(key);
-      console.log('🧹 Cleaned up poller for', key);
     }
   }
 
@@ -912,12 +896,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
 
-                          {/* Debug info - remove after testing */}
+                          {/* Debug info */}
                           <div className="text-xs text-gray-500 mt-1">
-                            Debug: {paid ? 'PAID' : 'NOT PAID'} | 
-                            Pending: {pendingPay.has(key) ? 'YES' : 'NO'} |
-                            SafeHash: {readSafeTxHash(m) ? 'YES' : 'NO'} |
-                            HasSafeMarker: {msHasSafeMarker(m) ? 'YES' : 'NO'}
+                            Status: {m?.status} | Paid: {m?.paid ? 'YES' : 'NO'} | 
+                            TxHash: {m?.paymentTxHash ? 'SET' : 'NOT SET'} |
+                            SafeHash: {readSafeTxHash(m) ? 'SET' : 'NOT SET'}
                           </div>
 
                           {/* Proof */}
