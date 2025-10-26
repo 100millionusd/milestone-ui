@@ -36,6 +36,14 @@ const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLI
 const API_BASE = RAW_API_BASE;
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
 
+// Toggle client console spam without redeploy:
+//   localStorage.setItem('mx_debug_safe','1')  to enable
+//   localStorage.removeItem('mx_debug_safe')   to disable
+const SAFE_DEBUG =
+  typeof window !== 'undefined' &&
+  (process.env.NEXT_PUBLIC_DEBUG_SAFE === '1' ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('mx_debug_safe') === '1'));
+
 // Tabs
 const TABS = [
   { key: 'all', label: 'All' },
@@ -113,7 +121,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     lastUpdated: 0,
   });
 
-
   // Broadcast channel
   const bcRef = useRef<BroadcastChannel | null>(null);
   function emitPayQueued(bidId: number, milestoneIndex: number) {
@@ -174,66 +181,186 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     });
   }
 
-  // Init
-  useEffect(() => {
-  let bc: BroadcastChannel | null = null;
-  try {
-    bc = new BroadcastChannel('mx-payments');
-    bcRef.current = bc;
-  } catch {}
-
-  if (bc) {
-    bc.onmessage = (e: MessageEvent) => {
-      const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-      if (!type) return;
-
-      if (type === 'mx:pay:queued') {
-        const key = mkKey(bidId, milestoneIndex);
-        addPending(key);
-        // start polling immediately
-        pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-        loadProofs(true);
-      } else if (type === 'mx:pay:done') {
-        removePending(mkKey(bidId, milestoneIndex));
-        loadProofs(true);
-      } else if (type === 'mx:ms:updated') {
-        loadProofs(true);
-      }
-    };
+  // -------- Safe helpers --------
+  function readSafeTxHash(m: any): string | null {
+    return (
+      m?.safeTxHash ||
+      m?.safe_tx_hash ||
+      m?.safePaymentTxHash ||
+      m?.safe_payment_tx_hash ||
+      null
+    );
   }
 
-  if (initialBids.length === 0) {
-    // No SSR data → normal fetch path
-    loadProofs();
-  } else {
-    // We DO have SSR data; hydrate AND kick polls for any Safe-in-flight rows
-    hydrateArchiveStatuses(initialBids).catch(() => {});
+  async function fetchSafeTx(hash: string): Promise<{ isExecuted: boolean; txHash?: string | null } | null> {
+    if (!hash) return null;
+
+    // small cache to reduce spam
+    const now = Date.now();
+    const cached = safeStatusCache.current.get(hash);
+    if (cached && now - cached.at < 3000) return { isExecuted: cached.isExecuted, txHash: cached.txHash };
 
     try {
-      for (const bid of initialBids) {
-        const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-        for (let i = 0; i < ms.length; i++) {
-          const key = mkKey(bid.bidId, i);
-
-          // If server already says PAID, clear any local flags
-          if (msIsPaid(ms[i])) {
-            removePending(key);
-            setPaidOverrideKey(key, false);
-            continue;
-          }
-
-          // NEW: also poll if Safe markers are present even WITHOUT localPending
-          const needsPoll = pendingPay.has(key) || msHasSafeMarker(ms[i]);
-          if (needsPoll && !pollers.current.has(key)) {
-            pollUntilPaid(bid.bidId, i).catch(() => {});
-          }
-        }
-      }
-    } catch {}
+      const r = await fetch(apiUrl(`/safe/tx/${encodeURIComponent(hash)}`), {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const out = { isExecuted: !!j?.isExecuted, txHash: j?.txHash ?? null };
+      safeStatusCache.current.set(hash, { ...out, at: now });
+      return out;
+    } catch {
+      return null;
+    }
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+  // ==== SAFE PAYMENT POLLING ONLY ====
+  // Local override: flip to PAID as soon as Safe shows executed (2 consecutive ticks)
+  async function pollUntilPaid(bidId: number, milestoneIndex: number) {
+    const key = mkKey(bidId, milestoneIndex);
+    if (pollers.current.has(key)) return;
+    pollers.current.add(key);
+
+    if (SAFE_DEBUG) console.log(`🚀 Starting SAFE payment status check for ${key}`);
+
+    try {
+      let executedStreak = 0; // require two consecutive confirmations
+
+      // Poll for up to 10 minutes (120 * 5s)
+      for (let i = 0; i < 120; i++) {
+        if (SAFE_DEBUG) console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
+
+        // 1) Get fresh bid from the server
+        let bid: any | null = null;
+        try {
+          bid = await getBid(bidId);
+        } catch (err: any) {
+          if (SAFE_DEBUG) console.error('Error fetching bid:', err);
+          if (err?.status === 401 || err?.status === 403) {
+            setError('Your session expired. Please sign in again.');
+            break;
+          }
+        }
+
+        const m = bid?.milestones?.[milestoneIndex];
+
+        // 2) If server already shows paid → finish
+        if (m && msIsPaid(m)) {
+          if (SAFE_DEBUG) console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
+          removePending(key);
+          setPaidOverrideKey(key, false);
+
+          // Update local state
+          setBids((prev) =>
+            prev.map((b) => {
+              const match = ((b as any).bidId ?? (b as any).id) === bidId;
+              if (!match) return b;
+              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
+              ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
+              return { ...b, milestones: ms };
+            })
+          );
+
+          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+          router.refresh();
+          emitPayDone(bidId, milestoneIndex);
+          return;
+        }
+
+        // 3) Safe direct check; if executed twice consecutively → mark Paid locally (override)
+        const safeHash = m ? readSafeTxHash(m) : null;
+        if (safeHash) {
+          const safeStatus = await fetchSafeTx(safeHash);
+          if (safeStatus?.isExecuted) {
+            executedStreak++;
+            if (executedStreak >= 2) {
+              if (SAFE_DEBUG) console.log('✅ SAFE EXECUTED ON-CHAIN → mark Paid (local override).');
+              setPaidOverrideKey(key, true);   // flip chip to Paid now
+              removePending(key);
+              emitPayDone(bidId, milestoneIndex);
+              router.refresh();
+
+              // gentle refresh later to pick up server reconcile if it lags
+              setTimeout(() => loadProofs(true), 15_000);
+              return;
+            }
+          } else {
+            executedStreak = 0;
+          }
+        }
+
+        // 4) Wait 5s
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+
+      if (SAFE_DEBUG) console.log('🛑 Stopping Safe payment status check - time limit reached');
+      removePending(key);
+    } finally {
+      pollers.current.delete(key);
+    }
+  }
+
+  // Init
+  useEffect(() => {
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('mx-payments');
+      bcRef.current = bc;
+    } catch {}
+
+    if (bc) {
+      bc.onmessage = (e: MessageEvent) => {
+        const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+        if (!type) return;
+
+        if (type === 'mx:pay:queued') {
+          const key = mkKey(bidId, milestoneIndex);
+          addPending(key);
+          // start polling immediately
+          pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+          loadProofs(true);
+        } else if (type === 'mx:pay:done') {
+          removePending(mkKey(bidId, milestoneIndex));
+          loadProofs(true);
+        } else if (type === 'mx:ms:updated') {
+          loadProofs(true);
+        }
+      };
+    }
+
+    if (initialBids.length === 0) {
+      // No SSR data → normal fetch path
+      loadProofs();
+    } else {
+      // We DO have SSR data; hydrate AND kick polls for any Safe-in-flight rows
+      hydrateArchiveStatuses(initialBids).catch(() => {});
+
+      try {
+        for (const bid of initialBids) {
+          const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+          for (let i = 0; i < ms.length; i++) {
+            const key = mkKey(bid.bidId, i);
+
+            // If server already says PAID, clear any local flags
+            if (msIsPaid(ms[i])) {
+              removePending(key);
+              setPaidOverrideKey(key, false);
+              continue;
+            }
+
+            // START POLLING ONLY IF: (local pending) OR (Safe markers AND there is a real Safe hash)
+            const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
+            if (needsPoll && !pollers.current.has(key)) {
+              pollUntilPaid(bid.bidId, i).catch(() => {});
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useMilestonesUpdated(loadProofs);
 
@@ -265,48 +392,46 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // Resume polling for any still pending OR any milestone that shows Safe markers
-for (const bid of rows || []) {
-  const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-  for (let i = 0; i < ms.length; i++) {
-    const key = mkKey(bid.bidId, i);
+      // Resume polling for any still pending OR any milestone that shows Safe markers with a real hash
+      for (const bid of rows || []) {
+        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+        for (let i = 0; i < ms.length; i++) {
+          const key = mkKey(bid.bidId, i);
 
-    // Skip if server already says PAID — and clear local flags
-    if (msIsPaid(ms[i])) {
-      removePending(key);
-      setPaidOverrideKey(key, false);
-      continue;
-    }
+          // Skip if server already says PAID — and clear local flags
+          if (msIsPaid(ms[i])) {
+            removePending(key);
+            setPaidOverrideKey(key, false);
+            continue;
+          }
 
-    // NEW: also poll when Safe markers exist (even without localPending)
-    const needsPoll = pendingPay.has(key) || msHasSafeMarker(ms[i]);
-    if (needsPoll && !pollers.current.has(key)) {
-      pollUntilPaid(bid.bidId, i).catch(() => {});
-    }
-  }
-}
-
-// Prune local pending keys that don't exist anymore
-try {
-  const validKeys = new Set<string>();
-  for (const bid of rows || []) {
-    const msArr: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-    for (let i = 0; i < msArr.length; i++) validKeys.add(mkKey(bid.bidId, i));
-  }
-  setPendingPay((prev) => {
-    const next = new Set(prev);
-    let changed = false;
-    for (const k of prev) {
-      if (!validKeys.has(k)) {
-        next.delete(k);
-        changed = true;
+          const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
+          if (needsPoll && !pollers.current.has(key)) {
+            pollUntilPaid(bid.bidId, i).catch(() => {});
+          }
+        }
       }
-    }
-    if (changed) saveSet(PENDING_LS_KEY, next);
-    return next;
-  });
-} catch {}
 
+      // Prune local pending keys that don't exist anymore
+      try {
+        const validKeys = new Set<string>();
+        for (const bid of rows || []) {
+          const msArr: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+          for (let i = 0; i < msArr.length; i++) validKeys.add(mkKey(bid.bidId, i));
+        }
+        setPendingPay((prev) => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const k of prev) {
+            if (!validKeys.has(k)) {
+              next.delete(k);
+              changed = true;
+            }
+          }
+          if (changed) saveSet(PENDING_LS_KEY, next);
+          return next;
+        });
+      } catch {}
 
       // Hydrate milestones lacking `proof` from the proofs table
       let merged = rows;
@@ -321,7 +446,7 @@ try {
 
       await hydrateArchiveStatuses(merged);
     } catch (e: any) {
-      console.error('Error fetching proofs:', e);
+      if (SAFE_DEBUG) console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
     } finally {
       setLoading(false);
@@ -356,7 +481,7 @@ try {
 
       setArchMap(nextMap);
     } catch (error) {
-      console.error('Failed to fetch bulk archive status:', error);
+      if (SAFE_DEBUG) console.error('Failed to fetch bulk archive status:', error);
       await hydrateArchiveStatusesFallback(allBids);
     }
   }
@@ -488,126 +613,6 @@ try {
     return out;
   }
 
-  // -------- Safe helpers --------
-  function readSafeTxHash(m: any): string | null {
-    return (
-      m?.safeTxHash ||
-      m?.safe_tx_hash ||
-      m?.safePaymentTxHash ||
-      m?.safe_payment_tx_hash ||
-      null
-    );
-  }
-
-  async function fetchSafeTx(hash: string): Promise<{ isExecuted: boolean; txHash?: string | null } | null> {
-    if (!hash) return null;
-
-    // small cache to reduce spam
-    const now = Date.now();
-    const cached = safeStatusCache.current.get(hash);
-    if (cached && now - cached.at < 3000) return { isExecuted: cached.isExecuted, txHash: cached.txHash };
-
-    try {
-      const r = await fetch(apiUrl(`/safe/tx/${encodeURIComponent(hash)}`), {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (!r.ok) return null;
-      const j = await r.json();
-      const out = { isExecuted: !!j?.isExecuted, txHash: j?.txHash ?? null };
-      safeStatusCache.current.set(hash, { ...out, at: now });
-      return out;
-    } catch {
-      return null;
-    }
-  }
-
-  // ==== SAFE PAYMENT POLLING ONLY ====
-  // Local override: flip to PAID as soon as Safe shows executed (2 consecutive ticks)
-  async function pollUntilPaid(bidId: number, milestoneIndex: number) {
-    const key = mkKey(bidId, milestoneIndex);
-    if (pollers.current.has(key)) return;
-    pollers.current.add(key);
-
-    console.log(`🚀 Starting SAFE payment status check for ${key}`);
-
-    try {
-      let executedStreak = 0; // require two consecutive confirmations
-
-      // Poll for up to 10 minutes (120 * 5s)
-      for (let i = 0; i < 120; i++) {
-        console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
-
-        // 1) Get fresh bid from the server
-        let bid: any | null = null;
-        try {
-          bid = await getBid(bidId);
-        } catch (err: any) {
-          console.error('Error fetching bid:', err);
-          if (err?.status === 401 || err?.status === 403) {
-            setError('Your session expired. Please sign in again.');
-            break;
-          }
-        }
-
-        const m = bid?.milestones?.[milestoneIndex];
-
-        // 2) If server already shows paid → finish
-        if (m && msIsPaid(m)) {
-          console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
-          removePending(key);
-          setPaidOverrideKey(key, false);
-
-          // Update local state
-          setBids((prev) =>
-            prev.map((b) => {
-              const match = ((b as any).bidId ?? (b as any).id) === bidId;
-              if (!match) return b;
-              const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
-              ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
-              return { ...b, milestones: ms };
-            })
-          );
-
-          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-          router.refresh();
-          emitPayDone(bidId, milestoneIndex);
-          return;
-        }
-
-        // 3) Safe direct check; if executed twice consecutively → mark Paid locally (override)
-        const safeHash = m ? readSafeTxHash(m) : null;
-        if (safeHash) {
-          const safeStatus = await fetchSafeTx(safeHash);
-          if (safeStatus?.isExecuted) {
-            executedStreak++;
-            if (executedStreak >= 2) {
-              console.log('✅ SAFE EXECUTED ON-CHAIN → mark Paid (local override).');
-              setPaidOverrideKey(key, true);   // flip chip to Paid now
-              removePending(key);
-              emitPayDone(bidId, milestoneIndex);
-              router.refresh();
-
-              // gentle refresh later to pick up server reconcile if it lags
-              setTimeout(() => loadProofs(true), 15000);
-              return;
-            }
-          } else {
-            executedStreak = 0;
-          }
-        }
-
-        // 4) Wait 5s
-        await new Promise((r) => setTimeout(r, 5000));
-      }
-
-      console.log('🛑 Stopping Safe payment status check - time limit reached');
-      removePending(key);
-    } finally {
-      pollers.current.delete(key);
-    }
-  }
-
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -685,7 +690,7 @@ try {
     try {
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
-    clearBulkArchiveCache(bidId);
+      clearBulkArchiveCache(bidId);
       setArchMap((prev) => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
@@ -982,7 +987,12 @@ try {
                   const approved = msIsApproved(m) || isCompleted(m);
                   const paid = msIsPaid(m) || paidOverride.has(key);
                   const localPending = pendingPay.has(key);
-                  const showPendingChip = !paid && msIsPaymentPending(m, localPending); // << respect override
+
+                  // Only show the "Payment Pending" chip when:
+                  //  - it's not paid (incl. override), AND
+                  //  - there is a real Safe hash to track OR we have a localPending flag
+                  const hasRealSafeHash = !!readSafeTxHash(m);
+                  const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
