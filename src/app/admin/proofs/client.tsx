@@ -1,4 +1,4 @@
-// src/app/admin/proofs/Client.tsx
+// src/app/admin/proofs/client.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -925,36 +925,36 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 );
                               })()}
 
-                              {msCanShowPayButtons(m, { approved, localPending }) && (
-                                <div className="flex items-center gap-2">
-                                  {/* Manual payment */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePay(bid.bidId, origIdx)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    className={['px-4 py-2 rounded text-white', processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'].join(' ')}
-                                    title="Release payment manually (EOA)"
-                                  >
-                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
-                                  </button>
+ {msCanShowPayButtons(m, { approved, localPending }) && (
+  <div className="flex items-center gap-2">
+    {/* Manual payment */}
+    <button
+      type="button"
+      onClick={() => handlePay(bid.bidId, origIdx)}
+      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+      className={['px-4 py-2 rounded text-white', processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'].join(' ')}
+      title="Release payment manually (EOA)"
+    >
+      {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
+    </button>
 
-                                  {/* SAFE */}
-                                  <SafePayButton
-                                    bidId={bid.bidId}
-                                    milestoneIndex={origIdx}
-                                    amountUSD={Number(m?.amount || 0)}
-                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    onQueued={() => {
-                                      const k = mkKey(bid.bidId, origIdx);
-                                      addPending(k);
-                                      emitPayQueued(bid.bidId, origIdx);
-                                      // Start aggressive reconcile + Safe polling
-                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                      router.refresh();
-                                    }}
-                                  />
-                                </div>
-                              )}
+    {/* SAFE */}
+    <SafePayButton
+      bidId={bid.bidId}
+      milestoneIndex={origIdx}
+      amountUSD={Number(m?.amount || 0)}
+      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+      onQueued={() => {
+        const k = mkKey(bid.bidId, origIdx);
+        addPending(k);
+        emitPayQueued(bid.bidId, origIdx);
+        // Start aggressive reconcile + Safe polling
+        pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+        router.refresh();
+      }}
+    />
+  </div>
+)}
                             </>
                           )}
 
