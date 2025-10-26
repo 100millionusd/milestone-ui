@@ -20,11 +20,14 @@ import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import { useRouter } from 'next/navigation';
-import {
-  isPaid as msIsPaid,
-  hasSafeMarker as msHasSafeMarker,
-  isApproved as msIsApproved,
-} from '@/lib/milestonePaymentState';
+
+// Import the functions directly to avoid the undefined error
+import * as milestonePaymentState from '@/lib/milestonePaymentState';
+
+// Create aliases for the functions
+const msIsPaid = milestonePaymentState.isPaid;
+const msHasSafeMarker = milestonePaymentState.hasSafeMarker;
+const msIsApproved = milestonePaymentState.isApproved;
 
 // -------------------------------
 // Config / endpoints (best-effort)
