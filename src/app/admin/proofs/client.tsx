@@ -113,6 +113,43 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     lastUpdated: 0,
   });
 
+  // --- AUTO-REFRESH WHILE PENDING/IN-FLIGHT ---
+const refreshTimerRef = useRef<number | null>(null);
+
+// Revalidate every 5s while we have any "pending" locally OR any Safe in-flight marker on server data.
+// Stops automatically when everything is settled.
+useEffect(() => {
+  // stop existing timer
+  if (refreshTimerRef.current) {
+    clearInterval(refreshTimerRef.current);
+    refreshTimerRef.current = null;
+  }
+
+  const hasLocalPending = pendingPay.size > 0;
+
+  const hasSafeInFlight = (bids || []).some((b: any) =>
+    (Array.isArray(b?.milestones) ? b.milestones : []).some((m: any) =>
+      !msIsPaid(m) && msHasSafeMarker(m)
+    )
+  );
+
+  // If anything is pending or in-flight, poll the API every 5s
+  if (hasLocalPending || hasSafeInFlight) {
+    refreshTimerRef.current = window.setInterval(() => {
+      // force refresh so we pick up server "paid" and clear local flags
+      loadProofs(true);
+    }, 5000);
+  }
+
+  // cleanup on unmount/changes
+  return () => {
+    if (refreshTimerRef.current) {
+      clearInterval(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+  };
+}, [pendingPay, bids]);
+
   // Broadcast channel
   const bcRef = useRef<BroadcastChannel | null>(null);
   function emitPayQueued(bidId: number, milestoneIndex: number) {
@@ -284,6 +321,28 @@ for (const bid of rows || []) {
     }
   }
 }
+
+// Prune local pending keys that don't exist anymore
+try {
+  const validKeys = new Set<string>();
+  for (const bid of rows || []) {
+    const msArr: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    for (let i = 0; i < msArr.length; i++) validKeys.add(mkKey(bid.bidId, i));
+  }
+  setPendingPay((prev) => {
+    const next = new Set(prev);
+    let changed = false;
+    for (const k of prev) {
+      if (!validKeys.has(k)) {
+        next.delete(k);
+        changed = true;
+      }
+    }
+    if (changed) saveSet(PENDING_LS_KEY, next);
+    return next;
+  });
+} catch {}
+
 
       // Hydrate milestones lacking `proof` from the proofs table
       let merged = rows;
