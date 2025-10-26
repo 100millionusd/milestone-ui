@@ -25,8 +25,7 @@ import {
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
 
-// ---- types & utils ----
-type TabKey = typeof TABS[number]['key'];
+// ---- tabs/types ----
 const TABS = [
   { key: 'all', label: 'All' },
   { key: 'needs-approval', label: 'Needs Approval' },
@@ -35,9 +34,9 @@ const TABS = [
   { key: 'no-proof', label: 'No Proof' },
   { key: 'archived', label: 'Archived' },
 ] as const;
+type TabKey = typeof TABS[number]['key'];
 
 type LightboxState = { urls: string[]; index: number } | null;
-
 const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 type ArchiveInfo = {
@@ -45,20 +44,6 @@ type ArchiveInfo = {
   archivedAt?: string | null;
   archiveReason?: string | null;
 };
-
-// Payout overlay rows (from /admin/oversight/payouts)
-type PayoutPending = { bid_id: number; milestone_index: number; created_at?: string | null };
-type PayoutReleased = {
-  bid_id: number;
-  milestone_index: number;
-  tx_hash?: string | null;
-  released_at?: string | null;
-};
-
-type PayoutOverlayMap = Record<
-  string,
-  { status: 'pending' | 'released'; txHash?: string | null; releasedAt?: string | null }
->;
 
 // ===== Persist "payment pending" across refreshes =====
 const PENDING_LS_KEY = 'mx_pay_pending';
@@ -75,43 +60,54 @@ function loadPendingFromLS(): Set<string> {
   }
 }
 function savePendingToLS(s: Set<string>) {
-  try {
-    localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s)));
-  } catch {}
+  try { localStorage.setItem(PENDING_LS_KEY, JSON.stringify(Array.from(s))); } catch {}
 }
 
-// Try both likely paths so this works on Netlify proxy or direct server:
-async function fetchPayoutsSnapshot(): Promise<{
-  pending: PayoutPending[];
-  released: PayoutReleased[];
-}> {
-  const paths = ['/admin/oversight/payouts', '/api/admin/oversight/payouts'];
-  for (const path of paths) {
+// ---- SAFE overlay (uses /admin/oversight/reconcile-safe) ----
+// We keep a tiny overlay map: server says {pending|released} for (bidId, idx).
+type SafeOverlay = Record<string, { status: 'pending' | 'released'; txHash?: string | null; seenAt: number }>;
+
+async function fetchReconcileSafe(
+  bidId: number,
+  milestoneIndex: number
+): Promise<{ executed: boolean; pending: boolean; txHash?: string | null }> {
+  const qsA = `?bidId=${encodeURIComponent(bidId)}&milestoneIndex=${encodeURIComponent(milestoneIndex)}`;
+  const qsB = `?bidId=${encodeURIComponent(bidId)}&milestone=${encodeURIComponent(milestoneIndex)}`;
+  const paths = [
+    `/admin/oversight/reconcile-safe${qsA}`,
+    `/admin/oversight/reconcile-safe${qsB}`,
+    `/api/admin/oversight/reconcile-safe${qsA}`,
+    `/api/admin/oversight/reconcile-safe${qsB}`,
+  ];
+
+  for (const url of paths) {
     try {
-      const res = await fetch(path, { credentials: 'include', cache: 'no-store' });
+      const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
       if (!res.ok) continue;
       const j = await res.json();
-      const pending = Array.isArray(j?.pending) ? (j.pending as PayoutPending[]) : [];
-      const released = Array.isArray(j?.released) ? (j.released as PayoutReleased[]) : [];
-      return { pending, released };
+
+      // Be very tolerant: flatten to string for keyword checks,
+      // but try to extract a tx hash if present.
+      const raw = JSON.stringify(j || {});
+      const rawL = raw.toLowerCase();
+
+      const executed =
+        /"executed"|executed|success|released/g.test(rawL) &&
+        !/"failed|rejected|cancelled|canceled|reverted"/g.test(rawL);
+
+      const pending =
+        !executed &&
+        /(queued|pending|submitted|awaiting|awaiting_exec|awaiting-exec|awaiting_execution|waiting|proposed)/g.test(rawL);
+
+      const txMatch = raw.match(/0x[a-fA-F0-9]{64}/);
+      const txHash = txMatch ? txMatch[0] : undefined;
+
+      return { executed, pending, txHash: txHash || undefined };
     } catch {
-      // try next path
+      // try next
     }
   }
-  return { pending: [], released: [] };
-}
-
-function buildPayoutOverlayMap(pending: PayoutPending[], released: PayoutReleased[]): PayoutOverlayMap {
-  const map: PayoutOverlayMap = {};
-  for (const p of pending || []) {
-    const key = mkKey(Number(p.bid_id), Number(p.milestone_index));
-    if (!map[key]) map[key] = { status: 'pending' };
-  }
-  for (const r of released || []) {
-    const key = mkKey(Number(r.bid_id), Number(r.milestone_index));
-    map[key] = { status: 'released', txHash: r.tx_hash ?? null, releasedAt: r.released_at ?? null };
-  }
-  return map;
+  return { executed: false, pending: false };
 }
 
 // ================== Component ==================
@@ -133,14 +129,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // server archive state map
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
-  // local "payment pending" while we poll the server after clicking Pay (persisted)
+  // local "payment pending" while we poll after clicking Pay (persisted)
   const [pendingPay, setPendingPay] = useState<Set<string>>(
     () => (typeof window !== 'undefined' ? loadPendingFromLS() : new Set())
   );
 
-  // 🔴 NEW: snapshot of server payout truth (milestone_payments)
-  const [payoutOverlay, setPayoutOverlay] = useState<PayoutOverlayMap>({});
-  const lastPayoutFetchRef = useRef<number>(0);
+  // 🔴 NEW: SAFE overlay from reconcile-safe
+  const [safeOverlay, setSafeOverlay] = useState<SafeOverlay>({});
+  const lastOverlayFetchRef = useRef<number>(0);
 
   // Client-side caching for bids data
   const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({
@@ -151,11 +147,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // --- helpers to toggle local pending ---
   function addPending(key: string) {
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
-      } catch {}
+      try { localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
     }
-    setPendingPay((prev) => {
+    setPendingPay(prev => {
       const next = new Set(prev);
       next.add(key);
       savePendingToLS(next);
@@ -164,11 +158,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
   function removePending(key: string) {
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
-      } catch {}
+      try { localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
     }
-    setPendingPay((prev) => {
+    setPendingPay(prev => {
       const next = new Set(prev);
       next.delete(key);
       savePendingToLS(next);
@@ -182,7 +174,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       loadProofs();
     } else {
       hydrateArchiveStatuses(initialBids).catch(() => {});
-      refreshPayoutsOverlay(true).catch(() => {});
+      // Opportunistic overlay hydration for any already-pending items
+      refreshOverlayForPending(true).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -193,28 +186,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // cross-page payment sync
   const bcRef = useRef<BroadcastChannel | null>(null);
   function emitPayQueued(bidId: number, milestoneIndex: number) {
-    try {
-      bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex });
-    } catch {}
+    try { bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex }); } catch {}
   }
   function emitPayDone(bidId: number, milestoneIndex: number) {
-    try {
-      bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex });
-    } catch {}
+    try { bcRef.current?.postMessage({ type: 'mx:pay:done', bidId, milestoneIndex }); } catch {}
   }
   function emitMilestonesUpdated(detail: any) {
-    try {
-      window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
-    } catch {}
-    try {
-      bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail });
-    } catch {}
-  }
-  function queueBroadcast(bidId: number, milestoneIndex: number) {
-    const key = mkKey(bidId, milestoneIndex);
-    addPending(key);
-    emitPayQueued(bidId, milestoneIndex);
-    pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
+    try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
   }
 
   useEffect(() => {
@@ -230,33 +209,30 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         if (!type) return;
 
         if (type === 'mx:pay:queued') {
-          addPending(mkKey(bidId, milestoneIndex));
+          const k = mkKey(bidId, milestoneIndex);
+          addPending(k);
           pollUntilPaid(bidId, milestoneIndex).catch(() => {});
           loadProofs(true);
-          refreshPayoutsOverlay(true).catch(() => {});
+          refreshOverlayForPending(true).catch(() => {});
         } else if (type === 'mx:pay:done') {
           removePending(mkKey(bidId, milestoneIndex));
           loadProofs(true);
-          refreshPayoutsOverlay(true).catch(() => {});
+          refreshOverlayForPending(true).catch(() => {});
         } else if (type === 'mx:ms:updated') {
           loadProofs(true);
-          refreshPayoutsOverlay(true).catch(() => {});
+          refreshOverlayForPending(true).catch(() => {});
         }
       };
     }
 
-    return () => {
-      try {
-        bc?.close();
-      } catch {}
-    };
+    return () => { try { bc?.close(); } catch {} };
   }, []);
 
-  // --- payouts overlay: refresh only while something is pending ---
+  // --- overlay refresher: poll only while something is pending ---
   useEffect(() => {
     if (pendingPay.size === 0) return;
     const id = setInterval(() => {
-      refreshPayoutsOverlay().catch(() => {});
+      refreshOverlayForPending().catch(() => {});
     }, 5000);
     return () => clearInterval(id);
   }, [pendingPay]);
@@ -280,7 +256,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setDataCache({ bids: rows, lastUpdated: Date.now() });
       setBids(rows);
 
-      // Clear local "pending" for milestones that are now paid per milestones JSON
+      // Clear local "pending" where milestones JSON already shows paid
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
@@ -290,28 +266,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // TTL auto-clear for stale local "pending" — but DO NOT clear if server overlay says pending/released
+      // TTL auto-clear for stale local "pending" — but DO NOT clear if overlay says pending/released
       try {
         const now = Date.now();
-        const MAX_MS = 30 * 60 * 1000; // 30 minutes
+        const MAX_MS = 30 * 60 * 1000; // 30 mins
         for (const key of Array.from(pendingPay)) {
-          const tsRaw =
-            typeof window !== 'undefined'
-              ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`)
-              : null;
+          const tsRaw = typeof window !== 'undefined' ? localStorage.getItem(`${PENDING_TS_PREFIX}${key}`) : null;
           const ts = tsRaw ? Number(tsRaw) : 0;
 
           const [bidIdStr, idxStr] = key.split('-');
           const b = rows.find((r: any) => Number(r.bidId) === Number(bidIdStr));
           const m = Array.isArray(b?.milestones) ? b.milestones[Number(idxStr)] : null;
 
-          const overlay = payoutOverlay[key]; // <- server truth
+          const overlay = safeOverlay[key];
 
           const stillInFlight =
             (overlay?.status === 'pending') ||
             (!!m && !msIsPaid(m) && msHasSafeMarker(m));
 
-          // If server says released, we definitely clear (handled elsewhere), otherwise only clear TTL if not in-flight
           if (!ts || now - ts > MAX_MS) {
             if (!stillInFlight && overlay?.status !== 'released') {
               removePending(key);
@@ -321,8 +293,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       } catch {}
 
       await hydrateArchiveStatuses(rows);
-      // Refresh overlay near load to keep in sync
-      refreshPayoutsOverlay(true).catch(() => {});
+      // Kick an overlay refresh near load
+      refreshOverlayForPending(true).catch(() => {});
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
@@ -331,22 +303,54 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  async function refreshPayoutsOverlay(force = false) {
+  // Refresh overlay ONLY for rows that are pending/in-flight
+  async function refreshOverlayForPending(force = false) {
     const now = Date.now();
-    if (!force && now - lastPayoutFetchRef.current < 2000) return; // throttle a bit
-    lastPayoutFetchRef.current = now;
+    if (!force && now - lastOverlayFetchRef.current < 2000) return;
+    lastOverlayFetchRef.current = now;
 
-    try {
-      const { pending, released } = await fetchPayoutsSnapshot();
-      setPayoutOverlay(buildPayoutOverlayMap(pending, released));
-    } catch {
-      // ignore
+    // Build a list of (bidId, idx) we care about
+    const targets: Array<{ bidId: number; idx: number }> = [];
+    for (const bid of bids || []) {
+      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+      for (let i = 0; i < ms.length; i++) {
+        const key = mkKey(bid.bidId, i);
+        const m = ms[i];
+        const inflight = pendingPay.has(key) || msHasSafeMarker(m);
+        const notPaid = !msIsPaid(m) && !(safeOverlay[key]?.status === 'released');
+        if (inflight && notPaid) {
+          targets.push({ bidId: bid.bidId, idx: i });
+        }
+      }
     }
+    if (targets.length === 0) return;
+
+    // Probe reconcile-safe for each target (in parallel but throttled by fetch)
+    const updates: SafeOverlay = { ...safeOverlay };
+    await Promise.all(
+      targets.map(async ({ bidId, idx }) => {
+        try {
+          const r = await fetchReconcileSafe(bidId, idx);
+          const key = mkKey(bidId, idx);
+          if (r.executed) {
+            updates[key] = { status: 'released', txHash: r.txHash ?? null, seenAt: Date.now() };
+          } else if (r.pending) {
+            // Only mark pending if we don't already have released
+            if (updates[key]?.status !== 'released') {
+              updates[key] = { status: 'pending', txHash: r.txHash ?? null, seenAt: Date.now() };
+            }
+          }
+        } catch {
+          // ignore single target errors
+        }
+      })
+    );
+
+    setSafeOverlay(updates);
   }
 
   async function hydrateArchiveStatuses(allBids: any[]) {
-    const uniqueBidIds = [...new Set(allBids.map((bid) => bid.bidId))];
-
+    const uniqueBidIds = [...new Set(allBids.map(bid => bid.bidId))];
     if (uniqueBidIds.length === 0) {
       setArchMap({});
       return;
@@ -357,16 +361,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       updateBulkArchiveCache(bulkArchiveStatus);
 
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
-      allBids.forEach((bid) => {
+      allBids.forEach(bid => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-
         ms.forEach((_, index) => {
           const key = mkKey(bid.bidId, index);
-          if (nextMap[key] === undefined) {
-            nextMap[key] = bidArchiveStatus[index] || { archived: false };
-          }
+          if (nextMap[key] === undefined) nextMap[key] = bidArchiveStatus[index] || { archived: false };
         });
       });
 
@@ -425,35 +425,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
   function isCompleted(m: any): boolean {
     const s = String(m?.status ?? '').toLowerCase();
-    return (
-      m?.completed === true ||
-      m?.approved === true ||
-      s === 'completed' ||
-      s === 'approved' ||
-      s === 'complete'
-    );
+    return m?.completed === true || m?.approved === true || s === 'completed' || s === 'approved' || s === 'complete';
   }
 
-  // ==== STRICT STATE MACHINE using overlay ====
+  // ==== STRICT STATE MACHINE using SAFE overlay ====
   function overlayPaid(key: string): boolean {
-    return payoutOverlay[key]?.status === 'released';
+    return safeOverlay[key]?.status === 'released';
   }
   function overlayInFlight(key: string): boolean {
-    return payoutOverlay[key]?.status === 'pending';
+    return safeOverlay[key]?.status === 'pending';
   }
 
   function isPaid(m: any, key: string): boolean {
     return overlayPaid(key) || msIsPaid(m);
   }
   function hasSafeMarker(m: any, key: string): boolean {
-    // If server says released, it's not "in-flight"
-    if (overlayPaid(key)) return false;
-    // If server says pending, it's in-flight
-    if (overlayInFlight(key)) return true;
-    return msHasSafeMarker(m);
+    if (overlayPaid(key)) return false;        // released trumps everything
+    if (overlayInFlight(key)) return true;     // server says still in-flight
+    return msHasSafeMarker(m);                 // otherwise rely on detectors
   }
   function isReadyToPay(m: any, key: string): boolean {
-    return isCompleted(m) && !isPaid(m, key) && !hasSafeMarker(m, key);
+    return isCompleted(m) && !isPaid(m, key) && !hasSafeMarker(m, key) && !pendingPay.has(key);
   }
   function isArchived(bidId: number, milestoneIndex: number): boolean {
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
@@ -462,7 +454,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
     const key = mkKey(bidId, idx);
     const archived = isArchived(bidId, idx);
-
     if (tab === 'archived') return archived;
     if (archived) return false;
 
@@ -470,7 +461,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       case 'needs-approval':
         return hasProof(m) && !isCompleted(m);
       case 'ready-to-pay':
-        return isReadyToPay(m, key) && !pendingPay.has(key);
+        return isReadyToPay(m, key);
       case 'paid':
         return isPaid(m, key);
       case 'no-proof':
@@ -484,17 +475,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   function bidMatchesSearch(bid: any): boolean {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${
-      bid.walletAddress || ''
-    }`.toLowerCase();
-    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : []).some((m: any) =>
-      (m?.name || '').toLowerCase().includes(q)
-    );
+    const hay = `${bid.vendorName || ''} ${bid.proposalId || ''} ${bid.bidId || ''} ${bid.walletAddress || ''}`.toLowerCase();
+    const msMatch = (Array.isArray(bid.milestones) ? bid.milestones : [])
+      .some((m: any) => (m?.name || '').toLowerCase().includes(q));
     return hay.includes(q) || msMatch;
   }
 
   const archivedCount = useMemo(
-    () => Object.values(archMap).filter((v) => v.archived).length,
+    () => Object.values(archMap).filter(v => v.archived).length,
     [archMap]
   );
 
@@ -511,89 +499,67 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
-  }, [bids, tab, query, archMap, pendingPay, payoutOverlay]);
+  }, [bids, tab, query, archMap, pendingPay, safeOverlay]);
 
   // ==== POLL UNTIL PAID ====
-  async function pollUntilPaid(bidId: number, milestoneIndex: number, tries = 120, intervalMs = 3000) {
+  async function pollUntilPaid(
+    bidId: number,
+    milestoneIndex: number,
+    tries = 120,
+    intervalMs = 3000
+  ) {
     const key = mkKey(bidId, milestoneIndex);
 
     for (let i = 0; i < tries; i++) {
       try {
-        // 1) always peek at overlay first (server truth)
-        await refreshPayoutsOverlay();
-        if (overlayPaid(key)) {
-          // mark as paid locally (inject tx hash for UX)
-          const tx = payoutOverlay[key]?.txHash || undefined;
-          setBids((prev) =>
-            prev.map((b) => {
-              if (((b as any).bidId ?? (b as any).id) !== bidId) return b;
-              const ms = Array.isArray((b as any).milestones)
-                ? [...(b as any).milestones]
-                : [];
-              const orig = ms[milestoneIndex] || {};
-              ms[milestoneIndex] = {
-                ...orig,
-                safePaymentTxHash: orig.safePaymentTxHash || tx || orig.paymentTxHash || orig.txHash,
-                payment_status: 'released',
-                status: orig.status === 'completed' ? 'completed' : orig.status, // keep completed if set
-              };
-              return { ...b, milestones: ms };
-            })
-          );
+        // 1) ask reconcile-safe first (server may know before milestones JSON)
+        const r = await fetchReconcileSafe(bidId, milestoneIndex);
+        if (r.executed) {
+          setSafeOverlay(prev => ({ ...prev, [key]: { status: 'released', txHash: r.txHash ?? null, seenAt: Date.now() } }));
           removePending(key);
-          try {
-            (await import('@/lib/api')).invalidateBidsCache?.();
-          } catch {}
+          setBids(prev => prev.map(b => {
+            if (((b as any).bidId ?? (b as any).id) !== bidId) return b;
+            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+            const orig = ms[milestoneIndex] || {};
+            ms[milestoneIndex] = {
+              ...orig,
+              safePaymentTxHash: orig.safePaymentTxHash || r.txHash || orig.paymentTxHash || orig.txHash,
+              payment_status: 'released',
+            };
+            return { ...b, milestones: ms };
+          }));
+          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
         }
+        if (r.pending) {
+          setSafeOverlay(prev => {
+            if (prev[key]?.status === 'released') return prev;
+            return { ...prev, [key]: { status: 'pending', txHash: r.txHash ?? prev[key]?.txHash ?? null, seenAt: Date.now() } };
+          });
+        }
 
-        // 2) fallback: pull the bid (legacy/manual paid path)
+        // 2) then fall back to the bid (covers manual path & when milestones finally update)
         const bid = await getBid(bidId);
         const m = bid?.milestones?.[milestoneIndex];
 
-        if (!m) {
-          // keep polling
-        } else if (msIsPaid(m)) {
+        if (m && msIsPaid(m)) {
           removePending(key);
-          setBids((prev) =>
-            prev.map((b) => {
-              const match = ((b as any).bidId ?? (b as any).id) === bidId;
-              if (!match) return b;
-              const ms = Array.isArray((b as any).milestones)
-                ? [...(b as any).milestones]
-                : [];
-              const srvM = m as any;
-              ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-              return { ...b, milestones: ms };
-            })
-          );
-          try {
-            (await import('@/lib/api')).invalidateBidsCache?.();
-          } catch {}
+          setBids(prev => prev.map(b => {
+            const match = ((b as any).bidId ?? (b as any).id) === bidId;
+            if (!match) return b;
+            const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+            ms[milestoneIndex] = { ...ms[milestoneIndex], ...m };
+            return { ...b, milestones: ms };
+          }));
+          try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
           if (typeof router?.refresh === 'function') router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
-        } else if (msHasSafeMarker(m) || overlayInFlight(key)) {
-          // still in-flight — keep pending and hydrate latest fields for the row
-          setBids((prev) =>
-            prev.map((b) => {
-              const match = ((b as any).bidId ?? (b as any).id) === bidId;
-              if (!match) return b;
-              const ms = Array.isArray((b as any).milestones)
-                ? [...(b as any).milestones]
-                : [];
-              const srvM = m as any;
-              ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-              return { ...b, milestones: ms };
-            })
-          );
-          try {
-            (await import('@/lib/api')).invalidateBidsCache?.();
-          } catch {}
-          if (typeof router?.refresh === 'function') router.refresh();
         }
+
+        // else keep waiting
       } catch (err: any) {
         if (err?.status === 401 || err?.status === 403) {
           removePending(key);
@@ -601,44 +567,30 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
       }
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await new Promise(r => setTimeout(r, intervalMs));
     }
 
-    // Final reconciliation
+    // After tries exhausted, do a final reconcile
     try {
-      await refreshPayoutsOverlay(true);
-      if (overlayPaid(key)) {
+      const r = await fetchReconcileSafe(bidId, milestoneIndex);
+      if (r.executed) {
+        setSafeOverlay(prev => ({ ...prev, [key]: { status: 'released', txHash: r.txHash ?? null, seenAt: Date.now() } }));
         removePending(key);
         emitPayDone(bidId, milestoneIndex);
-        setBids((prev) =>
-          prev.map((b) => {
-            if (((b as any).bidId ?? (b as any).id) !== bidId) return b;
-            const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
-            const orig = ms[milestoneIndex] || {};
-            ms[milestoneIndex] = {
-              ...orig,
-              safePaymentTxHash: orig.safePaymentTxHash || payoutOverlay[key]?.txHash || orig.paymentTxHash,
-              payment_status: 'released',
-            };
-            return { ...b, milestones: ms };
-          })
-        );
       } else {
         const bid = await getBid(bidId);
         const m = bid?.milestones?.[milestoneIndex];
         if (!m || (!msIsPaid(m) && !msHasSafeMarker(m))) {
           removePending(key);
         }
-        setBids((prev) =>
-          prev.map((b) => {
-            const match = ((b as any).bidId ?? (b as any).id) === bidId;
-            if (!match) return b;
-            const ms = Array.isArray((b as any).milestones) ? [...(b as any).milestones] : [];
-            const srvM = (bid as any)?.milestones?.[milestoneIndex];
-            if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
-            return { ...b, milestones: ms };
-          })
-        );
+        setBids(prev => prev.map(b => {
+          const match = ((b as any).bidId ?? (b as any).id) === bidId;
+          if (!match) return b;
+          const ms = Array.isArray((b as any).milestones) ? [ ...(b as any).milestones ] : [];
+          const srvM = (bid as any)?.milestones?.[milestoneIndex];
+          if (srvM) ms[milestoneIndex] = { ...ms[milestoneIndex], ...srvM };
+          return { ...b, milestones: ms };
+        }));
       }
     } catch {}
     if (typeof router?.refresh === 'function') router.refresh();
@@ -667,8 +619,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const key = mkKey(bidId, milestoneIndex);
       addPending(key);
       emitPayQueued(bidId, milestoneIndex);
-      // Start overlay checks immediately
-      refreshPayoutsOverlay(true).catch(() => {});
+      // Start SAFE overlay checks immediately
+      refreshOverlayForPending(true).catch(() => {});
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
@@ -684,7 +636,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       setProcessing(`reject-${bidId}-${milestoneIndex}`);
       await rejectMilestoneProof(bidId, milestoneIndex, reason);
-      setRejectedLocal((prev) => {
+      setRejectedLocal(prev => {
         const next = new Set(prev);
         next.add(mkRejectKey(bidId, milestoneIndex));
         return next;
@@ -703,7 +655,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`archive-${bidId}-${milestoneIndex}`);
       await archiveMilestone(bidId, milestoneIndex, reason || undefined);
       clearBulkArchiveCache(bidId);
-      setArchMap((prev) => ({
+      setArchMap(prev => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: true,
@@ -724,7 +676,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
       await unarchiveMilestone(bidId, milestoneIndex);
       clearBulkArchiveCache(bidId);
-      setArchMap((prev) => ({
+      setArchMap(prev => ({
         ...prev,
         [mkKey(bidId, milestoneIndex)]: {
           archived: false,
@@ -744,9 +696,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!confirm('Unarchive ALL archived milestones?')) return;
     try {
       setProcessing('unarchive-all');
-      const keys = Object.entries(archMap)
-        .filter(([, v]) => v.archived)
-        .map(([k]) => k);
+      const keys = Object.entries(archMap).filter(([, v]) => v.archived).map(([k]) => k);
       for (const k of keys) {
         const [bidIdStr, idxStr] = k.split('-');
         const bidId = Number(bidIdStr);
@@ -768,18 +718,19 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   };
 
   // ---- Proof renderer (with lightbox support) ----
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
 
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(m.proof);
-    } catch {}
+    try { parsed = JSON.parse(m.proof); } catch {}
 
     if (parsed && typeof parsed === 'object') {
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
+          {parsed.description && (
+            <p className="text-sm text-gray-700">{parsed.description}</p>
+          )}
           {parsed.files?.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {parsed.files.map((f: any, i: number) => {
@@ -795,6 +746,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                       key={i}
                       onClick={() => {
                         setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
+                        setLightboxOpen(true);
                       }}
                       className="group relative overflow-hidden rounded border"
                     >
@@ -849,6 +801,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                     key={i}
                     onClick={() => {
                       setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
+                      setLightboxOpen(true);
                     }}
                     className="group relative overflow-hidden rounded border"
                   >
@@ -917,33 +870,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               ].join(' ')}
             >
               {t.label}
-              {t.key === 'archived' && archivedCount > 0 && (
+              {t.key === 'archived' && Object.values(archMap).filter(v => v.archived).length > 0 && (
                 <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
-                  {archivedCount}
+                  {Object.values(archMap).filter(v => v.archived).length}
                 </span>
               )}
             </button>
           ))}
         </div>
       </div>
-
-      {/* Archive Controls (server) */}
-      {tab === 'archived' && archivedCount > 0 && (
-        <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">
-              {archivedCount} milestone{archivedCount === 1 ? '' : 's'} archived
-            </span>
-            <button
-              onClick={handleUnarchiveAll}
-              disabled={processing === 'unarchive-all'}
-              className="px-3 py-1 text-sm border border-slate-300 rounded hover:bg:white disabled:opacity-50"
-            >
-              {processing === 'unarchive-all' ? 'Working…' : 'Unarchive All'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Search */}
       <div className="mb-6">
@@ -956,8 +891,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       </div>
 
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <div className="text-5xl mb-3">{tab === 'archived' ? '📁' : '🗂️'}</div>
+        <div className="bg-white rounded-xl border border-slate-2 00 p-10 text-center">
+          <div className="text-5xl mb-3">
+            {tab === 'archived' ? '📁' : '🗂️'}
+          </div>
           <p className="text-slate-700">
             {tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}
           </p>
@@ -986,15 +923,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   const key = mkKey(bid.bidId, origIdx);
                   const archived = isArchived(bid.bidId, origIdx);
 
-                  // strict state:
                   const approved = isCompleted(m);
                   const paid = isPaid(m, key);
                   const inflight = hasSafeMarker(m, key) || pendingPay.has(key);
 
-                  // chip:
                   const showPendingChip = !paid && inflight;
-
-                  // buttons:
                   const canShowButtons = approved && !paid && !inflight;
 
                   return (
@@ -1033,11 +966,51 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                             Amount: ${m.amount} | Due: {m.dueDate}
                           </p>
 
-                          {renderProof(m)}
+                          {/* proof */}
+                          {(() => {
+                            if (!m?.proof) return null;
+                            try {
+                              const parsed = JSON.parse(m.proof);
+                              if (parsed && typeof parsed === 'object') {
+                                return (
+                                  <div className="mt-2 space-y-2">
+                                    {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
+                                    {parsed.files?.length > 0 && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                        {parsed.files.map((f: any, i: number) => {
+                                          const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
+                                          if (isImage) {
+                                            return (
+                                              <button
+                                                key={i}
+                                                onClick={() => setLightbox({ urls: parsed.files.filter((ff: any)=>/\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name||ff?.url||'')).map((ff: any)=>ff.url), index: 0 })}
+                                                className="group relative overflow-hidden rounded border"
+                                              >
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img src={f.url} alt={f.name || `Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                                              </button>
+                                            );
+                                          }
+                                          return (
+                                            <div key={i} className="p-3 rounded border bg-gray-50">
+                                              <p className="truncate text-sm">{f?.name || 'Attachment'}</p>
+                                              <a href={f?.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Open</a>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                            } catch {}
+                            const text = String(m.proof);
+                            return <p className="text-sm text-gray-700 whitespace-pre-line mt-2">{text}</p>;
+                          })()}
 
-                          {(m.paymentTxHash || m.safePaymentTxHash) && (
+                          {(m.paymentTxHash || m.safePaymentTxHash || safeOverlay[key]?.txHash) && (
                             <p className="text-sm text-green-600 mt-2 break-all">
-                              Paid ✅ Tx: {m.paymentTxHash || m.safePaymentTxHash || m.txHash || m.hash}
+                              Paid ✅ Tx: {m.paymentTxHash || m.safePaymentTxHash || safeOverlay[key]?.txHash}
                             </p>
                           )}
                           {!hasProof(m) && !isCompleted(m) && (
@@ -1069,13 +1042,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                     onClick={() => handleReject(bid.bidId, origIdx)}
                                     disabled={disabled}
                                     className={[
-                                      'px-4 py-2 rounded disabled:opacity-50',
-                                      disabled
-                                        ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                                        : 'bg-red-600 hover:bg-red-700 text-white',
-                                    ].join(' ')}
+                                      "px-4 py-2 rounded disabled:opacity-50",
+                                      disabled ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                                               : "bg-red-600 hover:bg-red-700 text-white"
+                                    ].join(" ")}
                                   >
-                                    {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
+                                    {isProcessing ? "Rejecting..." : (isLocked ? "Rejected" : "Reject")}
                                   </button>
                                 );
                               })()}
@@ -1088,11 +1060,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                     onClick={() => handlePay(bid.bidId, origIdx)}
                                     disabled={processing === `pay-${bid.bidId}-${origIdx}`}
                                     className={[
-                                      'px-4 py-2 rounded text-white',
-                                      processing === `pay-${bid.bidId}-${origIdx}`
-                                        ? 'bg-green-600 opacity-60 cursor-not-allowed'
-                                        : 'bg-green-600 hover:bg-green-700',
-                                    ].join(' ')}
+                                      "px-4 py-2 rounded text-white",
+                                      (processing === `pay-${bid.bidId}-${origIdx}`)
+                                        ? "bg-green-600 opacity-60 cursor-not-allowed"
+                                        : "bg-green-600 hover:bg-green-700"
+                                    ].join(" ")}
                                     title="Release payment manually (EOA)"
                                   >
                                     {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
@@ -1108,7 +1080,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                       const k = mkKey(bid.bidId, origIdx);
                                       addPending(k);
                                       emitPayQueued(bid.bidId, origIdx);
-                                      refreshPayoutsOverlay(true).catch(() => {});
+                                      refreshOverlayForPending(true).catch(() => {});
                                       pollUntilPaid(bid.bidId, origIdx).catch(() => {});
                                       router.refresh();
                                     }}
@@ -1186,7 +1158,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             </button>
           )}
 
-          <button className="absolute top-4 right-4 text-white text-2xl" onClick={() => setLightbox(null)}>
+          <button
+            className="absolute top-4 right-4 text-white text-2xl"
+            onClick={() => setLightbox(null)}
+          >
             ✕
           </button>
         </div>
