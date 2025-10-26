@@ -414,10 +414,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       // Poll for up to 10 minutes (ONLY for Safe payments)
       for (let i = 0; i < 120; i++) {
         console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
-        
-        // 1) Trigger reconciliation to update Safe payment status
-        await callReconcileSafe();
-        
+             
         // 2) Get fresh bid data
         let bid: any | null = null;
         try {
