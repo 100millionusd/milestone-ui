@@ -1,4 +1,4 @@
-// src/app/admin/proofs/client.tsx
+// src/app/admin/proofs/Client.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -15,7 +15,6 @@ import {
   getBulkArchiveStatus,
   updateBulkArchiveCache,
   clearBulkArchiveCache,
-  getProofs,
 } from '@/lib/api';
 import Link from 'next/link';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
@@ -32,12 +31,8 @@ import {
 // -------------------------------
 // Config / endpoints (best-effort)
 // -------------------------------
-const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-const API_BASE = RAW_API_BASE;
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
-
-// Always prefer real backend origin for reconcile (prevents Netlify hits)
-const BACKEND = (RAW_API_BASE || 'https://milestone-api-production.up.railway.app').replace(/\/+$/, '');
 
 // Tabs
 const TABS = [
@@ -233,6 +228,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
 
+      setDataCache({ bids: rows, lastUpdated: Date.now() });
+      setBids(rows);
+
       // Clear local "pending" for milestones that are now paid
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
@@ -256,18 +254,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
       }
 
-      // Hydrate milestones lacking `proof` from the proofs table
-      let merged = rows;
-      try {
-        merged = await mergeLatestProofsFromTable(rows);
-      } catch {
-        // non-fatal; keep original rows
-      }
-
-      setDataCache({ bids: merged, lastUpdated: Date.now() });
-      setBids(merged);
-
-      await hydrateArchiveStatuses(merged);
+      await hydrateArchiveStatuses(rows);
     } catch (e: any) {
       console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
@@ -362,80 +349,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
   }
 
-  // ---- backfill missing milestone.proof from /proofs ----
-  async function mergeLatestProofsFromTable(rows: any[]) {
-    const out = (rows || []).map((b) => ({
-      ...b,
-      milestones: Array.isArray(b?.milestones) ? [...b.milestones] : [],
-    }));
-
-    const tasks: Promise<void>[] = [];
-
-    for (let bi = 0; bi < out.length; bi++) {
-      const bid = out[bi];
-      const ms = bid.milestones;
-
-      const missingIdxs = ms
-        .map((m: any, i: number) => (!hasProof(m) ? i : -1))
-        .filter((i: number) => i >= 0);
-
-      if (missingIdxs.length === 0) continue;
-
-      tasks.push(
-        (async () => {
-          let list: any[] = [];
-          try {
-            const r = await getProofs(bid.bidId);
-            list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
-          } catch {
-            return;
-          }
-          if (!Array.isArray(list) || list.length === 0) return;
-
-          for (const mi of missingIdxs) {
-            const candidates = list.filter(
-              (p: any) => (p.milestoneIndex ?? p.milestone_index) === mi
-            );
-            if (candidates.length === 0) continue;
-
-            candidates.sort((a: any, b: any) => {
-              const at =
-                new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
-              const bt =
-                new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
-              return bt - at;
-            });
-
-            const latest = candidates[0];
-            const description =
-              latest?.description ||
-              latest?.text ||
-              latest?.vendor_prompt ||
-              latest?.title ||
-              '';
-            const files =
-              latest?.files ||
-              latest?.file_json ||
-              latest?.attachments ||
-              [];
-
-            try {
-              ms[mi] = {
-                ...ms[mi],
-                proof: JSON.stringify({ description, files }),
-              };
-            } catch {
-              // ignore
-            }
-          }
-        })()
-      );
-    }
-
-    if (tasks.length) await Promise.all(tasks);
-    return out;
-  }
-
   // -------- Safe helpers / reconciliation --------
   function readSafeTxHash(m: any): string | null {
     return (
@@ -448,36 +361,21 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }
 
   async function callReconcileSafe(): Promise<void> {
-    if (!BACKEND) return;
-    console.log('🔄 FORCING Safe reconciliation...');
-
-    const candidates = [
-      `${BACKEND}/admin/oversight/reconcile-safe`,
-      `${BACKEND}/oversight/reconcile-safe`,
-    ];
-
-    for (const url of candidates) {
-      try {
-        const res = await fetch(url, { method: 'POST', credentials: 'include' });
-        if (res.ok) {
-          try {
-            const body = await res.json();
-            console.log('✅ Safe reconciliation completed:', body);
-          } catch {
-            console.log('✅ Safe reconciliation completed (no JSON).');
-          }
-          return;
-        }
-        if (res.status === 404) {
-          console.warn(`ℹ️ Safe reconcile endpoint not found at ${url}.`);
-          continue;
-        }
-        console.error('❌ Safe reconciliation failed:', res.status);
-        return;
-      } catch (error: any) {
-        console.error('❌ Safe reconciliation error:', error?.message || error);
-        return;
+    try {
+      console.log('🔄 FORCING Safe reconciliation...');
+      const response = await fetch(apiUrl('/admin/oversight/reconcile-safe'), {
+        method: 'POST',
+        credentials: 'include',
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Safe reconciliation completed:', result);
+      } else {
+        console.error('❌ Safe reconciliation failed:', response.status);
       }
+    } catch (error) {
+      console.error('❌ Safe reconciliation error:', error);
     }
   }
 
@@ -516,9 +414,11 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       // Poll for up to 10 minutes (ONLY for Safe payments)
       for (let i = 0; i < 120; i++) {
         console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
-
+        
+        // 1) Trigger reconciliation to update Safe payment status
         await callReconcileSafe();
-
+        
+        // 2) Get fresh bid data
         let bid: any | null = null;
         try {
           bid = await getBid(bidId);
@@ -529,14 +429,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
             break;
           }
         }
-
+        
         const m = bid?.milestones?.[milestoneIndex];
-
+        
+        // 3) Check if Safe payment is now marked as paid/released
         if (m && msIsPaid(m)) {
           console.log('🎉 SAFE PAYMENT CONFIRMED! Updating UI...');
           removePending(key);
           setPaidOverrideKey(key, false);
-
+          
+          // Update local state
           setBids((prev) =>
             prev.map((b) => {
               const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -546,7 +448,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               return { ...b, milestones: ms };
             })
           );
-
+          
+          // Refresh everything
           try {
             (await import('@/lib/api')).invalidateBidsCache?.();
           } catch {}
@@ -555,14 +458,18 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           return;
         }
 
+        // 4) Check Safe transaction status directly as backup
         const safeHash = m ? readSafeTxHash(m) : null;
         if (safeHash) {
           const safeStatus = await fetchSafeTx(safeHash);
           if (safeStatus?.isExecuted) {
             console.log('🔍 Safe transaction executed, waiting for reconciliation...');
+            // Transaction is executed but reconciliation hasn't caught up yet
+            // Continue polling to let reconciliation update the status
           }
         }
 
+        // Wait 5 seconds between checks
         await new Promise((r) => setTimeout(r, 5000));
       }
 
@@ -842,7 +749,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               );
             })}
           </div>
-        )}
+        );
       </div>
     );
   };
@@ -891,7 +798,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         </div>
       </div>
 
-      {/* Archive Controls */}
+      {/* Archive Controls (server) */}
       {tab === 'archived' && archivedCount > 0 && (
         <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
           <div className="flex items-center justify-between">
@@ -943,10 +850,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
-
                   const approved = msIsApproved(m) || isCompleted(m);
                   const paid = msIsPaid(m) || paidOverride.has(key);
                   const localPending = pendingPay.has(key);
+
+                  // Reject button logic
+                  let rejectButton = null;
+                  if (hasProof(m) && !approved) {
+                    const rKey = mkKey(bid.bidId, origIdx);
+                    const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
+                    const isLocked = rejectedLocal.has(rKey);
+                    const disabled = isProcessing || isLocked;
+                    rejectButton = (
+                      <button
+                        onClick={() => handleReject(bid.bidId, origIdx)}
+                        disabled={disabled}
+                        className={['px-4 py-2 rounded disabled:opacity-50', disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'].join(' ')}
+                      >
+                        {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
+                      </button>
+                    );
+                  }
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -999,22 +923,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 </button>
                               )}
 
-                              {hasProof(m) && !approved && (() => {
-                                const rKey = mkKey(bid.bidId, origIdx);
-                                const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
-                                const isLocked = rejectedLocal.has(rKey);
-                                const disabled = isProcessing || isLocked;
-
-                                return (
-                                  <button
-                                    onClick={() => handleReject(bid.bidId, origIdx)}
-                                    disabled={disabled}
-                                    className={['px-4 py-2 rounded disabled:opacity-50', disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'].join(' ')}
-                                  >
-                                    {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
-                                  </button>
-                                );
-                              })()}
+                              {rejectButton}
 
                               {msCanShowPayButtons(m, { approved, localPending }) && (
                                 <div className="flex items-center gap-2">
