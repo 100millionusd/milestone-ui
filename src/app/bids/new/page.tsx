@@ -172,42 +172,42 @@ const handleSubmit = async (e: React.FormEvent) => {
   setCreatedBidId(null);
 
   try {
-    // Upload any selected files (optional) — NO contentType anywhere in legacy fields
-    let filesPayload: Array<{ cid?: string; url?: string; name?: string; size?: number }> = [];
-    if (selectedFiles.length) {
-      const uploaded = await Promise.all(
-        selectedFiles.map(async (f) => {
-          const up = await uploadFileToIPFS(f); // expects { cid, url, ... }
-          return {
-            name: up.name ?? f.name,
-            cid: up.cid,
-            url: up.url ?? (up.cid ? `https://ipfs.io/ipfs/${up.cid}` : undefined),
-            size: up.size ?? f.size,
-          };
-        })
-      );
-      filesPayload = uploaded;
-    }
+   // Upload any selected files — elements: { cid, url, name, size } (NO contentType)
+let filesPayload: Array<{ cid: string; url?: string; name: string; size?: number }> = [];
+if (selectedFiles.length) {
+  const uploaded = await Promise.all(
+    selectedFiles.map(async (f) => {
+      const up = await uploadFileToIPFS(f);
+      return {
+        cid: up.cid,
+        url: up.url ?? (up.cid ? `https://ipfs.io/ipfs/${up.cid}` : undefined),
+        name: f.name,      // ← required by backend
+        size: f.size,      // ← ok
+      };
+    })
+  );
+  filesPayload = uploaded;
+}
 
-    // Legacy single-file object — STRICT: only { cid, url } to satisfy backend schema
-    const first = filesPayload[0];
-    const legacyDoc = first ? { cid: first.cid, url: first.url } : null;
+// Legacy single-file object: MUST include name (no contentType)
+const first = filesPayload[0] || null;
+const legacyDoc = first ? { cid: first.cid, url: first.url, name: first.name, size: first.size } : null;
 
-    // Build payload
-    const body: any = {
-      ...formData,
-      proposalId: Number(proposalId),
-      priceUSD: parseFloat(formData.priceUSD),
-      days: parseInt(formData.days),
-      milestones: formData.milestones.map((m) => ({
-        name: m.name,
-        amount: parseFloat(m.amount),
-        dueDate: new Date(m.dueDate).toISOString(),
-      })),
-      files: filesPayload,  // multi-file array (server may ignore extras)
-      file: legacyDoc,      // legacy single-file (no contentType)
-      doc: legacyDoc,       // legacy single-file (no contentType)
-    };
+// Now build payload
+const body: any = {
+  ...formData,
+  proposalId: Number(proposalId),
+  priceUSD: parseFloat(formData.priceUSD),
+  days: parseInt(formData.days),
+  milestones: formData.milestones.map((m) => ({
+    name: m.name,
+    amount: parseFloat(m.amount),
+    dueDate: new Date(m.dueDate).toISOString(),
+  })),
+  files: filesPayload,  // multi-file array (safe)
+  file: legacyDoc,      // legacy single-file
+  doc: legacyDoc,       // legacy single-file
+};
 
     // Create
     const created = await createBid(body);
