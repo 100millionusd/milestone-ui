@@ -5,6 +5,7 @@ import './globals.css';
 import Navigation from '@/components/Navigation';
 import { Web3AuthProvider } from '@/providers/Web3AuthProvider';
 import ClientBootstrap from './ClientBootstrap'; // ← ADD THIS
+import FetchTimeoutClient from '@/components/FetchTimeoutClient';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -22,6 +23,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <ClientBootstrap> {/* ← WRAP EVERYTHING IN HERE */}
+          <FetchTimeoutClient />
           <Web3AuthProvider>
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
               <Navigation />
