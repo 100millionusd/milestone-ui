@@ -1114,40 +1114,54 @@ export default function ProjectDetailPage() {
       <p className="text-sm text-gray-500">No files yet.</p>
     ) : (
       (() => {
-        const grouped = allFiles.reduce((acc: Record<string, any[]>, row: any) => {
-          (acc[row?.scope || 'Files'] ||= []).push(row.doc);
-          return acc;
-        }, {});
-        return (
-          <div className="space-y-6">
-            {Object.entries(grouped).map(([scope, docs]) => (
-              <div key={scope}>
-                <div className="text-sm font-medium mb-2">{scope}</div>
+        // FLATTEN: ignore grouping; one horizontal row only
+        const flatDocs = allFiles.map((r: any) => r.doc);
 
-                {/* horizontal row with snapping */}
-                <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                  {docs.map((doc: any, i: number) => (
-                    <div key={i} className="shrink-0 w-44 snap-start">
-                      {typeof renderAttachment === 'function' ? (
-                        <div className="[&>*]:w-full">{renderAttachment(doc, i)}</div>
-                      ) : (
-                        <a
-                          href={doc?.url || (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block rounded border p-3 text-sm hover:shadow h-full"
-                        >
-                          <div className="font-medium truncate">
-                            {doc?.name || doc?.filename || doc?.cid || 'file'}
-                          </div>
-                          {doc?.cid ? (
-                            <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
-                          ) : null}
-                        </a>
-                      )}
-                    </div>
-                  ))}
+        // tile renderer (forces fixed width tile so it can only lay out horizontally)
+        const Tile = ({ doc }: { doc: any }) => {
+          const href =
+            doc?.url || (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#');
+
+          const name = doc?.name || doc?.filename || doc?.cid || 'file';
+          const isImg =
+            /^image\//.test(doc?.contentType || '') ||
+            /\.(png|jpe?g|webp|gif|svg)$/i.test(name) ||
+            /\.(png|jpe?g|webp|gif|svg)$/i.test(href || '');
+
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded border hover:shadow h-full w-44"
+            >
+              {isImg ? (
+                <img
+                  src={href}
+                  alt={name}
+                  className="w-44 h-28 object-cover rounded-t"
+                />
+              ) : (
+                <div className="w-44 h-28 flex items-center justify-center text-xs text-gray-600">
+                  {name}
                 </div>
+              )}
+              <div className="p-2 text-xs">
+                <div className="font-medium truncate">{name}</div>
+                {doc?.cid ? (
+                  <div className="opacity-60 truncate">ipfs://{doc.cid}</div>
+                ) : null}
+              </div>
+            </a>
+          );
+        };
+
+        return (
+          // HORIZONTAL ONLY: no grid classes anywhere here
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+            {flatDocs.map((doc: any, i: number) => (
+              <div key={i} className="shrink-0 snap-start">
+                <Tile doc={doc} />
               </div>
             ))}
           </div>
