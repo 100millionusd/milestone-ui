@@ -13,10 +13,10 @@ function NewBidPageContent() {
   const proposalId = searchParams.get('proposalId');
 
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(false);                 // ✅ lock form after finalize
   const [proposal, setProposal] = useState<any | null>(null);
 
-  // Vendor profile
+  // ✅ Vendor profile (prefill + gate)
   type VendorProfile = {
     vendorName: string;
     walletAddress: string;
@@ -38,11 +38,19 @@ function NewBidPageContent() {
     preferredStablecoin: 'USDC',
     milestones: [{ name: 'Milestone 1', amount: '', dueDate: '' }],
   });
-  
-  // CHANGED: Multi-file state instead of single docFile
-  const [docFiles, setDocFiles] = useState<File[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+const fileInputRef = useRef<HTMLInputElement | null>(null);
+const fmtBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const removeSelectedAt = (idx: number) => {
+  setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
+};
+const clearSelected = () => {
+  setSelectedFiles([]);
+  if (fileInputRef.current) fileInputRef.current.value = '';
+};
 
-  // Agent2 modal state
+  // ✅ Agent2 modal state
   type Step = 'submitting' | 'analyzing' | 'done' | 'error';
   const [modalOpen, setModalOpen] = useState(false);
   const [step, setStep] = useState<Step>('submitting');
@@ -90,7 +98,7 @@ function NewBidPageContent() {
     return clearPoll;
   }, [proposalId]);
 
-  // Load vendor profile and prefill vendorName + walletAddress
+  // ✅ Load vendor profile and prefill vendorName + walletAddress
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -120,29 +128,16 @@ function NewBidPageContent() {
     return () => { alive = false; };
   }, []);
 
-  // Guard: only allow submit when the clicked button opts in
+  // ✅ Guard: only allow submit when the clicked button opts in
   const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
-    const submitter = (e.nativeEvent as any)?.submitter as HTMLElement | undefined;
+    // @ts-ignore nativeEvent is fine here
+    const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
     if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
       e.preventDefault();
     }
   };
 
-  // NEW: Multi-file handlers
-  const handleFileSelect = (selectedFiles: FileList | null) => {
-    if (!selectedFiles || selectedFiles.length === 0) return;
-    const newFiles = Array.from(selectedFiles);
-    setDocFiles(prev => [...prev, ...newFiles]);
-  };
-
-  const removeFile = (index: number) => {
-    setDocFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const clearAllFiles = () => {
-    setDocFiles([]);
-  };
-
+  // ✅ Require profile fields once (adjust which fields are required)
   const missingRequiredProfile =
     !profileLoading &&
     (
@@ -159,7 +154,7 @@ function NewBidPageContent() {
   // --- submit handler ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitted) return;
+    if (submitted) return; // already finalized
     if (!proposalId) {
       alert('No project selected. Open this page with ?proposalId=<id>.');
       return;
@@ -177,39 +172,40 @@ function NewBidPageContent() {
     setCreatedBidId(null);
 
     try {
-      // CHANGED: Upload multiple files
-      let filesPayload: any[] = [];
-      if (docFiles.length > 0) {
-        setMessage('Uploading files to IPFS...');
-        const uploaded = await Promise.all(docFiles.map(uploadFileToIPFS));
-        filesPayload = uploaded.map((up, i) => ({
-          cid: up.cid,
-          url: up.url,
-          name: docFiles[i].name,
-          size: docFiles[i].size,
-        }));
-      }
-
-      // Build payload with multiple files
-      const body: any = {
-        ...formData,
-        proposalId: Number(proposalId),
-        priceUSD: parseFloat(formData.priceUSD),
-        days: parseInt(formData.days),
-        milestones: formData.milestones.map((m) => ({
-          name: m.name,
-          amount: parseFloat(m.amount),
-          dueDate: new Date(m.dueDate).toISOString(),
-        })),
-        files: filesPayload, // NEW: Send array of files
+// Upload any selected files (optional)
+let filesPayload: Array<{ name?: string; cid?: string; url?: string; size?: number; contentType?: string }> = [];
+if (selectedFiles.length) {
+  const uploaded = await Promise.all(
+    selectedFiles.map(async (f) => {
+      const u = await uploadFileToIPFS(f); // expects { cid, url, name?, size?, contentType? }
+      return {
+        name: u.name ?? f.name,
+        cid: u.cid,
+        url: u.url ?? (u.cid ? `https://ipfs.io/ipfs/${u.cid}` : undefined),
+        size: u.size ?? f.size,
+        contentType: u.contentType ?? f.type,
       };
+    })
+  );
+  filesPayload = uploaded;
+}
 
-      // For backward compatibility, also set the first file as `doc`
-      if (filesPayload[0]) {
-        body.doc = filesPayload[0];
-      }
+ const body: any = {
+  ...formData,
+  proposalId: Number(proposalId),
+  priceUSD: parseFloat(formData.priceUSD),
+  days: parseInt(formData.days),
+  milestones: formData.milestones.map((m) => ({
+    name: m.name,
+    amount: parseFloat(m.amount),
+    dueDate: new Date(m.dueDate).toISOString(),
+  })),
+  files: filesPayload,                 // NEW: multi-file metadata array
+  file: filesPayload[0] || null,       // legacy single-file (if backend reads `file`)
+  doc: filesPayload[0] || null,        // legacy single-file (if backend reads `doc`)
+};
 
-      // Create bid
+      // Create
       const created = await createBid(body);
       const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
       if (!bidId) throw new Error('Bid created but no ID returned');
@@ -218,7 +214,7 @@ function NewBidPageContent() {
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
 
-      // Trigger server analysis
+      // Trigger server analysis (safe if it already ran inline)
       try { await analyzeBid(bidId, undefined); } catch {}
 
       // Start polling until aiAnalysis appears
@@ -242,13 +238,13 @@ function NewBidPageContent() {
     );
   }
 
-  const disabled = loading || submitted;
+  const disabled = loading || submitted; // ✅ lock inputs after finalization
 
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Submit Bid</h1>
 
-      {/* Profile gate */}
+      {/* ✅ Profile gate */}
       {profileLoading && (
         <div className="mb-4 text-slate-500">Loading your profile…</div>
       )}
@@ -276,9 +272,10 @@ function NewBidPageContent() {
       )}
 
       <form
-        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }}
+        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
         className="space-y-6"
       >
+        {/* ✅ Disable everything in one shot after finalize */}
         <fieldset disabled={disabled} className={disabled ? 'opacity-70 pointer-events-none' : ''}>
           {/* Vendor Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -291,7 +288,7 @@ function NewBidPageContent() {
                 onChange={(e) => setFormData({ ...formData, vendorName: e.target.value })}
                 className="w-full p-2 border rounded"
                 placeholder="Your company name"
-                readOnly={!!profile?.vendorName}
+                readOnly={!!profile?.vendorName} // keep source of truth in Profile
               />
               {profile?.vendorName && (
                 <div className="text-xs text-slate-500 mt-1">
@@ -464,63 +461,76 @@ function NewBidPageContent() {
             </div>
           </div>
 
-          {/* CHANGED: Supporting Documents - Multi-file */}
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="flex justify-between items-center mb-3">
-              <label className="block text-sm font-medium">Supporting Documents</label>
-              {docFiles.length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearAllFiles}
-                  className="text-xs text-red-600 hover:text-red-800"
-                >
-                  Clear all
-                </button>
-              )}
-            </div>
+ {/* Supporting Documents (multi-file) */}
+<div>
+  <div className="flex items-center justify-between">
+    <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+    {selectedFiles.length > 0 && (
+      <button
+        type="button"
+        onClick={clearSelected}
+        className="text-xs text-red-600 hover:text-red-800"
+      >
+        Clear all
+      </button>
+    )}
+  </div>
 
-            <input
-              type="file"
-              multiple
-              onChange={(e) => handleFileSelect(e.target.files)}
-              className="w-full p-2 border rounded mb-3"
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-            />
+  <input
+    ref={fileInputRef}
+    type="file"
+    multiple
+    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+    onChange={(e) => {
+      const picked = Array.from(e.currentTarget.files || []);
+      if (!picked.length) return;
+      setSelectedFiles(prev => [...prev, ...picked]); // append, not replace
+      e.currentTarget.value = ''; // allow re-picking same file
+    }}
+    className="w-full p-2 border rounded"
+    disabled={disabled}
+  />
 
-            {/* Selected files list */}
-            {docFiles.length > 0 && (
-              <div className="mt-3">
-                <div className="text-xs font-medium mb-2">
-                  Selected files ({docFiles.length}):
-                </div>
-                <ul className="space-y-2 text-sm">
-                  {docFiles.map((file, index) => (
-                    <li key={index} className="flex items-center justify-between bg-white p-2 rounded border">
-                      <span className="truncate flex-1">{file.name}</span>
-                      <span className="text-gray-500 ml-2 text-xs">
-                        {Math.round(file.size / 1024)} KB
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeFile(index)}
-                        className="ml-2 text-red-500 hover:text-red-700 text-xs"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+  <div
+    onDragOver={(e) => { e.preventDefault(); }}
+    onDrop={(e) => {
+      e.preventDefault();
+      const dropped = Array.from(e.dataTransfer.files || []);
+      if (!dropped.length) return;
+      setSelectedFiles(prev => [...prev, ...dropped]); // append
+    }}
+    className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
+  >
+    Drag & drop files here or use the picker above. Selections accumulate.
+  </div>
 
-            <p className="text-sm text-gray-500 mt-2">
-              Upload portfolio, previous work, certifications, etc. You can select multiple files.
-            </p>
-          </div>
+  {selectedFiles.length > 0 && (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {selectedFiles.map((f, i) => (
+        <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
+          <span className="truncate max-w-[180px]">{f.name}</span>
+          <span className="opacity-60">{fmtBytes(f.size)}</span>
+          <button
+            type="button"
+            aria-label="Remove file"
+            title="Remove"
+            onClick={() => removeSelectedAt(i)}
+            className="w-5 h-5 rounded-full hover:bg-gray-200"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  )}
+
+  <p className="text-sm text-gray-500 mt-2">Upload portfolio, previous work, certifications, etc.</p>
+</div>
         </fieldset>
 
         {/* Submit / Cancel */}
         <div className="flex gap-4 pt-4">
+          {/* ✅ only this may submit */}
           <button
             type="submit"
             data-allow-submit="true"
@@ -541,7 +551,7 @@ function NewBidPageContent() {
         </div>
       </form>
 
-      {/* Agent2 modal */}
+      {/* ✅ Agent2 modal — pass onFinalized to lock the form AFTER user closes */}
       <Agent2ProgressModal
         open={modalOpen}
         step={step}
@@ -550,9 +560,10 @@ function NewBidPageContent() {
         bidId={createdBidId ?? undefined}
         onClose={() => { setModalOpen(false); clearPoll(); }}
         onFinalized={() => {
-          setSubmitted(true);
+          setSubmitted(true);    // lock the form
           clearPoll();
           setModalOpen(false);
+          // Optionally navigate: router.push(`/bids/${createdBidId}`);
         }}
       />
     </div>
