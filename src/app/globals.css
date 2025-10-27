@@ -69,3 +69,21 @@ body {
 .btn-outline {
   @apply border border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-white;
 }
+
+/* Freeze guard: hidden full-screen layers must not capture clicks */
+.fixed.opacity-0,
+.fixed[aria-hidden="true"],
+.fixed[data-state="closed"],
+.fixed[data-open="false"],
+.absolute.opacity-0,
+.absolute[aria-hidden="true"],
+.absolute[data-state="closed"],
+.absolute[data-open="false"] {
+  pointer-events: none !important;
+}
+
+/* visible layers remain clickable */
+.fixed.opacity-100,
+.absolute.opacity-100 {
+  pointer-events: auto;
+}
