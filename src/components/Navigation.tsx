@@ -187,15 +187,24 @@ export default function Navigation() {
                   )}
                 </div>
               ) : (
-                <Link prefetch={false}
-                  key={item.href}
-                  href={resolveHref(item.href)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  {item.label}
-                </Link>
+ <Link
+  prefetch={false}
+  key={item.href}
+  href={resolveHref(item.href)}
+  onClick={item.href === '/public'
+    ? () => {
+        const before = location.href;
+        setTimeout(() => {
+          if (location.href === before) location.assign('/public');
+        }, 1200);
+      }
+    : undefined}
+  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+  }`}
+>
+  {item.label}
+</Link>
               )
             )}
           </nav>
@@ -294,16 +303,25 @@ export default function Navigation() {
                     ))}
                   </div>
                 ) : (
-                  <Link prefetch={false}
-                    key={item.href}
-                    href={resolveHref(item.href)}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    {item.label}
-                  </Link>
+ <Link
+  prefetch={false}
+  key={item.href}
+  href={resolveHref(item.href)}
+  onClick={(e) => {
+    setIsMobileMenuOpen(false);
+    if (item.href === '/public') {
+      const before = location.href;
+      setTimeout(() => {
+        if (location.href === before) location.assign('/public');
+      }, 1200);
+    }
+  }}
+  className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+  }`}
+>
+  {item.label}
+</Link>
                 )
               )}
 
