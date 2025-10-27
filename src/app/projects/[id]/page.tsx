@@ -1114,33 +1114,34 @@ export default function ProjectDetailPage() {
       <p className="text-sm text-gray-500">No files yet.</p>
     ) : (
       (() => {
-        // FLATTEN: ignore grouping; one horizontal row only
+        // Flatten: one horizontal row
         const flatDocs = allFiles.map((r: any) => r.doc);
 
-        // tile renderer (forces fixed width tile so it can only lay out horizontally)
+        // robust link resolver (covers url, href, link, gatewayUrl, cid, ipfsCid, src)
+        const getDocHref = (doc: any) =>
+          doc?.url ||
+          doc?.href ||
+          doc?.link ||
+          doc?.gatewayUrl ||
+          (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : null) ||
+          (doc?.ipfsCid ? `https://ipfs.io/ipfs/${doc.ipfsCid}` : null) ||
+          doc?.src ||
+          null;
+
         const Tile = ({ doc }: { doc: any }) => {
-          const href =
-            doc?.url || (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#');
-
-          const name = doc?.name || doc?.filename || doc?.cid || 'file';
+          const href = getDocHref(doc);
+          const name = doc?.name || doc?.filename || doc?.originalName || doc?.cid || 'file';
+          const imgSrc =
+            doc?.preview || doc?.thumbnail || doc?.src || (/\.(png|jpe?g|webp|gif|svg)$/i.test(String(href || '')) ? href : null);
           const isImg =
+            !!imgSrc ||
             /^image\//.test(doc?.contentType || '') ||
-            /\.(png|jpe?g|webp|gif|svg)$/i.test(name) ||
-            /\.(png|jpe?g|webp|gif|svg)$/i.test(href || '');
+            /\.(png|jpe?g|webp|gif|svg)$/i.test(String(name));
 
-          return (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="block rounded border hover:shadow h-full w-44"
-            >
+          const Inner = (
+            <>
               {isImg ? (
-                <img
-                  src={href}
-                  alt={name}
-                  className="w-44 h-28 object-cover rounded-t"
-                />
+                <img src={imgSrc || String(href)} alt={name} className="w-44 h-28 object-cover rounded-t" />
               ) : (
                 <div className="w-44 h-28 flex items-center justify-center text-xs text-gray-600">
                   {name}
@@ -1148,16 +1149,27 @@ export default function ProjectDetailPage() {
               )}
               <div className="p-2 text-xs">
                 <div className="font-medium truncate">{name}</div>
-                {doc?.cid ? (
-                  <div className="opacity-60 truncate">ipfs://{doc.cid}</div>
-                ) : null}
+                {doc?.cid ? <div className="opacity-60 truncate">ipfs://{doc.cid}</div> : null}
               </div>
+            </>
+          );
+
+          // If we have a real link, make the whole tile an anchor; else render a non-link card.
+          return href ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded border hover:shadow h-full w-44 cursor-pointer relative z-10 pointer-events-auto"
+            >
+              {Inner}
             </a>
+          ) : (
+            <div className="rounded border h-full w-44 opacity-60">{Inner}</div>
           );
         };
 
         return (
-          // HORIZONTAL ONLY: no grid classes anywhere here
           <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
             {flatDocs.map((doc: any, i: number) => (
               <div key={i} className="shrink-0 snap-start">
