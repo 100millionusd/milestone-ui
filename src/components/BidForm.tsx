@@ -18,6 +18,26 @@ export default function BidForm({ proposalId }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // FIX: Handle file selection - APPEND instead of replace
+  const handleFileSelect = (selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    
+    const newFiles = Array.from(selectedFiles);
+    setFiles(prev => [...prev, ...newFiles]); // ← This is the fix: APPEND files
+  };
+
+  // NEW: Remove individual file
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // NEW: Clear all files
+  const clearAllFiles = () => {
+    setFiles([]);
+    setUploads([]);
+    setMsg(null);
+  };
+
   async function handleUpload() {
     setErr(null);
     try {
@@ -110,37 +130,82 @@ export default function BidForm({ proposalId }: Props) {
           />
         </label>
 
-        <div className="grid gap-2">
-          <span className="text-sm">Attach files (optional)</span>
+        {/* FIXED: Attachments section with multi-file support */}
+        <div className="grid gap-2 border rounded p-3 bg-gray-50">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Attach files (optional)</span>
+            {files.length > 0 && (
+              <button
+                type="button"
+                onClick={clearAllFiles}
+                className="text-xs text-red-600 hover:text-red-800"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          
           <input
             type="file"
             multiple
-            onChange={(e) => setFiles(Array.from(e.target.files || []))}
+            onChange={(e) => handleFileSelect(e.target.files)}
+            className="text-sm"
           />
+          
+          {/* Show selected files with remove buttons */}
+          {files.length > 0 && (
+            <div className="mt-2">
+              <div className="text-xs font-medium mb-1">
+                Selected files ({files.length}):
+              </div>
+              <ul className="space-y-1 text-xs">
+                {files.map((file, index) => (
+                  <li key={index} className="flex items-center justify-between bg-white p-2 rounded border">
+                    <span className="truncate flex-1">{file.name}</span>
+                    <span className="text-gray-500 ml-2 text-xs">
+                      {Math.round(file.size / 1024)} KB
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(index)}
+                      className="ml-2 text-red-500 hover:text-red-700 text-xs"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleUpload}
-            className="px-3 py-2 rounded bg-gray-900 text-white disabled:opacity-50"
+            className="px-3 py-2 rounded bg-gray-900 text-white disabled:opacity-50 text-sm"
             disabled={!files.length}
           >
-            Upload to IPFS
+            Upload {files.length} file(s) to IPFS
           </button>
+          
           {uploads.length > 0 && (
-            <ul className="text-xs list-disc pl-5">
-              {uploads.map((u) => (
-                <li key={u.cid}>
-                  <a
-                    className="underline"
-                    href={u.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {u.name}
-                  </a>{" "}
-                  ({u.size} bytes)
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2">
+              <div className="text-xs font-medium mb-1">Uploaded files:</div>
+              <ul className="text-xs list-disc pl-5 space-y-1">
+                {uploads.map((u) => (
+                  <li key={u.cid}>
+                    <a
+                      className="underline"
+                      href={u.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {u.name}
+                    </a>{" "}
+                    ({Math.round(u.size / 1024)} KB)
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
 
