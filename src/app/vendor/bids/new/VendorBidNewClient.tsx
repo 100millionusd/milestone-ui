@@ -213,31 +213,71 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           onChange={e => setNotes(e.target.value)}
         />
 
-        {/* NEW: Attachments (multi-file) */}
-        <div className="border rounded-xl p-3">
-          <div className="font-medium mb-2">Attachments</div>
-          <input
-            type="file"
-            multiple
-            onChange={(e) => {
-              const files = Array.from(e.currentTarget.files || []);
-              setSelectedFiles(files);
-            }}
-            className="block w-full rounded border px-3 py-2"
-          />
-          {selectedFiles.length > 0 && (
-            <ul className="mt-2 text-sm text-gray-600 space-y-1">
-              {selectedFiles.map((f, i) => (
-                <li key={i}>
-                  {f.name}{' '}
-                  <span className="opacity-60">
-                    ({Math.round(f.size / 1024)} KB)
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+{/* Attachments (multi-file, accumulates, supports drag & drop) */}
+<div className="border rounded-xl p-3">
+  <div className="flex items-center justify-between mb-2">
+    <div className="font-medium">Attachments</div>
+    <button
+      type="button"
+      onClick={() => document.getElementById('bid-files-input')?.click()}
+      className="px-3 py-1.5 rounded border text-sm hover:bg-gray-50"
+    >
+      Add files
+    </button>
+  </div>
+
+  {/* Hidden native picker */}
+  <input
+    id="bid-files-input"
+    type="file"
+    multiple
+    accept=".pdf,image/*"
+    onChange={(e) => {
+      const picked = Array.from(e.currentTarget.files || []);
+      setSelectedFiles(prev => {
+        const key = (f: File) => `${f.name}::${f.size}::${f.lastModified}`;
+        const map = new Map(prev.map(f => [key(f), f]));
+        for (const f of picked) map.set(key(f), f);
+        return Array.from(map.values());
+      });
+      // allow re-selecting the same files next time
+      e.currentTarget.value = '';
+    }}
+    className="hidden"
+  />
+
+  {/* Drag & drop area (works great in Safari) */}
+  <div
+    onDragOver={(e) => { e.preventDefault(); }}
+    onDrop={(e) => {
+      e.preventDefault();
+      const dropped = Array.from(e.dataTransfer.files || []);
+      if (!dropped.length) return;
+      setSelectedFiles(prev => {
+        const key = (f: File) => `${f.name}::${f.size}::${f.lastModified}`;
+        const map = new Map(prev.map(f => [key(f), f]));
+        for (const f of dropped) map.set(key(f), f);
+        return Array.from(map.values());
+      });
+    }}
+    className="border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
+  >
+    <div className="mb-1">Drag & drop files here, or click <span className="underline cursor-pointer" onClick={() => document.getElementById('bid-files-input')?.click()}>Add files</span></div>
+    <div className="text-xs opacity-70">PDFs and images supported. You can add in batches; selections accumulate.</div>
+  </div>
+
+  {selectedFiles.length > 0 && (
+    <ul className="mt-3 text-sm text-gray-700 space-y-1">
+      {selectedFiles.map((f, i) => (
+        <li key={i} className="flex items-center justify-between">
+          <span className="truncate">{f.name}</span>
+          <span className="opacity-60 text-xs ml-3">{Math.round(f.size/1024)} KB</span>
+        </li>
+      ))}
+    </ul>
+  )}
+</div>
+
 
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
