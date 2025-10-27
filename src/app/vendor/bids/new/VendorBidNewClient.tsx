@@ -29,6 +29,25 @@ const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => 
   }
 };
 
+// --------- NEW: uploader helper ----------
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+async function uploadIpfsFile(file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_BASE}/ipfs/upload-file`, {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`IPFS upload failed (${res.status}) ${t}`);
+  }
+  // expected: { cid, url, name?, size?, contentType? }
+  return res.json();
+}
+// ----------------------------------------
+
 export default function VendorBidNewClient({ proposalId }: { proposalId: number }) {
   const router = useRouter();
 
@@ -40,6 +59,9 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
   const [milestones, setMilestones] = useState<LocalMilestone[]>([
     { name: 'Milestone 1', amount: 0, dueDate: new Date().toISOString() },
   ]);
+
+  // NEW: multi-file state
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   // Agent2 modal state
   const [open, setOpen] = useState(false);
@@ -76,6 +98,19 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     setBidIdForModal(undefined);
 
     try {
+      // NEW: upload all selected files first
+      let filesPayload: any[] = [];
+      if (selectedFiles.length) {
+        const uploaded = await Promise.all(selectedFiles.map(uploadIpfsFile));
+        filesPayload = uploaded.map((u, i) => ({
+          name: u.name ?? selectedFiles[i]?.name ?? `file-${i + 1}`,
+          cid: u.cid ?? u.ipfsCid ?? null,
+          url: u.url ?? (u.cid ? `https://ipfs.io/ipfs/${u.cid}` : null),
+          size: u.size ?? selectedFiles[i]?.size ?? null,
+          contentType: u.contentType ?? selectedFiles[i]?.type ?? null,
+        }));
+      }
+
       const payload: any = {
         proposalId,
         vendorName,
@@ -89,10 +124,12 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           amount: Number(m.amount),
           dueDate: new Date(m.dueDate).toISOString(),
         })),
-        doc: null,
+        doc: null,           // legacy field (kept)
+        files: filesPayload, // NEW multi-file field
       };
+      if (filesPayload[0]) payload.file = filesPayload[0]; // legacy single-file compatibility
 
-      // 1) Create bid
+      // 1) Create bid (now includes files)
       const created: any = await createBid(payload);
       const bidId = Number(created?.bidId ?? created?.bid_id);
       if (!bidId) throw new Error('Failed to create bid (no id)');
@@ -175,6 +212,32 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
           value={notes}
           onChange={e => setNotes(e.target.value)}
         />
+
+        {/* NEW: Attachments (multi-file) */}
+        <div className="border rounded-xl p-3">
+          <div className="font-medium mb-2">Attachments</div>
+          <input
+            type="file"
+            multiple
+            onChange={(e) => {
+              const files = Array.from(e.currentTarget.files || []);
+              setSelectedFiles(files);
+            }}
+            className="block w-full rounded border px-3 py-2"
+          />
+          {selectedFiles.length > 0 && (
+            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+              {selectedFiles.map((f, i) => (
+                <li key={i}>
+                  {f.name}{' '}
+                  <span className="opacity-60">
+                    ({Math.round(f.size / 1024)} KB)
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         <div className="border rounded-xl p-3">
           <div className="font-medium mb-2">Milestones</div>
