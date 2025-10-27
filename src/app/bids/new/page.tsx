@@ -38,17 +38,7 @@ function NewBidPageContent() {
     preferredStablecoin: 'USDC',
     milestones: [{ name: 'Milestone 1', amount: '', dueDate: '' }],
   });
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-const fileInputRef = useRef<HTMLInputElement | null>(null);
-const fmtBytes = (n: number) =>
-  n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
-const removeSelectedAt = (idx: number) => {
-  setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
-};
-const clearSelected = () => {
-  setSelectedFiles([]);
-  if (fileInputRef.current) fileInputRef.current.value = '';
-};
+  const [docFile, setDocFile] = useState<File | null>(null);
 
   // ✅ Agent2 modal state
   type Step = 'submitting' | 'analyzing' | 'done' | 'error';
@@ -172,38 +162,26 @@ const clearSelected = () => {
     setCreatedBidId(null);
 
     try {
-// Upload any selected files (optional)
-let filesPayload: Array<{ name?: string; cid?: string; url?: string; size?: number; contentType?: string }> = [];
-if (selectedFiles.length) {
-  const uploaded = await Promise.all(
-    selectedFiles.map(async (f) => {
-      const u = await uploadFileToIPFS(f); // expects { cid, url, name?, size?, contentType? }
-      return {
-        name: u.name ?? f.name,
-        cid: u.cid,
-        url: u.url ?? (u.cid ? `https://ipfs.io/ipfs/${u.cid}` : undefined),
-        size: u.size ?? f.size,
-        contentType: u.contentType ?? f.type,
-      };
-    })
-  );
-  filesPayload = uploaded;
-}
+      // Upload file (optional)
+      let doc: any = null;
+      if (docFile) {
+        const up = await uploadFileToIPFS(docFile);
+        doc = { cid: up.cid, url: up.url, name: docFile.name, size: docFile.size };
+      }
 
- const body: any = {
-  ...formData,
-  proposalId: Number(proposalId),
-  priceUSD: parseFloat(formData.priceUSD),
-  days: parseInt(formData.days),
-  milestones: formData.milestones.map((m) => ({
-    name: m.name,
-    amount: parseFloat(m.amount),
-    dueDate: new Date(m.dueDate).toISOString(),
-  })),
-  files: filesPayload,                 // NEW: multi-file metadata array
-  file: filesPayload[0] || null,       // legacy single-file (if backend reads `file`)
-  doc: filesPayload[0] || null,        // legacy single-file (if backend reads `doc`)
-};
+      // Build payload
+      const body: any = {
+        ...formData,
+        proposalId: Number(proposalId),
+        priceUSD: parseFloat(formData.priceUSD),
+        days: parseInt(formData.days),
+        milestones: formData.milestones.map((m) => ({
+          name: m.name,
+          amount: parseFloat(m.amount),
+          dueDate: new Date(m.dueDate).toISOString(),
+        })),
+        doc,
+      };
 
       // Create
       const created = await createBid(body);
@@ -461,71 +439,17 @@ if (selectedFiles.length) {
             </div>
           </div>
 
- {/* Supporting Documents (multi-file) */}
-<div>
-  <div className="flex items-center justify-between">
-    <label className="block text-sm font-medium mb-1">Supporting Documents</label>
-    {selectedFiles.length > 0 && (
-      <button
-        type="button"
-        onClick={clearSelected}
-        className="text-xs text-red-600 hover:text-red-800"
-      >
-        Clear all
-      </button>
-    )}
-  </div>
-
-  <input
-    ref={fileInputRef}
-    type="file"
-    multiple
-    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-    onChange={(e) => {
-      const picked = Array.from(e.currentTarget.files || []);
-      if (!picked.length) return;
-      setSelectedFiles(prev => [...prev, ...picked]); // append, not replace
-      e.currentTarget.value = ''; // allow re-picking same file
-    }}
-    className="w-full p-2 border rounded"
-    disabled={disabled}
-  />
-
-  <div
-    onDragOver={(e) => { e.preventDefault(); }}
-    onDrop={(e) => {
-      e.preventDefault();
-      const dropped = Array.from(e.dataTransfer.files || []);
-      if (!dropped.length) return;
-      setSelectedFiles(prev => [...prev, ...dropped]); // append
-    }}
-    className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
-  >
-    Drag & drop files here or use the picker above. Selections accumulate.
-  </div>
-
-  {selectedFiles.length > 0 && (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {selectedFiles.map((f, i) => (
-        <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
-          <span className="truncate max-w-[180px]">{f.name}</span>
-          <span className="opacity-60">{fmtBytes(f.size)}</span>
-          <button
-            type="button"
-            aria-label="Remove file"
-            title="Remove"
-            onClick={() => removeSelectedAt(i)}
-            className="w-5 h-5 rounded-full hover:bg-gray-200"
-          >
-            ×
-          </button>
-        </span>
-      ))}
-    </div>
-  )}
-
-  <p className="text-sm text-gray-500 mt-2">Upload portfolio, previous work, certifications, etc.</p>
-</div>
+          {/* Supporting Documents */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+            <input
+              type="file"
+              onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+              className="w-full p-2 border rounded"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
+            <p className="text-sm text-gray-500 mt-1">Upload portfolio, previous work, certifications, etc.</p>
+          </div>
         </fieldset>
 
         {/* Submit / Cancel */}
