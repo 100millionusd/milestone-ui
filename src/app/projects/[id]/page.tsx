@@ -1103,7 +1103,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
- {/* Files */}
+{/* Files */}
 {tab === 'files' && (
   <section className="border rounded p-4">
     <h3 className="font-semibold mb-3">Files</h3>
@@ -1114,66 +1114,48 @@ export default function ProjectDetailPage() {
       <p className="text-sm text-gray-500">No files yet.</p>
     ) : (
       (() => {
-        // Flatten: one horizontal row
-        const flatDocs = allFiles.map((r: any) => r.doc);
-
-        // robust link resolver (covers url, href, link, gatewayUrl, cid, ipfsCid, src)
-        const getDocHref = (doc: any) =>
-          doc?.url ||
-          doc?.href ||
-          doc?.link ||
-          doc?.gatewayUrl ||
-          (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : null) ||
-          (doc?.ipfsCid ? `https://ipfs.io/ipfs/${doc.ipfsCid}` : null) ||
-          doc?.src ||
-          null;
-
-        const Tile = ({ doc }: { doc: any }) => {
-          const href = getDocHref(doc);
-          const name = doc?.name || doc?.filename || doc?.originalName || doc?.cid || 'file';
-          const imgSrc =
-            doc?.preview || doc?.thumbnail || doc?.src || (/\.(png|jpe?g|webp|gif|svg)$/i.test(String(href || '')) ? href : null);
-          const isImg =
-            !!imgSrc ||
-            /^image\//.test(doc?.contentType || '') ||
-            /\.(png|jpe?g|webp|gif|svg)$/i.test(String(name));
-
-          const Inner = (
-            <>
-              {isImg ? (
-                <img src={imgSrc || String(href)} alt={name} className="w-44 h-28 object-cover rounded-t" />
-              ) : (
-                <div className="w-44 h-28 flex items-center justify-center text-xs text-gray-600">
-                  {name}
-                </div>
-              )}
-              <div className="p-2 text-xs">
-                <div className="font-medium truncate">{name}</div>
-                {doc?.cid ? <div className="opacity-60 truncate">ipfs://{doc.cid}</div> : null}
-              </div>
-            </>
-          );
-
-          // If we have a real link, make the whole tile an anchor; else render a non-link card.
-          return href ? (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="block rounded border hover:shadow h-full w-44 cursor-pointer relative z-10 pointer-events-auto"
-            >
-              {Inner}
-            </a>
-          ) : (
-            <div className="rounded border h-full w-44 opacity-60">{Inner}</div>
-          );
-        };
-
+        const grouped = allFiles.reduce((acc: Record<string, any[]>, row: any) => {
+          (acc[row?.scope || 'Files'] ||= []).push(row.doc);
+          return acc;
+        }, {});
         return (
-          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-            {flatDocs.map((doc: any, i: number) => (
-              <div key={i} className="shrink-0 snap-start">
-                <Tile doc={doc} />
+          <div className="space-y-6">
+            {Object.entries(grouped).map(([scope, docs]) => (
+              <div key={scope}>
+                <div className="text-sm font-medium mb-2">{scope}</div>
+
+                {/* HORIZONTAL, CLICKABLE (keeps your renderAttachment) */}
+                <div className="flex gap-3 overflow-x-auto pb-2 touch-pan-x">
+                  {docs.map((doc: any, i: number) => (
+                    <div key={i} className="shrink-0 min-w-[11rem]">
+                      {typeof renderAttachment === 'function' ? (
+                        <div className="[&>*]:w-44 pointer-events-auto">
+                          {renderAttachment(doc, i)}
+                        </div>
+                      ) : (
+                        <a
+                          href={
+                            doc?.url ||
+                            doc?.href ||
+                            doc?.link ||
+                            doc?.gatewayUrl ||
+                            (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block rounded border p-3 text-sm hover:shadow w-44 pointer-events-auto"
+                        >
+                          <div className="font-medium truncate">
+                            {doc?.name || doc?.filename || doc?.cid || 'file'}
+                          </div>
+                          {doc?.cid ? (
+                            <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
+                          ) : null}
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
