@@ -1114,56 +1114,47 @@ export default function ProjectDetailPage() {
       <p className="text-sm text-gray-500">No files yet.</p>
     ) : (
       (() => {
-        const grouped = allFiles.reduce((acc: Record<string, any[]>, row: any) => {
-          (acc[row?.scope || 'Files'] ||= []).push(row.doc);
-          return acc;
-        }, {});
-        return (
-          <div className="space-y-6">
-            {Object.entries(grouped).map(([scope, docs]) => (
-              <div key={scope}>
-                <div className="text-sm font-medium mb-2">{scope}</div>
+        // ONE HORIZONTAL STRIP — no grouping, no grid
+        const flatDocs = allFiles.map((r: any) => r.doc);
 
-                {/* HORIZONTAL, CLICKABLE (keeps your renderAttachment) */}
-                <div className="flex gap-3 overflow-x-auto pb-2 touch-pan-x">
-                  {docs.map((doc: any, i: number) => (
-                    <div key={i} className="shrink-0 min-w-[11rem]">
-                      {typeof renderAttachment === 'function' ? (
-                        <div className="[&>*]:w-44 pointer-events-auto">
-                          {renderAttachment(doc, i)}
-                        </div>
-                      ) : (
-                        <a
-                          href={
-                            doc?.url ||
-                            doc?.href ||
-                            doc?.link ||
-                            doc?.gatewayUrl ||
-                            (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
-                          }
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block rounded border p-3 text-sm hover:shadow w-44 pointer-events-auto"
-                        >
-                          <div className="font-medium truncate">
-                            {doc?.name || doc?.filename || doc?.cid || 'file'}
-                          </div>
-                          {doc?.cid ? (
-                            <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
-                          ) : null}
-                        </a>
-                      )}
-                    </div>
-                  ))}
+        return (
+          <div className="overflow-x-auto">
+            <div className="flex gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
+              {flatDocs.map((doc: any, i: number) => (
+                <div key={i} className="shrink-0 snap-start pointer-events-auto">
+                  {typeof renderAttachment === 'function' ? (
+                    renderAttachment(doc, i)   // keep your original clickable tile
+                  ) : (
+                    <a
+                      href={
+                        doc?.url ||
+                        doc?.href ||
+                        doc?.link ||
+                        doc?.gatewayUrl ||
+                        (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded border p-3 text-sm hover:shadow"
+                    >
+                      <div className="font-medium truncate">
+                        {doc?.name || doc?.filename || doc?.cid || 'file'}
+                      </div>
+                      {doc?.cid ? (
+                        <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
+                      ) : null}
+                    </a>
+                  )}
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         );
       })()
     )}
   </section>
 )}
+
 
       {/* Admin */}
       {tab === 'admin' && me.role === 'admin' && (
