@@ -232,34 +232,23 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
     type="file"
     multiple
     accept=".pdf,image/*"
-    onChange={(e) => {
-      const picked = Array.from(e.currentTarget.files || []);
-      setSelectedFiles(prev => {
-        const key = (f: File) => `${f.name}::${f.size}::${f.lastModified}`;
-        const map = new Map(prev.map(f => [key(f), f]));
-        for (const f of picked) map.set(key(f), f);
-        return Array.from(map.values());
-      });
-      // allow re-selecting the same files next time
-      e.currentTarget.value = '';
-    }}
+ onChange={(e) => {
+  const picked = Array.from(e.currentTarget.files || []);
+  setSelectedFiles(prev => [...prev, ...picked]);  // ← append, no replace
+  e.currentTarget.value = ''; // allow re-picking same file later
+}}
     className="hidden"
   />
 
   {/* Drag & drop area (works great in Safari) */}
   <div
     onDragOver={(e) => { e.preventDefault(); }}
-    onDrop={(e) => {
-      e.preventDefault();
-      const dropped = Array.from(e.dataTransfer.files || []);
-      if (!dropped.length) return;
-      setSelectedFiles(prev => {
-        const key = (f: File) => `${f.name}::${f.size}::${f.lastModified}`;
-        const map = new Map(prev.map(f => [key(f), f]));
-        for (const f of dropped) map.set(key(f), f);
-        return Array.from(map.values());
-      });
-    }}
+ onDrop={(e) => {
+  e.preventDefault();
+  const dropped = Array.from(e.dataTransfer.files || []);
+  if (!dropped.length) return;
+  setSelectedFiles(prev => [...prev, ...dropped]); // ← append, no replace
+}}
     className="border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
   >
     <div className="mb-1">Drag & drop files here, or click <span className="underline cursor-pointer" onClick={() => document.getElementById('bid-files-input')?.click()}>Add files</span></div>
