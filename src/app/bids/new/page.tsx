@@ -152,82 +152,86 @@ const clearSelected = () => {
   const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
 
   // --- submit handler ---
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitted) return; // already finalized
-    if (!proposalId) {
-      alert('No project selected. Open this page with ?proposalId=<id>.');
-      return;
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (submitted) return; // already finalized
+  if (!proposalId) {
+    alert('No project selected. Open this page with ?proposalId=<id>.');
+    return;
+  }
+  if (missingRequiredProfile) {
+    alert('Please complete your vendor profile first.');
+    return;
+  }
+
+  setLoading(true);
+  setModalOpen(true);
+  setStep('submitting');
+  setMessage('Submitting your bid…');
+  setAnalysis(null);
+  setCreatedBidId(null);
+
+  try {
+    // Upload any selected files (optional) — NO contentType anywhere in legacy fields
+    let filesPayload: Array<{ cid?: string; url?: string; name?: string; size?: number }> = [];
+    if (selectedFiles.length) {
+      const uploaded = await Promise.all(
+        selectedFiles.map(async (f) => {
+          const up = await uploadFileToIPFS(f); // expects { cid, url, ... }
+          return {
+            name: up.name ?? f.name,
+            cid: up.cid,
+            url: up.url ?? (up.cid ? `https://ipfs.io/ipfs/${up.cid}` : undefined),
+            size: up.size ?? f.size,
+          };
+        })
+      );
+      filesPayload = uploaded;
     }
-    if (missingRequiredProfile) {
-      alert('Please complete your vendor profile first.');
-      return;
-    }
 
-    setLoading(true);
-    setModalOpen(true);
-    setStep('submitting');
-    setMessage('Submitting your bid…');
-    setAnalysis(null);
-    setCreatedBidId(null);
+    // Legacy single-file object — STRICT: only { cid, url } to satisfy backend schema
+    const first = filesPayload[0];
+    const legacyDoc = first ? { cid: first.cid, url: first.url } : null;
 
-    try {
-// Upload any selected files (optional)
-let filesPayload: Array<{ name?: string; cid?: string; url?: string; size?: number; contentType?: string }> = [];
-if (selectedFiles.length) {
-  const uploaded = await Promise.all(
-    selectedFiles.map(async (f) => {
-      const u = await uploadFileToIPFS(f); // expects { cid, url, name?, size?, contentType? }
-      return {
-        name: u.name ?? f.name,
-        cid: u.cid,
-        url: u.url ?? (u.cid ? `https://ipfs.io/ipfs/${u.cid}` : undefined),
-        size: u.size ?? f.size,
-        contentType: u.contentType ?? f.type,
-      };
-    })
-  );
-  filesPayload = uploaded;
-}
+    // Build payload
+    const body: any = {
+      ...formData,
+      proposalId: Number(proposalId),
+      priceUSD: parseFloat(formData.priceUSD),
+      days: parseInt(formData.days),
+      milestones: formData.milestones.map((m) => ({
+        name: m.name,
+        amount: parseFloat(m.amount),
+        dueDate: new Date(m.dueDate).toISOString(),
+      })),
+      files: filesPayload,  // multi-file array (server may ignore extras)
+      file: legacyDoc,      // legacy single-file (no contentType)
+      doc: legacyDoc,       // legacy single-file (no contentType)
+    };
 
- const body: any = {
-  ...formData,
-  proposalId: Number(proposalId),
-  priceUSD: parseFloat(formData.priceUSD),
-  days: parseInt(formData.days),
-  milestones: formData.milestones.map((m) => ({
-    name: m.name,
-    amount: parseFloat(m.amount),
-    dueDate: new Date(m.dueDate).toISOString(),
-  })),
-  files: filesPayload,                 // NEW: multi-file metadata array
-  file: filesPayload[0] || null,       // legacy single-file (if backend reads `file`)
-  doc: filesPayload[0] || null,        // legacy single-file (if backend reads `doc`)
+    // Create
+    const created = await createBid(body);
+    const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
+    if (!bidId) throw new Error('Bid created but no ID returned');
+
+    setCreatedBidId(bidId);
+    setStep('analyzing');
+    setMessage('Agent2 is analyzing your bid…');
+
+    // Trigger server analysis (safe if it already ran inline)
+    try { await analyzeBid(bidId, undefined); } catch {}
+
+    // Start polling until aiAnalysis appears
+    pollUntilAnalysis(bidId);
+  } catch (error: any) {
+    console.error('Error creating bid:', error);
+    setStep('error');
+    setMessage(error?.message || 'Failed to create bid');
+    alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
+  } finally {
+    setLoading(false);
+  }
 };
-
-      // Create
-      const created = await createBid(body);
-      const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
-      if (!bidId) throw new Error('Bid created but no ID returned');
-
-      setCreatedBidId(bidId);
-      setStep('analyzing');
-      setMessage('Agent2 is analyzing your bid…');
-
-      // Trigger server analysis (safe if it already ran inline)
-      try { await analyzeBid(bidId, undefined); } catch {}
-
-      // Start polling until aiAnalysis appears
-      pollUntilAnalysis(bidId);
-    } catch (error: any) {
-      console.error('Error creating bid:', error);
-      setStep('error');
-      setMessage(error?.message || 'Failed to create bid');
-      alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // --- UI ---
   if (!proposalId) {
