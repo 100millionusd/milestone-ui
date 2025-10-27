@@ -773,21 +773,11 @@ useEffect(() => {
                       <div className="mt-1 text-xs text-gray-500">
                         {b.days ? `${b.days} days` : null} {b.status ? `• ${b.status}` : null}
                       </div>
-                      {b.milestones?.length ? (
-                        <div className="mt-2">
-                          <div className="text-xs font-medium text-gray-700 mb-1">Milestones</div>
-                          <ol className="space-y-1">
-                            {b.milestones.map((m, i) => (
-                              <li key={i} className="text-xs text-gray-700">
-                                <span className="font-medium">{m.name || `Milestone ${i + 1}`}</span>
-                                {typeof m.amount === 'number' && <> — {usd(m.amount)}</>}
-                                {m.dueDate && <> • due {new Date(m.dueDate).toLocaleDateString()}</>}
-                                {m.completed && <> • completed</>}
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
+ {b.milestones?.length ? (
+  <div className="mt-2 text-xs text-gray-600">
+    {b.milestones.length} milestones • {b.milestones.filter(m => m.completed).length}/{b.milestones.length} completed
+  </div>
+) : null}
                     </div>
                   );
                 })}
