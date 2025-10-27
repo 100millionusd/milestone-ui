@@ -1103,6 +1103,57 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+            {/* Files */}
+      {tab === 'files' && (
+        <section className="border rounded p-4">
+          <h3 className="font-semibold mb-3">Files</h3>
+
+          {loadingProofs && allFiles.length === 0 ? (
+            <p className="text-sm text-gray-500">Loading files…</p>
+          ) : allFiles.length === 0 ? (
+            <p className="text-sm text-gray-500">No files yet.</p>
+          ) : (
+            (() => {
+              const grouped = allFiles.reduce((acc: Record<string, any[]>, row: any) => {
+                (acc[row?.scope || 'Files'] ||= []).push(row.doc);
+                return acc;
+              }, {});
+              return (
+                <div className="space-y-6">
+                  {Object.entries(grouped).map(([scope, docs]) => (
+                    <div key={scope}>
+                      <div className="text-sm font-medium mb-2">{scope}</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        {docs.map((doc: any, i: number) =>
+                          typeof renderAttachment === 'function' ? (
+                            renderAttachment(doc, i)
+                          ) : (
+                            <a
+                              key={i}
+                              href={doc?.url || (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block rounded border p-3 text-sm hover:shadow"
+                            >
+                              <div className="font-medium truncate">
+                                {doc?.name || doc?.filename || doc?.cid || 'file'}
+                              </div>
+                              {doc?.cid ? (
+                                <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
+                              ) : null}
+                            </a>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
+          )}
+        </section>
+      )}
+
       {/* Admin */}
       {tab === 'admin' && me.role === 'admin' && (
         <section className="border rounded p-4">
