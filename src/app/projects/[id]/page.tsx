@@ -1118,8 +1118,8 @@ export default function ProjectDetailPage() {
         const flatDocs = allFiles.map((r: any) => r.doc);
 
         return (
-          <div className="overflow-x-auto">
-            <div className="flex gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
+          <div className="overflow-x-auto scroll-smooth">
+            <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
               {flatDocs.map((doc: any, i: number) => (
                 <div key={i} className="shrink-0 snap-start pointer-events-auto">
                   {typeof renderAttachment === 'function' ? (
