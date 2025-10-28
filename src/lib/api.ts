@@ -515,6 +515,9 @@ export function clearBidsCache() {
   _bidsInflight = null;
 }
 
+// alias for callers expecting invalidateBidsCache
+export const invalidateBidsCache = clearBidsCache;
+
 // ---- Bids: coalesced + TTL cache (single fetch per 30s) ----
 let _bidsInflight: Promise<Bid[]> | null = null;
 let _bidsCache: { at: number; data: Bid[] } | null = null;
@@ -1618,6 +1621,7 @@ export default {
   loginWithSignature,
   clearBidsCache, 
   updateBidMilestones,
+  invalidateBidsCache,
 
   // proposals
   listProposals,
