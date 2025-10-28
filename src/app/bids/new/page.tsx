@@ -479,9 +479,9 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           </div>
 
- {/* File picker: hidden native input + custom button + live summary */}
-<div className="flex items-center gap-3">
-   {/* hidden real input */}
+{/* File picker: hidden native input + custom button + live summary */}
+<div className="mt-4">
+  {/* hidden real input */}
   <input
     id="supportingDocs"
     type="file"
@@ -491,69 +491,70 @@ const handleSubmit = async (e: React.FormEvent) => {
     onChange={(e) => {
       const files = Array.from(e.currentTarget.files || []);
       if (!files.length) return;
-      setSelectedFiles(prev => [...prev, ...files]);   // append, do not replace
-      e.currentTarget.value = '';                      // allow re-selecting the same file(s)
+      setSelectedFiles((prev) => [...prev, ...files]);   // append
+      e.currentTarget.value = "";                        // allow re-picking same file
     }}
   />
 
-  {/* visible trigger */}
-  <label
-    htmlFor="supportingDocs"
-    className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 cursor-pointer"
-  >
-    Choose Files
-  </label>
-
-  {/* live summary */}
-  <span className="text-sm text-slate-600">
-    {selectedFiles.length === 0
-      ? 'No files selected yet'
-      : selectedFiles.length === 1
-        ? `${selectedFiles[0].name} — ${fmtSize((selectedFiles[0] as File).size ?? 0)}`
-        : `${selectedFiles.length} files selected`}
-  </span>
-
-  {/* clear-all (your colorful version from earlier stays here if you want) */}
-  {selectedFiles.length > 0 && (
-    <button
-      type="button"
-      onClick={clearSelected}
-      aria-label="Clear all selected files"
-      className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+  {/* visible trigger + live summary + clear-all */}
+  <div className="flex items-center gap-3">
+    <label
+      htmlFor="supportingDocs"
+      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 cursor-pointer"
     >
-      Clear all
-    </button>
-  )}
-</div>
+      Choose Files
+    </label>
 
+    <span className="text-sm text-slate-600">
+      {selectedFiles.length === 0
+        ? "No files selected yet"
+        : selectedFiles.length === 1
+          ? `${selectedFiles[0].name} — ${fmtSize((selectedFiles[0] as File).size ?? 0)}`
+          : `${selectedFiles.length} files selected`}
+    </span>
+
+    {selectedFiles.length > 0 && (
+      <button
+        type="button"
+        onClick={clearSelected}
+        aria-label="Clear all selected files"
+        className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+      >
+        Clear all
+      </button>
+    )}
+  </div>
+
+  {/* drag & drop */}
   <div
     onDragOver={(e) => { e.preventDefault(); }}
     onDrop={(e) => {
       e.preventDefault();
       const dropped = Array.from(e.dataTransfer.files || []);
       if (!dropped.length) return;
-      setSelectedFiles(prev => [...prev, ...dropped]); // append
+      setSelectedFiles((prev) => [...prev, ...dropped]); // append
     }}
     className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
   >
     Drag & drop files here or use the picker above. Selections accumulate.
   </div>
 
+  {/* selected chips */}
   {selectedFiles.length > 0 && (
     <div className="mt-3 flex flex-wrap gap-2">
       {selectedFiles.map((f, i) => (
         <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
           <span className="truncate max-w-[180px]">{f.name}</span>
-          <span className="opacity-60">{fmtBytes(f.size)}</span>
-     <button
-  type="button"
-  aria-label="Remove file"
-  title="Remove"
-  onClick={() => removeSelectedAt(i)}
-  className="inline-flex items-center justify-center w-6 h-6 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
->
-  ×
-</button>
+          <span className="opacity-60">{fmtSize(f.size)}</span>
+          <button
+            type="button"
+            aria-label="Remove file"
+            title="Remove"
+            onClick={() => removeSelectedAt(i)}
+            className="inline-flex items-center justify-center w-6 h-6 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
+          >
+            ×
+          </button>
         </span>
       ))}
     </div>
