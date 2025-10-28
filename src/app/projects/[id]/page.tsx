@@ -722,42 +722,24 @@ export default function ProjectDetailPage() {
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
   const projectFiles = (projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d }));
- // ↓ replace your current bidFiles block with this:
-const bidFiles = safeBids.flatMap((b: any) => {
-  // Aggregate files for the "Files" tab
-const proofFiles = filesFromProofRecords(proofs);
-
-const allFiles = [
-  ...projectFiles,       // from project.docs
-  ...bidFiles,           // from bids.docs / bids.files
-  ...proofFiles,         // from proofs API
-].filter(r => r && r.doc);
-
-  // collect docs (plural or single) + files (array)
-  const docsArr = Array.isArray(b?.docs)
-    ? b.docs
-    : (b?.docs ? [b.docs] : (b?.doc ? [b.doc] : []));
-  const filesArr = Array.isArray(b?.files) ? b.files : [];
-
-  const merged = [...docsArr.filter(Boolean), ...filesArr.filter(Boolean)];
-
-  // de-dupe by url+cid to avoid duplicates
-  const seen = new Set<string>();
-  const uniq = merged.filter((d: any) => {
-    const url = String(d?.url || '').trim().toLowerCase();
-    const cid = String(d?.cid || '').trim().toLowerCase();
-    const key = `${url}|${cid}`;
-    if (!url && !cid) return false;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const bidFiles = safeBids.flatMap((b) => {
+    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
+    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
   });
+  const proofFiles = filesFromProofRecords(proofs);
+  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
-  return uniq.map((d: any) => ({
-    scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`,
-    doc: d,
-  }));
-});
+  if (typeof window !== 'undefined') {
+    (window as any).__FILES = allFiles.map((x) => {
+      const name = x.doc?.name || null;
+      const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
+      return {
+        scope: x.scope,
+        href: normalized ? withFilename(normalized, name || undefined) : null,
+        name,
+      };
+    });
+  }
 
   function renderAttachment(doc: any, key: number) {
     if (!doc) return null;
@@ -1120,59 +1102,6 @@ const allFiles = [
           )}
         </section>
       )}
-
-{/* Files */}
-{tab === 'files' && (
-  <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">Files</h3>
-
-    {loadingProofs && allFiles.length === 0 ? (
-      <p className="text-sm text-gray-500">Loading files…</p>
-    ) : allFiles.length === 0 ? (
-      <p className="text-sm text-gray-500">No files yet.</p>
-    ) : (
-      (() => {
-        // ONE HORIZONTAL STRIP — no grouping, no grid
-        const flatDocs = allFiles.map((r: any) => r.doc);
-
-        return (
-          <div className="overflow-x-auto scroll-smooth">
-            <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
-              {flatDocs.map((doc: any, i: number) => (
-                <div key={i} className="shrink-0 snap-start pointer-events-auto">
-                  {typeof renderAttachment === 'function' ? (
-                    renderAttachment(doc, i)   // keep your original clickable tile
-                  ) : (
-                    <a
-                      href={
-                        doc?.url ||
-                        doc?.href ||
-                        doc?.link ||
-                        doc?.gatewayUrl ||
-                        (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded border p-3 text-sm hover:shadow"
-                    >
-                      <div className="font-medium truncate">
-                        {doc?.name || doc?.filename || doc?.cid || 'file'}
-                      </div>
-                      {doc?.cid ? (
-                        <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
-                      ) : null}
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()
-    )}
-  </section>
-)}
-
 
       {/* Admin */}
       {tab === 'admin' && me.role === 'admin' && (
