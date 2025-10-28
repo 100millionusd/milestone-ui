@@ -10,15 +10,25 @@ import {
   getProposals,
 } from '@/lib/api';
 
-// --- attachments helpers (add after imports) ---
-function normalizeBidFiles(bid: any) {
-  const arr = Array.isArray(bid?.files) ? bid.files : (bid?.doc ? [bid.doc] : []);
-  return arr
+// --- attachments helper (PARSES array OR JSON string; falls back to legacy doc) ---
+function getAttachments(bid: any) {
+  const raw = bid?.files ?? bid?.files_json ?? null;
+  let files: any[] = [];
+
+  if (Array.isArray(raw)) {
+    files = raw;
+  } else if (typeof raw === 'string') {
+    try { files = JSON.parse(raw) || []; } catch { files = []; }
+  }
+
+  if (!files.length && bid?.doc) files = [bid.doc]; // legacy single-file
+
+  return files
     .filter(Boolean)
     .map((f: any, idx: number) => {
       const url =
         (typeof f?.url === 'string' && f.url) ||
-        (f?.cid ? `https://ipfs.io/ipfs/${String(f.cid)}` : '');
+        (f?.cid ? `${GATEWAY}/${String(f.cid)}` : '');
       return {
         name: String(f?.name || `file-${idx + 1}`),
         url,
@@ -27,7 +37,7 @@ function normalizeBidFiles(bid: any) {
         mimetype: f?.mimetype || f?.contentType || null,
       };
     })
-    .filter((x: any) => x.url); // keep only renderable links
+    .filter((x: any) => x.url);
 }
 
 const GATEWAY =
@@ -352,57 +362,50 @@ export default function AdminBidsPage() {
                     </div>
                   </Td>
 
- {/* Attachments */}
+ {/* Attachments (multi-file aware) */}
 <Td className="px-6 py-4">
   {(() => {
-    // Prefer multi-file `bid.files`; fall back to single `bid.doc`
-    const list = Array.isArray(bid?.files) && bid.files.length
-      ? bid.files
-      : (bid?.doc ? [bid.doc] : []);
+    const files = getAttachments(bid);
 
-    if (!list.length) {
+    if (!files.length) {
       return <span className="text-xs text-gray-400">No files</span>;
     }
 
     return (
       <div className="grid grid-cols-2 gap-1 w-[140px]">
-        {list.slice(0, 4).map((f: any, i: number) => {
-          const url = (typeof f?.url === 'string' && f.url)
-            || (f?.cid ? `https://ipfs.io/ipfs/${String(f.cid)}` : '');
-          const key = `${bid.bidId || bid.bid_id}-${i}-${f?.cid || f?.url || f?.name || 'x'}`;
+        {files.slice(0, 4).map((f, i) => {
+          const key = `${String(bid.bidId ?? bid.bid_id)}-${i}-${f.cid ?? f.url ?? f.name}`;
 
-          // Use your existing renderer if present (ensures consistent UI)
           if (typeof renderAttachment === 'function') {
             return (
               <div key={key} className="min-w-[64px]">
-                {renderAttachment({ ...f, url }, i)}
+                {renderAttachment({ name: f.name, url: f.url, cid: f.cid, mimetype: f.mimetype, size: f.size }, i)}
               </div>
             );
           }
 
-          // Fallback thumb (if you don’t have renderAttachment)
           return (
-            <a
+            <button
               key={key}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              title={f?.name || `file-${i + 1}`}
+              type="button"
+              onClick={() => setLightbox(f.url)}
+              title={f.name}
               className="block border rounded overflow-hidden bg-white"
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={url}
-                alt={f?.name || `file-${i + 1}`}
+                src={f.url}
+                alt={f.name}
                 className="w-[68px] h-[56px] object-cover"
                 onError={(e) => {
                   const parent = e.currentTarget.parentElement;
                   if (parent) {
                     parent.innerHTML =
-                      `<div class="w-[68px] h-[56px] flex items-center justify-center text-[10px] px-1 bg-gray-50 text-gray-600">${(f?.name||'file')}</div>`;
+                      `<div class="w-[68px] h-[56px] flex items-center justify-center text-[10px] px-1 bg-gray-50 text-gray-600">${(f.name || 'file')}</div>`;
                   }
                 }}
               />
-            </a>
+            </button>
           );
         })}
       </div>
