@@ -10,27 +10,15 @@ import {
   getProposals,
 } from '@/lib/api';
 
-// --- attachments helper (handles array OR JSON string; falls back to doc) ---
-function getAttachments(bid: any) {
-  let files: any[] = [];
-
-  const raw = bid?.files ?? bid?.files_json ?? null;
-  if (Array.isArray(raw)) {
-    files = raw;
-  } else if (typeof raw === 'string') {
-    try { files = JSON.parse(raw) || []; } catch { files = []; }
-  }
-
-  if ((!files || files.length === 0) && bid?.doc) {
-    files = [bid.doc]; // legacy single-file
-  }
-
-  return files
+// --- attachments helpers (add after imports) ---
+function normalizeBidFiles(bid: any) {
+  const arr = Array.isArray(bid?.files) ? bid.files : (bid?.doc ? [bid.doc] : []);
+  return arr
     .filter(Boolean)
     .map((f: any, idx: number) => {
       const url =
         (typeof f?.url === 'string' && f.url) ||
-        (f?.cid ? `${GATEWAY}/${String(f.cid)}` : '');
+        (f?.cid ? `https://ipfs.io/ipfs/${String(f.cid)}` : '');
       return {
         name: String(f?.name || `file-${idx + 1}`),
         url,
@@ -39,7 +27,7 @@ function getAttachments(bid: any) {
         mimetype: f?.mimetype || f?.contentType || null,
       };
     })
-    .filter((x: any) => x.url);
+    .filter((x: any) => x.url); // keep only renderable links
 }
 
 const GATEWAY =
@@ -364,41 +352,59 @@ export default function AdminBidsPage() {
                     </div>
                   </Td>
 
- {/* Attachments (multi-file) */}
+ {/* Attachments */}
 <Td className="px-6 py-4">
   {(() => {
-    const files = getAttachments(bid);
-    if (!files.length) {
+    // Prefer multi-file `bid.files`; fall back to single `bid.doc`
+    const list = Array.isArray(bid?.files) && bid.files.length
+      ? bid.files
+      : (bid?.doc ? [bid.doc] : []);
+
+    if (!list.length) {
       return <span className="text-xs text-gray-400">No files</span>;
     }
+
     return (
-      <div className="flex flex-wrap gap-2 max-w-[260px]">
-        {files.map((f, i) => (
-          typeof renderAttachment === 'function'
-            ? (
-              <div key={`${String(bid.bidId ?? bid.bid_id)}-${i}`} className="min-w-[64px]">
-                {renderAttachment({ name: f.name, url: f.url, cid: f.cid, mimetype: f.mimetype, size: f.size }, i)}
+      <div className="grid grid-cols-2 gap-1 w-[140px]">
+        {list.slice(0, 4).map((f: any, i: number) => {
+          const url = (typeof f?.url === 'string' && f.url)
+            || (f?.cid ? `https://ipfs.io/ipfs/${String(f.cid)}` : '');
+          const key = `${bid.bidId || bid.bid_id}-${i}-${f?.cid || f?.url || f?.name || 'x'}`;
+
+          // Use your existing renderer if present (ensures consistent UI)
+          if (typeof renderAttachment === 'function') {
+            return (
+              <div key={key} className="min-w-[64px]">
+                {renderAttachment({ ...f, url }, i)}
               </div>
-            )
-            : (
-              <a
-                key={`${String(bid.bidId ?? bid.bid_id)}-${i}`}
-                href={f.url}
-                target="_blank"
-                rel="noreferrer"
-                title={f.name}
-                className="block border rounded overflow-hidden bg-white"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={f.url}
-                  alt={f.name}
-                  className="w-[68px] h-[56px] object-cover"
-                />
-              </a>
-            )
-        ))}
-        <span className="text-[11px] text-gray-500 ml-1">({files.length})</span>
+            );
+          }
+
+          // Fallback thumb (if you don’t have renderAttachment)
+          return (
+            <a
+              key={key}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              title={f?.name || `file-${i + 1}`}
+              className="block border rounded overflow-hidden bg-white"
+            >
+              <img
+                src={url}
+                alt={f?.name || `file-${i + 1}`}
+                className="w-[68px] h-[56px] object-cover"
+                onError={(e) => {
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    parent.innerHTML =
+                      `<div class="w-[68px] h-[56px] flex items-center justify-center text-[10px] px-1 bg-gray-50 text-gray-600">${(f?.name||'file')}</div>`;
+                  }
+                }}
+              />
+            </a>
+          );
+        })}
       </div>
     );
   })()}
