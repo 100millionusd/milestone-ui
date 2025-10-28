@@ -1,5 +1,7 @@
 // src/lib/api.ts
 
+export {};
+
 // ---- Types ----
 export interface Proposal {
   proposalId: number;
