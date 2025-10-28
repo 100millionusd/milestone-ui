@@ -47,6 +47,8 @@ export interface Bid {
   preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
+  docs?: any[]; 
+  files?: any[];
   status: "pending" | "approved" | "completed" | "rejected" | "archived";
   createdAt: string;
   aiAnalysis?: any;
@@ -663,6 +665,20 @@ function toBid(b: any): Bid {
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
 
+  function toBid(b: any): Bid {
+  const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
+  const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
+  const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
+
+  // coerce doc/docs that might be JSON strings
+  const oneDoc = coerceJson(b?.doc);
+  const manyDocs = (() => {
+    const raw = coerceJson(b?.docs);
+    if (Array.isArray(raw)) return raw;
+    // if only single .doc exists, surface it in docs[] too so UIs can iterate
+    return oneDoc ? [oneDoc] : [];
+  })();
+
   return {
     bidId: Number(bidId),
     proposalId: Number(proposalId),
@@ -674,7 +690,14 @@ function toBid(b: any): Bid {
     preferredStablecoin: (b?.preferredStablecoin ??
       b?.preferred_stablecoin) as Bid["preferredStablecoin"],
     milestones: toMilestones(b?.milestones),
-    doc: coerceJson(b?.doc),
+
+    // single doc, kept for backward-compat
+    doc: oneDoc ?? null,
+
+    // NEW: arrays for multiple attachments
+    docs: manyDocs,
+    files: Array.isArray(b?.files) ? b.files : [],
+
     status: (b?.status as Bid["status"]) ?? "pending",
     createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(aiRaw),
