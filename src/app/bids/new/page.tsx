@@ -474,15 +474,15 @@ const handleSubmit = async (e: React.FormEvent) => {
   <div className="flex items-center justify-between">
     <label className="block text-sm font-medium mb-1">Supporting Documents</label>
     {selectedFiles.length > 0 && (
-      <button
-        type="button"
-        onClick={clearSelected}
-        aria-label="Clear all selected files"
-        className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50"
-      >
-        Clear all
-      </button>
-    )}
+  <button
+    type="button"
+    onClick={clearSelected}
+    aria-label="Clear all selected files"
+    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+  >
+    Clear all
+  </button>
+)}
   </div>
 
   <input
@@ -520,14 +520,14 @@ const handleSubmit = async (e: React.FormEvent) => {
           <span className="truncate max-w-[180px]">{f.name}</span>
           <span className="opacity-60">{fmtBytes(f.size)}</span>
      <button
-      type="button"
-      aria-label="Remove file"
-      title="Remove"
-      onClick={() => removeSelectedAt(i)}
-      className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-300 bg-white hover:bg-gray-50"
-    >
-      ×
-    </button>
+  type="button"
+  aria-label="Remove file"
+  title="Remove"
+  onClick={() => removeSelectedAt(i)}
+  className="inline-flex items-center justify-center w-6 h-6 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
+>
+  ×
+</button>
         </span>
       ))}
     </div>
