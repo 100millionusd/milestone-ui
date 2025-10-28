@@ -722,24 +722,33 @@ export default function ProjectDetailPage() {
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
   const projectFiles = (projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d }));
-  const bidFiles = safeBids.flatMap((b) => {
-    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
-  });
-  const proofFiles = filesFromProofRecords(proofs);
-  const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
+ // ↓ replace your current bidFiles block with this:
+const bidFiles = safeBids.flatMap((b: any) => {
+  // collect docs (plural or single) + files (array)
+  const docsArr = Array.isArray(b?.docs)
+    ? b.docs
+    : (b?.docs ? [b.docs] : (b?.doc ? [b.doc] : []));
+  const filesArr = Array.isArray(b?.files) ? b.files : [];
 
-  if (typeof window !== 'undefined') {
-    (window as any).__FILES = allFiles.map((x) => {
-      const name = x.doc?.name || null;
-      const normalized = normalizeIpfsUrl(x.doc?.url, x.doc?.cid);
-      return {
-        scope: x.scope,
-        href: normalized ? withFilename(normalized, name || undefined) : null,
-        name,
-      };
-    });
-  }
+  const merged = [...docsArr.filter(Boolean), ...filesArr.filter(Boolean)];
+
+  // de-dupe by url+cid to avoid duplicates
+  const seen = new Set<string>();
+  const uniq = merged.filter((d: any) => {
+    const url = String(d?.url || '').trim().toLowerCase();
+    const cid = String(d?.cid || '').trim().toLowerCase();
+    const key = `${url}|${cid}`;
+    if (!url && !cid) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return uniq.map((d: any) => ({
+    scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`,
+    doc: d,
+  }));
+});
 
   function renderAttachment(doc: any, key: number) {
     if (!doc) return null;
