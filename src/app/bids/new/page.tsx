@@ -151,7 +151,7 @@ const clearSelected = () => {
   const qs = searchParams?.toString();
   const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
 
-  // --- submit handler ---
+ // --- submit handler ---
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
   if (submitted) return; // already finalized
@@ -172,42 +172,34 @@ const handleSubmit = async (e: React.FormEvent) => {
   setCreatedBidId(null);
 
   try {
-   // Upload any selected files — elements: { cid, url, name, size } (NO contentType)
-let filesPayload: Array<{ cid: string; url?: string; name: string; size?: number }> = [];
-if (selectedFiles.length) {
-  const uploaded = await Promise.all(
-    selectedFiles.map(async (f) => {
-      const up = await uploadFileToIPFS(f);
-      return {
-        cid: up.cid,
-        url: up.url ?? (up.cid ? `https://ipfs.io/ipfs/${up.cid}` : undefined),
-        name: f.name,      // ← required by backend
-        size: f.size,      // ← ok
+    // Upload file (optional) — SHAPE: { url (req), name (req), cid, size, mimetype }
+    let doc: { url: string; name: string; cid?: string; size?: number; mimetype?: string } | null = null;
+
+    // if you have a single-file state:
+    if (docFile) {
+      const up = await uploadFileToIPFS(docFile);
+      doc = {
+        url: String(up.url),
+        name: String(docFile.name),
+        cid: up.cid ? String(up.cid) : undefined,
+        size: Number(docFile.size) || undefined,
+        mimetype: docFile.type || undefined,
       };
-    })
-  );
-  filesPayload = uploaded;
-}
+    }
 
-// Legacy single-file object: MUST include name (no contentType)
-const first = filesPayload[0] || null;
-const legacyDoc = first ? { cid: first.cid, url: first.url, name: first.name, size: first.size } : null;
-
-// Now build payload
-const body: any = {
-  ...formData,
-  proposalId: Number(proposalId),
-  priceUSD: parseFloat(formData.priceUSD),
-  days: parseInt(formData.days),
-  milestones: formData.milestones.map((m) => ({
-    name: m.name,
-    amount: parseFloat(m.amount),
-    dueDate: new Date(m.dueDate).toISOString(),
-  })),
-  files: filesPayload,  // multi-file array (safe)
-  file: legacyDoc,      // legacy single-file
-  doc: legacyDoc,       // legacy single-file
-};
+    // Build payload — DO NOT include "file" or "files"
+    const body: any = {
+      ...formData,
+      proposalId: Number(proposalId),
+      priceUSD: parseFloat(formData.priceUSD),
+      days: parseInt(formData.days),
+      milestones: formData.milestones.map((m) => ({
+        name: m.name,
+        amount: parseFloat(m.amount),
+        dueDate: new Date(m.dueDate).toISOString(),
+      })),
+      doc,  // single attachment only
+    };
 
     // Create
     const created = await createBid(body);
@@ -218,7 +210,6 @@ const body: any = {
     setStep('analyzing');
     setMessage('Agent2 is analyzing your bid…');
 
-    // Trigger server analysis (safe if it already ran inline)
     try { await analyzeBid(bidId, undefined); } catch {}
 
     // Start polling until aiAnalysis appears
