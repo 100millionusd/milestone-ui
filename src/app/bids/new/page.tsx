@@ -481,15 +481,18 @@ const handleSubmit = async (e: React.FormEvent) => {
 
  {/* File picker: hidden native input + custom button + live summary */}
 <div className="flex items-center gap-3">
-  {/* hidden real input */}
+   {/* hidden real input */}
   <input
     id="supportingDocs"
     type="file"
     multiple
+    ref={fileInputRef}
     className="sr-only"
     onChange={(e) => {
-      const files = Array.from(e.target.files ?? []);
-      if (files.length) addSelected(files);  // <-- keep your existing handler
+      const files = Array.from(e.currentTarget.files || []);
+      if (!files.length) return;
+      setSelectedFiles(prev => [...prev, ...files]);   // append, do not replace
+      e.currentTarget.value = '';                      // allow re-selecting the same file(s)
     }}
   />
 
@@ -522,21 +525,6 @@ const handleSubmit = async (e: React.FormEvent) => {
     </button>
   )}
 </div>
-
-  <input
-    ref={fileInputRef}
-    type="file"
-    multiple
-    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-    onChange={(e) => {
-      const picked = Array.from(e.currentTarget.files || []);
-      if (!picked.length) return;
-      setSelectedFiles(prev => [...prev, ...picked]); // append, not replace
-      e.currentTarget.value = ''; // allow re-picking same file
-    }}
-    className="w-full p-2 border rounded"
-    disabled={disabled}
-  />
 
   <div
     onDragOver={(e) => { e.preventDefault(); }}
