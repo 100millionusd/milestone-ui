@@ -47,6 +47,14 @@ export interface Bid {
   preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
+  /** all uploaded attachments (multi-file) */
+  files?: Array<{
+    name?: string;
+    url: string;
+    cid?: string;
+    size?: number;
+    mimetype?: string;
+  }>;
   status: "pending" | "approved" | "completed" | "rejected" | "archived";
   createdAt: string;
   aiAnalysis?: any;
@@ -664,6 +672,7 @@ function toMilestones(raw: any): Milestone[] {
   }));
 }
 
+// src/lib/api.ts  (inside function toBid(b: any): Bid)
 function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
@@ -677,10 +686,11 @@ function toBid(b: any): Bid {
     days: Number(b?.days) || 0,
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
-    preferredStablecoin: (b?.preferredStablecoin ??
-      b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+    preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
     milestones: toMilestones(b?.milestones),
     doc: coerceJson(b?.doc),
+    /** 👇 ADD THIS */
+    files: coerceFiles(b?.files ?? (b?.doc ? [b.doc] : [])),
     status: (b?.status as Bid["status"]) ?? "pending",
     createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(aiRaw),
