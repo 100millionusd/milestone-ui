@@ -47,6 +47,9 @@ export interface Bid {
   preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
+  /** NEW: keep arrays from server */
+  docs?: Attachment[];
+  files?: Attachment[];
   status: "pending" | "approved" | "completed" | "rejected" | "archived";
   createdAt: string;
   aiAnalysis?: any;
@@ -155,6 +158,9 @@ export type EntitySelector = {
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
+export type Attachment = { url?: string; cid?: string; name?: string } | string;
+
+
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -229,6 +235,13 @@ function coerceJson(val: any) {
     }
   }
   return val;
+}
+
+function parseMaybeJson<T = any>(x: any): T | any {
+  if (typeof x === "string") {
+    try { return JSON.parse(x); } catch {}
+  }
+  return x;
 }
 
 function toIso(d: any): string {
@@ -669,23 +682,24 @@ function toBid(b: any): Bid {
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
 
-  return {
-    bidId: Number(bidId),
-    proposalId: Number(proposalId),
-    vendorName: b?.vendorName ?? b?.vendor_name ?? "",
-    priceUSD: Number(b?.priceUSD ?? b?.price_usd ?? b?.price) || 0,
-    days: Number(b?.days) || 0,
-    notes: b?.notes ?? "",
-    walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
-    preferredStablecoin: (b?.preferredStablecoin ??
-      b?.preferred_stablecoin) as Bid["preferredStablecoin"],
-    milestones: toMilestones(b?.milestones),
-    doc: coerceJson(b?.doc),
-    status: (b?.status as Bid["status"]) ?? "pending",
-    createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
-    aiAnalysis: coerceAnalysis(aiRaw),
-  };
-}
+return {
+  bidId: Number(b?.bidId ?? b?.id ?? b?.bid_id),
+  proposalId: Number(b?.proposalId ?? b?.proposal_id),
+  vendorName: b?.vendorName ?? b?.vendor_name ?? "",
+  priceUSD: Number(b?.priceUSD ?? b?.price_usd ?? b?.price) || 0,
+  days: Number(b?.days) || 0,
+  notes: b?.notes ?? "",
+  walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
+  preferredStablecoin: (b?.preferredStablecoin ?? b?.preferred_stablecoin) as Bid["preferredStablecoin"],
+  milestones: Array.isArray(b?.milestones) ? b.milestones : [],
+  doc: parseMaybeJson(b?.doc) ?? null,
+  // NEW
+  docs: Array.isArray(b?.docs) ? b.docs : (b?.doc ? [parseMaybeJson(b.doc)] : []),
+  files: Array.isArray(b?.files) ? b.files : [],
+  status: (b?.status as Bid["status"]) ?? "pending",
+  createdAt: b?.createdAt ?? b?.created_at ?? new Date().toISOString(),
+  aiAnalysis: b?.aiAnalysis ?? b?.ai_analysis ?? null,
+};
 
 function toProof(p: any): Proof {
   return {
