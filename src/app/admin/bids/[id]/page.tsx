@@ -9,6 +9,27 @@ import { API_BASE } from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
 import BidChatAgent from '@/components/BidChatAgent';
 
+// ↓ add right after existing imports
+const IPFS_GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://ipfs.io/ipfs';
+
+function collectBidFiles(b: any) {
+  const src = Array.isArray(b?.files) && b.files.length
+    ? b.files
+    : (b?.doc ? [b.doc] : []);
+  return (src || [])
+    .filter(Boolean)
+    .map((f: any, i: number) => {
+      const url = (typeof f?.url === 'string' && f.url)
+        || (f?.cid ? `${IPFS_GATEWAY}/${String(f.cid)}` : '');
+      return {
+        url,
+        name: String(f?.name || `file-${i + 1}`),
+      };
+    })
+    .filter((x: any) => x.url);
+}
+
 export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const routeParams = useParams();
   const bidId = Number((props.params as any)?.id ?? (routeParams as any)?.id);
@@ -68,6 +89,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     return keep.has(id) && status !== 'rejected';
   });
 }, [proofs, latestIdByIdx]);
+// Attachments (doc + files → flat array)
+const bidFilesArr = useMemo(() => collectBidFiles(bid), [bid]);
+
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
@@ -270,6 +294,48 @@ setProofs(prev => {
             <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
           </div>
         </div>
+
+        {bidFilesArr.length > 0 && (
+  <div className="sm:col-span-2 mt-3">
+    <div className="text-sm text-gray-500 mb-1">Attachments</div>
+    <div className="flex flex-wrap gap-2">
+      {bidFilesArr.map((f, i) => {
+        const isImg =
+          /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name) ||
+          /\.(png|jpe?g|gif|webp|svg)$/i.test(f.url);
+
+        return isImg ? (
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noreferrer"
+            title={f.name}
+            className="block w-20 h-20 rounded overflow-hidden border bg-white"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={f.url}
+              alt={f.name}
+              className="w-full h-full object-cover"
+            />
+          </a>
+        ) : (
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noreferrer"
+            title={f.name}
+            className="text-xs px-2 py-1 rounded border bg-gray-50"
+          >
+            {f.name}
+          </a>
+        );
+      })}
+    </div>
+  </div>
+)}
 
         {/* Admin-only quick edits (non-milestone fields) */}
         {me.role === 'admin' && (
