@@ -722,10 +722,35 @@ export default function ProjectDetailPage() {
   timeline.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
 
   const projectFiles = (projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d }));
-  const bidFiles = safeBids.flatMap((b) => {
-    const ds = (b.docs || (b.doc ? [b.doc] : [])).filter(Boolean);
-    return ds.map((d: any) => ({ scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`, doc: d }));
+  // ↓ collect docs (plural or single) + files (array), merge & de-dupe
+const bidFiles = safeBids.flatMap((b: any) => {
+  // docs can be: array, single, or absent
+  const docsArr = Array.isArray(b?.docs)
+    ? b.docs
+    : (b?.docs ? [b.docs] : (b?.doc ? [b.doc] : []));
+  // files: always an array if present
+  const filesArr = Array.isArray(b?.files) ? b.files : [];
+
+  const merged = [...docsArr.filter(Boolean), ...filesArr.filter(Boolean)];
+
+  // de-dupe by url+cid to avoid duplicates
+  const seen = new Set<string>();
+  const uniq = merged.filter((d: any) => {
+    const url = String(d?.url || '').trim().toLowerCase();
+    const cid = String(d?.cid || '').trim().toLowerCase();
+    const key = `${url}|${cid}`;
+    if (!url && !cid) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+
+  return uniq.map((d: any) => ({
+    scope: `Bid #${b.bidId} — ${b.vendorName || 'Vendor'}`,
+    doc: d,
+  }));
+});
+
   const proofFiles = filesFromProofRecords(proofs);
   const allFiles = [...projectFiles, ...bidFiles, ...proofFiles];
 
