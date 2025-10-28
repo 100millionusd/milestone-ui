@@ -14,6 +14,20 @@ const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://gateway.pinata.cloud/ipfs';
 
+  // normalize a single attachment that may be an object or a plain URL string
+type DocLike = { url?: string; cid?: string; name?: string } | string;
+
+function normalizeDoc(d: DocLike): { url: string; cid: string; name: string } {
+  if (typeof d === 'string') {
+    const s = d.trim();
+    return { url: s, cid: '', name: s.split('/').pop() || 'file' };
+  }
+  const url = String(d?.url || '').trim();
+  const cid = String(d?.cid || '').trim();
+  const name = String(d?.name || url.split('/').pop() || (cid ? `ipfs:${cid}` : 'file')).trim();
+  return { url, cid, name };
+}
+
 // Admin tabs
 const TABS = [
   { key: 'all',       label: 'All' },
@@ -149,49 +163,51 @@ export default function AdminBidsPage() {
     }
   };
 
-  const renderAttachment = (doc: any, idx: number) => {
-    if (!doc) return null;
+  const renderAttachment = (doc: DocLike, idx: number) => {
+  if (!doc) return null;
 
-    const href =
-      doc.url || (doc.cid ? `${GATEWAY}/${doc.cid}` : '#');
-    const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(doc.name || href);
+  const nd = normalizeDoc(doc);
+  const href = nd.url || (nd.cid ? `${GATEWAY}/${nd.cid}` : '');
+  if (!href) return null;
 
-    if (isImage) {
-      return (
-        <button
-          key={idx}
-          onClick={() => setLightbox(href)}
-          className="group relative overflow-hidden rounded border"
-          title={doc.name}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={href}
-            alt={doc.name}
-            className="h-20 w-20 object-cover group-hover:scale-105 transition"
-          />
-        </button>
-      );
-    }
+  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(nd.name || href);
 
+  if (isImage) {
     return (
-      <div
+      <button
         key={idx}
-        className="p-2 rounded border bg-gray-50 text-xs text-gray-700 max-w-[200px]"
-        title={doc.name}
+        onClick={() => setLightbox(href)}
+        className="group relative overflow-hidden rounded border"
+        title={nd.name}
       >
-        <p className="truncate">{doc.name}</p>
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline"
-        >
-          Open
-        </a>
-      </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={href}
+          alt={nd.name}
+          className="h-20 w-20 object-cover group-hover:scale-105 transition"
+        />
+      </button>
     );
-  };
+  }
+
+  return (
+    <div
+      key={idx}
+      className="p-2 rounded border bg-gray-50 text-xs text-gray-700 max-w-[200px]"
+      title={nd.name}
+    >
+      <p className="truncate">{nd.name}</p>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:underline"
+      >
+        Open
+      </a>
+    </div>
+  );
+};
 
   if (loading) {
     return (
@@ -332,18 +348,38 @@ export default function AdminBidsPage() {
                     </div>
                   </Td>
 
-                  {/* Attachments */}
-                  <Td className="px-6 py-4">
-                    {bid.doc ? (
-                      <div className="flex flex-wrap gap-2 max-w-[260px]">
-                        {renderAttachment(bid.doc, 0)}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">
-                        No files
-                      </span>
-                    )}
-                  </Td>
+ {/* Attachments */}
+<Td className="px-6 py-4">
+  {(() => {
+    const docsArr = Array.isArray(bid?.docs)
+      ? bid.docs
+      : (bid?.doc ? [bid.doc] : []);
+    const filesArr = Array.isArray(bid?.files) ? bid.files : [];
+
+    // merge + de-dupe by (url|cid)
+    const merged = [...docsArr, ...filesArr].filter(Boolean);
+    const seen = new Set<string>();
+    const uniq = merged.filter((d: DocLike) => {
+      const nd = normalizeDoc(d);
+      const key = `${(nd.url || '').toLowerCase()}|${(nd.cid || '').toLowerCase()}`;
+      if (!nd.url && !nd.cid) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    if (!uniq.length) {
+      return <span className="text-xs text-gray-400">No files</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap gap-2 max-w-[260px]">
+        {uniq.map((d, i) => renderAttachment(d, i))}
+      </div>
+    );
+  })()}
+</Td>
+
 
                   {/* Status */}
                   <Td className="px-6 py-4">
