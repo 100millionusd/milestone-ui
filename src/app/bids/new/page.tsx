@@ -477,7 +477,8 @@ const handleSubmit = async (e: React.FormEvent) => {
       <button
         type="button"
         onClick={clearSelected}
-        className="text-xs text-red-600 hover:text-red-800"
+        aria-label="Clear all selected files"
+        className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50"
       >
         Clear all
       </button>
@@ -518,15 +519,15 @@ const handleSubmit = async (e: React.FormEvent) => {
         <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
           <span className="truncate max-w-[180px]">{f.name}</span>
           <span className="opacity-60">{fmtBytes(f.size)}</span>
-          <button
-            type="button"
-            aria-label="Remove file"
-            title="Remove"
-            onClick={() => removeSelectedAt(i)}
-            className="w-5 h-5 rounded-full hover:bg-gray-200"
-          >
-            ×
-          </button>
+     <button
+      type="button"
+      aria-label="Remove file"
+      title="Remove"
+      onClick={() => removeSelectedAt(i)}
+      className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-300 bg-white hover:bg-gray-50"
+    >
+      ×
+    </button>
         </span>
       ))}
     </div>
