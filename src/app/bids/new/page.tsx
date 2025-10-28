@@ -172,22 +172,28 @@ const handleSubmit = async (e: React.FormEvent) => {
   setCreatedBidId(null);
 
   try {
-    // Upload file (optional) — SHAPE: { url (req), name (req), cid, size, mimetype }
-    let doc: { url: string; name: string; cid?: string; size?: number; mimetype?: string } | null = null;
+    // 1) Upload ALL selected files to IPFS
+    //    server schema allows { url (req), name (req), cid?, size?, mimetype? }
+    const uploads = await Promise.all(
+      selectedFiles.map(async (f) => {
+        const up = await uploadFileToIPFS(f); // { cid, url, ... }
+        return {
+          url: String(up.url),
+          name: String(f.name),
+          cid: up.cid ? String(up.cid) : undefined,
+          size: Number(f.size) || undefined,
+          mimetype: f.type || undefined,   // allowed by server
+        };
+      })
+    );
 
-    // if you have a single-file state:
-    if (docFile) {
-      const up = await uploadFileToIPFS(docFile);
-      doc = {
-        url: String(up.url),
-        name: String(docFile.name),
-        cid: up.cid ? String(up.cid) : undefined,
-        size: Number(docFile.size) || undefined,
-        mimetype: docFile.type || undefined,
-      };
-    }
+    // 2) Choose a single back-compat doc (prefer a PDF, else first)
+    const doc =
+      uploads.find(u => /\.pdf($|\?)/i.test(u.name)) ||
+      uploads[0] ||
+      null;
 
-    // Build payload — DO NOT include "file" or "files"
+    // 3) Build payload (NOW includes `files`)
     const body: any = {
       ...formData,
       proposalId: Number(proposalId),
@@ -198,10 +204,12 @@ const handleSubmit = async (e: React.FormEvent) => {
         amount: parseFloat(m.amount),
         dueDate: new Date(m.dueDate).toISOString(),
       })),
-      doc,  // single attachment only
+      doc,            // single file for back-compat
+      files: uploads, // full list for multi-file
+      // DO NOT send "file"
     };
 
-    // Create
+    // 4) Create bid
     const created = await createBid(body);
     const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
     if (!bidId) throw new Error('Bid created but no ID returned');
@@ -210,9 +218,8 @@ const handleSubmit = async (e: React.FormEvent) => {
     setStep('analyzing');
     setMessage('Agent2 is analyzing your bid…');
 
+    // 5) Trigger analysis (safe if already done inline) + poll
     try { await analyzeBid(bidId, undefined); } catch {}
-
-    // Start polling until aiAnalysis appears
     pollUntilAnalysis(bidId);
   } catch (error: any) {
     console.error('Error creating bid:', error);
