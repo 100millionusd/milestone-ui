@@ -1,5 +1,3 @@
-export {};
-
 // src/lib/api.ts
 
 // ---- Types ----
@@ -661,11 +659,6 @@ function toMilestones(raw: any): Milestone[] {
     archiveReason: m?.archiveReason ?? m?.archive_reason ?? null,
   }));
 }
-
-function toBid(b: any): Bid {
-  const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
-  const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
-  const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
 
   function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
