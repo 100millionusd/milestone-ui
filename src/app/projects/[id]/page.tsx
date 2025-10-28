@@ -724,6 +724,15 @@ export default function ProjectDetailPage() {
   const projectFiles = (projectDocs || []).map((d: any) => ({ scope: 'Project', doc: d }));
  // ↓ replace your current bidFiles block with this:
 const bidFiles = safeBids.flatMap((b: any) => {
+  // Aggregate files for the "Files" tab
+const proofFiles = filesFromProofRecords(proofs);
+
+const allFiles = [
+  ...projectFiles,       // from project.docs
+  ...bidFiles,           // from bids.docs / bids.files
+  ...proofFiles,         // from proofs API
+].filter(r => r && r.doc);
+
   // collect docs (plural or single) + files (array)
   const docsArr = Array.isArray(b?.docs)
     ? b.docs
