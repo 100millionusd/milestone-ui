@@ -38,7 +38,17 @@ function NewBidPageContent() {
     preferredStablecoin: 'USDC',
     milestones: [{ name: 'Milestone 1', amount: '', dueDate: '' }],
   });
-  const [docFile, setDocFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+const fileInputRef = useRef<HTMLInputElement | null>(null);
+const fmtBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const removeSelectedAt = (idx: number) => {
+  setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
+};
+const clearSelected = () => {
+  setSelectedFiles([]);
+  if (fileInputRef.current) fileInputRef.current.value = '';
+};
 
   // ✅ Agent2 modal state
   type Step = 'submitting' | 'analyzing' | 'done' | 'error';
@@ -142,70 +152,86 @@ function NewBidPageContent() {
   const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
 
   // --- submit handler ---
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitted) return; // already finalized
-    if (!proposalId) {
-      alert('No project selected. Open this page with ?proposalId=<id>.');
-      return;
-    }
-    if (missingRequiredProfile) {
-      alert('Please complete your vendor profile first.');
-      return;
-    }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (submitted) return; // already finalized
+  if (!proposalId) {
+    alert('No project selected. Open this page with ?proposalId=<id>.');
+    return;
+  }
+  if (missingRequiredProfile) {
+    alert('Please complete your vendor profile first.');
+    return;
+  }
 
-    setLoading(true);
-    setModalOpen(true);
-    setStep('submitting');
-    setMessage('Submitting your bid…');
-    setAnalysis(null);
-    setCreatedBidId(null);
+  setLoading(true);
+  setModalOpen(true);
+  setStep('submitting');
+  setMessage('Submitting your bid…');
+  setAnalysis(null);
+  setCreatedBidId(null);
 
-    try {
-      // Upload file (optional)
-      let doc: any = null;
-      if (docFile) {
-        const up = await uploadFileToIPFS(docFile);
-        doc = { cid: up.cid, url: up.url, name: docFile.name, size: docFile.size };
-      }
-
-      // Build payload
-      const body: any = {
-        ...formData,
-        proposalId: Number(proposalId),
-        priceUSD: parseFloat(formData.priceUSD),
-        days: parseInt(formData.days),
-        milestones: formData.milestones.map((m) => ({
-          name: m.name,
-          amount: parseFloat(m.amount),
-          dueDate: new Date(m.dueDate).toISOString(),
-        })),
-        doc,
+  try {
+   // Upload any selected files — elements: { cid, url, name, size } (NO contentType)
+let filesPayload: Array<{ cid: string; url?: string; name: string; size?: number }> = [];
+if (selectedFiles.length) {
+  const uploaded = await Promise.all(
+    selectedFiles.map(async (f) => {
+      const up = await uploadFileToIPFS(f);
+      return {
+        cid: up.cid,
+        url: up.url ?? (up.cid ? `https://ipfs.io/ipfs/${up.cid}` : undefined),
+        name: f.name,      // ← required by backend
+        size: f.size,      // ← ok
       };
+    })
+  );
+  filesPayload = uploaded;
+}
 
-      // Create
-      const created = await createBid(body);
-      const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
-      if (!bidId) throw new Error('Bid created but no ID returned');
+// Legacy single-file object: MUST include name (no contentType)
+const first = filesPayload[0] || null;
+const legacyDoc = first ? { cid: first.cid, url: first.url, name: first.name, size: first.size } : null;
 
-      setCreatedBidId(bidId);
-      setStep('analyzing');
-      setMessage('Agent2 is analyzing your bid…');
+// Now build payload
+const body: any = {
+  ...formData,
+  proposalId: Number(proposalId),
+  priceUSD: parseFloat(formData.priceUSD),
+  days: parseInt(formData.days),
+  milestones: formData.milestones.map((m) => ({
+    name: m.name,
+    amount: parseFloat(m.amount),
+    dueDate: new Date(m.dueDate).toISOString(),
+  })),
+  files: filesPayload,  // multi-file array (safe)
+  file: legacyDoc,      // legacy single-file
+  doc: legacyDoc,       // legacy single-file
+};
 
-      // Trigger server analysis (safe if it already ran inline)
-      try { await analyzeBid(bidId, undefined); } catch {}
+    // Create
+    const created = await createBid(body);
+    const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
+    if (!bidId) throw new Error('Bid created but no ID returned');
 
-      // Start polling until aiAnalysis appears
-      pollUntilAnalysis(bidId);
-    } catch (error: any) {
-      console.error('Error creating bid:', error);
-      setStep('error');
-      setMessage(error?.message || 'Failed to create bid');
-      alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
+    setCreatedBidId(bidId);
+    setStep('analyzing');
+    setMessage('Agent2 is analyzing your bid…');
+
+    // Trigger server analysis (safe if it already ran inline)
+    try { await analyzeBid(bidId, undefined); } catch {}
+
+    // Start polling until aiAnalysis appears
+    pollUntilAnalysis(bidId);
+  } catch (error: any) {
+    console.error('Error creating bid:', error);
+    setStep('error');
+    setMessage(error?.message || 'Failed to create bid');
+    alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
+  } finally {
+    setLoading(false);
+  }
+};
 
   // --- UI ---
   if (!proposalId) {
@@ -439,17 +465,71 @@ function NewBidPageContent() {
             </div>
           </div>
 
-          {/* Supporting Documents */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Supporting Documents</label>
-            <input
-              type="file"
-              onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-              className="w-full p-2 border rounded"
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-            />
-            <p className="text-sm text-gray-500 mt-1">Upload portfolio, previous work, certifications, etc.</p>
-          </div>
+ {/* Supporting Documents (multi-file) */}
+<div>
+  <div className="flex items-center justify-between">
+    <label className="block text-sm font-medium mb-1">Supporting Documents</label>
+    {selectedFiles.length > 0 && (
+      <button
+        type="button"
+        onClick={clearSelected}
+        className="text-xs text-red-600 hover:text-red-800"
+      >
+        Clear all
+      </button>
+    )}
+  </div>
+
+  <input
+    ref={fileInputRef}
+    type="file"
+    multiple
+    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+    onChange={(e) => {
+      const picked = Array.from(e.currentTarget.files || []);
+      if (!picked.length) return;
+      setSelectedFiles(prev => [...prev, ...picked]); // append, not replace
+      e.currentTarget.value = ''; // allow re-picking same file
+    }}
+    className="w-full p-2 border rounded"
+    disabled={disabled}
+  />
+
+  <div
+    onDragOver={(e) => { e.preventDefault(); }}
+    onDrop={(e) => {
+      e.preventDefault();
+      const dropped = Array.from(e.dataTransfer.files || []);
+      if (!dropped.length) return;
+      setSelectedFiles(prev => [...prev, ...dropped]); // append
+    }}
+    className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
+  >
+    Drag & drop files here or use the picker above. Selections accumulate.
+  </div>
+
+  {selectedFiles.length > 0 && (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {selectedFiles.map((f, i) => (
+        <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
+          <span className="truncate max-w-[180px]">{f.name}</span>
+          <span className="opacity-60">{fmtBytes(f.size)}</span>
+          <button
+            type="button"
+            aria-label="Remove file"
+            title="Remove"
+            onClick={() => removeSelectedAt(i)}
+            className="w-5 h-5 rounded-full hover:bg-gray-200"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  )}
+
+  <p className="text-sm text-gray-500 mt-2">Upload portfolio, previous work, certifications, etc.</p>
+</div>
         </fieldset>
 
         {/* Submit / Cancel */}
