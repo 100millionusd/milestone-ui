@@ -10,36 +10,6 @@ import {
   getProposals,
 } from '@/lib/api';
 
-// --- attachments helper (PARSES array OR JSON string; falls back to legacy doc) ---
-function getAttachments(bid: any) {
-  const raw = bid?.files ?? bid?.files_json ?? null;
-  let files: any[] = [];
-
-  if (Array.isArray(raw)) {
-    files = raw;
-  } else if (typeof raw === 'string') {
-    try { files = JSON.parse(raw) || []; } catch { files = []; }
-  }
-
-  if (!files.length && bid?.doc) files = [bid.doc]; // legacy single-file
-
-  return files
-    .filter(Boolean)
-    .map((f: any, idx: number) => {
-      const url =
-        (typeof f?.url === 'string' && f.url) ||
-        (f?.cid ? `${GATEWAY}/${String(f.cid)}` : '');
-      return {
-        name: String(f?.name || `file-${idx + 1}`),
-        url,
-        cid: f?.cid || null,
-        size: Number(f?.size || 0) || null,
-        mimetype: f?.mimetype || f?.contentType || null,
-      };
-    })
-    .filter((x: any) => x.url);
-}
-
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   'https://gateway.pinata.cloud/ipfs';
@@ -313,7 +283,7 @@ export default function AdminBidsPage() {
 
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredBids.map((bid) => (
-                <tr key={bid.bidId ?? bid.bid_id} className="hover:bg-gray-50 align-top">
+                <tr key={bid.bidId} className="hover:bg-gray-50 align-top">
                   {/* Project */}
                   <Td className="px-6 py-4">
                     <div
@@ -362,56 +332,18 @@ export default function AdminBidsPage() {
                     </div>
                   </Td>
 
- {/* Attachments (multi-file aware) */}
-<Td className="px-6 py-4">
-  {(() => {
-    const files = getAttachments(bid);
-
-    if (!files.length) {
-      return <span className="text-xs text-gray-400">No files</span>;
-    }
-
-    return (
-      <div className="grid grid-cols-2 gap-1 w-[140px]">
-        {files.slice(0, 4).map((f, i) => {
-          const key = `${String(bid.bidId ?? bid.bid_id)}-${i}-${f.cid ?? f.url ?? f.name}`;
-
-          if (typeof renderAttachment === 'function') {
-            return (
-              <div key={key} className="min-w-[64px]">
-                {renderAttachment({ name: f.name, url: f.url, cid: f.cid, mimetype: f.mimetype, size: f.size }, i)}
-              </div>
-            );
-          }
-
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setLightbox(f.url)}
-              title={f.name}
-              className="block border rounded overflow-hidden bg-white"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={f.url}
-                alt={f.name}
-                className="w-[68px] h-[56px] object-cover"
-                onError={(e) => {
-                  const parent = e.currentTarget.parentElement;
-                  if (parent) {
-                    parent.innerHTML =
-                      `<div class="w-[68px] h-[56px] flex items-center justify-center text-[10px] px-1 bg-gray-50 text-gray-600">${(f.name || 'file')}</div>`;
-                  }
-                }}
-              />
-            </button>
-          );
-        })}
-      </div>
-    );
-  })()}
-</Td>
+                  {/* Attachments */}
+                  <Td className="px-6 py-4">
+                    {bid.doc ? (
+                      <div className="flex flex-wrap gap-2 max-w-[260px]">
+                        {renderAttachment(bid.doc, 0)}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">
+                        No files
+                      </span>
+                    )}
+                  </Td>
 
                   {/* Status */}
                   <Td className="px-6 py-4">
