@@ -1103,6 +1103,59 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
+{/* Files */}
+{tab === 'files' && (
+  <section className="border rounded p-4">
+    <h3 className="font-semibold mb-3">Files</h3>
+
+    {loadingProofs && allFiles.length === 0 ? (
+      <p className="text-sm text-gray-500">Loading files…</p>
+    ) : allFiles.length === 0 ? (
+      <p className="text-sm text-gray-500">No files yet.</p>
+    ) : (
+      (() => {
+        // ONE HORIZONTAL STRIP — no grouping, no grid
+        const flatDocs = allFiles.map((r: any) => r.doc);
+
+        return (
+          <div className="overflow-x-auto scroll-smooth">
+            <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
+              {flatDocs.map((doc: any, i: number) => (
+                <div key={i} className="shrink-0 snap-start pointer-events-auto">
+                  {typeof renderAttachment === 'function' ? (
+                    renderAttachment(doc, i)   // keep your original clickable tile
+                  ) : (
+                    <a
+                      href={
+                        doc?.url ||
+                        doc?.href ||
+                        doc?.link ||
+                        doc?.gatewayUrl ||
+                        (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded border p-3 text-sm hover:shadow"
+                    >
+                      <div className="font-medium truncate">
+                        {doc?.name || doc?.filename || doc?.cid || 'file'}
+                      </div>
+                      {doc?.cid ? (
+                        <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
+                      ) : null}
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()
+    )}
+  </section>
+)}
+
+
       {/* Admin */}
       {tab === 'admin' && me.role === 'admin' && (
         <section className="border rounded p-4">
