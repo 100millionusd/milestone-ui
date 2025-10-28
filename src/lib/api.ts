@@ -158,7 +158,7 @@ export type EntitySelector = {
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
-export type Attachment = { url?: string; cid?: string; name?: string } | string;
+type Attachment = { url?: string; cid?: string; name?: string } | string;
 
 
 // ---- Env-safe API base resolution ----
