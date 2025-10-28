@@ -151,10 +151,27 @@ const clearSelected = () => {
   const qs = searchParams?.toString();
   const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
 
- // --- submit handler ---
+// --- submit handler ---
+
+// helper: upload many files to IPFS and normalize
+async function uploadManyToIPFS(fs: File[]) {
+  const out: Array<{ url: string; name: string; cid?: string; size?: number; mimetype?: string }> = [];
+  for (const f of fs) {
+    const up = await uploadFileToIPFS(f);
+    out.push({
+      url: String(up.url),
+      name: String(f.name || 'file'),
+      cid: up.cid ? String(up.cid) : undefined,
+      size: typeof f.size === 'number' ? f.size : undefined,
+      mimetype: f.type || undefined,
+    });
+  }
+  return out;
+}
+
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
-  if (submitted) return; // already finalized
+  if (submitted) return;
   if (!proposalId) {
     alert('No project selected. Open this page with ?proposalId=<id>.');
     return;
@@ -172,44 +189,34 @@ const handleSubmit = async (e: React.FormEvent) => {
   setCreatedBidId(null);
 
   try {
-    // 1) Upload ALL selected files to IPFS
-    //    server schema allows { url (req), name (req), cid?, size?, mimetype? }
-    const uploads = await Promise.all(
-      selectedFiles.map(async (f) => {
-        const up = await uploadFileToIPFS(f); // { cid, url, ... }
-        return {
-          url: String(up.url),
-          name: String(f.name),
-          cid: up.cid ? String(up.cid) : undefined,
-          size: Number(f.size) || undefined,
-          mimetype: f.type || undefined,   // allowed by server
-        };
-      })
-    );
+    // 1) upload ALL selected files
+    const uploadedFiles = selectedFiles.length ? await uploadManyToIPFS(selectedFiles) : [];
 
-    // 2) Choose a single back-compat doc (prefer a PDF, else first)
+    // 2) single back-compat doc (prefer PDF, else first)
     const doc =
-      uploads.find(u => /\.pdf($|\?)/i.test(u.name)) ||
-      uploads[0] ||
+      uploadedFiles.find(f => (f.mimetype || f.name || '').toLowerCase().includes('pdf')) ||
+      uploadedFiles[0] ||
       null;
 
-    // 3) Build payload (NOW includes `files`)
+    // 3) payload with BOTH doc and files[]
     const body: any = {
       ...formData,
       proposalId: Number(proposalId),
       priceUSD: parseFloat(formData.priceUSD),
       days: parseInt(formData.days),
-      milestones: formData.milestones.map((m) => ({
+      milestones: (formData.milestones || []).map((m) => ({
         name: m.name,
-        amount: parseFloat(m.amount),
+        amount: parseFloat(String(m.amount || 0)),
         dueDate: new Date(m.dueDate).toISOString(),
       })),
-      doc,            // single file for back-compat
-      files: uploads, // full list for multi-file
-      // DO NOT send "file"
+      doc,                // <- single object or null
+      files: uploadedFiles, // <- MULTI-FILE ARRAY
     };
 
-    // 4) Create bid
+    // optional debug
+    console.log('createBid files count =', body.files?.length ?? 0);
+
+    // 4) create bid
     const created = await createBid(body);
     const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
     if (!bidId) throw new Error('Bid created but no ID returned');
@@ -218,7 +225,6 @@ const handleSubmit = async (e: React.FormEvent) => {
     setStep('analyzing');
     setMessage('Agent2 is analyzing your bid…');
 
-    // 5) Trigger analysis (safe if already done inline) + poll
     try { await analyzeBid(bidId, undefined); } catch {}
     pollUntilAnalysis(bidId);
   } catch (error: any) {
