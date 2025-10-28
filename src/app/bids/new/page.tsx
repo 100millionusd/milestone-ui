@@ -7,6 +7,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { API_BASE, createBid, uploadFileToIPFS, getProposal, analyzeBid, getBid } from '@/lib/api';
 
+// ---- small helpers (after imports, before the component) ----
+function fmtSize(bytes: number) {
+  if (!Number.isFinite(bytes)) return '';
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  const digits = n < 10 && i > 0 ? 1 : 0;
+  return `${n.toFixed(digits)} ${u[i]}`;
+}
+
 function NewBidPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -469,21 +479,49 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           </div>
 
- {/* Supporting Documents (multi-file) */}
-<div>
-  <div className="flex items-center justify-between">
-    <label className="block text-sm font-medium mb-1">Supporting Documents</label>
-    {selectedFiles.length > 0 && (
-  <button
-    type="button"
-    onClick={clearSelected}
-    aria-label="Clear all selected files"
-    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+ {/* File picker: hidden native input + custom button + live summary */}
+<div className="flex items-center gap-3">
+  {/* hidden real input */}
+  <input
+    id="supportingDocs"
+    type="file"
+    multiple
+    className="sr-only"
+    onChange={(e) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length) addSelected(files);  // <-- keep your existing handler
+    }}
+  />
+
+  {/* visible trigger */}
+  <label
+    htmlFor="supportingDocs"
+    className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 cursor-pointer"
   >
-    Clear all
-  </button>
-)}
-  </div>
+    Choose Files
+  </label>
+
+  {/* live summary */}
+  <span className="text-sm text-slate-600">
+    {selectedFiles.length === 0
+      ? 'No files selected yet'
+      : selectedFiles.length === 1
+        ? `${selectedFiles[0].name} — ${fmtSize((selectedFiles[0] as File).size ?? 0)}`
+        : `${selectedFiles.length} files selected`}
+  </span>
+
+  {/* clear-all (your colorful version from earlier stays here if you want) */}
+  {selectedFiles.length > 0 && (
+    <button
+      type="button"
+      onClick={clearSelected}
+      aria-label="Clear all selected files"
+      className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+    >
+      Clear all
+    </button>
+  )}
+</div>
 
   <input
     ref={fileInputRef}
