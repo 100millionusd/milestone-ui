@@ -5,6 +5,65 @@ import Link from "next/link";
 
 type PageProps = { params: { id: string } };
 
+// tiny helpers local to this file
+function normList(x: any): any[] {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.filter(Boolean);
+  return [x].filter(Boolean);
+}
+function asUrl(d: any): string {
+  if (!d) return "";
+  if (typeof d === "string") return d;
+  return String(d.url || d.href || d.link || "");
+}
+function asName(d: any): string {
+  if (!d) return "";
+  if (typeof d === "string") {
+    try {
+      const u = new URL(d);
+      return decodeURIComponent(u.pathname.split("/").pop() || "file");
+    } catch {
+      return d.split("/").pop() || "file";
+    }
+  }
+  return String(d.name || d.filename || d.title || d.cid || "file");
+}
+function isImage(url: string): boolean {
+  const u = url.toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
+}
+
+function AttachmentTile({ doc }: { doc: any }) {
+  const url = asUrl(doc);
+  if (!url) return null;
+  const name = asName(doc);
+  const img = isImage(url);
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="group block rounded border bg-white hover:shadow-sm transition p-2"
+      title={name}
+    >
+      {img ? (
+        <img
+          src={url}
+          alt={name}
+          className="w-24 h-24 object-cover rounded"
+          loading="lazy"
+        />
+      ) : (
+        <div className="w-24 h-24 rounded grid place-items-center bg-slate-50 text-slate-600 text-xs">
+          PDF / File
+        </div>
+      )}
+      <div className="mt-1 w-24 truncate text-[11px] text-slate-700">{name}</div>
+    </a>
+  );
+}
+
 export default async function ProposalDetailPage({ params }: PageProps) {
   const proposalId = Number(params.id);
   if (!Number.isFinite(proposalId)) {
@@ -19,6 +78,9 @@ export default async function ProposalDetailPage({ params }: PageProps) {
 
     const fmtUSD = (n: number) =>
       new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
+
+    // --- normalize proposal attachments (proposal.docs is already an array) ---
+    const proposalDocs = normList((proposal as any)?.docs);
 
     return (
       <div className="p-6 space-y-6">
@@ -43,6 +105,20 @@ export default async function ProposalDetailPage({ params }: PageProps) {
             <strong>Summary:</strong>
             <p className="mt-1 whitespace-pre-wrap">{proposal.summary}</p>
           </div>
+
+          {/* ✅ Proposal Attachments */}
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold mb-2">Attachments</h3>
+            {proposalDocs.length === 0 ? (
+              <div className="text-sm text-slate-500">No attachments.</div>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {proposalDocs.map((d, i) => (
+                  <AttachmentTile key={i} doc={d} />
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         <section>
@@ -50,19 +126,41 @@ export default async function ProposalDetailPage({ params }: PageProps) {
 
           {bids.length > 0 ? (
             <div className="grid gap-4">
-              {bids.map((bid) => (
-                <div key={bid.bidId} className="bg-white p-4 rounded shadow space-y-3">
-                  <div className="grid md:grid-cols-2 gap-2">
-                    <p><strong>Vendor:</strong> {bid.vendorName}</p>
-                    <p><strong>Price:</strong> {fmtUSD(bid.priceUSD)}</p>
-                    <p><strong>Days:</strong> {bid.days}</p>
-                    <p className="md:col-span-2"><strong>Notes:</strong> {bid.notes}</p>
-                  </div>
+              {bids.map((bid) => {
+                // ✅ normalize bid attachments: doc (single), docs[], files[]
+                const legacy = normList((bid as any)?.doc);
+                const docs = normList((bid as any)?.docs);
+                const files = normList((bid as any)?.files);
+                const all = [...docs, ...files, ...legacy].filter(Boolean);
 
-                  {/* ✅ Agent 2 inline prompt + results */}
-                  <Agent2Inline bid={bid} />
-                </div>
-              ))}
+                return (
+                  <div key={bid.bidId} className="bg-white p-4 rounded shadow space-y-3">
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <p><strong>Vendor:</strong> {bid.vendorName}</p>
+                      <p><strong>Price:</strong> {fmtUSD(bid.priceUSD)}</p>
+                      <p><strong>Days:</strong> {bid.days}</p>
+                      <p className="md:col-span-2"><strong>Notes:</strong> {bid.notes}</p>
+                    </div>
+
+                    {/* ✅ Bid attachments */}
+                    <div>
+                      <h4 className="text-sm font-semibold mb-2">Bid Attachments</h4>
+                      {all.length === 0 ? (
+                        <div className="text-sm text-slate-500">No attachments.</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-3">
+                          {all.map((d, i) => (
+                            <AttachmentTile key={i} doc={d} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ✅ Agent 2 inline prompt + results */}
+                    <Agent2Inline bid={bid} />
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p>No bids yet for this proposal.</p>
