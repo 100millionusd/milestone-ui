@@ -45,58 +45,38 @@ function isImg(s?: string) {
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
-// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
+// Build a safe https URL for {url|cid}, collapsing duplicate /ipfs/ segments.
 function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  const G = GW.replace(/\/+$/, '/');
-  if (!file) return "";
+  if (!file) return '';
 
-  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
-  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
 
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${G}${rawCid}`;
-  if (!rawUrl) return "";
+  // If only CID is present
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    return GW + String(rawCid).replace(/^ipfs\//i, '');
+  }
+  if (!rawUrl) return '';
 
   let u = rawUrl;
 
-  // bare CID
+  // Bare CID in url field
   const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) return `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
+  if (cidOnly) {
+    return GW + cidOnly[1] + (cidOnly[2] || '');
+  }
 
-  // ipfs://... → strip scheme; strip leading slashes; strip leading ipfs/ segments
-  u = u.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "").replace(/^(?:ipfs\/)+/i, "");
+  // ipfs://... or leading ipfs/...
+  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
 
-  // prefix gateway if not http(s)
-  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
+  // Prefix with our gateway if not absolute http(s)
+  if (!/^https?:\/\//i.test(u)) u = GW + u;
 
-  // collapse any /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
+  // Collapse duplicate /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
   return u;
 }
 
-
-function withFilename_Admin(url: string, name?: string) {
-  if (!url || !name) return url;
-  try {
-    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//,'')}`);
-    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
-      u.search = `?filename=${encodeURIComponent(name)}`;
-    }
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
-// Normalize any proof shape into an array of {url?, cid?, name?}
-function extractFilesFromProof(proof: any): Array<{url?: string; cid?: string; name?: string}> {
-  if (!proof) return [];
-  if (Array.isArray(proof.files)) return proof.files as any[];
-  if (Array.isArray((proof as any).filesJson)) return (proof as any).filesJson as any[];
-  if (typeof proof.files === 'string') {
-    try { const arr = JSON.parse(proof.files); return Array.isArray(arr) ? arr : []; } catch {}
-  }
-  return [];
-}
 
 function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
   if (!files?.length) return null;
