@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
-// --- Activity helpers: pick keys + open pretty JSON in a new tab (no data:/blob: nav) ---
+// --- Activity helpers: pick keys + open pretty JSON in a new tab (no data: nav) ---
 const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
 
 const pickActivityId = (r: any) =>
@@ -23,7 +23,6 @@ const pickType = (r: any) =>
 const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
 
-/** Build the activity document we will display/download */
 function buildActivityDoc(row: any) {
   const meta = {
     id: pickActivityId(row),
@@ -52,6 +51,9 @@ function escapeHtml(s: string) {
 
 /** Open pretty JSON in a new tab by writing HTML into a blank window (CSP-safe). Falls back to .json download. */
 function openJsonInNewTab(title: string, doc: any) {
+  // Synchronous open to satisfy popup blockers
+  const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
+
   const pretty = JSON.stringify(doc ?? {}, null, 2);
   const html = `<!doctype html>
 <html><head>
@@ -70,8 +72,6 @@ function openJsonInNewTab(title: string, doc: any) {
 </div>
 </body></html>`;
 
-  // Open blank tab synchronously from the click
-  const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
   if (w && w.document) {
     try {
       w.document.open();
