@@ -1187,7 +1187,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
 
               <div className="space-y-4">
-                {(bid._withIdxVisible as Array<{ m: any; idx: number }>)).map(({ m, idx: origIdx }) => {
+                {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
 
                   const approved = msIsApproved(m) || isCompleted(m);
