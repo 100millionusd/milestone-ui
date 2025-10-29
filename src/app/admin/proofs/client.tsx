@@ -210,7 +210,7 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
   );
 }
 
-// Improved extractFiles function to be more comprehensive
+// Replace the extractFiles function with this improved version
 function extractFiles(m: any): { name: string; url: string }[] {
   if (!m) {
     if (DEBUG_FILES) console.log('🔍 extractFiles: No milestone data');
@@ -237,18 +237,32 @@ function extractFiles(m: any): { name: string; url: string }[] {
 
   if (DEBUG_FILES) console.log('🔍 extractFiles: Raw candidates:', candidates);
 
-  // Also try to parse proof JSON for files
+  // Handle proof field - it might be JSON or plain text with URLs
   let proofFiles: any[] = [];
-  try {
-    if (m?.proof && typeof m.proof === "string") {
-      const parsed = JSON.parse(m.proof);
-      if (parsed && Array.isArray(parsed.files)) {
-        proofFiles = parsed.files;
-        if (DEBUG_FILES) console.log('🔍 extractFiles: Found proof files:', proofFiles);
+  if (m?.proof) {
+    if (typeof m.proof === "string") {
+      try {
+        // Try to parse as JSON first
+        const parsed = JSON.parse(m.proof);
+        if (parsed && Array.isArray(parsed.files)) {
+          proofFiles = parsed.files;
+          if (DEBUG_FILES) console.log('🔍 extractFiles: Found JSON proof files:', proofFiles);
+        }
+      } catch {
+        // If JSON parsing fails, treat as plain text and extract URLs
+        if (DEBUG_FILES) console.log('🔍 extractFiles: Proof is plain text, extracting URLs');
+        
+        // Extract URLs from plain text proof
+        const urlRegex = /(https?:\/\/[^\s]+|ipfs:\/\/[^\s]+|ipfs\/[^\s]+|[A-Za-z0-9]{46,})/g;
+        const urls = m.proof.match(urlRegex) || [];
+        
+        if (DEBUG_FILES) console.log('🔍 extractFiles: Extracted URLs from text:', urls);
+        
+        proofFiles = urls.map(url => ({ url }));
       }
+    } else if (typeof m.proof === "object" && Array.isArray(m.proof.files)) {
+      proofFiles = m.proof.files;
     }
-  } catch (e) {
-    if (DEBUG_FILES) console.log('🔍 extractFiles: Proof parsing failed:', e);
   }
 
   candidates.push(proofFiles);
