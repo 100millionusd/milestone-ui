@@ -31,12 +31,24 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
-const BASE_GW = (
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  "https://gateway.pinata.cloud"
-).replace(/\/+$/, "").replace(/(?:\/ipfs)+$/i, "");
-const GW = `${BASE_GW}/ipfs/`;
+// ---------- Unified IPFS gateway (same as project page style) ----------
+const PINATA_GATEWAY = (() => {
+  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
+  if (raw1) {
+    const host = raw1
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .replace(/(?:\/ipfs)+$/i, '');
+    return `https://${host}/ipfs`;
+  }
+  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, '');
+  return `${base}/ipfs`;
+})();
+
+const GW = `${PINATA_GATEWAY.replace(/\/+$/, '')}/`;
 
 function isImg(s?: string) {
   if (!s) return false;
@@ -61,37 +73,42 @@ function isImageFile(f: any, href: string): boolean {
   );
 }
 
-// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
-function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  const G = GW.replace(/\/+$/, '/');
+function toGatewayUrl(file: { url?: string; cid?: string } | string | undefined): string {
+  const G = GW; // already ends with /
   if (!file) return "";
+
+  // Accept string too
+  if (typeof file === "string") {
+    const s = file.trim();
+    // bare CID?
+    const m = s.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+    if (m) return `${G}${m[1]}${m[2] || ""}`;
+    // ipfs:// or leading ipfs/...
+    if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
+      const cid = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
+      return `${G}${cid}`;
+    }
+    // http(s)
+    if (/^https?:\/\//i.test(s)) return s;
+    return s ? `${G}${s.replace(/^\/+/, "").replace(/^ipfs\//i, "")}` : "";
+  }
 
   const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
   const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
 
-  // Only CID present
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    return `${G}${String(rawCid).replace(/^ipfs\//i, "")}`;
-  }
+  if (!rawUrl && rawCid) return `${G}${rawCid.replace(/^ipfs\//i, "")}`;
   if (!rawUrl) return "";
 
-  let u = rawUrl.trim();
+  // bare CID in url field?
+  const m2 = rawUrl.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (m2) return `${G}${m2[1]}${m2[2] || ""}`;
 
-  // Bare CID in url field
-  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
-  if (cidOnly) return `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
+  if (/^ipfs:\/\//i.test(rawUrl) || /^ipfs\//i.test(rawUrl)) {
+    const cid = rawUrl.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
+    return `${G}${cid}`;
+  }
 
-  // ipfs://... or leading ipfs/... → normalize
-  u = u.replace(/^ipfs:\/\//i, "")
-       .replace(/^\/+/, "")
-       .replace(/^(?:ipfs\/)+/i, "");
-
-  // Prefix with our gateway if not absolute http(s)
-  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
-
-  // Collapse duplicate /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
-  return u;
+  return rawUrl; // already http(s)
 }
 
 function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
@@ -127,9 +144,8 @@ function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?
   );
 }
 
-// Replace your entire extractFiles(...) with this:
 function extractFiles(m: any): { name: string; url: string }[] {
-  // 1) also read files from JSON-string proof
+  // 1) also read files from m.proof JSON string
   let proofFiles: any[] = [];
   try {
     if (m?.proof && typeof m.proof === "string") {
@@ -153,78 +169,29 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.ai_analysis?.raw?.files ?? [])
       .concat(proofFiles);
 
-  const toUrl = (x: any): { name: string; url: string } | null => {
+  const toEntry = (x: any): { name: string; url: string } | null => {
     if (!x) return null;
 
-    // string value (raw URL, ipfs://, or bare CID)
+    // strings (could be http(s), ipfs://, bare CID)
     if (typeof x === "string") {
-      const s = x.trim();
-      if (!s) return null;
-
-      if (/^https?:\/\//i.test(s)) {
-        const name = s.split(/[?#]/)[0].split("/").pop() || "file";
-        return { name, url: s };
-      }
-      if (/^ipfs:\/\//i.test(s)) {
-        const cidOrPath = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
-        return { name: cidOrPath.split("/").pop() || cidOrPath, url: GW + cidOrPath };
-      }
-      // bare CID (allow long multihash, ipfs path w/o scheme)
-      if (/^(?:ipfs\/)?[A-Za-z0-9]{46,}(?:\/.*)?$/.test(s)) {
-        const clean = s.replace(/^ipfs\//i, "");
-        return { name: clean.split("/").pop() || clean, url: GW + clean };
-      }
-      return null;
+      const url = toGatewayUrl(x);
+      if (!url) return null;
+      const name = url.split(/[?#]/)[0].split("/").pop() || "file";
+      return { name, url };
     }
 
-    // object value — accept many common fields
-    const name =
-      x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
+    // objects
+    const rawName = x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
+    const url = toGatewayUrl(x.url ? String(x.url) : (x.cid ? String(x.cid) : ""));
+    if (!url) return null;
 
-    // collect possible url-ish fields
-    const rawUrl =
-      x.url || x.href || x.link || x.permalink || x.external_url ||
-      x.previewUrl || x.preview_url || x.downloadUrl || x.download_url ||
-      x.gateway || x.gateway_url || x.ipfsGateway || x.ipfs_gateway ||
-      x.path || x.filepath || x.file_path || null;
-
-    const cid =
-      x.cid || x.CID || x.ipfs || x.ipfsHash || x.ipfs_hash ||
-      (typeof x.hash === "string" ? x.hash : null) ||
-      (typeof x.cid === "string" ? x.cid : null);
-
-    // prefer explicit URL; otherwise build from CID
-    const built =
-      rawUrl
-        ? String(rawUrl)
-        : cid
-          ? GW + String(cid).replace(/^ipfs\//i, "")
-          : null;
-
-    if (!built) return null;
-
-    // Normalize through the same logic as strings
-    const normalized = (() => {
-      let u = String(built).trim();
-      if (!u) return "";
-
-      // already http(s)
-      if (/^https?:\/\//i.test(u)) return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
-
-      // ipfs:// or ipfs/ or bare
-      u = u.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "").replace(/^(?:ipfs\/)+/i, "");
-      u = `${GW}${u}`;
-      return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
-    })();
-
-    const safeName = name || normalized.split(/[?#]/)[0].split("/").pop() || "file";
-    return { name: safeName, url: normalized };
+    const name = rawName || url.split(/[?#]/)[0].split("/").pop() || "file";
+    return { name, url };
   };
 
   const flat = ([] as any[]).concat(...candidates.map((c: any) => (Array.isArray(c) ? c : [c])));
-  const mapped = flat.map(toUrl).filter(Boolean) as { name: string; url: string }[];
+  const mapped = flat.map(toEntry).filter(Boolean) as { name: string; url: string }[];
 
-  // de-dup by URL (ignore hash fragment)
   const seen = new Set<string>();
   const unique: { name: string; url: string }[] = [];
   for (const f of mapped) {
