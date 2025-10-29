@@ -31,14 +31,13 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
-// ---------- Unified IPFS gateway + URL helpers ----------
+Copy-paste (keep in client.tsx, above FilesStrip)
 const BASE_GW = (
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
   "https://gateway.pinata.cloud"
-).replace(/\/+$/, "");
-// Ensure exactly one "/ipfs/" and a trailing slash
-const GW = /\/ipfs$/i.test(BASE_GW) ? `${BASE_GW}/` : `${BASE_GW}/ipfs/`;
+).replace(/\/+$/, "").replace(/(?:\/ipfs)+$/i, "");
+const GW = `${BASE_GW}/ipfs/`;
 
 function isImg(s?: string) {
   if (!s) return false;
@@ -129,9 +128,9 @@ function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?
   );
 }
 
-// REPLACE your current extractFiles with THIS version (no local GW)
+// Replace your entire extractFiles(...) with this:
 function extractFiles(m: any): { name: string; url: string }[] {
-  // try to read files from m.proof JSON string
+  // 1) also read files from JSON-string proof
   let proofFiles: any[] = [];
   try {
     if (m?.proof && typeof m.proof === "string") {
@@ -153,48 +152,80 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.aiAnalysis?.raw?.files ?? [])
       .concat(m?.ai_analysis?.files ?? [])
       .concat(m?.ai_analysis?.raw?.files ?? [])
-      .concat(proofFiles); // ← add files from m.proof
+      .concat(proofFiles);
 
   const toUrl = (x: any): { name: string; url: string } | null => {
     if (!x) return null;
 
-    // string form
+    // string value (raw URL, ipfs://, or bare CID)
     if (typeof x === "string") {
       const s = x.trim();
+      if (!s) return null;
+
       if (/^https?:\/\//i.test(s)) {
         const name = s.split(/[?#]/)[0].split("/").pop() || "file";
         return { name, url: s };
       }
       if (/^ipfs:\/\//i.test(s)) {
-        const cid = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
-        return { name: cid, url: GW + cid };
+        const cidOrPath = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
+        return { name: cidOrPath.split("/").pop() || cidOrPath, url: GW + cidOrPath };
       }
-      if (/^[A-Za-z0-9]+$/i.test(s) && s.length > 30) {
-        return { name: s, url: GW + s };
+      // bare CID (allow long multihash, ipfs path w/o scheme)
+      if (/^(?:ipfs\/)?[A-Za-z0-9]{46,}(?:\/.*)?$/.test(s)) {
+        const clean = s.replace(/^ipfs\//i, "");
+        return { name: clean.split("/").pop() || clean, url: GW + clean };
       }
       return null;
     }
 
-    // object form
+    // object value — accept many common fields
     const name =
       x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
 
+    // collect possible url-ish fields
+    const rawUrl =
+      x.url || x.href || x.link || x.permalink || x.external_url ||
+      x.previewUrl || x.preview_url || x.downloadUrl || x.download_url ||
+      x.gateway || x.gateway_url || x.ipfsGateway || x.ipfs_gateway ||
+      x.path || x.filepath || x.file_path || null;
+
     const cid =
-      x.cid || x.ipfs || x.ipfsHash || x.CID ||
+      x.cid || x.CID || x.ipfs || x.ipfsHash || x.ipfs_hash ||
       (typeof x.hash === "string" ? x.hash : null) ||
       (typeof x.cid === "string" ? x.cid : null);
 
-    const url =
-      x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid).replace(/^ipfs\//i, "") : null);
+    // prefer explicit URL; otherwise build from CID
+    const built =
+      rawUrl
+        ? String(rawUrl)
+        : cid
+          ? GW + String(cid).replace(/^ipfs\//i, "")
+          : null;
 
-    if (!url) return null;
-    const safeName = name || String(url).split(/[?#]/)[0].split("/").pop() || "file";
-    return { name: safeName, url: String(url) };
+    if (!built) return null;
+
+    // Normalize through the same logic as strings
+    const normalized = (() => {
+      let u = String(built).trim();
+      if (!u) return "";
+
+      // already http(s)
+      if (/^https?:\/\//i.test(u)) return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
+
+      // ipfs:// or ipfs/ or bare
+      u = u.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "").replace(/^(?:ipfs\/)+/i, "");
+      u = `${GW}${u}`;
+      return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
+    })();
+
+    const safeName = name || normalized.split(/[?#]/)[0].split("/").pop() || "file";
+    return { name: safeName, url: normalized };
   };
 
   const flat = ([] as any[]).concat(...candidates.map((c: any) => (Array.isArray(c) ? c : [c])));
   const mapped = flat.map(toUrl).filter(Boolean) as { name: string; url: string }[];
 
+  // de-dup by URL (ignore hash fragment)
   const seen = new Set<string>();
   const unique: { name: string; url: string }[] = [];
   for (const f of mapped) {
