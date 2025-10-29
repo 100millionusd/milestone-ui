@@ -3,18 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
-
-// --- Activity helpers: single, clean set (NO duplicates) ---
-const _first = (...vals: any[]) =>
-  vals.find(v => v !== undefined && v !== null && v !== '');
+// --- Activity helpers: pick keys + open pretty JSON in a new tab (Blob) ---
+const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
 
 const pickActivityId = (r: any) =>
-  Number(
-    _first(
-      r?.id, r?.activityId, r?.activity_id, r?.logId, r?.log_id,
-      r?.eventId, r?.event_id, r?.audit_id
-    )
-  ) || null;
+  Number(_first(r?.id, r?.activityId, r?.activity_id, r?.logId, r?.log_id, r?.eventId, r?.event_id, r?.audit_id)) || null;
 
 const pickActor = (r: any) =>
   _first(
@@ -25,40 +18,40 @@ const pickActor = (r: any) =>
   ) || null;
 
 const pickType = (r: any) =>
-  _first(
-    r?.type, r?.action, r?.event, r?.eventType, r?.event_type,
-    r?.kind, r?.operation, r?.op
-  ) || null;
+  _first(r?.type, r?.action, r?.event, r?.eventType, r?.event_type, r?.kind, r?.operation, r?.op) || null;
 
 const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
 
-const buildPrettyJson = (r: any) => {
+function buildActivityDoc(row: any) {
   const meta = {
-    id: pickActivityId(r),
-    when: pickWhen(r),
-    actor: pickActor(r),
-    type: pickType(r),
-    proposalId: _first(r?.proposalId, r?.proposal_id) ?? null,
-    bidId: _first(r?.bidId, r?.bid_id) ?? null,
-    projectId: _first(r?.projectId, r?.project_id) ?? null,
+    id: pickActivityId(row),
+    when: pickWhen(row),
+    actor: pickActor(row),
+    type: pickType(row),
+    proposalId: _first(row?.proposalId, row?.proposal_id) ?? null,
+    bidId: _first(row?.bidId, row?.bid_id) ?? null,
+    projectId: _first(row?.projectId, row?.project_id) ?? null,
   };
-  const payload = _first(r?.changes, r?.payload, r?.details, r?.data, r) ?? {};
-  return JSON.stringify({ meta, payload }, null, 2);
-};
+  const payload =
+    row?.changes ??
+    row?.payload ??
+    row?.details ??
+    row?.data ??
+    row ??
+    {};
+  return { meta, payload };
+}
 
-// Use this to make the href for your "Details" link (opens download/view directly)
-const makeActivityDataHref = (row: any, mime: string = 'application/json') =>
-  `data:${mime};charset=utf-8,${encodeURIComponent(buildPrettyJson(row))}`;
-
-// --- Optional: open JSON payload in a new tab (pretty HTML) ---
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (m) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" } as any)[m]
   );
 }
-function openJsonInNewTab(title: string, payload: any) {
-  const pretty = JSON.stringify(payload ?? {}, null, 2);
+
+/** Open a pretty JSON document in a new tab using a Blob (avoids data: URL nav) */
+function openJsonInNewTab(title: string, doc: any) {
+  const pretty = JSON.stringify(doc ?? {}, null, 2);
   const html = `<!doctype html>
 <html><head>
 <meta charset="utf-8"/>
@@ -1400,28 +1393,18 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-<Td className="whitespace-nowrap">
-  {/* View in new tab (no download attr → opens viewer) */}
-  <a
-    href={makeActivityDataHref(r, 'text/plain')}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 mr-2"
-    title="Open activity details in a new tab"
+<td className="px-3 py-2 text-right">
+  <button
+    type="button"
+    onClick={() => openJsonInNewTab(
+      `Activity #${pickActivityId(row) ?? 'N/A'}`,
+      buildActivityDoc(row)
+    )}
+    className="inline-flex items-center rounded px-2 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
   >
-    View
-  </a>
-
-  {/* Download pretty JSON */}
-  <a
-    href={makeActivityDataHref(r, 'application/json')}
-    download={`activity-${pickActivityId(r) ?? 'unknown'}.json`}
-    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-    title="Download activity details (JSON)"
-  >
-    Download
-  </a>
-</Td>
+    Details
+  </button>
+</td>
                     </tr>
                   ))}
                 </tbody>
