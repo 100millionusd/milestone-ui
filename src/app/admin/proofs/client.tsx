@@ -45,69 +45,89 @@ function isImg(s?: string) {
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
-// Build a safe https URL for {url|cid}, collapsing duplicate /ipfs/ segments.
-function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  if (!file) return '';
+// Treat as image if URL has an image extension, or the file object hints an image MIME, or it's a data:image URL
+function isImageFile(f: any, href: string): boolean {
+  const mime =
+    f?.mime ||
+    f?.mimetype ||
+    f?.contentType ||
+    f?.['content-type'] ||
+    '';
+  const name = f?.name || '';
 
-  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
-  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
-
-  // If only CID is present
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    return GW + String(rawCid).replace(/^ipfs\//i, '');
-  }
-  if (!rawUrl) return '';
-
-  let u = rawUrl;
-
-  // Bare CID in url field
-  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) {
-    return GW + cidOnly[1] + (cidOnly[2] || '');
-  }
-
-  // ipfs://... or leading ipfs/...
-  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
-
-  // Prefix with our gateway if not absolute http(s)
-  if (!/^https?:\/\//i.test(u)) u = GW + u;
-
-  // Collapse duplicate /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-  return u;
+  return (
+    isImg(href) ||
+    isImg(name) ||
+    /^data:image\//i.test(href) ||
+    /^image\//i.test(String(mime))
+  );
 }
 
+// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
+function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
+  const G = GW.replace(/\/+$/, '/');
+  if (!file) return "";
+
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
+
+  // Only CID present
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    return `${G}${String(rawCid).replace(/^ipfs\//i, "")}`;
+  }
+  if (!rawUrl) return "";
+
+  let u = rawUrl.trim();
+
+  // Bare CID in url field
+  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
+  if (cidOnly) return `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
+
+  // ipfs://... or leading ipfs/... → normalize
+  u = u.replace(/^ipfs:\/\//i, "")
+       .replace(/^\/+/, "")
+       .replace(/^(?:ipfs\/)+/i, "");
+
+  // Prefix with our gateway if not absolute http(s)
+  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
+
+  // Collapse duplicate /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
+  return u;
+}
 
 function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
   if (!files?.length) return null;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 my-3">
-      {files.map((f, i) => {
-        const href = toGatewayUrl(f);
-        const name = f.name || (href ? href.split('/').pop() : '') || 'file';
-        if (isImg(href) || isImg(name)) {
-          // eslint-disable-next-line @next/next/no-img-element
-          return (
-            <a key={i} href={href} target="_blank" rel="noopener noreferrer"
-               className="group relative overflow-hidden rounded border">
-              <img src={href} alt={name} className="h-32 w-full object-cover group-hover:scale-105 transition" />
-              <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{name}</div>
-            </a>
-          );
-        }
-        return (
-          <div key={i} className="p-3 rounded border bg-gray-50 flex items-center justify-between gap-3">
-            <p className="truncate text-sm">{name}</p>
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-              Open
-            </a>
-          </div>
-        );
-      })}
+{files.map((f, i) => {
+  const href = toGatewayUrl(f);
+  if (!href) return null;
+  const name = f.name || (href ? href.split('/').pop() : '') || 'file';
+
+  if (isImageFile(f, href)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <a key={i} href={href} target="_blank" rel="noopener noreferrer"
+         className="group relative overflow-hidden rounded border">
+        <img src={href} alt={name} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+        <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{name}</div>
+      </a>
+    );
+  }
+
+  return (
+    <div key={i} className="p-3 rounded border bg-gray-50 flex items-center justify-between gap-3">
+      <p className="truncate text-sm">{name}</p>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+        Open
+      </a>
+    </div>
+  );
+})}
     </div>
   );
 }
-
 
 // REPLACE your current extractFiles with THIS version (no local GW)
 function extractFiles(m: any): { name: string; url: string }[] {
