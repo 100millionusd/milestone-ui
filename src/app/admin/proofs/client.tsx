@@ -158,12 +158,12 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
                 onClick={() => {
                   if (onImageClick) {
                     // Get all image URLs for lightbox
-                    const imageUrls = files
-                      .map(file => toGatewayUrl(file))
-                      .filter(url => url && isImageFile(file, url));
-                    const startIndex = imageUrls.findIndex(url => url === href);
-                    if (DEBUG_FILES) console.log('🔍 Image clicked:', { href, imageUrls, startIndex });
-                    onImageClick(imageUrls, Math.max(0, startIndex));
+ const images = files
+  .map(f2 => ({ f2, url: toGatewayUrl(f2) }))
+  .filter(x => x.url && isImageFile(x.f2, x.url));
+const imageUrls = images.map(x => x.url);
+const startIndex = Math.max(0, imageUrls.findIndex(u => u === href));
+onImageClick(imageUrls, startIndex);
                   }
                 }}
                 className="shrink-0 snap-start group relative overflow-hidden rounded border"
@@ -226,14 +226,14 @@ function extractFiles(m: any): { name: string; url: string }[] {
     // ipfs://... or starting with ipfs/
     if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
       const cid = s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
-      const url = toGatewayUrl(cid);
+      const url = toGatewayUrl({ cid });
       const name = cid.split(/[?#]/)[0];
       return { name, url };
     }
     // bare CID (CIDv0/v1 heuristic: 46+ base58/base32-ish)
     if (/^[A-Za-z0-9]{46,}([/?#].*)?$/i.test(s)) {
       const bare = s.split(/[/?#]/)[0];
-      const url = toGatewayUrl(bare);
+      const url = toGatewayUrl({ cid: bare });
       return { name: bare, url };
     }
     return null;
