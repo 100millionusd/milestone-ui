@@ -31,45 +31,60 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
-// ---------- Files helpers (match Projects/AdminProofs) ----------
-const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '')}/ipfs`
-    : 'https://gateway.pinata.cloud/ipfs';
+// ---------- Unified IPFS gateway + URL helpers ----------
+const BASE_GW = (
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  "https://gateway.pinata.cloud"
+).replace(/\/+$/, "");
+// Ensure exactly one "/ipfs/" and a trailing slash
+const GW = /\/ipfs$/i.test(BASE_GW) ? `${BASE_GW}/` : `${BASE_GW}/ipfs/`;
 
 function isImg(s?: string) {
   if (!s) return false;
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
-// Build a safe https URL for {url|cid}, collapsing duplicate /ipfs/ segments.
+// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
 function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
-  if (!file) return '';
+  const G = GW.replace(/\/+$/, '/');
+  if (!file) return "";
 
-  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
-  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
 
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
-  if (!rawUrl) return '';
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${G}${rawCid}`;
+  if (!rawUrl) return "";
 
   let u = rawUrl;
 
   // bare CID
   const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
+  if (cidOnly) return `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
 
   // ipfs://... → strip scheme; strip leading slashes; strip leading ipfs/ segments
-  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
+  u = u.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "").replace(/^(?:ipfs\/)+/i, "");
 
-  // prefix with our gateway if not http(s)
-  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+  // prefix gateway if not http(s)
+  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
 
   // collapse any /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
   return u;
+}
+
+
+function withFilename_Admin(url: string, name?: string) {
+  if (!url || !name) return url;
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//,'')}`);
+    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
+      u.search = `?filename=${encodeURIComponent(name)}`;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 // Normalize any proof shape into an array of {url?, cid?, name?}
@@ -113,48 +128,13 @@ function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?
   );
 }
 
-// ---- Files helpers (IPFS + thumbnails) ----
-const IPFS_GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace(/\/+$/,'') ||
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY?.replace(/\/+$/,'') ||
-  "https://gateway.pinata.cloud";
 
-function fileUrlFrom(x: any): string {
-  const url: string | undefined = x?.url || x?.link || x?.href;
-  const cid: string | undefined = x?.cid || x?.ipfsCid || x?.ipfs_cid;
-  if (url) {
-    if (url.startsWith("ipfs://")) return `${IPFS_GATEWAY}/ipfs/${url.slice(7)}`;
-    // already http(s)
-    return url;
-  }
-  if (cid) return `${IPFS_GATEWAY}/ipfs/${cid}`;
-  return "";
-}
-function fileNameFrom(x: any): string {
-  return x?.name || x?.filename || x?.originalname || x?.original || x?.key || "file";
-}
-function fileSizeFrom(x: any): number|undefined {
-  const n = x?.size ?? x?.bytes ?? x?.length;
-  return Number.isFinite(Number(n)) ? Number(n) : undefined;
-}
-function fmtBytes(n?: number) {
-  if (!n && n !== 0) return "";
-  const u = ["B","KB","MB","GB"]; let i = 0; let v = n;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${v < 10 && i>0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
-}
-function isImage(x: any): boolean {
-  const mt = (x?.mimetype || x?.mime || "").toLowerCase();
-  const name = (fileNameFrom(x) || "").toLowerCase();
-  return mt.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(name);
-}
-
-// REPLACE your current extractFiles with this one
+// REPLACE your current extractFiles with THIS version (no local GW)
 function extractFiles(m: any): { name: string; url: string }[] {
   // try to read files from m.proof JSON string
   let proofFiles: any[] = [];
   try {
-    if (m?.proof && typeof m.proof === 'string') {
+    if (m?.proof && typeof m.proof === "string") {
       const parsed = JSON.parse(m.proof);
       if (parsed && Array.isArray(parsed.files)) proofFiles = parsed.files;
     }
@@ -175,16 +155,10 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.ai_analysis?.raw?.files ?? [])
       .concat(proofFiles); // ← add files from m.proof
 
-  // --- FIXED gateway (always ensures single /ipfs/ and trailing /) ---
-const baseGW = (
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  "https://gateway.pinata.cloud"
-).replace(/\/+$/, "");
-const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
-
   const toUrl = (x: any): { name: string; url: string } | null => {
     if (!x) return null;
+
+    // string form
     if (typeof x === "string") {
       const s = x.trim();
       if (/^https?:\/\//i.test(s)) {
@@ -201,6 +175,7 @@ const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
       return null;
     }
 
+    // object form
     const name =
       x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
 
@@ -210,7 +185,7 @@ const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
       (typeof x.cid === "string" ? x.cid : null);
 
     const url =
-  x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid).replace(/^ipfs\//i, "") : null);
+      x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid).replace(/^ipfs\//i, "") : null);
 
     if (!url) return null;
     const safeName = name || String(url).split(/[?#]/)[0].split("/").pop() || "file";
@@ -231,7 +206,6 @@ const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
   }
   return unique;
 }
-
 
 // -------------------------------
 // Config / endpoints
