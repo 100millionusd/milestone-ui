@@ -31,7 +31,6 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
-Copy-paste (keep in client.tsx, above FilesStrip)
 const BASE_GW = (
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
