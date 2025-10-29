@@ -1418,16 +1418,20 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-<button
-  type="button"
-  onClick={() => openJsonInNewTab(
-    `Activity ${pickActivityId(row) ?? ''}`,
-    buildActivityDoc(row)
-  )}
-  className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
->
-  Details
-</button>
+<Td>
+  <button
+    type="button"
+    onClick={() =>
+      openJsonInNewTab(
+        `Activity ${pickActivityId(r) ?? ''}`,
+        buildActivityDoc(r)
+      )
+    }
+    className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
+  >
+    Details
+  </button>
+</Td>
                     </tr>
                   ))}
                 </tbody>
