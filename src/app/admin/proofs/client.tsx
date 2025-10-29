@@ -219,8 +219,8 @@ function extractFiles(m: any): { name: string; url: string }[] {
 
   if (DEBUG_FILES) console.log('🔍 extractFiles: Processing milestone:', m);
 
-  // Collect all possible file sources
-  const candidates = [
+  // Method 1: Standard file locations
+  const standardCandidates = [
     m?.files?.data ?? m?.files ?? [],
     m?.files_json ?? [],
     m?.vendorFiles ?? [],
@@ -235,7 +235,12 @@ function extractFiles(m: any): { name: string; url: string }[] {
     m?.ai_analysis?.raw?.files ?? [],
   ];
 
-  if (DEBUG_FILES) console.log('🔍 extractFiles: Raw candidates:', candidates);
+  // Method 2: Proof field (JSON or text)
+  let proofFiles: any[] = [];
+  if (m?.proof) {
+    if (typeof m.proof === "string") {
+      try {
+        const parsed = JSON.parse(m.proof);
 
   // Handle proof field - it might be JSON or plain text with URLs
   let proofFiles: any[] = [];
