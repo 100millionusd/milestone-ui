@@ -229,49 +229,6 @@ function extractFiles(m: any): { name: string; url: string }[] {
   return unique;
 }
 
-// small UI block for files
-function FilesStrip({ files }: { files: any[] }) {
-  if (!files?.length) return null;
-  return (
-    <div className="mt-3">
-      <div className="text-xs font-medium text-neutral-600 mb-1">Files</div>
-      <div className="flex flex-wrap gap-2">
-        {files.map((f, i) => {
-          const url = fileUrlFrom(f);
-          const name = fileNameFrom(f);
-          const size = fileSizeFrom(f);
-          const image = isImage(f);
-          return (
-            <a
-              key={i}
-              href={url || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={name}
-              className="group inline-flex items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white/70 dark:bg-neutral-900/50 hover:bg-neutral-50 dark:hover:bg-neutral-800 px-2 py-1"
-            >
-              {image ? (
-                <img
-                  src={url}
-                  alt={name}
-                  className="h-10 w-10 rounded object-cover border border-neutral-200 dark:border-neutral-700"
-                />
-              ) : (
-                <div className="h-10 w-10 grid place-items-center rounded border border-neutral-200 dark:border-neutral-700 text-xs font-mono">
-                  {name.split(".").pop()?.toUpperCase() || "FILE"}
-                </div>
-              )}
-              <div className="min-w-[140px] max-w-[260px]">
-                <div className="text-xs truncate">{name}</div>
-                <div className="text-[11px] text-neutral-500 truncate">{size ? fmtBytes(size) : url?.replace(/^https?:\/\//,'')}</div>
-              </div>
-            </a>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // -------------------------------
 // Config / endpoints
