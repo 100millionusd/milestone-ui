@@ -875,79 +875,128 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
   }
 
-  // ---- backfill missing milestone.proof from /proofs ----
-  async function mergeLatestProofsFromTable(rows: any[]) {
-    const out = (rows || []).map((b) => ({
-      ...b,
-      milestones: Array.isArray(b?.milestones) ? [...b.milestones] : [],
-    }));
 
-    const tasks: Promise<void>[] = [];
+// Normalize many possible proof file shapes into an array of {url?|cid?, name?}
+function normalizeProofFiles(x: any): any[] {
+  const out: any[] = [];
+  const tryParse = (v: any) => { try { return JSON.parse(v); } catch { return null; } };
+  const pushArr = (arr: any) => { if (Array.isArray(arr)) out.push(...arr); };
 
-    for (let bi = 0; bi < out.length; bi++) {
-      const bid = out[bi];
-      const ms = bid.milestones;
+  if (!x) return out;
 
-      const missingIdxs = ms
-        .map((m: any, i: number) => (!hasProof(m) ? i : -1))
-        .filter((i: number) => i >= 0);
+  // Common shapes
+  if (Array.isArray(x.files)) pushArr(x.files);
+  if (x?.files?.data) pushArr(x.files.data);
+  if (typeof x.files === 'string') pushArr(tryParse(x.files) || []);
+  if (Array.isArray(x.files_json)) pushArr(x.files_json);
+  if (typeof x.files_json === 'string') pushArr(tryParse(x.files_json) || []);
+  if (Array.isArray(x.attachments)) pushArr(x.attachments);
+  if (typeof x.attachments === 'string') pushArr(tryParse(x.attachments) || []);
 
-      if (missingIdxs.length === 0) continue;
+  // Singles
+  if (x.file) out.push(x.file);
+  if (x.fileUrl) out.push({ url: x.fileUrl, name: x.fileName || x.name });
+  if (x.cid) out.push({ cid: String(x.cid), name: x.name });
 
-      tasks.push(
-        (async () => {
-          let list: any[] = [];
-          try {
-            const r = await getProofs(bid.bidId);
-            list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
-          } catch {
-            return;
-          }
-          if (!Array.isArray(list) || list.length === 0) return;
-
-          for (const mi of missingIdxs) {
-            const candidates = list.filter(
-              (p: any) => (p.milestoneIndex ?? p.milestone_index) === mi
-            );
-            if (candidates.length === 0) continue;
-
-            candidates.sort((a: any, b: any) => {
-              const at =
-                new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
-              const bt =
-                new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
-              return bt - at;
-            });
-
-            const latest = candidates[0];
-            const description =
-              latest?.description ||
-              latest?.text ||
-              latest?.vendor_prompt ||
-              latest?.title ||
-              '';
-            const files =
-              latest?.files ||
-              latest?.file_json ||
-              latest?.attachments ||
-              [];
-
-            try {
-              ms[mi] = {
-                ...ms[mi],
-                proof: JSON.stringify({ description, files }),
-              };
-            } catch {
-              // ignore
-            }
-          }
-        })()
-      );
-    }
-
-    if (tasks.length) await Promise.all(tasks);
-    return out;
+  // Nested proof JSON may itself have files
+  if (typeof x.proof === 'string') {
+    const p = tryParse(x.proof);
+    if (p?.files) pushArr(p.files);
   }
+
+  return out;
+}
+
+  // ---- backfill missing milestone.proof from /proofs ----
+async function mergeLatestProofsFromTable(rows: any[]) {
+  const out = (rows || []).map((b) => ({
+    ...b,
+    milestones: Array.isArray(b?.milestones) ? [...b.milestones] : [],
+  }));
+
+  const tasks: Promise<void>[] = [];
+
+  for (let bi = 0; bi < out.length; bi++) {
+    const bid = out[bi];
+    const ms = bid.milestones;
+
+    // Which milestones are missing usable proof JSON (description/files)
+    const missingIdxs = ms
+      .map((m: any, i: number) => {
+        if (!m?.proof) return i;
+        try {
+          const p = JSON.parse(m.proof);
+          const hasDesc = typeof p?.description === 'string' && p.description.trim();
+          const hasFiles = Array.isArray(p?.files) && p.files.length > 0;
+          return hasDesc || hasFiles ? -1 : i;
+        } catch {
+          // plain text proof without links → still missing files
+          return i;
+        }
+      })
+      .filter((i: number) => i >= 0);
+
+    if (missingIdxs.length === 0) continue;
+
+    tasks.push(
+      (async () => {
+        let list: any[] = [];
+        try {
+          const r = await getProofs(bid.bidId);
+          list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
+        } catch {
+          return;
+        }
+        if (!Array.isArray(list) || list.length === 0) return;
+
+        for (const mi of missingIdxs) {
+          const candidates = list.filter(
+            (p: any) => (p.milestoneIndex ?? p.milestone_index) === mi
+          );
+          if (candidates.length === 0) continue;
+
+          // pick latest
+          candidates.sort((a: any, b: any) => {
+            const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
+            const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
+            return bt - at;
+          });
+          const latest = candidates[0];
+
+          // description from several fields or nested proof JSON
+          let description =
+            latest?.description ||
+            latest?.text ||
+            latest?.vendor_prompt ||
+            latest?.title ||
+            '';
+
+          if (!description && typeof latest?.proof === 'string') {
+            try {
+              const pj = JSON.parse(latest.proof);
+              if (typeof pj?.description === 'string') description = pj.description;
+            } catch {}
+          }
+
+          // collect files robustly
+          const files = normalizeProofFiles(latest);
+
+          try {
+            ms[mi] = {
+              ...ms[mi],
+              proof: JSON.stringify({ description, files }),
+            };
+          } catch {
+            // ignore
+          }
+        }
+      })()
+    );
+  }
+
+  if (tasks.length) await Promise.all(tasks);
+  return out;
+}
 
   function Agent2PanelInline({ bidId, milestoneIndex }: { bidId: number; milestoneIndex: number }) {
   const [loading, setLoading] = useState(true);
