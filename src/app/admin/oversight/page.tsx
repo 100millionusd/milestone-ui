@@ -4,11 +4,17 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
 
-// --- Activity helpers: robust key pickers + data URL makers ---
-const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
+// --- Activity helpers: single, clean set (NO duplicates) ---
+const _first = (...vals: any[]) =>
+  vals.find(v => v !== undefined && v !== null && v !== '');
 
 const pickActivityId = (r: any) =>
-  Number(_first(r?.id, r?.activityId, r?.activity_id, r?.logId, r?.log_id, r?.eventId, r?.event_id, r?.audit_id)) || null;
+  Number(
+    _first(
+      r?.id, r?.activityId, r?.activity_id, r?.logId, r?.log_id,
+      r?.eventId, r?.event_id, r?.audit_id
+    )
+  ) || null;
 
 const pickActor = (r: any) =>
   _first(
@@ -19,7 +25,10 @@ const pickActor = (r: any) =>
   ) || null;
 
 const pickType = (r: any) =>
-  _first(r?.type, r?.action, r?.event, r?.eventType, r?.event_type, r?.kind, r?.operation, r?.op) || null;
+  _first(
+    r?.type, r?.action, r?.event, r?.eventType, r?.event_type,
+    r?.kind, r?.operation, r?.op
+  ) || null;
 
 const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
@@ -38,40 +47,11 @@ const buildPrettyJson = (r: any) => {
   return JSON.stringify({ meta, payload }, null, 2);
 };
 
-const makeActivityDataHref = (r: any, mime: string = 'text/plain') =>
-  `data:${mime};charset=utf-8,${encodeURIComponent(buildPrettyJson(r))}`;
+// Use this to make the href for your "Details" link (opens download/view directly)
+const makeActivityDataHref = (row: any, mime: string = 'application/json') =>
+  `data:${mime};charset=utf-8,${encodeURIComponent(buildPrettyJson(row))}`;
 
-// --- Activity helpers (open as data: URL, no server route needed) ---
-const pickActivityId = (row: any) =>
-  row?.id ??
-  row?.activityId ??
-  row?.activity_id ??
-  row?.logId ??
-  row?.log_id ??
-  row?.eventId ??
-  row?.event_id ??
-  null;
-
-const makeActivityDataHref = (row: any) => {
-  const id = pickActivityId(row);
-  const meta = {
-    id,
-    when: row?.createdAt ?? row?.created_at ?? null,
-    actor: row?.actor ?? row?.wallet ?? row?.user ?? null,
-    type: row?.type ?? row?.action ?? row?.event ?? null,
-  };
-  const payload =
-    row?.changes ??
-    row?.payload ??
-    row?.details ??
-    row ??
-    {};
-
-  const pretty = JSON.stringify({ meta, payload }, null, 2);
-  return `data:application/json;charset=utf-8,${encodeURIComponent(pretty)}`;
-};
-
-// --- open JSON payload in a new tab (Activity "View" link) ---
+// --- Optional: open JSON payload in a new tab (pretty HTML) ---
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (m) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" } as any)[m]
