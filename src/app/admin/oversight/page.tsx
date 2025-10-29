@@ -3,6 +3,44 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
+
+// --- Activity helpers: robust key pickers + data URL makers ---
+const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
+
+const pickActivityId = (r: any) =>
+  Number(_first(r?.id, r?.activityId, r?.activity_id, r?.logId, r?.log_id, r?.eventId, r?.event_id, r?.audit_id)) || null;
+
+const pickActor = (r: any) =>
+  _first(
+    r?.actor, r?.user, r?.username, r?.userEmail, r?.email,
+    r?.wallet, r?.walletAddress, r?.wallet_address,
+    r?.vendorName, r?.vendor_name,
+    r?.adminEmail, r?.admin_email
+  ) || null;
+
+const pickType = (r: any) =>
+  _first(r?.type, r?.action, r?.event, r?.eventType, r?.event_type, r?.kind, r?.operation, r?.op) || null;
+
+const pickWhen = (r: any) =>
+  _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
+
+const buildPrettyJson = (r: any) => {
+  const meta = {
+    id: pickActivityId(r),
+    when: pickWhen(r),
+    actor: pickActor(r),
+    type: pickType(r),
+    proposalId: _first(r?.proposalId, r?.proposal_id) ?? null,
+    bidId: _first(r?.bidId, r?.bid_id) ?? null,
+    projectId: _first(r?.projectId, r?.project_id) ?? null,
+  };
+  const payload = _first(r?.changes, r?.payload, r?.details, r?.data, r) ?? {};
+  return JSON.stringify({ meta, payload }, null, 2);
+};
+
+const makeActivityDataHref = (r: any, mime: string = 'text/plain') =>
+  `data:${mime};charset=utf-8,${encodeURIComponent(buildPrettyJson(r))}`;
+
 // --- Activity helpers (open as data: URL, no server route needed) ---
 const pickActivityId = (row: any) =>
   row?.id ??
@@ -1382,16 +1420,26 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-<Td>
+<Td className="whitespace-nowrap">
+  {/* View in new tab (no download attr → opens viewer) */}
   <a
-    href={makeActivityDataHref(r)}
+    href={makeActivityDataHref(r, 'text/plain')}
     target="_blank"
     rel="noopener noreferrer"
-    download={`activity-${pickActivityId(r) ?? 'unknown'}.json`}
-    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
-    title="Open activity details (JSON) in a new tab"
+    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 mr-2"
+    title="Open activity details in a new tab"
   >
-    Details
+    View
+  </a>
+
+  {/* Download pretty JSON */}
+  <a
+    href={makeActivityDataHref(r, 'application/json')}
+    download={`activity-${pickActivityId(r) ?? 'unknown'}.json`}
+    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+    title="Download activity details (JSON)"
+  >
+    Download
   </a>
 </Td>
                     </tr>
