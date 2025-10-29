@@ -1432,7 +1432,7 @@ export default function AdminOversightPage() {
                         <button
                           type="button"
                           onClick={() => openActivity(r)}
-                          className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
+                          className="px-2 py-1 rounded text-xs bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
                         >
                           Details
                         </button>
