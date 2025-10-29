@@ -16,6 +16,7 @@ import {
   updateBulkArchiveCache,
   clearBulkArchiveCache,
   getProofs,
+  analyzeProof,
   invalidateBidsCache,
 } from '@/lib/api';
 import Link from 'next/link';
@@ -614,6 +615,158 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return out;
   }
 
+  function Agent2PanelInline({ bidId, milestoneIndex }: { bidId: number; milestoneIndex: number }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<any | null>(null);
+  const [proofId, setProofId] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+  const API_BASE = RAW_API_BASE;
+  const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
+
+  async function fetchLatest() {
+    setError(null);
+    try {
+      setLoading(true);
+      // load all proofs for this bid and pick the latest for this milestone
+      const r = await getProofs(bidId);
+      const list: any[] = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
+      const mine = list
+        .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
+        .sort((a: any, b: any) => {
+          const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
+          const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
+          return bt - at;
+        })[0];
+
+      setProofId(Number(mine?.id ?? mine?.proof_id ?? mine?.proofId ?? NaN) || null);
+      setAnalysis(mine?.ai_analysis ?? mine?.aiAnalysis ?? null);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load Agent2 result');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function pollUpdatedAnalysis(timeoutMs = 60000, intervalMs = 1500) {
+    const stop = Date.now() + timeoutMs;
+    while (Date.now() < stop) {
+      try {
+        const r = await fetch(apiUrl(`/proofs?bidId=${bidId}&t=${Date.now()}`), {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const list: any[] = Array.isArray(j) ? j : (j?.proofs ?? []);
+          const mine = list
+            .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
+            .sort((a: any, b: any) => {
+              const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
+              const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
+              return bt - at;
+            })[0];
+          const a = mine?.ai_analysis ?? mine?.aiAnalysis ?? null;
+          if (a) {
+            setAnalysis(a);
+            return;
+          }
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+
+  async function rerun() {
+    setError(null);
+    if (!proofId) {
+      setError('No proof found for this milestone.');
+      return;
+    }
+    try {
+      setRunning(true);
+      await analyzeProof(proofId);
+      await pollUpdatedAnalysis();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to analyze');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  useEffect(() => { fetchLatest(); /* on mount */ }, [bidId, milestoneIndex]);
+
+  const A = analysis || {};
+  const summary: string | undefined = A.summary || A.tldr || A.brief || A.overview;
+  const fit: string | undefined = A.fit || A.fitScore || A.fitment;
+  const confidence: string | number | undefined = A.confidence;
+  const risks: string[] = Array.isArray(A.risks) ? A.risks : (A.risks ? [A.risks] : []);
+  const notes: string[] = Array.isArray(A.milestoneNotes) ? A.milestoneNotes : (A.milestoneNotes ? [A.milestoneNotes] : []);
+
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium">Agent 2</div>
+        <button
+          onClick={rerun}
+          disabled={running || !proofId}
+          className={['px-3 py-1.5 rounded-md text-sm',
+            running ? 'bg-slate-300 text-slate-600' : 'bg-blue-600 hover:bg-blue-700 text-white'
+          ].join(' ')}
+          title={proofId ? 'Re-run analysis' : 'No proof found for this milestone'}
+        >
+          {running ? 'Analyzing…' : 'Run Agent 2'}
+        </button>
+      </div>
+
+      {loading && <div className="mt-2 text-sm text-slate-500">Loading…</div>}
+      {error && <div className="mt-2 text-sm text-rose-600">{error}</div>}
+
+      {!loading && !analysis && !error && (
+        <div className="mt-2 text-sm text-slate-500">No analysis yet.</div>
+      )}
+
+      {analysis && (
+        <div className="mt-3 space-y-2 text-sm">
+          {summary && (
+            <div>
+              <div className="text-xs uppercase text-slate-500">Summary</div>
+              <div className="mt-0.5">{summary}</div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {typeof fit !== 'undefined' && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">Fit: {String(fit)}</span>
+            )}
+            {typeof confidence !== 'undefined' && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">Confidence: {String(confidence)}</span>
+            )}
+          </div>
+          {risks.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-slate-500">Risks</div>
+              <ul className="list-disc pl-5 mt-1 space-y-1">
+                {risks.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {notes.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-slate-500">Milestone Notes</div>
+              <ul className="list-disc pl-5 mt-1 space-y-1">
+                {notes.map((n, i) => <li key={i}>{n}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
   // ---- Actions ----
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
@@ -1019,8 +1172,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
 
-                          {/* Proof */}
-                          {renderProof(m)}
+ {/* Proof */}
+{renderProof(m)}
+
+{/* Agent2 (summary + re-run) */}
+<Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
+
 
                           {/* Tx display */}
                           {(m.paymentTxHash || m.safePaymentTxHash) && (
