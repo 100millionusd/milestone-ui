@@ -13,6 +13,99 @@ import {
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
+// ---- Attachments helpers (images + pdfs) ----
+const PINATA_GATEWAY =
+  (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
+  'gateway.pinata.cloud';
+
+function resolveUrl(d: any): string | null {
+  const url = String(d?.url || d?.href || '').trim();
+  if (url) return url;
+  const cid = String(d?.cid || '').trim();
+  if (cid) return `https://${PINATA_GATEWAY}/ipfs/${cid}`;
+  if (typeof d === 'string' && d.startsWith('ipfs://')) {
+    const cidOnly = d.replace(/^ipfs:\/\//, '');
+    return `https://${PINATA_GATEWAY}/ipfs/${cidOnly}`;
+  }
+  if (typeof d === 'string' && /^https?:\/\//i.test(d)) return d;
+  return null;
+}
+
+function isImageUrl(u: string) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u);
+}
+function isPdfUrl(u: string) {
+  return /\.pdf(\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
+}
+
+function AttachmentGrid({
+  items,
+  onOpenLightbox,
+}: {
+  items: any[];
+  onOpenLightbox: (src: string) => void;
+}) {
+  const list = (Array.isArray(items) ? items : []).map((d) => {
+    const url = resolveUrl(d);
+    const name =
+      String(d?.name || d?.filename || d?.title || '').trim() ||
+      (url ? url.split('/').pop() || 'file' : 'file');
+    return { url, name };
+  }).filter(x => !!x.url) as { url: string; name: string }[];
+
+  if (list.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <h4 className="text-sm font-semibold text-slate-900 mb-2">Attachments</h4>
+      <div className="flex flex-wrap gap-3">
+        {list.map((f, i) => {
+          const img = isImageUrl(f.url);
+          const pdf = isPdfUrl(f.url);
+          if (img) {
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onOpenLightbox(f.url)}
+                className="group relative w-28 h-28 overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow"
+                title={f.name}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={f.url}
+                  alt={f.name}
+                  className="w-full h-full object-cover"
+                />
+                <span className="absolute inset-x-0 bottom-0 bg-black/50 text-[10px] text-white px-1 py-0.5 truncate">
+                  {f.name}
+                </span>
+              </button>
+            );
+          }
+          return (
+            <a
+              key={i}
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs"
+              title={f.name}
+            >
+              {pdf ? (
+                <span className="inline-block w-2 h-2 rounded-full bg-rose-600" />
+              ) : (
+                <span className="inline-block w-2 h-2 rounded-full bg-slate-400" />
+              )}
+              <span className="truncate max-w-[160px]">{f.name}</span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** =======================
  * Entities (proposers) types
  * ======================= */
@@ -316,6 +409,15 @@ useEffect(() => {
                       Submitted: {new Date(p.createdAt).toLocaleString()}
                     </p>
                   </div>
+
+                  {/* Attachments (from Proposal.docs) */}
+{Array.isArray(p.docs) && p.docs.length > 0 && (
+  <AttachmentGrid
+    items={p.docs}
+    onOpenLightbox={(src) => setLightbox(src)}
+  />
+)}
+
 
                   {/* ✅ Keep AI Chat Agent */}
                   <ProposalAgent proposal={p} />
