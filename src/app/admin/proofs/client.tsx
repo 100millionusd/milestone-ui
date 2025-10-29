@@ -175,10 +175,13 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.ai_analysis?.raw?.files ?? [])
       .concat(proofFiles); // ← add files from m.proof
 
-  const GW =
-    (process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-     process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-     "https://gateway.pinata.cloud/ipfs/").replace(/\/+$/, "") + "/";
+  // --- FIXED gateway (always ensures single /ipfs/ and trailing /) ---
+const baseGW = (
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  "https://gateway.pinata.cloud"
+).replace(/\/+$/, "");
+const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
 
   const toUrl = (x: any): { name: string; url: string } | null => {
     if (!x) return null;
@@ -1153,52 +1156,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       parsed = JSON.parse(m.proof);
     } catch {}
 
-    if (parsed && typeof parsed === 'object') {
-      return (
-        <div className="mt-2 space-y-2">
-          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
-          {parsed.files?.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {parsed.files.map((f: any, i: number) => {
-                const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(f?.name || f?.url || '');
-                if (isImage) {
-                  const imageUrls = parsed.files
-                    .filter((ff: any) => /\.(png|jpe?g|gif|webp|svg)$/i.test(ff?.name || ff?.url || ''))
-                    .map((ff: any) => ff.url);
-                  const startIndex = imageUrls.findIndex((u: string) => u === f.url);
-
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
-                      className="group relative overflow-hidden rounded border"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={f.url}
-                        alt={f.name || `Proof ${i}`}
-                        className="h-32 w-full object-cover group-hover:scale-105 transition"
-                      />
-                      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                        {f.name || 'Image'}
-                      </div>
-                    </button>
-                  );
-                }
-                return (
-                  <div key={i} className="p-3 rounded border bg-gray-50">
-                    <p className="truncate text-sm">{f?.name || 'Attachment'}</p>
-                    <a href={f?.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-                      Open
-                    </a>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      );
-    }
+ if (parsed && typeof parsed === 'object') {
+  return (
+    <div className="mt-2 space-y-2">
+      {parsed.description && (
+        <p className="text-sm text-gray-700">{parsed.description}</p>
+      )}
+      {/* Files are rendered below via <FilesStrip files={extractFiles(m)} /> */}
+    </div>
+  );
+}
 
     const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
