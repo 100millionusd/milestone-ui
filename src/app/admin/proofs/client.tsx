@@ -210,7 +210,7 @@ const GW = /\/ipfs$/i.test(baseGW) ? `${baseGW}/` : `${baseGW}/ipfs/`;
       (typeof x.cid === "string" ? x.cid : null);
 
     const url =
-      x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid) : null);
+  x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid).replace(/^ipfs\//i, "") : null);
 
     if (!url) return null;
     const safeName = name || String(url).split(/[?#]/)[0].split("/").pop() || "file";
