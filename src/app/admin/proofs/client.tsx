@@ -38,6 +38,9 @@ const BASE_GW = (
 ).replace(/\/+$/, "").replace(/(?:\/ipfs)+$/i, "");
 const GW = `${BASE_GW}/ipfs/`;
 
+// Debug state
+const DEBUG_FILES = typeof window !== 'undefined' && (localStorage.getItem('debug_files') === 'true' || process.env.NODE_ENV === 'development');
+
 function isImg(s?: string) {
   if (!s) return false;
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
@@ -86,10 +89,14 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | unde
   const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
   const name = file.name;
 
+  if (DEBUG_FILES) console.log('🔍 toGatewayUrl input:', { rawUrl, rawCid, name });
+
   // Only CID present
   if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
     const url = `${G}${String(rawCid).replace(/^ipfs\//i, "")}`;
-    return withFilename(url, name);
+    const result = withFilename(url, name);
+    if (DEBUG_FILES) console.log('🔍 CID only result:', result);
+    return result;
   }
   if (!rawUrl) return "";
 
@@ -99,7 +106,9 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | unde
   const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
   if (cidOnly) {
     const url = `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
-    return withFilename(url, name);
+    const result = withFilename(url, name);
+    if (DEBUG_FILES) console.log('🔍 Bare CID result:', result);
+    return result;
   }
 
   // ipfs://... or leading ipfs/... → normalize
@@ -113,22 +122,34 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | unde
   // Collapse duplicate /ipfs/ipfs/
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
   
-  return withFilename(u, name);
+  const result = withFilename(u, name);
+  if (DEBUG_FILES) console.log('🔍 Final URL result:', result);
+  return result;
 }
 
 // Updated FilesStrip component with horizontal scroll layout
 function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?: string; name?: string}>, onImageClick?: (imageUrls: string[], index: number) => void }) {
-  if (!files?.length) return null;
+  if (DEBUG_FILES) console.log('🔍 FilesStrip received files:', files);
+  
+  if (!files?.length) {
+    if (DEBUG_FILES) console.log('🔍 FilesStrip: No files to display');
+    return null;
+  }
   
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
         {files.map((f, i) => {
           const href = toGatewayUrl(f);
-          if (!href) return null;
+          if (!href) {
+            if (DEBUG_FILES) console.log('🔍 FilesStrip: No href for file:', f);
+            return null;
+          }
           
           const name = f.name || (href ? decodeURIComponent(href.split('/').pop() || '') : '') || 'file';
           const isImage = isImageFile(f, href);
+
+          if (DEBUG_FILES) console.log('🔍 FilesStrip processing file:', { index: i, file: f, href, name, isImage });
 
           if (isImage) {
             return (
@@ -141,6 +162,7 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
                       .map(file => toGatewayUrl(file))
                       .filter(url => url && isImageFile(file, url));
                     const startIndex = imageUrls.findIndex(url => url === href);
+                    if (DEBUG_FILES) console.log('🔍 Image clicked:', { href, imageUrls, startIndex });
                     onImageClick(imageUrls, Math.max(0, startIndex));
                   }
                 }}
@@ -151,6 +173,13 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
                   src={href} 
                   alt={name} 
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
+                  onError={(e) => {
+                    if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
+                    e.currentTarget.style.display = 'none';
+                  }}
+                  onLoad={(e) => {
+                    if (DEBUG_FILES) console.log('🔍 Image loaded successfully:', href);
+                  }}
                 />
                 <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-1 py-0.5 truncate text-center">
                   {name}
@@ -167,6 +196,9 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
                 target="_blank" 
                 rel="noopener noreferrer" 
                 className="text-blue-600 hover:underline"
+                onClick={(e) => {
+                  if (DEBUG_FILES) console.log('🔍 File link clicked:', { href, name });
+                }}
               >
                 Open
               </a>
@@ -180,7 +212,12 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
 
 // Improved extractFiles function to be more comprehensive
 function extractFiles(m: any): { name: string; url: string }[] {
-  if (!m) return [];
+  if (!m) {
+    if (DEBUG_FILES) console.log('🔍 extractFiles: No milestone data');
+    return [];
+  }
+
+  if (DEBUG_FILES) console.log('🔍 extractFiles: Processing milestone:', m);
 
   // Collect all possible file sources
   const candidates = [
@@ -198,18 +235,28 @@ function extractFiles(m: any): { name: string; url: string }[] {
     m?.ai_analysis?.raw?.files ?? [],
   ];
 
+  if (DEBUG_FILES) console.log('🔍 extractFiles: Raw candidates:', candidates);
+
   // Also try to parse proof JSON for files
+  let proofFiles: any[] = [];
   try {
     if (m?.proof && typeof m.proof === "string") {
       const parsed = JSON.parse(m.proof);
       if (parsed && Array.isArray(parsed.files)) {
-        candidates.push(parsed.files);
+        proofFiles = parsed.files;
+        if (DEBUG_FILES) console.log('🔍 extractFiles: Found proof files:', proofFiles);
       }
     }
-  } catch {}
+  } catch (e) {
+    if (DEBUG_FILES) console.log('🔍 extractFiles: Proof parsing failed:', e);
+  }
+
+  candidates.push(proofFiles);
 
   const flat = ([] as any[]).concat(...candidates);
   
+  if (DEBUG_FILES) console.log('🔍 extractFiles: Flattened files:', flat);
+
   const mapped = flat.map((item): { name: string; url: string } | null => {
     if (!item) return null;
 
@@ -218,7 +265,9 @@ function extractFiles(m: any): { name: string; url: string }[] {
       const url = toGatewayUrl({ url: item });
       if (!url) return null;
       const name = decodeURIComponent(url.split('/').pop() || 'file');
-      return { name, url };
+      const result = { name, url };
+      if (DEBUG_FILES) console.log('🔍 extractFiles: String item result:', result);
+      return result;
     }
 
     // Handle object items
@@ -235,11 +284,15 @@ function extractFiles(m: any): { name: string; url: string }[] {
         item.originalname ||
         decodeURIComponent(url.split('/').pop() || 'file');
       
-      return { name, url };
+      const result = { name, url };
+      if (DEBUG_FILES) console.log('🔍 extractFiles: Object item result:', result);
+      return result;
     }
 
     return null;
   }).filter(Boolean) as { name: string; url: string }[];
+
+  if (DEBUG_FILES) console.log('🔍 extractFiles: Mapped files:', mapped);
 
   // De-duplicate by URL
   const seen = new Set<string>();
@@ -252,6 +305,8 @@ function extractFiles(m: any): { name: string; url: string }[] {
       unique.push(file);
     }
   }
+
+  if (DEBUG_FILES) console.log('🔍 extractFiles: Final unique files:', unique);
 
   return unique;
 }
@@ -308,6 +363,30 @@ function saveSet(key: string, s: Set<string>) {
   } catch {}
 }
 
+// Debug panel component
+function DebugPanel({ data, title }: { data: any, title: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  if (!DEBUG_FILES) return null;
+
+  return (
+    <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 text-sm font-medium text-yellow-800"
+      >
+        <span>🐛 {title}</span>
+        <span>{isOpen ? '▲' : '▼'}</span>
+      </button>
+      {isOpen && (
+        <pre className="mt-2 text-xs text-yellow-700 overflow-auto max-h-60">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 // -----------------------------
 // Client component
 // -----------------------------
@@ -347,6 +426,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     bids: [],
     lastUpdated: 0,
   });
+
+  // Debug state
+  const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
 
   // Broadcast channel
   const bcRef = useRef<BroadcastChannel | null>(null);
@@ -606,6 +688,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
+
+      if (DEBUG_FILES) console.log('🔍 loadProofs: Raw bids data:', rows);
 
       // Clear local "pending" for milestones that are now paid (server truth)
       for (const bid of rows || []) {
@@ -1250,6 +1334,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   return (
     <div className="max-w-5xl mx-auto py-8">
+      {/* Debug Controls */}
+      {DEBUG_FILES && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-blue-800">🐛 Debug Mode Active</span>
+            <button
+              onClick={() => {
+                localStorage.removeItem('debug_files');
+                window.location.reload();
+              }}
+              className="px-2 py-1 text-xs bg-blue-600 text-white rounded"
+            >
+              Disable Debug
+            </button>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">
+            Check browser console for detailed file debugging information
+          </p>
+        </div>
+      )}
+
       {/* Header + Tabs */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold">Submitted Proofs (Admin)</h1>
@@ -1323,6 +1428,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                 </Link>
               </div>
 
+              <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
+
               <div className="space-y-4">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
@@ -1336,6 +1443,13 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   //  - there is a real Safe hash to track OR we have a localPending flag
                   const hasRealSafeHash = !!readSafeTxHash(m);
                   const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
+
+                  const extractedFiles = extractFiles(m);
+                  if (DEBUG_FILES) console.log('🔍 Milestone files debug:', {
+                    milestone: m,
+                    extractedFiles,
+                    key
+                  });
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -1361,12 +1475,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
 
+                          {/* Debug milestone data */}
+                          <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
+                          <DebugPanel data={extractedFiles} title={`Extracted Files: ${origIdx}`} />
+
 {/* Proof */}
 {renderProof(m)}
 
 {/* Files submitted with this proof */}
 <FilesStrip 
-  files={extractFiles(m)} 
+  files={extractedFiles} 
   onImageClick={(urls, index) => setLightbox({ urls, index })}
 />
 
