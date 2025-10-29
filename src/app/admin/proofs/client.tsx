@@ -1051,62 +1051,75 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   }, [bids, tab, query, archMap, pendingPay, paidOverride]);
 
   // ---------------- Proof renderer ----------------
-  const renderProof = (m: any) => {
-    if (!m?.proof) return null;
+  // ---- UI helpers ----
+const renderProof = (m: any) => {
+  if (!m?.proof) return null;
 
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse(m.proof);
-    } catch {}
+  const title = String(m?.name || '').trim();
 
+  // Try JSON first
+  try {
+    const parsed = JSON.parse(m.proof);
     if (parsed && typeof parsed === 'object') {
+      const desc = String(parsed.description || '').trim();
+      const showDesc = !!desc && desc !== title;
+
       return (
         <div className="mt-2 space-y-2">
-          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
-          {/* Files are rendered below via FilesStrip */}
+          {showDesc && (
+            <p className="text-sm text-gray-700">{desc}</p>
+          )}
+          {/* Files are rendered below via <FilesStrip files={extractFiles(m)} /> */}
         </div>
       );
     }
+  } catch {
+    // not JSON; fall through
+  }
 
-    const text = String(m.proof);
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
+  // Plain text proof
+  const text = String(m.proof).trim();
+  const showText = !!text && text !== title;
+  if (!showText) return null;
 
-    return (
-      <div className="mt-2 space-y-2">
-        <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>
-        {urls.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {urls.map((url, i) => {
-              const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
-              if (isImage) {
-                const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
-                const startIndex = imageUrls.findIndex((u) => u === url);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
-                    className="group relative overflow-hidden rounded border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
-                  </button>
-                );
-              }
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const urls = [...text.matchAll(urlRegex)].map((match) => match[0]);
+
+  return (
+    <div className="mt-2 space-y-2">
+      <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>
+      {urls.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+          {urls.map((url, i) => {
+            const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
+            if (isImage) {
+              const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
+              const startIndex = imageUrls.findIndex((u) => u === url);
               return (
-                <div key={i} className="p-3 rounded border bg-gray-50">
-                  <p className="truncate text-sm">Attachment</p>
-                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-                    Open
-                  </a>
-                </div>
+                <button
+                  key={i}
+                  onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
+                  className="group relative overflow-hidden rounded border"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                </button>
               );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  };
+            }
+            return (
+              <div key={i} className="p-3 rounded border bg-gray-50">
+                <p className="truncate text-sm">Attachment</p>
+                <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                  Open
+                </a>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
   // ---------------- Render ----------------
   if (loading) {
