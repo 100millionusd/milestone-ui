@@ -69,10 +69,18 @@ function isImage(x: any): boolean {
 
 // REPLACE your current extractFiles with this one
 function extractFiles(m: any): { name: string; url: string }[] {
-  // gather raw candidates from many possible places
+  // try to read files from m.proof JSON string
+  let proofFiles: any[] = [];
+  try {
+    if (m?.proof && typeof m.proof === 'string') {
+      const parsed = JSON.parse(m.proof);
+      if (parsed && Array.isArray(parsed.files)) proofFiles = parsed.files;
+    }
+  } catch {}
+
   const candidates =
-    (m?.files?.data ?? m?.files ?? []) // Prisma JSON({ data: [...] }) or plain array
-      .concat(m?.files_json ?? [])     // some APIs serialize to files_json
+    (m?.files?.data ?? m?.files ?? [])
+      .concat(m?.files_json ?? [])
       .concat(m?.vendorFiles ?? [])
       .concat(m?.submission?.files ?? [])
       .concat(m?.uploads ?? [])
@@ -82,17 +90,16 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.aiAnalysis?.files ?? [])
       .concat(m?.aiAnalysis?.raw?.files ?? [])
       .concat(m?.ai_analysis?.files ?? [])
-      .concat(m?.ai_analysis?.raw?.files ?? []);
+      .concat(m?.ai_analysis?.raw?.files ?? [])
+      .concat(proofFiles); // ← add files from m.proof
 
   const GW =
     (process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-      process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-      "https://gateway.pinata.cloud/ipfs/").replace(/\/+$/, "") + "/";
+     process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+     "https://gateway.pinata.cloud/ipfs/").replace(/\/+$/, "") + "/";
 
   const toUrl = (x: any): { name: string; url: string } | null => {
     if (!x) return null;
-
-    // string URL or ipfs://
     if (typeof x === "string") {
       const s = x.trim();
       if (/^https?:\/\//i.test(s)) {
@@ -103,47 +110,31 @@ function extractFiles(m: any): { name: string; url: string }[] {
         const cid = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
         return { name: cid, url: GW + cid };
       }
-      // bare CID
       if (/^[A-Za-z0-9]+$/i.test(s) && s.length > 30) {
         return { name: s, url: GW + s };
       }
       return null;
     }
 
-    // object with common fields
     const name =
-      x.name ||
-      x.fileName ||
-      x.filename ||
-      x.title ||
-      x.displayName ||
-      x.originalname ||
-      null;
+      x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
 
     const cid =
-      x.cid ||
-      x.ipfs ||
-      x.ipfsHash ||
-      x.CID ||
+      x.cid || x.ipfs || x.ipfsHash || x.CID ||
       (typeof x.hash === "string" ? x.hash : null) ||
       (typeof x.cid === "string" ? x.cid : null);
 
     const url =
-      x.url ||
-      x.gateway ||
-      x.previewUrl ||
-      (cid ? GW + String(cid) : null);
+      x.url || x.gateway || x.previewUrl || (cid ? GW + String(cid) : null);
 
     if (!url) return null;
     const safeName = name || String(url).split(/[?#]/)[0].split("/").pop() || "file";
     return { name: safeName, url: String(url) };
   };
 
-  // map + flatten arrays of arrays
   const flat = ([] as any[]).concat(...candidates.map((c: any) => (Array.isArray(c) ? c : [c])));
   const mapped = flat.map(toUrl).filter(Boolean) as { name: string; url: string }[];
 
-  // de-dup by URL
   const seen = new Set<string>();
   const unique: { name: string; url: string }[] = [];
   for (const f of mapped) {
