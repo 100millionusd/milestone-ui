@@ -24,7 +24,7 @@ const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
 
 /** Build the activity document we will display/download */
-export function buildActivityDoc(row: any) {
+function buildActivityDoc(row: any) {
   const meta = {
     id: pickActivityId(row),
     when: pickWhen(row),
@@ -51,7 +51,7 @@ function escapeHtml(s: string) {
 }
 
 /** Open pretty JSON in a new tab by writing HTML into a blank window (CSP-safe). Falls back to .json download. */
-export function openJsonInNewTab(title: string, doc: any) {
+function openJsonInNewTab(title: string, doc: any) {
   const pretty = JSON.stringify(doc ?? {}, null, 2);
   const html = `<!doctype html>
 <html><head>
@@ -70,7 +70,7 @@ export function openJsonInNewTab(title: string, doc: any) {
 </div>
 </body></html>`;
 
-  // Preferred: open blank tab and write HTML directly (no data:/blob: navigation)
+  // Open blank tab synchronously from the click
   const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
   if (w && w.document) {
     try {
@@ -1418,18 +1418,16 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-<td className="px-3 py-2 text-right">
-  <button
-    type="button"
-    onClick={() => openJsonInNewTab(
-      `Activity #${pickActivityId(row) ?? 'N/A'}`,
-      buildActivityDoc(row)
-    )}
-    className="inline-flex items-center rounded px-2 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-  >
-    Details
-  </button>
-</td>
+<button
+  type="button"
+  onClick={() => openJsonInNewTab(
+    `Activity ${pickActivityId(row) ?? ''}`,
+    buildActivityDoc(row)
+  )}
+  className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
+>
+  Details
+</button>
                     </tr>
                   ))}
                 </tbody>
