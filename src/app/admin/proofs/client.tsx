@@ -117,7 +117,7 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | unde
 }
 
 // Updated FilesStrip component with horizontal scroll layout
-function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
+function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?: string; name?: string}>, onImageClick?: (imageUrls: string[], index: number) => void }) {
   if (!files?.length) return null;
   
   return (
@@ -135,12 +135,14 @@ function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?
               <button
                 key={i}
                 onClick={() => {
-                  // Get all image URLs for lightbox
-                  const imageUrls = files
-                    .map(file => toGatewayUrl(file))
-                    .filter(url => url && isImageFile(file, url));
-                  const startIndex = imageUrls.findIndex(url => url === href);
-                  setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
+                  if (onImageClick) {
+                    // Get all image URLs for lightbox
+                    const imageUrls = files
+                      .map(file => toGatewayUrl(file))
+                      .filter(url => url && isImageFile(file, url));
+                    const startIndex = imageUrls.findIndex(url => url === href);
+                    onImageClick(imageUrls, Math.max(0, startIndex));
+                  }
                 }}
                 className="shrink-0 snap-start group relative overflow-hidden rounded border"
               >
@@ -1363,7 +1365,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 {renderProof(m)}
 
 {/* Files submitted with this proof */}
-<FilesStrip files={extractFiles(m)} />
+<FilesStrip 
+  files={extractFiles(m)} 
+  onImageClick={(urls, index) => setLightbox({ urls, index })}
+/>
 
 {/* Agent2 (summary + re-run) */}
 <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
