@@ -67,17 +67,26 @@ function isImage(x: any): boolean {
   return mt.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(name);
 }
 
-// accept multiple backend shapes: files[], doc, attachments[], proof_files[]
+// accept multiple backend shapes: files[], doc, attachments[], proof_files[], OR files inside m.proof JSON
 function extractFiles(m: any): any[] {
   const a: any[] = [];
   const push = (v: any)=> { if (v && (v.url || v.cid || v.name)) a.push(v); };
 
+  // 1) top-level shapes
   if (Array.isArray(m?.files)) m.files.forEach(push);
   if (Array.isArray(m?.attachments)) m.attachments.forEach(push);
   if (Array.isArray(m?.proof_files)) m.proof_files.forEach(push);
   if (Array.isArray(m?.proofFiles)) m.proofFiles.forEach(push);
   if (m?.doc) push(m.doc);
   if (m?.document) push(m.document);
+
+  // 2) proof JSON → { description, files }
+  try {
+    if (m?.proof) {
+      const pj = typeof m.proof === 'string' ? JSON.parse(m.proof) : m.proof;
+      if (pj && Array.isArray(pj.files)) pj.files.forEach(push);
+    }
+  } catch {}
 
   // de-dup by url/cid/name
   const seen = new Set<string>();
