@@ -3,6 +3,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
+// --- Helpers for Activity "Open" links ---
+const safeStringify = (o: any) => {
+  try { return JSON.stringify(o); } catch { return "{}"; }
+};
+
+const makePayloadQS = (row: any) =>
+  new URLSearchParams({
+    payload: safeStringify(row?.changes ?? {}),
+  }).toString();
+
 // --- open JSON payload in a new tab (Activity "View" link) ---
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (m) =>
