@@ -210,123 +210,129 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
   );
 }
 
-// Replace the extractFiles function with this improved version
+// Replace your current extractFiles with this version
 function extractFiles(m: any): { name: string; url: string }[] {
-  if (!m) {
-    if (DEBUG_FILES) console.log('🔍 extractFiles: No milestone data');
-    return [];
-  }
+  // 0) helper: turn any token into a gateway URL if possible
+  const toEntryFromToken = (token: string): { name: string; url: string } | null => {
+    const s = token.trim();
+    if (!s) return null;
 
-  if (DEBUG_FILES) console.log('🔍 extractFiles: Processing milestone:', m);
-
-  // Method 1: Standard file locations
-  const standardCandidates = [
-    m?.files?.data ?? m?.files ?? [],
-    m?.files_json ?? [],
-    m?.vendorFiles ?? [],
-    m?.submission?.files ?? [],
-    m?.uploads ?? [],
-    m?.input?.files ?? [],
-    m?.proofParsed?.files ?? [],
-    m?.parsed?.files ?? [],
-    m?.aiAnalysis?.files ?? [],
-    m?.aiAnalysis?.raw?.files ?? [],
-    m?.ai_analysis?.files ?? [],
-    m?.ai_analysis?.raw?.files ?? [],
-  ];
-
-  // Method 2: Proof field (JSON or text)
-  let proofFiles: any[] = [];
-  if (m?.proof) {
-    if (typeof m.proof === "string") {
-      try {
-        const parsed = JSON.parse(m.proof);
-
-  // Handle proof field - it might be JSON or plain text with URLs
-  let proofFiles: any[] = [];
-  if (m?.proof) {
-    if (typeof m.proof === "string") {
-      try {
-        // Try to parse as JSON first
-        const parsed = JSON.parse(m.proof);
-        if (parsed && Array.isArray(parsed.files)) {
-          proofFiles = parsed.files;
-          if (DEBUG_FILES) console.log('🔍 extractFiles: Found JSON proof files:', proofFiles);
-        }
-      } catch {
-        // If JSON parsing fails, treat as plain text and extract URLs
-        if (DEBUG_FILES) console.log('🔍 extractFiles: Proof is plain text, extracting URLs');
-        
-        // Extract URLs from plain text proof
-        const urlRegex = /(https?:\/\/[^\s]+|ipfs:\/\/[^\s]+|ipfs\/[^\s]+|[A-Za-z0-9]{46,})/g;
-        const urls = m.proof.match(urlRegex) || [];
-        
-        if (DEBUG_FILES) console.log('🔍 extractFiles: Extracted URLs from text:', urls);
-        
-        proofFiles = urls.map(url => ({ url }));
-      }
-    } else if (typeof m.proof === "object" && Array.isArray(m.proof.files)) {
-      proofFiles = m.proof.files;
+    // http(s)
+    if (/^https?:\/\//i.test(s)) {
+      const url = s;
+      const name = decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
+      return { name, url };
     }
-  }
-
-  candidates.push(proofFiles);
-
-  const flat = ([] as any[]).concat(...candidates);
-  
-  if (DEBUG_FILES) console.log('🔍 extractFiles: Flattened files:', flat);
-
-  const mapped = flat.map((item): { name: string; url: string } | null => {
-    if (!item) return null;
-
-    // Handle string items
-    if (typeof item === "string") {
-      const url = toGatewayUrl({ url: item });
-      if (!url) return null;
-      const name = decodeURIComponent(url.split('/').pop() || 'file');
-      const result = { name, url };
-      if (DEBUG_FILES) console.log('🔍 extractFiles: String item result:', result);
-      return result;
+    // ipfs://... or starting with ipfs/
+    if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
+      const cid = s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
+      const url = toGatewayUrl(cid);
+      const name = cid.split(/[?#]/)[0];
+      return { name, url };
     }
-
-    // Handle object items
-    if (typeof item === "object") {
-      const url = toGatewayUrl(item);
-      if (!url) return null;
-      
-      const name = 
-        item.name || 
-        item.fileName || 
-        item.filename || 
-        item.title || 
-        item.displayName || 
-        item.originalname ||
-        decodeURIComponent(url.split('/').pop() || 'file');
-      
-      const result = { name, url };
-      if (DEBUG_FILES) console.log('🔍 extractFiles: Object item result:', result);
-      return result;
+    // bare CID (CIDv0/v1 heuristic: 46+ base58/base32-ish)
+    if (/^[A-Za-z0-9]{46,}([/?#].*)?$/i.test(s)) {
+      const bare = s.split(/[/?#]/)[0];
+      const url = toGatewayUrl(bare);
+      return { name: bare, url };
     }
-
     return null;
-  }).filter(Boolean) as { name: string; url: string }[];
+  };
 
-  if (DEBUG_FILES) console.log('🔍 extractFiles: Mapped files:', mapped);
+  // 1) try JSON proof.files
+  let proofFiles: any[] = [];
+  if (m?.proof && typeof m.proof === 'string') {
+    try {
+      const parsed = JSON.parse(m.proof);
+      if (parsed && Array.isArray(parsed.files)) proofFiles = parsed.files;
+    } catch {
+      // not JSON → fall through to URL scraping
+    }
+  }
 
-  // De-duplicate by URL
+  // 2) gather all structured candidates from known shapes
+  const candidates =
+    (m?.files?.data ?? m?.files ?? [])
+      .concat(m?.files_json ?? [])
+      .concat(m?.vendorFiles ?? [])
+      .concat(m?.submission?.files ?? [])
+      .concat(m?.uploads ?? [])
+      .concat(m?.input?.files ?? [])
+      .concat(m?.proofParsed?.files ?? [])
+      .concat(m?.parsed?.files ?? [])
+      .concat(m?.aiAnalysis?.files ?? [])
+      .concat(m?.aiAnalysis?.raw?.files ?? [])
+      .concat(m?.ai_analysis?.files ?? [])
+      .concat(m?.ai_analysis?.raw?.files ?? [])
+      .concat(proofFiles);
+
+  // 3) if still empty, scrape links/CIDs from a text proof
+  if ((!candidates || candidates.length === 0) && typeof m?.proof === 'string') {
+    const text = m.proof;
+
+    // - http(s) URLs
+    const httpUrls = Array.from(text.matchAll(/https?:\/\/[^\s)'"<>]+/gi)).map((m) => m[0]);
+
+    // - ipfs://… and tokens that start with ipfs/
+    const ipfsTokens = Array.from(text.matchAll(/\b(?:ipfs:\/\/[^\s)'"<>]+|ipfs\/[A-Za-z0-9][^\s)'"<>]*)/gi)).map((m) => m[0]);
+
+    // - probable bare CIDs (avoid catching ordinary words; keep 46+ chars)
+    const bareCids = Array.from(text.matchAll(/\b[A-Za-z0-9]{46,}\b/g)).map((m) => m[0]);
+
+    const tokens = [...httpUrls, ...ipfsTokens, ...bareCids];
+
+    const scraped = tokens
+      .map(toEntryFromToken)
+      .filter(Boolean) as { name: string; url: string }[];
+
+    // de-dupe by URL without fragment
+    const seen = new Set<string>();
+    const uniqueScraped: { name: string; url: string }[] = [];
+    for (const f of scraped) {
+      const key = f.url.split('#')[0];
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueScraped.push(f);
+      }
+    }
+    if (uniqueScraped.length > 0) return uniqueScraped;
+  }
+
+  // 4) map structured candidates (strings or objects) → entries
+  const toEntry = (x: any): { name: string; url: string } | null => {
+    if (!x) return null;
+
+    if (typeof x === 'string') {
+      const e = toEntryFromToken(x);
+      return e;
+    }
+
+    const rawName =
+      x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
+
+    const rawUrl = typeof x.url === 'string' ? x.url : '';
+    const rawCid = typeof x.cid === 'string' ? x.cid : '';
+
+    const url = toGatewayUrl(rawUrl || rawCid);
+    if (!url) return null;
+
+    const name = rawName || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
+    return { name, url };
+  };
+
+  const flat = ([] as any[]).concat(...(candidates || []).map((c: any) => (Array.isArray(c) ? c : [c])));
+  const mapped = flat.map(toEntry).filter(Boolean) as { name: string; url: string }[];
+
+  // 5) de-dupe
   const seen = new Set<string>();
   const unique: { name: string; url: string }[] = [];
-  
-  for (const file of mapped) {
-    const key = file.url.split('#')[0];
+  for (const f of mapped) {
+    const key = f.url.split('#')[0];
     if (!seen.has(key)) {
       seen.add(key);
-      unique.push(file);
+      unique.push(f);
     }
   }
-
-  if (DEBUG_FILES) console.log('🔍 extractFiles: Final unique files:', unique);
-
   return unique;
 }
 
