@@ -67,35 +67,93 @@ function isImage(x: any): boolean {
   return mt.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(name);
 }
 
-// accept multiple backend shapes: files[], doc, attachments[], proof_files[], OR files inside m.proof JSON
-function extractFiles(m: any): any[] {
-  const a: any[] = [];
-  const push = (v: any)=> { if (v && (v.url || v.cid || v.name)) a.push(v); };
+// REPLACE your current extractFiles with this one
+function extractFiles(m: any): { name: string; url: string }[] {
+  // gather raw candidates from many possible places
+  const candidates =
+    (m?.files?.data ?? m?.files ?? []) // Prisma JSON({ data: [...] }) or plain array
+      .concat(m?.files_json ?? [])     // some APIs serialize to files_json
+      .concat(m?.vendorFiles ?? [])
+      .concat(m?.submission?.files ?? [])
+      .concat(m?.uploads ?? [])
+      .concat(m?.input?.files ?? [])
+      .concat(m?.proofParsed?.files ?? [])
+      .concat(m?.parsed?.files ?? [])
+      .concat(m?.aiAnalysis?.files ?? [])
+      .concat(m?.aiAnalysis?.raw?.files ?? [])
+      .concat(m?.ai_analysis?.files ?? [])
+      .concat(m?.ai_analysis?.raw?.files ?? []);
 
-  // 1) top-level shapes
-  if (Array.isArray(m?.files)) m.files.forEach(push);
-  if (Array.isArray(m?.attachments)) m.attachments.forEach(push);
-  if (Array.isArray(m?.proof_files)) m.proof_files.forEach(push);
-  if (Array.isArray(m?.proofFiles)) m.proofFiles.forEach(push);
-  if (m?.doc) push(m.doc);
-  if (m?.document) push(m.document);
+  const GW =
+    (process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+      process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+      "https://gateway.pinata.cloud/ipfs/").replace(/\/+$/, "") + "/";
 
-  // 2) proof JSON → { description, files }
-  try {
-    if (m?.proof) {
-      const pj = typeof m.proof === 'string' ? JSON.parse(m.proof) : m.proof;
-      if (pj && Array.isArray(pj.files)) pj.files.forEach(push);
+  const toUrl = (x: any): { name: string; url: string } | null => {
+    if (!x) return null;
+
+    // string URL or ipfs://
+    if (typeof x === "string") {
+      const s = x.trim();
+      if (/^https?:\/\//i.test(s)) {
+        const name = s.split(/[?#]/)[0].split("/").pop() || "file";
+        return { name, url: s };
+      }
+      if (/^ipfs:\/\//i.test(s)) {
+        const cid = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
+        return { name: cid, url: GW + cid };
+      }
+      // bare CID
+      if (/^[A-Za-z0-9]+$/i.test(s) && s.length > 30) {
+        return { name: s, url: GW + s };
+      }
+      return null;
     }
-  } catch {}
 
-  // de-dup by url/cid/name
+    // object with common fields
+    const name =
+      x.name ||
+      x.fileName ||
+      x.filename ||
+      x.title ||
+      x.displayName ||
+      x.originalname ||
+      null;
+
+    const cid =
+      x.cid ||
+      x.ipfs ||
+      x.ipfsHash ||
+      x.CID ||
+      (typeof x.hash === "string" ? x.hash : null) ||
+      (typeof x.cid === "string" ? x.cid : null);
+
+    const url =
+      x.url ||
+      x.gateway ||
+      x.previewUrl ||
+      (cid ? GW + String(cid) : null);
+
+    if (!url) return null;
+    const safeName = name || String(url).split(/[?#]/)[0].split("/").pop() || "file";
+    return { name: safeName, url: String(url) };
+  };
+
+  // map + flatten arrays of arrays
+  const flat = ([] as any[]).concat(...candidates.map((c: any) => (Array.isArray(c) ? c : [c])));
+  const mapped = flat.map(toUrl).filter(Boolean) as { name: string; url: string }[];
+
+  // de-dup by URL
   const seen = new Set<string>();
-  return a.filter(f => {
-    const key = `${fileUrlFrom(f)}|${f.cid || ""}|${fileNameFrom(f)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const unique: { name: string; url: string }[] = [];
+  for (const f of mapped) {
+    const key = f.url.split("#")[0];
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(f);
+    }
+  }
+  return unique;
 }
 
 // small UI block for files
