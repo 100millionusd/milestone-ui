@@ -3,6 +3,36 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
+// --- open JSON payload in a new tab (Activity "View" link) ---
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (m) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" } as any)[m]
+  );
+}
+function openJsonInNewTab(title: string, payload: any) {
+  const pretty = JSON.stringify(payload ?? {}, null, 2);
+  const html = `<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<title>${escapeHtml(title)}</title>
+<style>
+  html,body{margin:0;padding:16px;background:#0b0b0b;color:#e5e5e5;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+  pre{white-space:pre-wrap;word-break:break-word}
+  .wrap{max-width:1000px;margin:0 auto}
+  .h{color:#9CA3AF;margin-bottom:8px}
+</style>
+</head><body>
+<div class="wrap">
+  <div class="h">${escapeHtml(title)}</div>
+  <pre>${escapeHtml(pretty)}</pre>
+</div>
+</body></html>`;
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 // ------------------------------------------------------------
 // Admin Oversight — polished
 // - Pure React + Tailwind (no external UI packages)
@@ -1322,12 +1352,16 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-                      <Td>
-                        <details className="max-w-[520px] text-xs text-neutral-600 dark:text-neutral-300">
-                          <summary className="cursor-pointer select-none underline decoration-dotted">View</summary>
-                          <pre className="whitespace-pre-wrap break-words">{JSON.stringify(Object.values(r.changes)[0], null, 2)}</pre>
-                        </details>
-                      </Td>
+ <Td>
+  <a
+    href={`/admin/oversight/activity/${r.id}?${makePayloadQS(r)}`}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+  >
+    Open
+  </a>
+</Td>
                     </tr>
                   ))}
                 </tbody>
