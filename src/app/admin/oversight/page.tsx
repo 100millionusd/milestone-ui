@@ -3,15 +3,35 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
-// --- Helpers for Activity "Open" links ---
-const safeStringify = (o: any) => {
-  try { return JSON.stringify(o); } catch { return "{}"; }
-};
+// --- Activity helpers (open as data: URL, no server route needed) ---
+const pickActivityId = (row: any) =>
+  row?.id ??
+  row?.activityId ??
+  row?.activity_id ??
+  row?.logId ??
+  row?.log_id ??
+  row?.eventId ??
+  row?.event_id ??
+  null;
 
-const makePayloadQS = (row: any) =>
-  new URLSearchParams({
-    payload: safeStringify(row?.changes ?? {}),
-  }).toString();
+const makeActivityDataHref = (row: any) => {
+  const id = pickActivityId(row);
+  const meta = {
+    id,
+    when: row?.createdAt ?? row?.created_at ?? null,
+    actor: row?.actor ?? row?.wallet ?? row?.user ?? null,
+    type: row?.type ?? row?.action ?? row?.event ?? null,
+  };
+  const payload =
+    row?.changes ??
+    row?.payload ??
+    row?.details ??
+    row ??
+    {};
+
+  const pretty = JSON.stringify({ meta, payload }, null, 2);
+  return `data:application/json;charset=utf-8,${encodeURIComponent(pretty)}`;
+};
 
 // --- open JSON payload in a new tab (Activity "View" link) ---
 function escapeHtml(s: string) {
@@ -1362,14 +1382,16 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
- <Td>
+<Td>
   <a
-    href={`/admin/oversight/activity/${r.id}?${makePayloadQS(r)}`}
+    href={makeActivityDataHref(r)}
     target="_blank"
     rel="noopener noreferrer"
+    download={`activity-${pickActivityId(r) ?? 'unknown'}.json`}
     className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+    title="Open activity details (JSON) in a new tab"
   >
-    Open
+    Details
   </a>
 </Td>
                     </tr>
