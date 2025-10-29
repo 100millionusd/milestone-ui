@@ -856,18 +856,36 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   // ---- Helpers for milestone state ----
   function hasProof(m: any): boolean {
-    if (!m?.proof) return false;
+  const p = m?.proof;
+  if (!p) return false;
+
+  // JSON shape with description/files
+  if (typeof p === 'string') {
     try {
-      const p = JSON.parse(m.proof);
-      if (p && typeof p === 'object') {
-        if (typeof p.description === 'string' && p.description.trim()) return true;
-        if (Array.isArray(p.files) && p.files.length > 0) return true;
-      }
+      const j = JSON.parse(p);
+      const hasDesc = typeof j?.description === 'string' && j.description.trim().length > 0;
+      const hasFiles = Array.isArray(j?.files) && j.files.length > 0;
+      if (hasDesc || hasFiles) return true;
     } catch {
-      if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
+      // plain text → only count as proof if it has a URL or CID
+      const s = p.trim();
+      const hasHttp = /https?:\/\/[^\s)'"<>]+/i.test(s);
+      const hasIpfs = /\b(?:ipfs:\/\/[^\s)'"<>]+|ipfs\/[A-Za-z0-9][^\s)'"<>]*)/i.test(s);
+      const hasCid  = /\b[A-Za-z0-9]{46,}\b/.test(s); // rough CID heuristic
+      return hasHttp || hasIpfs || hasCid;
     }
     return false;
   }
+
+  // Non-string proof object
+  try {
+    const hasDesc = typeof p?.description === 'string' && p.description.trim().length > 0;
+    const hasFiles = Array.isArray(p?.files) && p.files.length > 0;
+    return hasDesc || hasFiles;
+  } catch {
+    return false;
+  }
+}
   function isCompleted(m: any): boolean {
     return m?.completed === true || m?.approved === true || String(m?.status ?? '').toLowerCase() === 'completed';
   }
