@@ -121,7 +121,7 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | stri
 }
 
 // ---------------- Files UI ----------------
-// Updated FilesStrip: no image names shown
+/// Fixed FilesStrip: clickable images + files, no image names
 function FilesStrip({
   files,
   onImageClick,
@@ -135,61 +135,60 @@ function FilesStrip({
     return null;
   }
 
+  // Precompute entries so we keep (file, href) pairs together
+  const entries = files
+    .map((file, idx) => {
+      const href = toGatewayUrl(file);
+      return { file, href, idx, isImage: href ? isImageFile(file, href) : false };
+    })
+    .filter(e => !!e.href);
+
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
-        {files.map((f, i) => {
-          const href = toGatewayUrl(f);
-          if (!href) {
-            if (DEBUG_FILES) console.log('🔍 FilesStrip: No href for file:', f);
-            return null;
-          }
-
-          const isImage = isImageFile(f, href);
-
+        {entries.map(({ file, href, isImage }, i) => {
           if (isImage) {
-            // Image: clickable (lightbox if provided), NO filename overlay
+            // Image tile: clickable (lightbox if provided; fallback opens new tab)
             return (
               <button
                 key={i}
+                type="button"
+                className="shrink-0 snap-start group relative overflow-hidden rounded border cursor-pointer"
                 onClick={() => {
                   if (onImageClick) {
-                    const imageUrls = files
-                      .map(file => toGatewayUrl(file))
-                      .filter(url => url && isImageFile(file, url));
-                    const startIndex = imageUrls.findIndex(url => url === href);
-                    if (DEBUG_FILES) console.log('🔍 Image clicked:', { href, imageUrls, startIndex });
+                    const imageEntries = entries.filter(e => e.isImage);
+                    const imageUrls = imageEntries.map(e => e.href!);
+                    const startIndex = imageEntries.findIndex(e => e.href === href);
+                    if (DEBUG_FILES) console.log('🔍 Image clicked:', { href, startIndex });
                     onImageClick(imageUrls, Math.max(0, startIndex));
                   } else {
-                    // Fallback: open in new tab if no lightbox handler
-                    window.open(href, '_blank', 'noopener,noreferrer');
+                    window.open(href!, '_blank', 'noopener,noreferrer');
                   }
                 }}
-                className="shrink-0 snap-start group relative overflow-hidden rounded border"
                 aria-label="Open image"
                 title=""
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={href}
-                  alt=""                 // no visible filename
+                  src={href!}
+                  alt=""
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
                   onError={(e) => {
                     if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
                     e.currentTarget.style.display = 'none';
                   }}
                   onLoad={() => {
-                    if (DEBUG_FILES) console.log('🔍 Image loaded successfully:', href);
+                    if (DEBUG_FILES) console.log('🔍 Image loaded:', href);
                   }}
                 />
-                {/* NOTE: filename overlay removed on purpose */}
+                {/* No filename overlay */}
               </button>
             );
           }
 
-          // Non-image: keep simple card with name + Open link
+          // Non-image: keep a simple card with name + Open link
           const name =
-            f.name ||
+            file.name ||
             (href ? decodeURIComponent(href.split('/').pop() || '') : '') ||
             'file';
 
@@ -202,10 +201,13 @@ function FilesStrip({
                 {name}
               </p>
               <a
-                href={href}
+                href={href!}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:underline"
+                onClick={() => {
+                  if (DEBUG_FILES) console.log('🔍 File link clicked:', { href, name });
+                }}
               >
                 Open
               </a>
