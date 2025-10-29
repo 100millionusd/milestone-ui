@@ -1,9 +1,14 @@
+src/app/admin/oversight/
+
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
-// --- Activity helpers: pick keys + open pretty JSON in a new tab (no data: nav) ---
+// === Activity helpers (IDs, title, links, doc) ===
+type ActivityDoc = { meta: any; payload: any };
+type ActivityLink = { label: string; href: string };
+
 const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
 
 const pickActivityId = (r: any) =>
@@ -23,7 +28,7 @@ const pickType = (r: any) =>
 const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
 
-function buildActivityDoc(row: any) {
+function buildActivityDoc(row: any): ActivityDoc {
   const meta = {
     id: pickActivityId(row),
     when: pickWhen(row),
@@ -31,6 +36,8 @@ function buildActivityDoc(row: any) {
     type: pickType(row),
     proposalId: _first(row?.proposalId, row?.proposal_id) ?? null,
     bidId: _first(row?.bidId, row?.bid_id) ?? null,
+    proofId: _first(row?.proofId, row?.proof_id) ?? null,
+    milestoneIndex: _first(row?.milestoneIndex, row?.milestone_index) ?? null,
     projectId: _first(row?.projectId, row?.project_id) ?? null,
   };
   const payload =
@@ -43,68 +50,33 @@ function buildActivityDoc(row: any) {
   return { meta, payload };
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (m) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" } as any)[m]
-  );
+/** Build in-app target links (admin pages) from available IDs */
+function buildActivityLinks(doc: ActivityDoc): ActivityLink[] {
+  const L: ActivityLink[] = [];
+  const pid = doc.meta?.proposalId ? Number(doc.meta.proposalId) : null;
+  const bid = doc.meta?.bidId ? Number(doc.meta.bidId) : null;
+  const prf = doc.meta?.proofId ? Number(doc.meta.proofId) : null;
+  const mi  = (doc.meta?.milestoneIndex ?? null);
+
+  if (pid) L.push({ label: `Open Proposal #${pid}`, href: `/admin/proposals/${pid}` });
+  if (bid) L.push({ label: `Open Bid #${bid}`, href: `/admin/bids/${bid}` });
+  if (typeof mi === 'number' && bid != null) {
+    L.push({ label: `Open Bid #${bid} · Milestone ${Number(mi) + 1}`, href: `/admin/bids/${bid}#milestone-${mi}` });
+  }
+  if (bid && prf) {
+    // If you add a proof detail route later, update this href:
+    L.push({ label: `View Proofs for Bid #${bid}`, href: `/admin/proofs?bidId=${bid}` });
+  }
+  if (L.length === 0) L.push({ label: 'Open Proposals', href: `/admin/proposals` });
+  return L;
 }
 
-/** Open pretty JSON in a new tab by writing HTML into a blank window (CSP-safe). Falls back to .json download. */
-function openJsonInNewTab(title: string, doc: any) {
-  // Synchronous open to satisfy popup blockers
-  const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
-
-  const pretty = JSON.stringify(doc ?? {}, null, 2);
-  const html = `<!doctype html>
-<html><head>
-<meta charset="utf-8"/>
-<title>${escapeHtml(title)}</title>
-<style>
-  html,body{margin:0;padding:16px;background:#0b0b0b;color:#e5e5e5;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
-  pre{white-space:pre-wrap;word-break:break-word}
-  .wrap{max-width:1000px;margin:0 auto}
-  .h{color:#9CA3AF;margin-bottom:8px}
-</style>
-</head><body>
-<div class="wrap">
-  <div class="h">${escapeHtml(title)}</div>
-  <pre>${escapeHtml(pretty)}</pre>
-</div>
-</body></html>`;
-
-  if (w && w.document) {
-    try {
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
-      return;
-    } catch {
-      // fall through to download
-    }
-  }
-
-  // Fallback: force a download as .json
-  try {
-    const jsonBlob = new Blob([pretty], { type: 'application/json' });
-    const url = URL.createObjectURL(jsonBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(title || 'activity').replace(/[^\w.-]+/g, '_')}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  } catch {
-    alert('Unable to open or download the activity details due to browser restrictions.');
-  }
-}
+const pretty = (obj: any) => {
+  try { return JSON.stringify(obj ?? {}, null, 2); } catch { return String(obj ?? ""); }
+};
 
 // ------------------------------------------------------------
-// Admin Oversight — polished
-// - Pure React + Tailwind (no external UI packages)
-// - Drop into app/admin/page.tsx or pages/admin.tsx
-// - Uses NEXT_PUBLIC_API_BASE_URL to call /admin/oversight (server) or /api/admin/oversight (Next API)
-// - Adds: auto-refresh, keyboard shortcuts, CSV export, sticky headers, a11y, sorting, toasts, persisted tab/query
+// Admin Oversight — polished (modal-based Details viewer)
 // ------------------------------------------------------------
 
 // —— Types that match your /api/admin/oversight payload ——
@@ -258,19 +230,28 @@ const changeLabel = (changes: Record<string, any>) => (Object.keys(changes)[0] |
 const copy = async (t: string, onDone?: () => void) => { try { await navigator.clipboard.writeText(t); onDone?.(); } catch { /* ignore */ } };
 
 function normalizePending(p: any) {
-  // allow number or object, accept many key names
-  const count =
-    (typeof p === "number" ? p : Number(p?.count)) || 0;
-
+  const count = (typeof p === "number" ? p : Number(p?.count)) || 0;
   const usd =
     Number(
       typeof p === "number"
         ? 0
         : p?.totalUSD ?? p?.usd ?? (p?.usdCents != null ? p.usdCents / 100 : 0)
     ) || 0;
-
   return { count, usd };
 }
+
+type ProofRow = {
+  id: number;
+  bid_id?: number | string | null;
+  milestone_index?: number | null;
+  vendor_name?: string | null;
+  wallet_address?: string | null;
+  title?: string | null;
+  status?: string | null;
+  submitted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 function normalizeProofs(rows: any[]): ProofRow[] {
   return (rows || []).map((r: any) => ({
@@ -288,6 +269,15 @@ function normalizeProofs(rows: any[]): ProofRow[] {
 }
 
 // ——— Normalizers for backend shape drift ———
+type ProposalRow = {
+  id: number;
+  title?: string;
+  status?: string;
+  owner_wallet?: string | null;
+  owner_email?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 function normalizeProposals(rows: any[]): ProposalRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.proposal_id ?? r?.proposalId),
@@ -300,6 +290,16 @@ function normalizeProposals(rows: any[]): ProposalRow[] {
   }));
 }
 
+type BidRow = {
+  id: number;
+  proposal_id?: number;
+  vendor_name?: string | null;
+  status?: string;
+  amount_usd?: number | string | null;
+  amount?: number | string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
@@ -407,7 +407,7 @@ function StatCard({ label, value, sub, tone = "neutral", icon }: { label: string
  <div className={cls("relative rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur p-4 ring-1", toneRing, toneGlow)}>
   <div className="flex items-center gap-3">
     {icon && <div className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 shrink-0">{icon}</div>}
-    <div className="flex-1 min-w-0"> {/* ← allow shrink so truncate works */}
+    <div className="flex-1 min-w-0">
       <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
       <div className="mt-0.5 font-semibold leading-tight">
         <div className="text-xl sm:text-2xl whitespace-nowrap truncate tabular-nums">{value}</div>
@@ -475,38 +475,59 @@ export default function AdminOversightPage() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // === Activity modal state (NEW) ===
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityTitle, setActivityTitle] = useState<string>("");
+  const [activityDoc, setActivityDoc] = useState<ActivityDoc | null>(null);
+  const [activityLinks, setActivityLinks] = useState<ActivityLink[]>([]);
+  function openActivity(row: any) {
+    const doc = buildActivityDoc(row);
+    const title =
+      (doc.meta?.type ? String(doc.meta.type) : "Activity") +
+      (doc.meta?.id ? ` #${doc.meta.id}` : "");
+    setActivityTitle(title);
+    setActivityDoc(doc);
+    setActivityLinks(buildActivityLinks(doc));
+    setActivityOpen(true);
+  }
+  function closeActivity() {
+    setActivityOpen(false);
+    setActivityDoc(null);
+    setActivityLinks([]);
+  }
+
   // ——— Proofs state & sorting ———
-const [proofs, setProofs] = useState<ProofRow[] | null>(null);
-const [proofsLoading, setProofsLoading] = useState(false);
-const [proofsError, setProofsError] = useState<string | null>(null);
-const [proofSort, setProofSort] = usePersistentState<{ key: keyof ProofRow; dir: "asc"|"desc" }>(
-  "oversight.proofs.sort",
-  { key: "submitted_at", dir: "desc" }
-);
+  const [proofs, setProofs] = useState<ProofRow[] | null>(null);
+  const [proofsLoading, setProofsLoading] = useState(false);
+  const [proofsError, setProofsError] = useState<string | null>(null);
+  const [proofSort, setProofSort] = usePersistentState<{ key: keyof ProofRow; dir: "asc"|"desc" }>(
+    "oversight.proofs.sort",
+    { key: "submitted_at", dir: "desc" }
+  );
 
   // ——— Proposals & Bids state ———
-const [proposals, setProposals] = useState<ProposalRow[] | null>(null);
-const [bids, setBids] = useState<BidRow[] | null>(null);
-const [pbLoading, setPbLoading] = useState(false);
-const [pbError, setPbError] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<ProposalRow[] | null>(null);
+  const [bids, setBids] = useState<BidRow[] | null>(null);
+  const [pbLoading, setPbLoading] = useState(false);
+  const [pbError, setPbError] = useState<string | null>(null);
 
-// Sorting prefs for new tabs
-const [proposalSort, setProposalSort] = usePersistentState<{ key: keyof ProposalRow; dir: "asc"|"desc" }>(
-  "oversight.proposals.sort",
-  { key: "created_at", dir: "desc" }
-);
-const [bidSort, setBidSort] = usePersistentState<{ key: keyof BidRow; dir: "asc"|"desc" }>(
-  "oversight.bids.sort",
-  { key: "created_at", dir: "desc" }
-);
+  // Sorting prefs for new tabs
+  const [proposalSort, setProposalSort] = usePersistentState<{ key: keyof ProposalRow; dir: "asc"|"desc" }>(
+    "oversight.proposals.sort",
+    { key: "created_at", dir: "desc" }
+  );
+  const [bidSort, setBidSort] = usePersistentState<{ key: keyof BidRow; dir: "asc"|"desc" }>(
+    "oversight.bids.sort",
+    { key: "created_at", dir: "desc" }
+  );
 
-// Numeric parser tolerant to "$1,234.56"
-const toNumber = (v: unknown) => {
-  if (v == null) return 0;
-  if (typeof v === "number") return v;
-  if (typeof v === "string") return Number(v.replace(/[^0-9.-]/g, "")) || 0;
-  return 0;
-};
+  // Numeric parser tolerant to "$1,234.56"
+  const toNumber = (v: unknown) => {
+    if (v == null) return 0;
+    if (typeof v === "number") return v;
+    if (typeof v === "string") return Number(v.replace(/[^0-9.-]/g, "")) || 0;
+    return 0;
+  };
 
   // sorting
   const [queueSort, setQueueSort] = usePersistentState<{ key: keyof Oversight["queue"][number]; dir: "asc"|"desc" }>("oversight.queue.sort", { key: "ageHours", dir: "desc" });
@@ -517,90 +538,86 @@ const toNumber = (v: unknown) => {
   const baseUrl = `${API_BASE}${PATH}`;
 
   // Always use same-origin proxy so we never hit CORS
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+  const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
 
   async function load(signal?: AbortSignal) {
-  try {
-    setError(null);
-    setLoading(true);
+    try {
+      setError(null);
+      setLoading(true);
 
-    // cache-buster so we ALWAYS get fresh data
-    const res = await fetch(`${baseUrl}?t=${Date.now()}`, {
-      cache: "no-store",
-      credentials: "include",
-      headers: { Accept: "application/json" },
-      signal,
-    });
+      // cache-buster so we ALWAYS get fresh data
+      const res = await fetch(`${baseUrl}?t=${Date.now()}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        signal,
+      });
 
-    if (!res.ok) {
-      // try to surface server error text if available
-      let msg = `HTTP ${res.status}`;
-      try {
-        const err = await res.text();
-        if (err) msg += ` — ${err.slice(0, 300)}`;
-      } catch {}
-      throw new Error(msg);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const err = await res.text();
+          if (err) msg += ` — ${err.slice(0, 300)}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const json = (await res.json()) as Oversight;
+      setData(json);
+      setLastUpdated(Date.now());
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setError(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
     }
-
-    const json = (await res.json()) as Oversight;
-    setData(json);
-    setLastUpdated(Date.now());
-  } catch (e: any) {
-    if (e?.name === "AbortError") return;
-    setError(e?.message || "Failed to load");
-  } finally {
-    setLoading(false);
   }
-}
 
   // initial load + abort on unmount
   useEffect(() => {
     const ctr = new AbortController();
     load(ctr.signal);
     return () => ctr.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Prefetch lists so tab counts are correct without clicking any tab
-// Prefetch lists so tab counts are correct without clicking any tab
-useEffect(() => {
-  if (!data) return; // wait for /admin/oversight to load once
-  let aborted = false;
+  useEffect(() => {
+    if (!data) return; // wait for /admin/oversight to load once
+    let aborted = false;
 
-  (async () => {
-    try {
-      // Proposals
-      if (proposals == null) {
-        const pRes = await fetch(`${api("/proposals")}?t=${Date.now()}`, {
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (!aborted && pRes.ok) {
-          const pj = await pRes.json();
-          setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+    (async () => {
+      try {
+        // Proposals
+        if (proposals == null) {
+          const pRes = await fetch(`${api("/proposals")}?t=${Date.now()}`, {
+            cache: "no-store",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          if (!aborted && pRes.ok) {
+            const pj = await pRes.json();
+            setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+          }
         }
-      }
 
-      // Bids
-      if (bids == null) {
-  const bj = await getBidsOnce();
-  if (!aborted) {
-    setBids(normalizeBids(bj));
-  }
-}
-      // (intentionally NO direct /proofs prefetch — backend rejects it without bidId)
-    } catch { /* ignore network errors here */ }
-  })();
+        // Bids
+        if (bids == null) {
+          const bj = await getBidsOnce();
+          if (!aborted) {
+            setBids(normalizeBids(bj));
+          }
+        }
+        // (intentionally NO direct /proofs prefetch — backend rejects it without bidId)
+      } catch { /* ignore network errors here */ }
+    })();
 
-  return () => { aborted = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [!!data]); // run once after first /admin/oversight load
+    return () => { aborted = true; };
+  }, [!!data]); // run once after first /admin/oversight load
 
   // auto refresh
   useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 30000 : null);
 
-  // keyboard shortcuts: "/" focus search, "r" refresh, "[" prev tab, "]" next tab
+  // keyboard shortcuts
   const searchRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -613,119 +630,116 @@ useEffect(() => {
     return () => window.removeEventListener("keydown", onKey);
   }, [tab]);
 
- // ——— Lazy load Proofs on demand ———
-// ——— Lazy load Proofs on demand ———
-useEffect(() => {
-  if (tab !== "proofs" || proofs !== null) return;
+  // Lazy load Proofs on demand
+  useEffect(() => {
+    if (tab !== "proofs" || proofs !== null) return;
 
-  let aborted = false;
-  (async () => {
-    try {
-      setProofsError(null);
-      setProofsLoading(true);
+    let aborted = false;
+    (async () => {
+      try {
+        setProofsError(null);
+        setProofsLoading(true);
 
-      // Always aggregate per-bid; do NOT call /proofs without bidId
-      let list: any[] = [];
+        let list: any[] = [];
 
-      // ensure we have bids
- let bidList = bids;
-if (!bidList) {
-  const bj = await getBidsOnce();
-  bidList = normalizeBids(bj);
-  setBids(bidList);
-}
-      const ids = (bidList || []).map(b => b.id).filter(Boolean);
-      const results: any[] = [];
+        // ensure we have bids
+        let bidList = bids;
+        if (!bidList) {
+          const bj = await getBidsOnce();
+          bidList = normalizeBids(bj);
+          setBids(bidList);
+        }
+        const ids = (bidList || []).map(b => b.id).filter(Boolean);
+        const results: any[] = [];
 
-      // modest concurrency to avoid hammering the API
-      const CONCURRENCY = 6;
-      let idx = 0;
-      async function runBatch() {
-        const batch = ids.slice(idx, idx + CONCURRENCY);
-        idx += CONCURRENCY;
-        const reqs = batch.map(id =>
-          fetch(`${api("/proofs")}?bidId=${id}&t=${Date.now()}`, {
-            cache: "no-store",
-            credentials: "include",
-            headers: { Accept: "application/json" },
-          })
-            .then(r => r.ok ? r.json() : null)
-            .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
-            .catch(() => [])
-        );
-        const chunks = await Promise.all(reqs);
-        chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
-        if (idx < ids.length) await runBatch();
-      }
-
-      if (ids.length) {
-        await runBatch();
-        list = results;
-      }
-
-      if (!aborted) setProofs(normalizeProofs(list));
-    } catch (e: any) {
-      if (!aborted) setProofsError(e?.message || "Failed to load proofs");
-    } finally {
-      if (!aborted) setProofsLoading(false);
-    }
-  })();
-
-  return () => { aborted = true; };
-}, [tab, proofs, bids]);
-  
- // ——— Lazy fetch for proposals/bids when tabs opened ———
-useEffect(() => {
-  const needProposals = tab === "proposals" && proposals == null;
-  const needBids = tab === "bids" && bids == null;
-  if (!needProposals && !needBids) return;
-
-  let aborted = false;
-  (async () => {
-    try {
-      setPbError(null);
-      setPbLoading(true);
-
-      const [pRes, bj] = await Promise.all([
-        needProposals
-          ? fetch(`${api("/proposals")}?t=${Date.now()}`, {
+        // modest concurrency
+        const CONCURRENCY = 6;
+        let idx = 0;
+        async function runBatch() {
+          const batch = ids.slice(idx, idx + CONCURRENCY);
+          idx += CONCURRENCY;
+          const reqs = batch.map(id =>
+            fetch(`${api("/proofs")}?bidId=${id}&t=${Date.now()}`, {
               cache: "no-store",
               credentials: "include",
+              headers: { Accept: "application/json" },
             })
-          : null,
-        needBids ? getBidsOnce() : null,
-      ]);
+              .then(r => r.ok ? r.json() : null)
+              .then(j => (Array.isArray(j) ? j : (j?.proofs ?? [])))
+              .catch(() => [])
+          );
+          const chunks = await Promise.all(reqs);
+          chunks.forEach(arr => { if (Array.isArray(arr)) results.push(...arr); });
+          if (idx < ids.length) await runBatch();
+        }
 
-      if (!aborted && pRes) {
-        const pj = await pRes.json();
-        setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+        if (ids.length) {
+          await runBatch();
+          list = results;
+        }
+
+        if (!aborted) setProofs(normalizeProofs(list));
+      } catch (e: any) {
+        if (!aborted) setProofsError(e?.message || "Failed to load proofs");
+      } finally {
+        if (!aborted) setProofsLoading(false);
       }
+    })();
 
-      if (!aborted && bj) {
-        setBids(normalizeBids(bj));
+    return () => { aborted = true; };
+  }, [tab, proofs, bids]);
+
+  // Lazy fetch for proposals/bids when tabs opened
+  useEffect(() => {
+    const needProposals = tab === "proposals" && proposals == null;
+    const needBids = tab === "bids" && bids == null;
+    if (!needProposals && !needBids) return;
+
+    let aborted = false;
+    (async () => {
+      try {
+        setPbError(null);
+        setPbLoading(true);
+
+        const [pRes, bj] = await Promise.all([
+          needProposals
+            ? fetch(`${api("/proposals")}?t=${Date.now()}`, {
+                cache: "no-store",
+                credentials: "include",
+              })
+            : null,
+          needBids ? getBidsOnce() : null,
+        ]);
+
+        if (!aborted && pRes) {
+          const pj = await pRes.json();
+          setProposals(normalizeProposals(pj?.proposals ?? pj ?? []));
+        }
+
+        if (!aborted && bj) {
+          setBids(normalizeBids(bj));
+        }
+      } catch (e: any) {
+        if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
+      } finally {
+        if (!aborted) setPbLoading(false);
       }
-    } catch (e: any) {
-      if (!aborted) setPbError(e?.message || "Failed to load proposals/bids");
-    } finally {
-      if (!aborted) setPbLoading(false);
-    }
-  })();
+    })();
 
-  return () => { aborted = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [tab]);
+    return () => { aborted = true; };
+  }, [tab]);
 
-const tabs = useMemo(() => [
-  { key: "overview", label: "Overview" },
-  { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
-  { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
-  { key: "proposals", label: "Proposals", count: proposals?.length ?? 0 },
-  { key: "bids", label: "Bids", count: bids?.length ?? 0 },              // ← added
-  { key: "proofs", label: "Proofs", count: proofs?.length ?? 0 },
-  { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
-  { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
-  { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
-], [data, proposals, bids, proofs]); // ← ensure bids & proposals in deps
+  const tabs = useMemo(() => [
+    { key: "overview", label: "Overview" },
+    { key: "queue", label: "Queue", count: data?.queue?.length ?? 0 },
+    { key: "vendors", label: "Vendors", count: data?.vendors?.length ?? 0 },
+    { key: "proposals", label: "Proposals", count: proposals?.length ?? 0 },
+    { key: "bids", label: "Bids", count: bids?.length ?? 0 },
+    { key: "proofs", label: "Proofs", count: proofs?.length ?? 0 },
+    { key: "alerts", label: "Alerts", count: data?.alerts?.length ?? 0 },
+    { key: "payouts", label: "Payouts", count: data?.payouts?.recent?.length ?? 0 },
+    { key: "activity", label: "Activity", count: data?.recent?.length ?? 0 },
+  ], [data, proposals, bids, proofs]);
 
   function stepTab(delta: number) {
     const idx = tabs.findIndex(t => t.key === tab);
@@ -794,108 +808,106 @@ const tabs = useMemo(() => [
   }, [filteredVendors, vendorSort]);
 
   // ——— PROPOSALS ———
-const filteredProposals = useMemo(() => {
-  const list = proposals ?? [];
-  if (!query) return list;
-  const q = query.toLowerCase();
-  return list.filter(p =>
-    String(p.id).includes(q) ||
-    (p.title ?? "").toLowerCase().includes(q) ||
-    (p.status ?? "").toLowerCase().includes(q) ||
-    (p.owner_wallet ?? "").toLowerCase().includes(q) ||
-    (p.owner_email ?? "").toLowerCase().includes(q)
-  );
-}, [proposals, query]);
+  const filteredProposals = useMemo(() => {
+    const list = proposals ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(p =>
+      String(p.id).includes(q) ||
+      (p.title ?? "").toLowerCase().includes(q) ||
+      (p.status ?? "").toLowerCase().includes(q) ||
+      (p.owner_wallet ?? "").toLowerCase().includes(q) ||
+      (p.owner_email ?? "").toLowerCase().includes(q)
+    );
+  }, [proposals, query]);
 
-const sortedProposals = useMemo(() => {
-  const arr = [...filteredProposals];
-  const k = proposalSort.key as keyof ProposalRow;
-  return arr.sort((a, b) => {
-    const av = (a as any)[k];
-    const bv = (b as any)[k];
-    const cmp =
-      k === "created_at" || k === "updated_at" || typeof av === "string"
-        ? String(av ?? "").localeCompare(String(bv ?? ""))
-        : (toNumber(av) - toNumber(bv));
-    return proposalSort.dir === "asc" ? cmp : -cmp;
-  });
-}, [filteredProposals, proposalSort]);
+  const sortedProposals = useMemo(() => {
+    const arr = [...filteredProposals];
+    const k = proposalSort.key as keyof ProposalRow;
+    return arr.sort((a, b) => {
+      const av = (a as any)[k];
+      const bv = (b as any)[k];
+      const cmp =
+        k === "created_at" || k === "updated_at" || typeof av === "string"
+          ? String(av ?? "").localeCompare(String(bv ?? ""))
+          : (toNumber(av) - toNumber(bv));
+      return proposalSort.dir === "asc" ? cmp : -cmp;
+    });
+  }, [filteredProposals, proposalSort]);
 
-// ——— BIDS ———
-const filteredBids = useMemo(() => {
-  const list = bids ?? [];
-  if (!query) return list;
-  const q = query.toLowerCase();
-  return list.filter(b =>
-    String(b.id).includes(q) ||
-    String(b.proposal_id ?? "").includes(q) ||
-    (b.vendor_name ?? "").toLowerCase().includes(q) ||
-    (b.status ?? "").toLowerCase().includes(q)
-  );
-}, [bids, query]);
+  // ——— BIDS ———
+  const filteredBids = useMemo(() => {
+    const list = bids ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(b =>
+      String(b.id).includes(q) ||
+      String(b.proposal_id ?? "").includes(q) ||
+      (b.vendor_name ?? "").toLowerCase().includes(q) ||
+      (b.status ?? "").toLowerCase().includes(q)
+    );
+  }, [bids, query]);
 
-const sortedBids = useMemo(() => {
-  const arr = [...filteredBids];
-  const k = bidSort.key as keyof BidRow;
-  return arr.sort((a, b) => {
-    const av = (a as any)[k];
-    const bv = (b as any)[k];
-    const cmp =
-      k === "amount" || k === "amount_usd"
-        ? (toNumber(av) - toNumber(bv))
-        : (typeof av === "string"
-            ? String(av ?? "").localeCompare(String(bv ?? ""))
-            : (toNumber(av) - toNumber(bv)));
-    return bidSort.dir === "asc" ? cmp : -cmp;
-  });
-}, [filteredBids, bidSort]);
+  const sortedBids = useMemo(() => {
+    const arr = [...filteredBids];
+    const k = bidSort.key as keyof BidRow;
+    return arr.sort((a, b) => {
+      const av = (a as any)[k];
+      const bv = (b as any)[k];
+      const cmp =
+        k === "amount" || k === "amount_usd"
+          ? (toNumber(av) - toNumber(bv))
+          : (typeof av === "string"
+              ? String(av ?? "").localeCompare(String(bv ?? ""))
+              : (toNumber(av) - toNumber(bv)));
+      return bidSort.dir === "asc" ? cmp : -cmp;
+    });
+  }, [filteredBids, bidSort]);
 
-// ——— PROOFS ———
-const filteredProofs = useMemo(() => {
-  const list = proofs ?? [];
-  if (!query) return list;
-  const q = query.toLowerCase();
-  return list.filter(p =>
-    String(p.id).includes(q) ||
-    String(p.bid_id ?? "").toLowerCase().includes(q) ||
-    String(p.milestone_index ?? "").toLowerCase().includes(q) ||
-    (p.vendor_name ?? "").toLowerCase().includes(q) ||
-    (p.title ?? "").toLowerCase().includes(q) ||
-    (p.status ?? "").toLowerCase().includes(q)
-  );
-}, [proofs, query]);
+  // ——— PROOFS ———
+  const filteredProofs = useMemo(() => {
+    const list = proofs ?? [];
+    if (!query) return list;
+    const q = query.toLowerCase();
+    return list.filter(p =>
+      String(p.id).includes(q) ||
+      String(p.bid_id ?? "").toLowerCase().includes(q) ||
+      String(p.milestone_index ?? "").toLowerCase().includes(q) ||
+      (p.vendor_name ?? "").toLowerCase().includes(q) ||
+      (p.title ?? "").toLowerCase().includes(q) ||
+      (p.status ?? "").toLowerCase().includes(q)
+    );
+  }, [proofs, query]);
 
-const sortedProofs = useMemo(() => {
-  const arr = [...filteredProofs];
-  const k = proofSort.key as keyof ProofRow;
-  return arr.sort((a, b) => {
-    const av: any = (a as any)[k];
-    const bv: any = (b as any)[k];
-    const cmp = (typeof av === "string" ? (av || "").localeCompare(bv || "") : (Number(av) - Number(bv)));
-    return proofSort.dir === "asc" ? cmp : -cmp;
-  });
-}, [filteredProofs, proofSort]);
+  const sortedProofs = useMemo(() => {
+    const arr = [...filteredProofs];
+    const k = proofSort.key as keyof ProofRow;
+    return arr.sort((a, b) => {
+      const av: any = (a as any)[k];
+      const bv: any = (b as any)[k];
+      const cmp = (typeof av === "string" ? (av || "").localeCompare(bv || "") : (Number(av) - Number(bv)));
+      return proofSort.dir === "asc" ? cmp : -cmp;
+    });
+  }, [filteredProofs, proofSort]);
 
   const tiles = data?.tiles;
   const pending = useMemo(() => {
-  // normalize the summary shape first
-  const fromTiles = normalizePending(tiles?.pendingPayouts);
-  if (fromTiles.count || fromTiles.usd) return fromTiles;
+    const fromTiles = normalizePending(tiles?.pendingPayouts);
+    if (fromTiles.count || fromTiles.usd) return fromTiles;
 
-  // fallback: compute from the pending payouts list
-  const list = data?.payouts?.pending || [];
-  const count = Array.isArray(list) ? list.length : 0;
-  const usd = (Array.isArray(list) ? list : []).reduce((sum, p: any) => {
-    const v =
-  p?.amount_usd ??
-  p?.amountUsd ??
-  p?.usd ??
-  ((p?.usdCents != null) ? p.usdCents / 100 : 0);
-    const n = typeof v === "string" ? Number(v.replace(/[^0-9.]/g, "")) : Number(v);
-    return sum + (Number.isFinite(n) ? n : 0);
-  }, 0);
-  return { count, usd };
-}, [tiles?.pendingPayouts, data?.payouts?.pending]);
+    const list = data?.payouts?.pending || [];
+    const count = Array.isArray(list) ? list.length : 0;
+    const usd = (Array.isArray(list) ? list : []).reduce((sum, p: any) => {
+      const v =
+        p?.amount_usd ??
+        p?.amountUsd ??
+        p?.usd ??
+        ((p?.usdCents != null) ? p.usdCents / 100 : 0);
+      const n = typeof v === "string" ? Number(v.replace(/[^0-9.]/g, "")) : Number(v);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    return { count, usd };
+  }, [tiles?.pendingPayouts, data?.payouts?.pending]);
 
   function toggleSort<T extends { key: any; dir: "asc"|"desc" }>(state: T, set: (v: T) => void, key: any) {
     if (state.key === key) set({ ...state, dir: state.dir === "asc" ? "desc" : "asc" });
@@ -980,48 +992,48 @@ const sortedProofs = useMemo(() => {
 
             {/* Overview split: Queue & Vendors quick views */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="xl:col-span-3">
-              <Card title={`Queue (${data?.queue?.length ?? 0})`} subtitle="Oldest first">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-                      <tr>
-                        <Th onClick={() => toggleSort(queueSort, setQueueSort, "id")} sorted={queueSort.key === "id"} dir={queueSort.dir}>ID</Th>
-                        <Th onClick={() => toggleSort(queueSort, setQueueSort, "vendor")} sorted={queueSort.key === "vendor"} dir={queueSort.dir}>Vendor</Th>
-                        <Th onClick={() => toggleSort(queueSort, setQueueSort, "project")} sorted={queueSort.key === "project"} dir={queueSort.dir}>Project</Th>
-                        <Th onClick={() => toggleSort(queueSort, setQueueSort, "milestone")} sorted={queueSort.key === "milestone"} dir={queueSort.dir}>Milestone</Th>
-                        <Th className="text-right" onClick={() => toggleSort(queueSort, setQueueSort, "ageHours")} sorted={queueSort.key === "ageHours"} dir={queueSort.dir}>Age (h)</Th>
-                        <Th>Status</Th><Th>Risk</Th><Th>Bid</Th><Th>Proposal</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loading && <RowPlaceholder cols={9} />}
-                      {!loading && (sortedQueue?.length ?? 0) === 0 && (
-                        <tr><td className="p-6 text-center text-neutral-500" colSpan={9}>Nothing in the queue</td></tr>
-                      )}
-                      {sortedQueue?.slice(0, 8).map((q) => (
-                        <tr key={q.id} className={cls("border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40", q.risk === "sla" && "outline outline-1 -outline-offset-0 outline-rose-300/40")}> 
-                          <Td>{q.id}</Td>
-                          <Td className="max-w-[220px] truncate" title={q.vendor}>{q.vendor}</Td>
-                          <Td>{q.project}</Td>
-                          <Td>{q.milestone}</Td>
-                          <Td className="text-right tabular-nums">{q.ageHours.toFixed(1)}</Td>
-                          <Td><Badge tone={q.status === "pending" ? "warning" : "neutral"}>{q.status}</Badge></Td>
-                          <Td><Badge tone={q.risk === "sla" ? "danger" : q.risk ? "warning" : "neutral"}>{q.risk || "—"}</Badge></Td>
-                          <Td>
-                            {q.actions?.bidId ? (
-                              <button onClick={() => copy(String(q.actions!.bidId), () => setToast("Bid ID copied"))} className="inline-flex items-center gap-1 text-xs underline decoration-dotted hover:opacity-80">
-                                {q.actions.bidId} <Icon.Copy className="h-3.5 w-3.5"/>
-                              </button>
-                            ) : "—"}
-                          </Td>
-                          <Td>{q.actions?.proposalId ?? "—"}</Td>
+              <div className="xl:col-span-3">
+                <Card title={`Queue (${data?.queue?.length ?? 0})`} subtitle="Oldest first">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                        <tr>
+                          <Th onClick={() => toggleSort(queueSort, setQueueSort, "id")} sorted={queueSort.key === "id"} dir={queueSort.dir}>ID</Th>
+                          <Th onClick={() => toggleSort(queueSort, setQueueSort, "vendor")} sorted={queueSort.key === "vendor"} dir={queueSort.dir}>Vendor</Th>
+                          <Th onClick={() => toggleSort(queueSort, setQueueSort, "project")} sorted={queueSort.key === "project"} dir={queueSort.dir}>Project</Th>
+                          <Th onClick={() => toggleSort(queueSort, setQueueSort, "milestone")} sorted={queueSort.key === "milestone"} dir={queueSort.dir}>Milestone</Th>
+                          <Th className="text-right" onClick={() => toggleSort(queueSort, setQueueSort, "ageHours")} sorted={queueSort.key === "ageHours"} dir={queueSort.dir}>Age (h)</Th>
+                          <Th>Status</Th><Th>Risk</Th><Th>Bid</Th><Th>Proposal</Th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
+                      </thead>
+                      <tbody>
+                        {loading && <RowPlaceholder cols={9} />}
+                        {!loading && (sortedQueue?.length ?? 0) === 0 && (
+                          <tr><td className="p-6 text-center text-neutral-500" colSpan={9}>Nothing in the queue</td></tr>
+                        )}
+                        {sortedQueue?.slice(0, 8).map((q) => (
+                          <tr key={q.id} className={cls("border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40", q.risk === "sla" && "outline outline-1 -outline-offset-0 outline-rose-300/40")}> 
+                            <Td>{q.id}</Td>
+                            <Td className="max-w-[220px] truncate" title={q.vendor}>{q.vendor}</Td>
+                            <Td>{q.project}</Td>
+                            <Td>{q.milestone}</Td>
+                            <Td className="text-right tabular-nums">{q.ageHours.toFixed(1)}</Td>
+                            <Td><Badge tone={q.status === "pending" ? "warning" : "neutral"}>{q.status}</Badge></Td>
+                            <Td><Badge tone={q.risk === "sla" ? "danger" : q.risk ? "warning" : "neutral"}>{q.risk || "—"}</Badge></Td>
+                            <Td>
+                              {q.actions?.bidId ? (
+                                <button onClick={() => copy(String(q.actions!.bidId), () => setToast("Bid ID copied"))} className="inline-flex items-center gap-1 text-xs underline decoration-dotted hover:opacity-80">
+                                  {q.actions.bidId} <Icon.Copy className="h-3.5 w-3.5"/>
+                                </button>
+                              ) : "—"}
+                            </Td>
+                            <Td>{q.actions?.proposalId ?? "—"}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
               </div>
 
               <div className="xl:col-span-3">
@@ -1153,181 +1165,181 @@ const sortedProofs = useMemo(() => {
         )}
 
         {tab === "proposals" && (
-  <Card
-    title={`Proposals (${proposals?.length ?? 0})`}
-    subtitle="Newest first (click headers to sort)"
-    right={
-      <>
-        <input
-          ref={searchRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter proposals…"
-          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
-        />
-        <button
-          onClick={() => sortedProposals && downloadCSV(`proposals-${new Date().toISOString().slice(0,10)}.csv`, sortedProposals)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-        >
-          <Icon.Download className="h-4 w-4" /> CSV
-        </button>
-      </>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-          <tr>
-            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "id")} sorted={proposalSort.key==="id"} dir={proposalSort.dir}>ID</Th>
-            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "title")} sorted={proposalSort.key==="title"} dir={proposalSort.dir}>Title</Th>
-            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "status")} sorted={proposalSort.key==="status"} dir={proposalSort.dir}>Status</Th>
-            <Th>Owner</Th>
-            <Th onClick={() => toggleSort(proposalSort, setProposalSort, "created_at")} sorted={proposalSort.key==="created_at"} dir={proposalSort.dir}>Created</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {(loading || pbLoading) && <RowPlaceholder cols={5} />}
-          {pbError && (
-            <tr><td colSpan={5} className="p-4 text-rose-600">{pbError}</td></tr>
-          )}
-          {!pbLoading && (sortedProposals.length === 0) && (
-            <tr><td colSpan={5} className="p-6 text-center text-neutral-500">No proposals</td></tr>
-          )}
-          {sortedProposals.map(p => (
-            <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-              <Td>#{p.id}</Td>
-              <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
-              <Td><Badge tone={p.status === "approved" ? "success" : p.status === "pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
-              <Td className="font-mono text-xs">{shortAddr(p.owner_wallet ?? "") || (p.owner_email ?? "—")}</Td>
-              <Td>{p.created_at ? humanTime(p.created_at) : "—"}</Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </Card>
-)}
+          <Card
+            title={`Proposals (${proposals?.length ?? 0})`}
+            subtitle="Newest first (click headers to sort)"
+            right={
+              <>
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter proposals…"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+                />
+                <button
+                  onClick={() => sortedProposals && downloadCSV(`proposals-${new Date().toISOString().slice(0,10)}.csv`, sortedProposals)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                >
+                  <Icon.Download className="h-4 w-4" /> CSV
+                </button>
+              </>
+            }
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                  <tr>
+                    <Th onClick={() => toggleSort(proposalSort, setProposalSort, "id")} sorted={proposalSort.key==="id"} dir={proposalSort.dir}>ID</Th>
+                    <Th onClick={() => toggleSort(proposalSort, setProposalSort, "title")} sorted={proposalSort.key==="title"} dir={proposalSort.dir}>Title</Th>
+                    <Th onClick={() => toggleSort(proposalSort, setProposalSort, "status")} sorted={proposalSort.key==="status"} dir={proposalSort.dir}>Status</Th>
+                    <Th>Owner</Th>
+                    <Th onClick={() => toggleSort(proposalSort, setProposalSort, "created_at")} sorted={proposalSort.key==="created_at"} dir={proposalSort.dir}>Created</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(loading || pbLoading) && <RowPlaceholder cols={5} />}
+                  {pbError && (
+                    <tr><td colSpan={5} className="p-4 text-rose-600">{pbError}</td></tr>
+                  )}
+                  {!pbLoading && (sortedProposals.length === 0) && (
+                    <tr><td colSpan={5} className="p-6 text-center text-neutral-500">No proposals</td></tr>
+                  )}
+                  {sortedProposals.map(p => (
+                    <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+                      <Td>#{p.id}</Td>
+                      <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
+                      <Td><Badge tone={p.status === "approved" ? "success" : p.status === "pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
+                      <Td className="font-mono text-xs">{shortAddr(p.owner_wallet ?? "") || (p.owner_email ?? "—")}</Td>
+                      <Td>{p.created_at ? humanTime(p.created_at) : "—"}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
-{tab === "bids" && (
-  <Card
-    title={`Bids (${bids?.length ?? 0})`}
-    subtitle="Newest first (click headers to sort)"
-    right={
-      <>
-        <input
-          ref={searchRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter bids…"
-          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
-        />
-        <button
-          onClick={() => sortedBids && downloadCSV(`bids-${new Date().toISOString().slice(0,10)}.csv`, sortedBids)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-        >
-          <Icon.Download className="h-4 w-4" /> CSV
-        </button>
-      </>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-          <tr>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "id")} sorted={bidSort.key==="id"} dir={bidSort.dir}>ID</Th>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "proposal_id")} sorted={bidSort.key==="proposal_id"} dir={bidSort.dir}>Proposal</Th>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "vendor_name")} sorted={bidSort.key==="vendor_name"} dir={bidSort.dir}>Vendor</Th>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "status")} sorted={bidSort.key==="status"} dir={bidSort.dir}>Status</Th>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "amount_usd")} sorted={bidSort.key==="amount_usd"} dir={bidSort.dir}>USD</Th>
-            <Th onClick={() => toggleSort(bidSort, setBidSort, "created_at")} sorted={bidSort.key==="created_at"} dir={bidSort.dir}>Created</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {(loading || pbLoading) && <RowPlaceholder cols={6} />}
-          {pbError && (
-            <tr><td colSpan={6} className="p-4 text-rose-600">{pbError}</td></tr>
-          )}
-          {!pbLoading && (sortedBids.length === 0) && (
-            <tr><td colSpan={6} className="p-6 text-center text-neutral-500">No bids</td></tr>
-          )}
-          {sortedBids.map(b => {
-            const amt = toNumber(b.amount_usd ?? b.amount);
-            return (
-              <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                <Td>#{b.id}</Td>
-                <Td>#{b.proposal_id ?? "—"}</Td>
-                <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td>
-                <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
-                <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
-                <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  </Card>
-)}
+        {tab === "bids" && (
+          <Card
+            title={`Bids (${bids?.length ?? 0})`}
+            subtitle="Newest first (click headers to sort)"
+            right={
+              <>
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter bids…"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+                />
+                <button
+                  onClick={() => sortedBids && downloadCSV(`bids-${new Date().toISOString().slice(0,10)}.csv`, sortedBids)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                >
+                  <Icon.Download className="h-4 w-4" /> CSV
+                </button>
+              </>
+            }
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                  <tr>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "id")} sorted={bidSort.key==="id"} dir={bidSort.dir}>ID</Th>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "proposal_id")} sorted={bidSort.key==="proposal_id"} dir={bidSort.dir}>Proposal</Th>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "vendor_name")} sorted={bidSort.key==="vendor_name"} dir={bidSort.dir}>Vendor</Th>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "status")} sorted={bidSort.key==="status"} dir={bidSort.dir}>Status</Th>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "amount_usd")} sorted={bidSort.key==="amount_usd"} dir={bidSort.dir}>USD</Th>
+                    <Th onClick={() => toggleSort(bidSort, setBidSort, "created_at")} sorted={bidSort.key==="created_at"} dir={bidSort.dir}>Created</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(loading || pbLoading) && <RowPlaceholder cols={6} />}
+                  {pbError && (
+                    <tr><td colSpan={6} className="p-4 text-rose-600">{pbError}</td></tr>
+                  )}
+                  {!pbLoading && (sortedBids.length === 0) && (
+                    <tr><td colSpan={6} className="p-6 text-center text-neutral-500">No bids</td></tr>
+                  )}
+                  {sortedBids.map(b => {
+                    const amt = toNumber(b.amount_usd ?? b.amount);
+                    return (
+                      <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+                        <Td>#{b.id}</Td>
+                        <Td>#{b.proposal_id ?? "—"}</Td>
+                        <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td>
+                        <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
+                        <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
+                        <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
-{tab === "proofs" && (
-  <Card
-    title={`Proofs (${sortedProofs.length})`}
-    subtitle="Newest first (click headers to sort)"
-    right={
-      <>
-        <input
-          ref={searchRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter proofs…"
-          className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
-        />
-        <button
-          onClick={() => sortedProofs && downloadCSV(`proofs-${new Date().toISOString().slice(0,10)}.csv`, sortedProofs)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-        >
-          <Icon.Download className="h-4 w-4" /> CSV
-        </button>
-      </>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-          <tr>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "id")} sorted={proofSort.key==="id"} dir={proofSort.dir}>ID</Th>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "bid_id")} sorted={proofSort.key==="bid_id"} dir={proofSort.dir}>Bid</Th>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "milestone_index")} sorted={proofSort.key==="milestone_index"} dir={proofSort.dir}>Milestone</Th>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "vendor_name")} sorted={proofSort.key==="vendor_name"} dir={proofSort.dir}>Vendor</Th>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "status")} sorted={proofSort.key==="status"} dir={proofSort.dir}>Status</Th>
-            <Th onClick={() => toggleSort(proofSort, setProofSort, "submitted_at")} sorted={proofSort.key==="submitted_at"} dir={proofSort.dir}>Submitted</Th>
-            <Th>Title</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {(loading || proofsLoading) && <RowPlaceholder cols={7} />}
-          {proofsError && (
-            <tr><td colSpan={7} className="p-4 text-rose-600">{proofsError}</td></tr>
-          )}
-          {!proofsLoading && sortedProofs.length === 0 && (
-            <tr><td className="p-6 text-center text-neutral-500" colSpan={7}>No proofs</td></tr>
-          )}
-          {sortedProofs.map((p) => (
-            <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-              <Td>#{p.id}</Td>
-              <Td>{p.bid_id ?? "—"}</Td>
-              <Td>{p.milestone_index ?? "—"}</Td>
-              <Td className="max-w-[240px] truncate" title={p.vendor_name || ""}>{p.vendor_name ?? "—"}</Td>
-              <Td><Badge tone={p.status==="approved" ? "success" : p.status==="pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
-              <Td>{p.submitted_at ? humanTime(p.submitted_at) : (p.created_at ? humanTime(p.created_at) : "—")}</Td>
-              <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </Card>
-)}
+        {tab === "proofs" && (
+          <Card
+            title={`Proofs (${sortedProofs.length})`}
+            subtitle="Newest first (click headers to sort)"
+            right={
+              <>
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter proofs…"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
+                />
+                <button
+                  onClick={() => sortedProofs && downloadCSV(`proofs-${new Date().toISOString().slice(0,10)}.csv`, sortedProofs)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                >
+                  <Icon.Download className="h-4 w-4" /> CSV
+                </button>
+              </>
+            }
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+                  <tr>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "id")} sorted={proofSort.key==="id"} dir={proofSort.dir}>ID</Th>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "bid_id")} sorted={proofSort.key==="bid_id"} dir={proofSort.dir}>Bid</Th>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "milestone_index")} sorted={proofSort.key==="milestone_index"} dir={proofSort.dir}>Milestone</Th>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "vendor_name")} sorted={proofSort.key==="vendor_name"} dir={proofSort.dir}>Vendor</Th>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "status")} sorted={proofSort.key==="status"} dir={proofSort.dir}>Status</Th>
+                    <Th onClick={() => toggleSort(proofSort, setProofSort, "submitted_at")} sorted={proofSort.key==="submitted_at"} dir={proofSort.dir}>Submitted</Th>
+                    <Th>Title</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(loading || proofsLoading) && <RowPlaceholder cols={7} />}
+                  {proofsError && (
+                    <tr><td colSpan={7} className="p-4 text-rose-600">{proofsError}</td></tr>
+                  )}
+                  {!proofsLoading && sortedProofs.length === 0 && (
+                    <tr><td className="p-6 text-center text-neutral-500" colSpan={7}>No proofs</td></tr>
+                  )}
+                  {sortedProofs.map((p) => (
+                    <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+                      <Td>#{p.id}</Td>
+                      <Td>{p.bid_id ?? "—"}</Td>
+                      <Td>{p.milestone_index ?? "—"}</Td>
+                      <Td className="max-w-[240px] truncate" title={p.vendor_name || ""}>{p.vendor_name ?? "—"}</Td>
+                      <Td><Badge tone={p.status==="approved" ? "success" : p.status==="pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
+                      <Td>{p.submitted_at ? humanTime(p.submitted_at) : (p.created_at ? humanTime(p.created_at) : "—")}</Td>
+                      <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         {tab === "alerts" && (
           <Card title={`Alerts (${filteredAlerts.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter alerts…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2"/>} subtitle="Newest first">
@@ -1418,20 +1430,15 @@ const sortedProofs = useMemo(() => {
                       </Td>
                       <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-<Td>
-  <button
-    type="button"
-    onClick={() =>
-      openJsonInNewTab(
-        `Activity ${pickActivityId(r) ?? ''}`,
-        buildActivityDoc(r)
-      )
-    }
-    className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
-  >
-    Details
-  </button>
-</Td>
+                      <Td>
+                        <button
+                          type="button"
+                          onClick={() => openActivity(r)}
+                          className="px-2 py-1 rounded text-xs bg-slate-800 text-white hover:bg-slate-700"
+                        >
+                          Details
+                        </button>
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1456,6 +1463,84 @@ const sortedProofs = useMemo(() => {
           </div>
         )}
       </div>
+
+      {/* === Activity Details Modal (NEW) === */}
+      {activityOpen && activityDoc && (
+        <div className="fixed inset-0 z-50">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/50" onClick={closeActivity} aria-hidden="true" />
+          {/* Panel */}
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-4xl rounded-xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <h3 className="text-sm font-semibold text-slate-800">
+                  {activityTitle || "Activity Details"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeActivity}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-slate-100"
+                  aria-label="Close"
+                  title="Close"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="max-h-[70vh] overflow-auto p-4 bg-slate-50">
+                {/* Quick facts */}
+                <div className="mb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="text-sm">
+                    <div className="text-slate-500">Type</div>
+                    <div className="font-medium">{String(activityDoc.meta?.type ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">When</div>
+                    <div className="font-medium">{String(activityDoc.meta?.when ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">Actor</div>
+                    <div className="font-medium break-all">{String(activityDoc.meta?.actor ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">Activity ID</div>
+                    <div className="font-medium">{String(activityDoc.meta?.id ?? "—")}</div>
+                  </div>
+                </div>
+
+                {/* Target links */}
+                {activityLinks.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-sm text-slate-600 mb-1">Go to:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {activityLinks.map((l, i) => (
+                        <a
+                          key={i}
+                          href={l.href}
+                          className="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          {l.label}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pretty JSON payload */}
+                <div className="rounded-lg overflow-hidden ring-1 ring-slate-200">
+                  <div className="px-3 py-2 bg-slate-100 text-xs font-semibold text-slate-700">Payload</div>
+                  <pre className="p-3 text-xs bg-white text-slate-900 overflow-auto">
+{pretty(activityDoc.payload)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+```
