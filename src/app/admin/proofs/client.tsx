@@ -121,6 +121,7 @@ function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | stri
 }
 
 // ---------------- Files UI ----------------
+// ✅ REPLACE your current FilesStrip with this version
 function FilesStrip({
   files,
   onImageClick,
@@ -128,65 +129,78 @@ function FilesStrip({
   files: Array<{ url?: string; cid?: string; name?: string }>;
   onImageClick?: (imageUrls: string[], index: number) => void;
 }) {
-  if (DEBUG_FILES) console.log('🔍 FilesStrip received files:', files);
-  if (!files?.length) {
-    if (DEBUG_FILES) console.log('🔍 FilesStrip: No files to display');
-    return null;
-  }
+  if (!files?.length) return null;
+
+  // Precompute href/name/isImage for each file once
+  const items = files
+    .map((f) => {
+      const href = toGatewayUrl(f);
+      if (!href) return null;
+      const name =
+        f.name ||
+        (href ? decodeURIComponent(href.split('/').pop() || '') : '') ||
+        'file';
+      const isImage = isImageFile(f as any, href);
+      return { href, name, isImage };
+    })
+    .filter(Boolean) as Array<{ href: string; name: string; isImage: boolean }>;
+
+  // Lightbox list of just image URLs (in the same order as shown)
+  const imageUrls = items.filter((i) => i.isImage).map((i) => i.href);
 
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
-        {files.map((f, i) => {
-          const href = toGatewayUrl(f);
-          if (!href) {
-            if (DEBUG_FILES) console.log('🔍 FilesStrip: No href for file:', f);
-            return null;
-          }
-          const name = f.name || decodeURIComponent(href.split(/[?#]/)[0].split('/').pop() || '') || 'file';
-          const img = isImageFile(f, href);
-
-          if (img) {
-            return (
-              <button
-                key={i}
-                onClick={() => {
-                  if (onImageClick) {
-                    const imageUrls = files
-                      .map((file) => toGatewayUrl(file))
-                      .filter((url) => url && isImageFile(file as any, url));
-                    const startIndex = imageUrls.findIndex((url) => url === href);
-                    onImageClick(imageUrls, Math.max(0, startIndex));
-                  }
-                }}
-                className="shrink-0 snap-start group relative overflow-hidden rounded border"
-                title={name}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={href}
-                  alt={name}
-                  className="h-24 w-24 object-cover group-hover:scale-105 transition"
-                  onError={(e) => (e.currentTarget.style.display = 'none')}
-                />
-                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate text-center">
-                  {name}
-                </div>
-              </button>
-            );
-          }
-
-          return (
-            <div key={i} className="shrink-0 snap-start p-2 rounded border bg-gray-50 text-xs text-gray-700 min-w-[120px]">
+        {items.map(({ href, name, isImage }, i) =>
+          isImage ? (
+            <button
+              key={href + i}
+              type="button"
+              className="shrink-0 snap-start group relative overflow-hidden rounded border cursor-zoom-in"
+              title="Click to enlarge"
+              onClick={() => {
+                if (!onImageClick) return;
+                const startIndex = imageUrls.findIndex((u) => u === href);
+                onImageClick(imageUrls, Math.max(0, startIndex));
+              }}
+              onKeyDown={(e) => {
+                if (!onImageClick) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  const startIndex = imageUrls.findIndex((u) => u === href);
+                  onImageClick(imageUrls, Math.max(0, startIndex));
+                }
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={href}
+                alt={name}
+                className="h-24 w-24 object-cover group-hover:scale-105 transition"
+              />
+              <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate text-center">
+                {name}
+              </div>
+            </button>
+          ) : (
+            <div
+              key={href + i}
+              className="shrink-0 snap-start p-2 rounded border bg-gray-50 text-xs text-gray-700 min-w-[120px]"
+            >
               <p className="truncate mb-1" title={name}>
                 {name}
               </p>
-              <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline"
+              >
                 Open
               </a>
             </div>
-          );
-        })}
+          )
+        )}
       </div>
     </div>
   );
