@@ -31,6 +31,88 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
+// ---------- Files helpers (match Projects/AdminProofs) ----------
+const PINATA_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
+        .replace(/^https?:\/\//, '')
+        .replace(/\/+$/, '')}/ipfs`
+    : 'https://gateway.pinata.cloud/ipfs';
+
+function isImg(s?: string) {
+  if (!s) return false;
+  return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
+}
+
+// Build a safe https URL for {url|cid}, collapsing duplicate /ipfs/ segments.
+function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  if (!file) return '';
+
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
+
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
+  if (!rawUrl) return '';
+
+  let u = rawUrl;
+
+  // bare CID
+  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
+
+  // ipfs://... → strip scheme; strip leading slashes; strip leading ipfs/ segments
+  u = u.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
+
+  // prefix with our gateway if not http(s)
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+
+  // collapse any /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  return u;
+}
+
+// Normalize any proof shape into an array of {url?, cid?, name?}
+function extractFilesFromProof(proof: any): Array<{url?: string; cid?: string; name?: string}> {
+  if (!proof) return [];
+  if (Array.isArray(proof.files)) return proof.files as any[];
+  if (Array.isArray((proof as any).filesJson)) return (proof as any).filesJson as any[];
+  if (typeof proof.files === 'string') {
+    try { const arr = JSON.parse(proof.files); return Array.isArray(arr) ? arr : []; } catch {}
+  }
+  return [];
+}
+
+function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
+  if (!files?.length) return null;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 my-3">
+      {files.map((f, i) => {
+        const href = toGatewayUrl(f);
+        const name = f.name || (href ? href.split('/').pop() : '') || 'file';
+        if (isImg(href) || isImg(name)) {
+          // eslint-disable-next-line @next/next/no-img-element
+          return (
+            <a key={i} href={href} target="_blank" rel="noopener noreferrer"
+               className="group relative overflow-hidden rounded border">
+              <img src={href} alt={name} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+              <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{name}</div>
+            </a>
+          );
+        }
+        return (
+          <div key={i} className="p-3 rounded border bg-gray-50 flex items-center justify-between gap-3">
+            <p className="truncate text-sm">{name}</p>
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+              Open
+            </a>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---- Files helpers (IPFS + thumbnails) ----
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace(/\/+$/,'') ||
