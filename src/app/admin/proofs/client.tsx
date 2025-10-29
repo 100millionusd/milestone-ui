@@ -31,24 +31,12 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
-// ---------- Unified IPFS gateway (same as project page style) ----------
-const PINATA_GATEWAY = (() => {
-  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
-  if (raw1) {
-    const host = raw1
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '')
-      .replace(/(?:\/ipfs)+$/i, '');
-    return `https://${host}/ipfs`;
-  }
-  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
-  const base = raw2
-    .replace(/\/+$/, '')
-    .replace(/(?:\/ipfs)+$/i, '');
-  return `${base}/ipfs`;
-})();
-
-const GW = `${PINATA_GATEWAY.replace(/\/+$/, '')}/`;
+const BASE_GW = (
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  "https://gateway.pinata.cloud"
+).replace(/\/+$/, "").replace(/(?:\/ipfs)+$/i, "");
+const GW = `${BASE_GW}/ipfs/`;
 
 function isImg(s?: string) {
   if (!s) return false;
@@ -73,134 +61,196 @@ function isImageFile(f: any, href: string): boolean {
   );
 }
 
-function toGatewayUrl(file: { url?: string; cid?: string } | string | undefined): string {
-  const G = GW; // already ends with /
-  if (!file) return "";
-
-  // Accept string too
-  if (typeof file === "string") {
-    const s = file.trim();
-    // bare CID?
-    const m = s.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-    if (m) return `${G}${m[1]}${m[2] || ""}`;
-    // ipfs:// or leading ipfs/...
-    if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
-      const cid = s.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
-      return `${G}${cid}`;
+// Add filename parameter to URLs for better display
+function withFilename(url: string, name?: string) {
+  if (!url) return url;
+  if (!name) return url;
+  
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//, '')}`);
+    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
+      u.search = `?filename=${encodeURIComponent(name)}`;
     }
-    // http(s)
-    if (/^https?:\/\//i.test(s)) return s;
-    return s ? `${G}${s.replace(/^\/+/, "").replace(/^ipfs\//i, "")}` : "";
+    return u.toString();
+  } catch {
+    return url;
   }
+}
+
+// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
+function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | undefined): string {
+  const G = GW.replace(/\/+$/, '/');
+  if (!file) return "";
 
   const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
   const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
+  const name = file.name;
 
-  if (!rawUrl && rawCid) return `${G}${rawCid.replace(/^ipfs\//i, "")}`;
+  // Only CID present
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    const url = `${G}${String(rawCid).replace(/^ipfs\//i, "")}`;
+    return withFilename(url, name);
+  }
   if (!rawUrl) return "";
 
-  // bare CID in url field?
-  const m2 = rawUrl.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (m2) return `${G}${m2[1]}${m2[2] || ""}`;
+  let u = rawUrl.trim();
 
-  if (/^ipfs:\/\//i.test(rawUrl) || /^ipfs\//i.test(rawUrl)) {
-    const cid = rawUrl.replace(/^ipfs:\/\//i, "").replace(/^ipfs\//i, "");
-    return `${G}${cid}`;
+  // Bare CID in url field
+  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
+  if (cidOnly) {
+    const url = `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
+    return withFilename(url, name);
   }
 
-  return rawUrl; // already http(s)
+  // ipfs://... or leading ipfs/... → normalize
+  u = u.replace(/^ipfs:\/\//i, "")
+       .replace(/^\/+/, "")
+       .replace(/^(?:ipfs\/)+/i, "");
+
+  // Prefix with our gateway if not absolute http(s)
+  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
+
+  // Collapse duplicate /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
+  
+  return withFilename(u, name);
 }
 
+// Updated FilesStrip component with horizontal scroll layout
 function FilesStrip({ files }: { files: Array<{url?: string; cid?: string; name?: string}> }) {
   if (!files?.length) return null;
+  
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 my-3">
-{files.map((f, i) => {
-  const href = toGatewayUrl(f);
-  if (!href) return null;
-  const name = f.name || (href ? href.split('/').pop() : '') || 'file';
+    <div className="overflow-x-auto scroll-smooth">
+      <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
+        {files.map((f, i) => {
+          const href = toGatewayUrl(f);
+          if (!href) return null;
+          
+          const name = f.name || (href ? decodeURIComponent(href.split('/').pop() || '') : '') || 'file';
+          const isImage = isImageFile(f, href);
 
-  if (isImageFile(f, href)) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <a key={i} href={href} target="_blank" rel="noopener noreferrer"
-         className="group relative overflow-hidden rounded border">
-        <img src={href} alt={name} className="h-32 w-full object-cover group-hover:scale-105 transition" />
-        <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{name}</div>
-      </a>
-    );
-  }
+          if (isImage) {
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  // Get all image URLs for lightbox
+                  const imageUrls = files
+                    .map(file => toGatewayUrl(file))
+                    .filter(url => url && isImageFile(file, url));
+                  const startIndex = imageUrls.findIndex(url => url === href);
+                  setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) });
+                }}
+                className="shrink-0 snap-start group relative overflow-hidden rounded border"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={href} 
+                  alt={name} 
+                  className="h-24 w-24 object-cover group-hover:scale-105 transition"
+                />
+                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-1 py-0.5 truncate text-center">
+                  {name}
+                </div>
+              </button>
+            );
+          }
 
-  return (
-    <div key={i} className="p-3 rounded border bg-gray-50 flex items-center justify-between gap-3">
-      <p className="truncate text-sm">{name}</p>
-      <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-        Open
-      </a>
-    </div>
-  );
-})}
+          return (
+            <div key={i} className="shrink-0 snap-start p-2 rounded border bg-gray-50 text-xs text-gray-700 min-w-[100px]">
+              <p className="truncate mb-1" title={name}>{name}</p>
+              <a 
+                href={href} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-blue-600 hover:underline"
+              >
+                Open
+              </a>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
+// Improved extractFiles function to be more comprehensive
 function extractFiles(m: any): { name: string; url: string }[] {
-  // 1) also read files from m.proof JSON string
-  let proofFiles: any[] = [];
+  if (!m) return [];
+
+  // Collect all possible file sources
+  const candidates = [
+    m?.files?.data ?? m?.files ?? [],
+    m?.files_json ?? [],
+    m?.vendorFiles ?? [],
+    m?.submission?.files ?? [],
+    m?.uploads ?? [],
+    m?.input?.files ?? [],
+    m?.proofParsed?.files ?? [],
+    m?.parsed?.files ?? [],
+    m?.aiAnalysis?.files ?? [],
+    m?.aiAnalysis?.raw?.files ?? [],
+    m?.ai_analysis?.files ?? [],
+    m?.ai_analysis?.raw?.files ?? [],
+  ];
+
+  // Also try to parse proof JSON for files
   try {
     if (m?.proof && typeof m.proof === "string") {
       const parsed = JSON.parse(m.proof);
-      if (parsed && Array.isArray(parsed.files)) proofFiles = parsed.files;
+      if (parsed && Array.isArray(parsed.files)) {
+        candidates.push(parsed.files);
+      }
     }
   } catch {}
 
-  const candidates =
-    (m?.files?.data ?? m?.files ?? [])
-      .concat(m?.files_json ?? [])
-      .concat(m?.vendorFiles ?? [])
-      .concat(m?.submission?.files ?? [])
-      .concat(m?.uploads ?? [])
-      .concat(m?.input?.files ?? [])
-      .concat(m?.proofParsed?.files ?? [])
-      .concat(m?.parsed?.files ?? [])
-      .concat(m?.aiAnalysis?.files ?? [])
-      .concat(m?.aiAnalysis?.raw?.files ?? [])
-      .concat(m?.ai_analysis?.files ?? [])
-      .concat(m?.ai_analysis?.raw?.files ?? [])
-      .concat(proofFiles);
+  const flat = ([] as any[]).concat(...candidates);
+  
+  const mapped = flat.map((item): { name: string; url: string } | null => {
+    if (!item) return null;
 
-  const toEntry = (x: any): { name: string; url: string } | null => {
-    if (!x) return null;
-
-    // strings (could be http(s), ipfs://, bare CID)
-    if (typeof x === "string") {
-      const url = toGatewayUrl(x);
+    // Handle string items
+    if (typeof item === "string") {
+      const url = toGatewayUrl({ url: item });
       if (!url) return null;
-      const name = url.split(/[?#]/)[0].split("/").pop() || "file";
+      const name = decodeURIComponent(url.split('/').pop() || 'file');
       return { name, url };
     }
 
-    // objects
-    const rawName = x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
-    const url = toGatewayUrl(x.url ? String(x.url) : (x.cid ? String(x.cid) : ""));
-    if (!url) return null;
+    // Handle object items
+    if (typeof item === "object") {
+      const url = toGatewayUrl(item);
+      if (!url) return null;
+      
+      const name = 
+        item.name || 
+        item.fileName || 
+        item.filename || 
+        item.title || 
+        item.displayName || 
+        item.originalname ||
+        decodeURIComponent(url.split('/').pop() || 'file');
+      
+      return { name, url };
+    }
 
-    const name = rawName || url.split(/[?#]/)[0].split("/").pop() || "file";
-    return { name, url };
-  };
+    return null;
+  }).filter(Boolean) as { name: string; url: string }[];
 
-  const flat = ([] as any[]).concat(...candidates.map((c: any) => (Array.isArray(c) ? c : [c])));
-  const mapped = flat.map(toEntry).filter(Boolean) as { name: string; url: string }[];
-
+  // De-duplicate by URL
   const seen = new Set<string>();
   const unique: { name: string; url: string }[] = [];
-  for (const f of mapped) {
-    const key = f.url.split("#")[0];
+  
+  for (const file of mapped) {
+    const key = file.url.split('#')[0];
     if (!seen.has(key)) {
       seen.add(key);
-      unique.push(f);
+      unique.push(file);
     }
   }
+
   return unique;
 }
 
