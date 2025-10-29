@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getBidsOnce } from "@/lib/api";
 
-// --- Activity helpers: pick keys + open pretty JSON in a new tab (Blob) ---
+// --- Activity helpers: pick keys + open pretty JSON in a new tab (no data:/blob: nav) ---
 const _first = (...vals: any[]) => vals.find(v => v !== undefined && v !== null && v !== '');
 
 const pickActivityId = (r: any) =>
@@ -23,7 +23,8 @@ const pickType = (r: any) =>
 const pickWhen = (r: any) =>
   _first(r?.createdAt, r?.created_at, r?.timestamp, r?.time, r?.at) || null;
 
-function buildActivityDoc(row: any) {
+/** Build the activity document we will display/download */
+export function buildActivityDoc(row: any) {
   const meta = {
     id: pickActivityId(row),
     when: pickWhen(row),
@@ -49,8 +50,8 @@ function escapeHtml(s: string) {
   );
 }
 
-/** Open a pretty JSON document in a new tab using a Blob (avoids data: URL nav) */
-function openJsonInNewTab(title: string, doc: any) {
+/** Open pretty JSON in a new tab by writing HTML into a blank window (CSP-safe). Falls back to .json download. */
+export function openJsonInNewTab(title: string, doc: any) {
   const pretty = JSON.stringify(doc ?? {}, null, 2);
   const html = `<!doctype html>
 <html><head>
@@ -68,10 +69,34 @@ function openJsonInNewTab(title: string, doc: any) {
   <pre>${escapeHtml(pretty)}</pre>
 </div>
 </body></html>`;
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+  // Preferred: open blank tab and write HTML directly (no data:/blob: navigation)
+  const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
+  if (w && w.document) {
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      return;
+    } catch {
+      // fall through to download
+    }
+  }
+
+  // Fallback: force a download as .json
+  try {
+    const jsonBlob = new Blob([pretty], { type: 'application/json' });
+    const url = URL.createObjectURL(jsonBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(title || 'activity').replace(/[^\w.-]+/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch {
+    alert('Unable to open or download the activity details due to browser restrictions.');
+  }
 }
 
 // ------------------------------------------------------------
