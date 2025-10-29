@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import {
-  getBids,
   getBid,
   getBidsOnce,
   payMilestone,
@@ -28,49 +27,39 @@ import {
   hasSafeMarker as msHasSafeMarker,
   isApproved as msIsApproved,
   canShowPayButtons as msCanShowPayButtons,
-  isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
+// ---------------- IPFS Gateway (project-page style, unified) ----------------
 const BASE_GW = (
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
   process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-  "https://gateway.pinata.cloud"
-).replace(/\/+$/, "").replace(/(?:\/ipfs)+$/i, "");
+  'https://gateway.pinata.cloud'
+)
+  .replace(/\/+$/, '')
+  .replace(/(?:\/ipfs)+$/i, '');
+
 const GW = `${BASE_GW}/ipfs/`;
 
-// Debug state
-const DEBUG_FILES = typeof window !== 'undefined' && (localStorage.getItem('debug_files') === 'true' || process.env.NODE_ENV === 'development');
+// ---------------- Debug toggle ----------------
+const DEBUG_FILES =
+  typeof window !== 'undefined' &&
+  (localStorage.getItem('debug_files') === 'true' || process.env.NODE_ENV === 'development');
 
+// ---------------- Small utils ----------------
 function isImg(s?: string) {
   if (!s) return false;
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
-
-// Treat as image if URL has an image extension, or the file object hints an image MIME, or it's a data:image URL
 function isImageFile(f: any, href: string): boolean {
   const mime =
-    f?.mime ||
-    f?.mimetype ||
-    f?.contentType ||
-    f?.['content-type'] ||
-    '';
+    f?.mime || f?.mimetype || f?.contentType || f?.['content-type'] || '';
   const name = f?.name || '';
-
-  return (
-    isImg(href) ||
-    isImg(name) ||
-    /^data:image\//i.test(href) ||
-    /^image\//i.test(String(mime))
-  );
+  return isImg(href) || isImg(name) || /^data:image\//i.test(href) || /^image\//i.test(String(mime));
 }
-
-// Add filename parameter to URLs for better display
 function withFilename(url: string, name?: string) {
-  if (!url) return url;
-  if (!name) return url;
-  
+  if (!url || !name) return url;
   try {
-    const u = new URL(url.startsWith('http') ? url : `https://${url.replace(/^https?:\/\//, '')}`);
+    const u = new URL(url);
     if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
       u.search = `?filename=${encodeURIComponent(name)}`;
     }
@@ -80,62 +69,71 @@ function withFilename(url: string, name?: string) {
   }
 }
 
-// Build a safe https URL from {url|cid}, collapsing duplicate /ipfs/ segments
-function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | undefined): string {
+// Build safe gateway URL from string | {url?, cid?, name?}
+function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | string | undefined): string {
   const G = GW.replace(/\/+$/, '/');
-  if (!file) return "";
+  if (!file) return '';
 
-  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : "";
-  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : "";
-  const name = file.name;
+  // Accept plain string tokens
+  if (typeof file === 'string') {
+    let s = file.trim();
+    if (!s) return '';
+    // http(s)
+    if (/^https?:\/\//i.test(s)) return s;
+    // ipfs://... or ipfs/... or bare CID
+    s = s.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
+    // if it still looks like absolute http, keep it
+    if (/^https?:\/\//i.test(s)) return s;
+    return `${G}${s}`;
+  }
+
+  const rawUrl = file?.url ? String(file.url).trim() : '';
+  const rawCid = file?.cid ? String(file.cid).trim() : '';
+  const name = file?.name;
 
   if (DEBUG_FILES) console.log('🔍 toGatewayUrl input:', { rawUrl, rawCid, name });
 
-  // Only CID present
   if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    const url = `${G}${String(rawCid).replace(/^ipfs\//i, "")}`;
-    const result = withFilename(url, name);
-    if (DEBUG_FILES) console.log('🔍 CID only result:', result);
-    return result;
+    const url = `${G}${rawCid.replace(/^ipfs\//i, '')}`;
+    return withFilename(url, name);
   }
-  if (!rawUrl) return "";
+  if (!rawUrl) return '';
 
-  let u = rawUrl.trim();
-
-  // Bare CID in url field
-  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
+  // bare CID in url field
+  const cidOnly = rawUrl.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
   if (cidOnly) {
-    const url = `${G}${cidOnly[1]}${cidOnly[2] || ""}`;
-    const result = withFilename(url, name);
-    if (DEBUG_FILES) console.log('🔍 Bare CID result:', result);
-    return result;
+    const url = `${G}${cidOnly[1]}${cidOnly[2] || ''}`;
+    return withFilename(url, name);
   }
 
-  // ipfs://... or leading ipfs/... → normalize
-  u = u.replace(/^ipfs:\/\//i, "")
-       .replace(/^\/+/, "")
-       .replace(/^(?:ipfs\/)+/i, "");
+  // ipfs://... or ipfs/... normalize
+  let u = rawUrl
+    .replace(/^ipfs:\/\//i, '')
+    .replace(/^\/+/, '')
+    .replace(/^(?:ipfs\/)+/i, '');
 
-  // Prefix with our gateway if not absolute http(s)
   if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
 
-  // Collapse duplicate /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, "/ipfs/");
-  
-  const result = withFilename(u, name);
-  if (DEBUG_FILES) console.log('🔍 Final URL result:', result);
-  return result;
+  const out = withFilename(u, name);
+  if (DEBUG_FILES) console.log('🔍 Final URL result:', out);
+  return out;
 }
 
-// Updated FilesStrip component with horizontal scroll layout
-function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?: string; name?: string}>, onImageClick?: (imageUrls: string[], index: number) => void }) {
+// ---------------- Files UI ----------------
+function FilesStrip({
+  files,
+  onImageClick,
+}: {
+  files: Array<{ url?: string; cid?: string; name?: string }>;
+  onImageClick?: (imageUrls: string[], index: number) => void;
+}) {
   if (DEBUG_FILES) console.log('🔍 FilesStrip received files:', files);
-  
   if (!files?.length) {
     if (DEBUG_FILES) console.log('🔍 FilesStrip: No files to display');
     return null;
   }
-  
+
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
@@ -145,43 +143,33 @@ function FilesStrip({ files, onImageClick }: { files: Array<{url?: string; cid?:
             if (DEBUG_FILES) console.log('🔍 FilesStrip: No href for file:', f);
             return null;
           }
-          
-          const name = f.name || (href ? decodeURIComponent(href.split('/').pop() || '') : '') || 'file';
-          const isImage = isImageFile(f, href);
+          const name = f.name || decodeURIComponent(href.split(/[?#]/)[0].split('/').pop() || '') || 'file';
+          const img = isImageFile(f, href);
 
-          if (DEBUG_FILES) console.log('🔍 FilesStrip processing file:', { index: i, file: f, href, name, isImage });
-
-          if (isImage) {
+          if (img) {
             return (
               <button
                 key={i}
                 onClick={() => {
                   if (onImageClick) {
-                    // Get all image URLs for lightbox
- const images = files
-  .map(f2 => ({ f2, url: toGatewayUrl(f2) }))
-  .filter(x => x.url && isImageFile(x.f2, x.url));
-const imageUrls = images.map(x => x.url);
-const startIndex = Math.max(0, imageUrls.findIndex(u => u === href));
-onImageClick(imageUrls, startIndex);
+                    const imageUrls = files
+                      .map((file) => toGatewayUrl(file))
+                      .filter((url) => url && isImageFile(file as any, url));
+                    const startIndex = imageUrls.findIndex((url) => url === href);
+                    onImageClick(imageUrls, Math.max(0, startIndex));
                   }
                 }}
                 className="shrink-0 snap-start group relative overflow-hidden rounded border"
+                title={name}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={href} 
-                  alt={name} 
+                <img
+                  src={href}
+                  alt={name}
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
-                  onError={(e) => {
-                    if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
-                    e.currentTarget.style.display = 'none';
-                  }}
-                  onLoad={(e) => {
-                    if (DEBUG_FILES) console.log('🔍 Image loaded successfully:', href);
-                  }}
+                  onError={(e) => (e.currentTarget.style.display = 'none')}
                 />
-                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-1 py-0.5 truncate text-center">
+                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate text-center">
                   {name}
                 </div>
               </button>
@@ -189,17 +177,11 @@ onImageClick(imageUrls, startIndex);
           }
 
           return (
-            <div key={i} className="shrink-0 snap-start p-2 rounded border bg-gray-50 text-xs text-gray-700 min-w-[100px]">
-              <p className="truncate mb-1" title={name}>{name}</p>
-              <a 
-                href={href} 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="text-blue-600 hover:underline"
-                onClick={(e) => {
-                  if (DEBUG_FILES) console.log('🔍 File link clicked:', { href, name });
-                }}
-              >
+            <div key={i} className="shrink-0 snap-start p-2 rounded border bg-gray-50 text-xs text-gray-700 min-w-[120px]">
+              <p className="truncate mb-1" title={name}>
+                {name}
+              </p>
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                 Open
               </a>
             </div>
@@ -210,47 +192,68 @@ onImageClick(imageUrls, startIndex);
   );
 }
 
-// Replace your current extractFiles with this version
-function extractFiles(m: any): { name: string; url: string }[] {
-  // 0) helper: turn any token into a gateway URL if possible
-  const toEntryFromToken = (token: string): { name: string; url: string } | null => {
-    const s = token.trim();
-    if (!s) return null;
+// ---------------- Proof/file extraction ----------------
+function entriesFromProofFiles(files: any[]): { name: string; url: string }[] {
+  if (!Array.isArray(files) || files.length === 0) return [];
+  const out: { name: string; url: string }[] = [];
 
-    // http(s)
-    if (/^https?:\/\//i.test(s)) {
-      const url = s;
-      const name = decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
-      return { name, url };
-    }
-    // ipfs://... or starting with ipfs/
-    if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
-      const cid = s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '');
-      const url = toGatewayUrl({ cid });
-      const name = cid.split(/[?#]/)[0];
-      return { name, url };
-    }
-    // bare CID (CIDv0/v1 heuristic: 46+ base58/base32-ish)
-    if (/^[A-Za-z0-9]{46,}([/?#].*)?$/i.test(s)) {
-      const bare = s.split(/[/?#]/)[0];
-      const url = toGatewayUrl({ cid: bare });
-      return { name: bare, url };
-    }
-    return null;
-  };
+  for (const x of files) {
+    if (!x) continue;
 
-  // 1) try JSON proof.files
+    if (typeof x === 'string') {
+      const s = x.trim();
+      if (!s) continue;
+
+      if (/^https?:\/\//i.test(s)) {
+        const url = s;
+        const name = decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
+        out.push({ name, url });
+        continue;
+      }
+      if (/^ipfs:\/\//i.test(s) || /^ipfs\//i.test(s)) {
+        const url = toGatewayUrl(s);
+        const name = (s.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '').split(/[?#]/)[0]) || 'file';
+        out.push({ name, url });
+        continue;
+      }
+      if (/^[A-Za-z0-9]{46,}([/?#].*)?$/i.test(s)) {
+        const bare = s.split(/[/?#]/)[0];
+        const url = toGatewayUrl({ cid: bare });
+        out.push({ name: bare, url });
+        continue;
+      }
+      continue;
+    }
+
+    const rawName = x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
+    const url = toGatewayUrl({ url: typeof x.url === 'string' ? x.url : '', cid: typeof x.cid === 'string' ? x.cid : '', name: rawName || undefined });
+    if (!url) continue;
+    const name = rawName || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
+    out.push({ name, url });
+  }
+
+  const seen = new Set<string>();
+  return out.filter((f) => {
+    const key = f.url.split('#')[0];
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Fallback extractor from milestone object (legacy shapes)
+function extractFilesFromMilestone(m: any): { name: string; url: string }[] {
+  // try JSON proof.files
   let proofFiles: any[] = [];
   if (m?.proof && typeof m.proof === 'string') {
     try {
       const parsed = JSON.parse(m.proof);
       if (parsed && Array.isArray(parsed.files)) proofFiles = parsed.files;
     } catch {
-      // not JSON → fall through to URL scraping
+      // not JSON; fall through
     }
   }
 
-  // 2) gather all structured candidates from known shapes
   const candidates =
     (m?.files?.data ?? m?.files ?? [])
       .concat(m?.files_json ?? [])
@@ -266,92 +269,22 @@ function extractFiles(m: any): { name: string; url: string }[] {
       .concat(m?.ai_analysis?.raw?.files ?? [])
       .concat(proofFiles);
 
-  // 3) if still empty, scrape links/CIDs from a text proof
-  if ((!candidates || candidates.length === 0) && typeof m?.proof === 'string') {
-    const text = m.proof;
-
-    // - http(s) URLs
-    const httpUrls = Array.from(text.matchAll(/https?:\/\/[^\s)'"<>]+/gi)).map((m) => m[0]);
-
-    // - ipfs://… and tokens that start with ipfs/
-    const ipfsTokens = Array.from(text.matchAll(/\b(?:ipfs:\/\/[^\s)'"<>]+|ipfs\/[A-Za-z0-9][^\s)'"<>]*)/gi)).map((m) => m[0]);
-
-    // - probable bare CIDs (avoid catching ordinary words; keep 46+ chars)
-    const bareCids = Array.from(text.matchAll(/\b[A-Za-z0-9]{46,}\b/g)).map((m) => m[0]);
-
-    const tokens = [...httpUrls, ...ipfsTokens, ...bareCids];
-
-    const scraped = tokens
-      .map(toEntryFromToken)
-      .filter(Boolean) as { name: string; url: string }[];
-
-    // de-dupe by URL without fragment
-    const seen = new Set<string>();
-    const uniqueScraped: { name: string; url: string }[] = [];
-    for (const f of scraped) {
-      const key = f.url.split('#')[0];
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueScraped.push(f);
-      }
-    }
-    if (uniqueScraped.length > 0) return uniqueScraped;
-  }
-
-  // 4) map structured candidates (strings or objects) → entries
-  const toEntry = (x: any): { name: string; url: string } | null => {
-    if (!x) return null;
-
-    if (typeof x === 'string') {
-      const e = toEntryFromToken(x);
-      return e;
-    }
-
-    const rawName =
-      x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
-
-    const rawUrl = typeof x.url === 'string' ? x.url : '';
-    const rawCid = typeof x.cid === 'string' ? x.cid : '';
-
-    const url = toGatewayUrl(rawUrl || rawCid);
-    if (!url) return null;
-
-    const name = rawName || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
-    return { name, url };
-  };
-
   const flat = ([] as any[]).concat(...(candidates || []).map((c: any) => (Array.isArray(c) ? c : [c])));
-  const mapped = flat.map(toEntry).filter(Boolean) as { name: string; url: string }[];
-
-  // 5) de-dupe
-  const seen = new Set<string>();
-  const unique: { name: string; url: string }[] = [];
-  for (const f of mapped) {
-    const key = f.url.split('#')[0];
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(f);
-    }
-  }
-  return unique;
+  return entriesFromProofFiles(flat);
 }
 
-// -------------------------------
-// Config / endpoints
-// -------------------------------
+// ---------------- Config / endpoints ----------------
 const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const API_BASE = RAW_API_BASE;
 const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
 
-// Toggle client console spam without redeploy:
-//   localStorage.setItem('mx_debug_safe','1')  to enable
-//   localStorage.removeItem('mx_debug_safe')   to disable
+// Toggle client console spam without redeploy
 const SAFE_DEBUG =
   typeof window !== 'undefined' &&
   (process.env.NEXT_PUBLIC_DEBUG_SAFE === '1' ||
     (typeof localStorage !== 'undefined' && localStorage.getItem('mx_debug_safe') === '1'));
 
-// Tabs
+// ---------------- Tabs / types ----------------
 const TABS = [
   { key: 'all', label: 'All' },
   { key: 'needs-approval', label: 'Needs Approval' },
@@ -369,7 +302,7 @@ const mkKey = (bidId: number, idx: number) => `${bidId}-${idx}`;
 
 // ===== Persist local "pending" and "paid override" =====
 const PENDING_LS_KEY = 'mx_pay_pending';
-const PENDING_TS_PREFIX = 'mx_pay_pending_ts:'; // kept for compatibility
+const PENDING_TS_PREFIX = 'mx_pay_pending_ts:';
 const PAID_OVERRIDE_LS_KEY = 'mx_paid_override';
 
 function loadSet(key: string): Set<string> {
@@ -388,33 +321,22 @@ function saveSet(key: string, s: Set<string>) {
   } catch {}
 }
 
-// Debug panel component
-function DebugPanel({ data, title }: { data: any, title: string }) {
+// ---------------- Small debug panel ----------------
+function DebugPanel({ data, title }: { data: any; title: string }) {
   const [isOpen, setIsOpen] = useState(false);
-  
   if (!DEBUG_FILES) return null;
-
   return (
     <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 text-sm font-medium text-yellow-800"
-      >
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-2 text-sm font-medium text-yellow-800">
         <span>🐛 {title}</span>
         <span>{isOpen ? '▲' : '▼'}</span>
       </button>
-      {isOpen && (
-        <pre className="mt-2 text-xs text-yellow-700 overflow-auto max-h-60">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
+      {isOpen && <pre className="mt-2 text-xs text-yellow-700 overflow-auto max-h-60">{JSON.stringify(data, null, 2)}</pre>}
     </div>
   );
 }
 
-// -----------------------------
-// Client component
-// -----------------------------
+// ---------------- Main component ----------------
 export default function Client({ initialBids = [] as any[] }: { initialBids?: any[] }) {
   const [loading, setLoading] = useState(initialBids.length === 0);
   const [bids, setBids] = useState<any[]>(initialBids);
@@ -427,36 +349,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
-
-  // Archive state map (server)
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
-
-  // Local "payment pending" (persisted)
-  const [pendingPay, setPendingPay] = useState<Set<string>>(
-    () => (typeof window !== 'undefined' ? loadSet(PENDING_LS_KEY) : new Set())
+  const [pendingPay, setPendingPay] = useState<Set<string>>(() =>
+    typeof window !== 'undefined' ? loadSet(PENDING_LS_KEY) : new Set()
   );
-  // Local "paid override" (persisted) — set when Safe executed on-chain, before backend flips to paid
-  const [paidOverride, setPaidOverride] = useState<Set<string>>(
-    () => (typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set())
+  const [paidOverride, setPaidOverride] = useState<Set<string>>(() =>
+    typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set()
   );
 
-  // Cache for /safe/tx lookups to avoid hammering
+  // 🔑 The missing piece: cache latest proof (same source Agent2 uses)
+  const [latestProofByKey, setLatestProofByKey] = useState<
+    Record<string, { description?: string; files?: any[] }>
+  >({});
+
   const safeStatusCache = useRef<Map<string, { isExecuted: boolean; txHash?: string | null; at: number }>>(new Map());
-
-  // One poller per milestone
   const pollers = useRef<Set<string>>(new Set());
-
-  // Client-side caching for bids data
-  const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({
-    bids: [],
-    lastUpdated: 0,
-  });
-
-  // Debug state
-  const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
-
-  // Broadcast channel
+  const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({ bids: [], lastUpdated: 0 });
   const bcRef = useRef<BroadcastChannel | null>(null);
+
   function emitPayQueued(bidId: number, milestoneIndex: number) {
     try {
       bcRef.current?.postMessage({ type: 'mx:pay:queued', bidId, milestoneIndex });
@@ -468,21 +378,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     } catch {}
   }
   function emitMilestonesUpdated(detail: any) {
-    try {
-      window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
-    } catch {}
-    try {
-      bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail });
-    } catch {}
+    try { window.dispatchEvent(new CustomEvent('milestones:updated', { detail })); } catch {}
+    try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
   }
 
-  // Helpers: local pending
   function addPending(key: string) {
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now()));
-      }
-    } catch {}
+    try { if (typeof window !== 'undefined') localStorage.setItem(`${PENDING_TS_PREFIX}${key}`, String(Date.now())); } catch {}
     setPendingPay((prev) => {
       const next = new Set(prev);
       next.add(key);
@@ -491,11 +392,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     });
   }
   function removePending(key: string) {
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`);
-      }
-    } catch {}
+    try { if (typeof window !== 'undefined') localStorage.removeItem(`${PENDING_TS_PREFIX}${key}`); } catch {}
     setPendingPay((prev) => {
       const next = new Set(prev);
       next.delete(key);
@@ -503,8 +400,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       return next;
     });
   }
-
-  // Helpers: local paid override
   function setPaidOverrideKey(key: string, on: boolean) {
     setPaidOverride((prev) => {
       const next = new Set(prev);
@@ -515,30 +410,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     });
   }
 
-  // -------- Safe helpers --------
   function readSafeTxHash(m: any): string | null {
-    return (
-      m?.safeTxHash ||
-      m?.safe_tx_hash ||
-      m?.safePaymentTxHash ||
-      m?.safe_payment_tx_hash ||
-      null
-    );
+    return m?.safeTxHash || m?.safe_tx_hash || m?.safePaymentTxHash || m?.safe_payment_tx_hash || null;
   }
 
   async function fetchSafeTx(hash: string): Promise<{ isExecuted: boolean; txHash?: string | null } | null> {
     if (!hash) return null;
-
-    // small cache to reduce spam
     const now = Date.now();
     const cached = safeStatusCache.current.get(hash);
     if (cached && now - cached.at < 3000) return { isExecuted: cached.isExecuted, txHash: cached.txHash };
-
     try {
-      const r = await fetch(apiUrl(`/safe/tx/${encodeURIComponent(hash)}`), {
-        method: 'GET',
-        credentials: 'include',
-      });
+      const r = await fetch(apiUrl(`/safe/tx/${encodeURIComponent(hash)}`), { method: 'GET', credentials: 'include' });
       if (!r.ok) return null;
       const j = await r.json();
       const out = { isExecuted: !!j?.isExecuted, txHash: j?.txHash ?? null };
@@ -549,43 +431,22 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  // ==== SAFE PAYMENT POLLING ONLY ====
-  // Local override: flip to PAID as soon as Safe shows executed (2 consecutive ticks)
   async function pollUntilPaid(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
     if (pollers.current.has(key)) return;
     pollers.current.add(key);
-
-    if (SAFE_DEBUG) console.log(`🚀 Starting SAFE payment status check for ${key}`);
-
     try {
-      let executedStreak = 0; // require two consecutive confirmations
-
-      // Poll for up to 10 minutes (120 * 5s)
+      let executedStreak = 0; // need 2 consecutive executions
       for (let i = 0; i < 120; i++) {
-        if (SAFE_DEBUG) console.log(`📡 Safe payment check ${i + 1}/120 for ${key}`);
-
-        // 1) Get fresh bid from the server
         let bid: any | null = null;
-        try {
-          bid = await getBid(bidId);
-        } catch (err: any) {
+        try { bid = await getBid(bidId); } catch (err: any) {
           if (SAFE_DEBUG) console.error('Error fetching bid:', err);
-          if (err?.status === 401 || err?.status === 403) {
-            setError('Your session expired. Please sign in again.');
-            break;
-          }
+          if (err?.status === 401 || err?.status === 403) { setError('Your session expired. Please sign in again.'); break; }
         }
-
         const m = bid?.milestones?.[milestoneIndex];
-
-        // 2) If server already shows paid → finish
         if (m && msIsPaid(m)) {
-          if (SAFE_DEBUG) console.log('🎉 PAYMENT CONFIRMED BY SERVER! Updating UI...');
           removePending(key);
           setPaidOverrideKey(key, false);
-
-          // Update local state
           setBids((prev) =>
             prev.map((b) => {
               const match = ((b as any).bidId ?? (b as any).id) === bidId;
@@ -595,63 +456,50 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               return { ...b, milestones: ms };
             })
           );
-
           try { invalidateBidsCache(); } catch {}
           router.refresh();
           emitPayDone(bidId, milestoneIndex);
           return;
         }
-
-        // 3) Safe direct check; if executed twice consecutively → mark Paid locally (override)
         const safeHash = m ? readSafeTxHash(m) : null;
         if (safeHash) {
           const safeStatus = await fetchSafeTx(safeHash);
           if (safeStatus?.isExecuted) {
             executedStreak++;
             if (executedStreak >= 2) {
-              if (SAFE_DEBUG) console.log('✅ SAFE EXECUTED ON-CHAIN → mark Paid (local override).');
-              setPaidOverrideKey(key, true);   // flip chip to Paid now
+              setPaidOverrideKey(key, true);
               removePending(key);
               emitPayDone(bidId, milestoneIndex);
               router.refresh();
-
-              // gentle refresh later to pick up server reconcile if it lags
-              setTimeout(() => loadProofs(true), 15_000);
+              setTimeout(() => loadProofs(true), 15000);
               return;
             }
           } else {
             executedStreak = 0;
           }
         }
-
-        // 4) Wait 5s
         await new Promise((r) => setTimeout(r, 5000));
       }
-
-      if (SAFE_DEBUG) console.log('🛑 Stopping Safe payment status check - time limit reached');
       removePending(key);
     } finally {
       pollers.current.delete(key);
     }
   }
 
-  // Init
+  // ---------------- Init ----------------
   useEffect(() => {
     let bc: BroadcastChannel | null = null;
     try {
       bc = new BroadcastChannel('mx-payments');
       bcRef.current = bc;
     } catch {}
-
     if (bc) {
       bc.onmessage = (e: MessageEvent) => {
         const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
         if (!type) return;
-
         if (type === 'mx:pay:queued') {
           const key = mkKey(bidId, milestoneIndex);
           addPending(key);
-          // start polling immediately
           pollUntilPaid(bidId, milestoneIndex).catch(() => {});
           loadProofs(true);
         } else if (type === 'mx:pay:done') {
@@ -664,44 +512,33 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
 
     if (initialBids.length === 0) {
-      // No SSR data → normal fetch path
       loadProofs();
     } else {
-      // We DO have SSR data; hydrate AND kick polls for any Safe-in-flight rows
       hydrateArchiveStatuses(initialBids).catch(() => {});
-
       try {
         for (const bid of initialBids) {
           const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
           for (let i = 0; i < ms.length; i++) {
             const key = mkKey(bid.bidId, i);
-
-            // If server already says PAID, clear any local flags
             if (msIsPaid(ms[i])) {
               removePending(key);
               setPaidOverrideKey(key, false);
               continue;
             }
-
-            // START POLLING ONLY IF: (local pending) OR (Safe markers AND there is a real Safe hash)
             const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
-            if (needsPoll && !pollers.current.has(key)) {
-              pollUntilPaid(bid.bidId, i).catch(() => {});
-            }
+            if (needsPoll && !pollers.current.has(key)) pollUntilPaid(bid.bidId, i).catch(() => {});
           }
         }
       } catch {}
     }
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useMilestonesUpdated(loadProofs);
 
-  // ------------- Data loading -------------
+  // ---------------- Data loading ----------------
   async function loadProofs(forceRefresh = false) {
     const CACHE_TTL = 0;
-
     if (!forceRefresh && dataCache.bids.length > 0 && Date.now() - dataCache.lastUpdated < CACHE_TTL) {
       setBids(dataCache.bids);
       setLoading(false);
@@ -713,42 +550,36 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     try {
       const allBids = await getBidsOnce();
       const rows = Array.isArray(allBids) ? allBids : [];
-
       if (DEBUG_FILES) console.log('🔍 loadProofs: Raw bids data:', rows);
 
-      // Clear local "pending" for milestones that are now paid (server truth)
+      // clear local pending for server-paid
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           if (msIsPaid(ms[i])) {
             const key = mkKey(bid.bidId, i);
             removePending(key);
-            setPaidOverrideKey(key, false); // server is source of truth once paid
+            setPaidOverrideKey(key, false);
           }
         }
       }
 
-      // Resume polling for any still pending OR any milestone that shows Safe markers with a real hash
+      // resume polling for inflight
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const key = mkKey(bid.bidId, i);
-
-          // Skip if server already says PAID — and clear local flags
           if (msIsPaid(ms[i])) {
             removePending(key);
             setPaidOverrideKey(key, false);
             continue;
           }
-
           const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
-          if (needsPoll && !pollers.current.has(key)) {
-            pollUntilPaid(bid.bidId, i).catch(() => {});
-          }
+          if (needsPoll && !pollers.current.has(key)) pollUntilPaid(bid.bidId, i).catch(() => {});
         }
       }
 
-      // Prune local pending keys that don't exist anymore
+      // prune locals that no longer exist
       try {
         const validKeys = new Set<string>();
         for (const bid of rows || []) {
@@ -769,18 +600,43 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         });
       } catch {}
 
-      // Hydrate milestones lacking `proof` from the proofs table
-      let merged = rows;
-      try {
-        merged = await mergeLatestProofsFromTable(rows);
-      } catch {
-        // non-fatal; keep original rows
+      setDataCache({ bids: rows, lastUpdated: Date.now() });
+      setBids(rows);
+
+      // 🔁 Fetch latest proofs per milestone (same source Agent2 uses)
+      const map: Record<string, { description?: string; files?: any[] }> = {};
+      for (const bid of rows) {
+        let list: any[] = [];
+        try {
+          const r = await getProofs(bid.bidId);
+          list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
+        } catch {}
+        const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+        for (let i = 0; i < ms.length; i++) {
+          const mine = (list || [])
+            .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === i)
+            .sort((a: any, b: any) => {
+              const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
+              const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
+              return bt - at;
+            })[0];
+          if (mine) {
+            map[mkKey(bid.bidId, i)] = {
+              description: mine?.description || mine?.text || mine?.vendor_prompt || mine?.title || '',
+              files:
+                mine?.files ||
+                mine?.file_json ||
+                mine?.attachments ||
+                mine?.ai_analysis?.files ||
+                mine?.aiAnalysis?.files ||
+                [],
+            };
+          }
+        }
       }
+      setLatestProofByKey(map);
 
-      setDataCache({ bids: merged, lastUpdated: Date.now() });
-      setBids(merged);
-
-      await hydrateArchiveStatuses(merged);
+      await hydrateArchiveStatuses(rows);
     } catch (e: any) {
       if (SAFE_DEBUG) console.error('Error fetching proofs:', e);
       setError(e?.message || 'Failed to load proofs');
@@ -791,33 +647,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
   async function hydrateArchiveStatuses(allBids: any[]) {
     const uniqueBidIds = [...new Set(allBids.map((bid) => bid.bidId))];
-
     if (uniqueBidIds.length === 0) {
       setArchMap({});
       return;
     }
-
     try {
       const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
       updateBulkArchiveCache(bulkArchiveStatus);
-
       const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
       allBids.forEach((bid) => {
         const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-
         ms.forEach((_, index) => {
           const key = mkKey(bid.bidId, index);
-          if (nextMap[key] === undefined) {
-            nextMap[key] = bidArchiveStatus[index] || { archived: false };
-          }
+          if (nextMap[key] === undefined) nextMap[key] = bidArchiveStatus[index] || { archived: false };
         });
       });
-
       setArchMap(nextMap);
-    } catch (error) {
-      if (SAFE_DEBUG) console.error('Failed to fetch bulk archive status:', error);
+    } catch {
       await hydrateArchiveStatusesFallback(allBids);
     }
   }
@@ -825,7 +672,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   async function hydrateArchiveStatusesFallback(allBids: any[]) {
     const tasks: Array<Promise<void>> = [];
     const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-
     for (const bid of allBids || []) {
       const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
       for (let i = 0; i < ms.length; i++) {
@@ -854,38 +700,20 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  // ---- Helpers for milestone state ----
+  // ---------------- Helpers ----------------
   function hasProof(m: any): boolean {
-  const p = m?.proof;
-  if (!p) return false;
-
-  // JSON shape with description/files
-  if (typeof p === 'string') {
+    if (!m?.proof) return false;
     try {
-      const j = JSON.parse(p);
-      const hasDesc = typeof j?.description === 'string' && j.description.trim().length > 0;
-      const hasFiles = Array.isArray(j?.files) && j.files.length > 0;
-      if (hasDesc || hasFiles) return true;
+      const p = JSON.parse(m.proof);
+      if (p && typeof p === 'object') {
+        if (typeof p.description === 'string' && p.description.trim()) return true;
+        if (Array.isArray(p.files) && p.files.length > 0) return true;
+      }
     } catch {
-      // plain text → only count as proof if it has a URL or CID
-      const s = p.trim();
-      const hasHttp = /https?:\/\/[^\s)'"<>]+/i.test(s);
-      const hasIpfs = /\b(?:ipfs:\/\/[^\s)'"<>]+|ipfs\/[A-Za-z0-9][^\s)'"<>]*)/i.test(s);
-      const hasCid  = /\b[A-Za-z0-9]{46,}\b/.test(s); // rough CID heuristic
-      return hasHttp || hasIpfs || hasCid;
+      if (typeof m.proof === 'string' && m.proof.trim().length > 0) return true;
     }
     return false;
   }
-
-  // Non-string proof object
-  try {
-    const hasDesc = typeof p?.description === 'string' && p.description.trim().length > 0;
-    const hasFiles = Array.isArray(p?.files) && p.files.length > 0;
-    return hasDesc || hasFiles;
-  } catch {
-    return false;
-  }
-}
   function isCompleted(m: any): boolean {
     return m?.completed === true || m?.approved === true || String(m?.status ?? '').toLowerCase() === 'completed';
   }
@@ -893,282 +721,152 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     return !!archMap[mkKey(bidId, milestoneIndex)]?.archived;
   }
 
+  // ---------------- Agent 2 panel ----------------
+  function Agent2PanelInline({ bidId, milestoneIndex }: { bidId: number; milestoneIndex: number }) {
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [analysis, setAnalysis] = useState<any | null>(null);
+    const [proofId, setProofId] = useState<number | null>(null);
 
-// Normalize many possible proof file shapes into an array of {url?|cid?, name?}
-function normalizeProofFiles(x: any): any[] {
-  const out: any[] = [];
-  const tryParse = (v: any) => { try { return JSON.parse(v); } catch { return null; } };
-  const pushArr = (arr: any) => { if (Array.isArray(arr)) out.push(...arr); };
+    const RAW = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+    const API = RAW;
+    const api = (path: string) => (API ? `${API}${path}` : path);
 
-  if (!x) return out;
-
-  // Common shapes
-  if (Array.isArray(x.files)) pushArr(x.files);
-  if (x?.files?.data) pushArr(x.files.data);
-  if (typeof x.files === 'string') pushArr(tryParse(x.files) || []);
-  if (Array.isArray(x.files_json)) pushArr(x.files_json);
-  if (typeof x.files_json === 'string') pushArr(tryParse(x.files_json) || []);
-  if (Array.isArray(x.attachments)) pushArr(x.attachments);
-  if (typeof x.attachments === 'string') pushArr(tryParse(x.attachments) || []);
-
-  // Singles
-  if (x.file) out.push(x.file);
-  if (x.fileUrl) out.push({ url: x.fileUrl, name: x.fileName || x.name });
-  if (x.cid) out.push({ cid: String(x.cid), name: x.name });
-
-  // Nested proof JSON may itself have files
-  if (typeof x.proof === 'string') {
-    const p = tryParse(x.proof);
-    if (p?.files) pushArr(p.files);
-  }
-
-  return out;
-}
-
-  // ---- backfill missing milestone.proof from /proofs ----
-async function mergeLatestProofsFromTable(rows: any[]) {
-  const out = (rows || []).map((b) => ({
-    ...b,
-    milestones: Array.isArray(b?.milestones) ? [...b.milestones] : [],
-  }));
-
-  const tasks: Promise<void>[] = [];
-
-  for (let bi = 0; bi < out.length; bi++) {
-    const bid = out[bi];
-    const ms = bid.milestones;
-
-    // Which milestones are missing usable proof JSON (description/files)
-    const missingIdxs = ms
-      .map((m: any, i: number) => {
-        if (!m?.proof) return i;
-        try {
-          const p = JSON.parse(m.proof);
-          const hasDesc = typeof p?.description === 'string' && p.description.trim();
-          const hasFiles = Array.isArray(p?.files) && p.files.length > 0;
-          return hasDesc || hasFiles ? -1 : i;
-        } catch {
-          // plain text proof without links → still missing files
-          return i;
-        }
-      })
-      .filter((i: number) => i >= 0);
-
-    if (missingIdxs.length === 0) continue;
-
-    tasks.push(
-      (async () => {
-        let list: any[] = [];
-        try {
-          const r = await getProofs(bid.bidId);
-          list = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
-        } catch {
-          return;
-        }
-        if (!Array.isArray(list) || list.length === 0) return;
-
-        for (const mi of missingIdxs) {
-          const candidates = list.filter(
-            (p: any) => (p.milestoneIndex ?? p.milestone_index) === mi
-          );
-          if (candidates.length === 0) continue;
-
-          // pick latest
-          candidates.sort((a: any, b: any) => {
+    async function fetchLatest() {
+      setError(null);
+      try {
+        setLoading(true);
+        const r = await getProofs(bidId);
+        const list: any[] = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
+        const mine = list
+          .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
+          .sort((a: any, b: any) => {
             const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
             const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
             return bt - at;
+          })[0];
+
+        setProofId(Number(mine?.id ?? mine?.proof_id ?? mine?.proofId ?? NaN) || null);
+        setAnalysis(mine?.ai_analysis ?? mine?.aiAnalysis ?? null);
+      } catch (e: any) {
+        setError(e?.message || 'Failed to load Agent2 result');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function pollUpdatedAnalysis(timeoutMs = 60000, intervalMs = 1500) {
+      const stop = Date.now() + timeoutMs;
+      while (Date.now() < stop) {
+        try {
+          const r = await fetch(api(`/proofs?bidId=${bidId}&t=${Date.now()}`), {
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
           });
-          const latest = candidates[0];
-
-          // description from several fields or nested proof JSON
-          let description =
-            latest?.description ||
-            latest?.text ||
-            latest?.vendor_prompt ||
-            latest?.title ||
-            '';
-
-          if (!description && typeof latest?.proof === 'string') {
-            try {
-              const pj = JSON.parse(latest.proof);
-              if (typeof pj?.description === 'string') description = pj.description;
-            } catch {}
+          if (r.ok) {
+            const j = await r.json();
+            const list: any[] = Array.isArray(j) ? j : (j?.proofs ?? []);
+            const mine = list
+              .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
+              .sort((a: any, b: any) => {
+                const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
+                const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
+                return bt - at;
+              })[0];
+            const a = mine?.ai_analysis ?? mine?.aiAnalysis ?? null;
+            if (a) {
+              setAnalysis(a);
+              return;
+            }
           }
+        } catch {}
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+    }
 
-          // collect files robustly
-          const files = normalizeProofFiles(latest);
+    async function rerun() {
+      setError(null);
+      if (!proofId) {
+        setError('No proof found for this milestone.');
+        return;
+      }
+      try {
+        await analyzeProof(proofId);
+        await pollUpdatedAnalysis();
+      } catch (e: any) {
+        setError(e?.message || 'Failed to analyze');
+      }
+    }
 
-          try {
-            ms[mi] = {
-              ...ms[mi],
-              proof: JSON.stringify({ description, files }),
-            };
-          } catch {
-            // ignore
-          }
-        }
-      })()
+    useEffect(() => {
+      fetchLatest();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [bidId, milestoneIndex]);
+
+    const A = analysis || {};
+    const summary: string | undefined = A.summary || A.tldr || A.brief || A.overview;
+    const fit: string | undefined = A.fit || A.fitScore || A.fitment;
+    const confidence: string | number | undefined = A.confidence;
+    const risks: string[] = Array.isArray(A.risks) ? A.risks : A.risks ? [A.risks] : [];
+    const notes: string[] = Array.isArray(A.milestoneNotes) ? A.milestoneNotes : A.milestoneNotes ? [A.milestoneNotes] : [];
+
+    return (
+      <div className="mt-3 rounded-lg border border-slate-200 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-medium">Agent 2</div>
+          <button
+            onClick={rerun}
+            disabled={!proofId}
+            className="px-3 py-1.5 rounded-md text-sm bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+            title={proofId ? 'Re-run analysis' : 'No proof found for this milestone'}
+          >
+            Run Agent 2
+          </button>
+        </div>
+
+        {loading && <div className="mt-2 text-sm text-slate-500">Loading…</div>}
+        {error && <div className="mt-2 text-sm text-rose-600">{error}</div>}
+
+        {!loading && !analysis && !error && <div className="mt-2 text-sm text-slate-500">No analysis yet.</div>}
+
+        {analysis && (
+          <div className="mt-3 space-y-2 text-sm">
+            {summary && (
+              <div>
+                <div className="text-xs uppercase text-slate-500">Summary</div>
+                <div className="mt-0.5">{summary}</div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3">
+              {typeof fit !== 'undefined' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">Fit: {String(fit)}</span>
+              )}
+              {typeof confidence !== 'undefined' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">
+                  Confidence: {String(confidence)}
+                </span>
+              )}
+            </div>
+            {risks.length > 0 && (
+              <div>
+                <div className="text-xs uppercase text-slate-500">Risks</div>
+                <ul className="list-disc pl-5 mt-1 space-y-1">{risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              </div>
+            )}
+            {notes.length > 0 && (
+              <div>
+                <div className="text-xs uppercase text-slate-500">Milestone Notes</div>
+                <ul className="list-disc pl-5 mt-1 space-y-1">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     );
   }
 
-  if (tasks.length) await Promise.all(tasks);
-  return out;
-}
-
-  function Agent2PanelInline({ bidId, milestoneIndex }: { bidId: number; milestoneIndex: number }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<any | null>(null);
-  const [proofId, setProofId] = useState<number | null>(null);
-  const [running, setRunning] = useState(false);
-
-  const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-  const API_BASE = RAW_API_BASE;
-  const apiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path);
-
-  async function fetchLatest() {
-    setError(null);
-    try {
-      setLoading(true);
-      // load all proofs for this bid and pick the latest for this milestone
-      const r = await getProofs(bidId);
-      const list: any[] = Array.isArray(r) ? r : (Array.isArray(r?.proofs) ? r.proofs : []);
-      const mine = list
-        .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
-        .sort((a: any, b: any) => {
-          const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
-          const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
-          return bt - at;
-        })[0];
-
-      setProofId(Number(mine?.id ?? mine?.proof_id ?? mine?.proofId ?? NaN) || null);
-      setAnalysis(mine?.ai_analysis ?? mine?.aiAnalysis ?? null);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load Agent2 result');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function pollUpdatedAnalysis(timeoutMs = 60000, intervalMs = 1500) {
-    const stop = Date.now() + timeoutMs;
-    while (Date.now() < stop) {
-      try {
-        const r = await fetch(apiUrl(`/proofs?bidId=${bidId}&t=${Date.now()}`), {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        });
-        if (r.ok) {
-          const j = await r.json();
-          const list: any[] = Array.isArray(j) ? j : (j?.proofs ?? []);
-          const mine = list
-            .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === milestoneIndex)
-            .sort((a: any, b: any) => {
-              const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
-              const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
-              return bt - at;
-            })[0];
-          const a = mine?.ai_analysis ?? mine?.aiAnalysis ?? null;
-          if (a) {
-            setAnalysis(a);
-            return;
-          }
-        }
-      } catch {}
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-  }
-
-  async function rerun() {
-    setError(null);
-    if (!proofId) {
-      setError('No proof found for this milestone.');
-      return;
-    }
-    try {
-      setRunning(true);
-      await analyzeProof(proofId);
-      await pollUpdatedAnalysis();
-    } catch (e: any) {
-      setError(e?.message || 'Failed to analyze');
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  useEffect(() => { fetchLatest(); /* on mount */ }, [bidId, milestoneIndex]);
-
-  const A = analysis || {};
-  const summary: string | undefined = A.summary || A.tldr || A.brief || A.overview;
-  const fit: string | undefined = A.fit || A.fitScore || A.fitment;
-  const confidence: string | number | undefined = A.confidence;
-  const risks: string[] = Array.isArray(A.risks) ? A.risks : (A.risks ? [A.risks] : []);
-  const notes: string[] = Array.isArray(A.milestoneNotes) ? A.milestoneNotes : (A.milestoneNotes ? [A.milestoneNotes] : []);
-
-  return (
-    <div className="mt-3 rounded-lg border border-slate-200 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-medium">Agent 2</div>
-        <button
-          onClick={rerun}
-          disabled={running || !proofId}
-          className={['px-3 py-1.5 rounded-md text-sm',
-            running ? 'bg-slate-300 text-slate-600' : 'bg-blue-600 hover:bg-blue-700 text-white'
-          ].join(' ')}
-          title={proofId ? 'Re-run analysis' : 'No proof found for this milestone'}
-        >
-          {running ? 'Analyzing…' : 'Run Agent 2'}
-        </button>
-      </div>
-
-      {loading && <div className="mt-2 text-sm text-slate-500">Loading…</div>}
-      {error && <div className="mt-2 text-sm text-rose-600">{error}</div>}
-
-      {!loading && !analysis && !error && (
-        <div className="mt-2 text-sm text-slate-500">No analysis yet.</div>
-      )}
-
-      {analysis && (
-        <div className="mt-3 space-y-2 text-sm">
-          {summary && (
-            <div>
-              <div className="text-xs uppercase text-slate-500">Summary</div>
-              <div className="mt-0.5">{summary}</div>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-3">
-            {typeof fit !== 'undefined' && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">Fit: {String(fit)}</span>
-            )}
-            {typeof confidence !== 'undefined' && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">Confidence: {String(confidence)}</span>
-            )}
-          </div>
-          {risks.length > 0 && (
-            <div>
-              <div className="text-xs uppercase text-slate-500">Risks</div>
-              <ul className="list-disc pl-5 mt-1 space-y-1">
-                {risks.map((r, i) => <li key={i}>{r}</li>)}
-              </ul>
-            </div>
-          )}
-          {notes.length > 0 && (
-            <div>
-              <div className="text-xs uppercase text-slate-500">Milestone Notes</div>
-              <ul className="list-disc pl-5 mt-1 space-y-1">
-                {notes.map((n, i) => <li key={i}>{n}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-  // ---- Actions ----
+  // ---------------- Actions ----------------
   const handleApprove = async (bidId: number, milestoneIndex: number, proof: string) => {
     if (!confirm('Approve this proof?')) return;
     try {
@@ -1182,7 +880,6 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       setProcessing(null);
     }
   };
-
   const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
     try {
@@ -1199,7 +896,6 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       setProcessing(null);
     }
   };
-
   const handleReject = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Reason for rejection (optional):') || '';
     if (!confirm('Reject this proof?')) return;
@@ -1218,7 +914,6 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       setProcessing(null);
     }
   };
-
   const handleArchive = async (bidId: number, milestoneIndex: number) => {
     const reason = prompt('Archive reason (optional):') || '';
     try {
@@ -1240,7 +935,6 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       setProcessing(null);
     }
   };
-
   const handleUnarchive = async (bidId: number, milestoneIndex: number) => {
     try {
       setProcessing(`unarchive-${bidId}-${milestoneIndex}`);
@@ -1261,7 +955,6 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       setProcessing(null);
     }
   };
-
   const handleUnarchiveAll = async () => {
     if (!confirm('Unarchive ALL archived milestones?')) return;
     try {
@@ -1289,11 +982,10 @@ async function mergeLatestProofsFromTable(rows: any[]) {
     }
   };
 
-  // ---- Filters / search ----
+  // ---------------- Filters / search ----------------
   function milestoneMatchesTab(m: any, bidId: number, idx: number): boolean {
     const key = mkKey(bidId, idx);
     const archived = isArchived(bidId, idx);
-
     if (tab === 'archived') return archived;
     if (archived) return false;
 
@@ -1335,18 +1027,16 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       .map((bid) => {
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
         const withIdx = ms.map((m: any, idx: number) => ({ m, idx }));
-
         const visibleWithIdx =
           tab === 'all'
             ? withIdx.filter(({ idx }) => !isArchived(bid.bidId, idx))
             : withIdx.filter(({ m, idx }) => milestoneMatchesTab(m, bid.bidId, idx));
-
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
   }, [bids, tab, query, archMap, pendingPay, paidOverride]);
 
-  // ---- UI helpers ----
+  // ---------------- Proof renderer ----------------
   const renderProof = (m: any) => {
     if (!m?.proof) return null;
 
@@ -1355,16 +1045,14 @@ async function mergeLatestProofsFromTable(rows: any[]) {
       parsed = JSON.parse(m.proof);
     } catch {}
 
- if (parsed && typeof parsed === 'object') {
-  return (
-    <div className="mt-2 space-y-2">
-      {parsed.description && (
-        <p className="text-sm text-gray-700">{parsed.description}</p>
-      )}
-      {/* Files are rendered below via <FilesStrip files={extractFiles(m)} /> */}
-    </div>
-  );
-}
+    if (parsed && typeof parsed === 'object') {
+      return (
+        <div className="mt-2 space-y-2">
+          {parsed.description && <p className="text-sm text-gray-700">{parsed.description}</p>}
+          {/* Files are rendered below via FilesStrip */}
+        </div>
+      );
+    }
 
     const text = String(m.proof);
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -1406,7 +1094,7 @@ async function mergeLatestProofsFromTable(rows: any[]) {
     );
   };
 
-  // ---- Render ----
+  // ---------------- Render ----------------
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto py-12">
@@ -1441,9 +1129,7 @@ async function mergeLatestProofsFromTable(rows: any[]) {
               Disable Debug
             </button>
           </div>
-          <p className="text-xs text-blue-600 mt-1">
-            Check browser console for detailed file debugging information
-          </p>
+          <p className="text-xs text-blue-600 mt-1">Check browser console for detailed file debugging information</p>
         </div>
       )}
 
@@ -1462,32 +1148,12 @@ async function mergeLatestProofsFromTable(rows: any[]) {
             >
               {t.label}
               {t.key === 'archived' && archivedCount > 0 && (
-                <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">
-                  {archivedCount}
-                </span>
+                <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-xs min-w-[20px]">{archivedCount}</span>
               )}
             </button>
           ))}
         </div>
       </div>
-
-      {/* Archive Controls */}
-      {tab === 'archived' && archivedCount > 0 && (
-        <div className="mb-4 p-3 bg-slate-50 rounded-lg border">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">
-              {archivedCount} milestone{archivedCount === 1 ? '' : 's'} archived
-            </span>
-            <button
-              onClick={handleUnarchiveAll}
-              disabled={processing === 'unarchive-all'}
-              className="px-3 py-1 text-sm border border-slate-300 rounded hover:bg:white disabled:opacity-50"
-            >
-              {processing === 'unarchive-all' ? 'Working…' : 'Unarchive All'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Search */}
       <div className="mb-6">
@@ -1510,9 +1176,7 @@ async function mergeLatestProofsFromTable(rows: any[]) {
             <div key={bid.bidId} className="bg-white rounded-lg shadow p-6">
               <div className="flex items-start justify-between gap-3 mb-2">
                 <div>
-                  <h2 className="text-lg font-semibold">
-                    {bid.vendorName} — Proposal #{bid.proposalId}
-                  </h2>
+                  <h2 className="text-lg font-semibold">{bid.vendorName} — Proposal #{bid.proposalId}</h2>
                   <p className="text-gray-600 text-sm">Bid ID: {bid.bidId}</p>
                 </div>
                 <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-sm text-blue-600 hover:underline">
@@ -1523,25 +1187,20 @@ async function mergeLatestProofsFromTable(rows: any[]) {
               <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
 
               <div className="space-y-4">
-                {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
+                {(bid._withIdxVisible as Array<{ m: any; idx: number }>)).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
 
                   const approved = msIsApproved(m) || isCompleted(m);
                   const paid = msIsPaid(m) || paidOverride.has(key);
                   const localPending = pendingPay.has(key);
-
-                  // Only show the "Payment Pending" chip when:
-                  //  - it's not paid (incl. override), AND
-                  //  - there is a real Safe hash to track OR we have a localPending flag
                   const hasRealSafeHash = !!readSafeTxHash(m);
                   const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
 
-                  const extractedFiles = extractFiles(m);
-                  if (DEBUG_FILES) console.log('🔍 Milestone files debug:', {
-                    milestone: m,
-                    extractedFiles,
-                    key
-                  });
+                  // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
+                  const lp = latestProofByKey[key];
+                  const fromProofs = entriesFromProofFiles(lp?.files || []);
+                  const fromMilestone = extractFilesFromMilestone(m);
+                  const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className="border-t pt-4 mt-4">
@@ -1553,45 +1212,40 @@ async function mergeLatestProofsFromTable(rows: any[]) {
                             {isArchived(bid.bidId, origIdx) && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">Archived</span>
                             )}
-
                             {approved && !paid && !msHasSafeMarker(m) && !localPending && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">Approved</span>
                             )}
-
                             {showPendingChip && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">Payment Pending</span>
                             )}
-
                             {paid && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">Paid</span>}
                           </div>
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
 
-                          {/* Debug milestone data */}
                           <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
-                          <DebugPanel data={extractedFiles} title={`Extracted Files: ${origIdx}`} />
+                          <DebugPanel data={filesToShow} title={`Files to Show: ${origIdx}`} />
 
-{/* Proof */}
-{renderProof(m)}
+                          {/* Proof text/description */}
+                          {renderProof(m)}
+                          {/* If milestone.proof is plain text without links, show latest proof description */}
+                          {(!m?.proof || (typeof m.proof === 'string' && !/https?:\/\//i.test(m.proof))) && lp?.description && (
+                            <p className="text-sm text-gray-700 mt-2">{lp.description}</p>
+                          )}
 
-{/* Files submitted with this proof */}
-<FilesStrip 
-  files={extractedFiles} 
-  onImageClick={(urls, index) => setLightbox({ urls, index })}
-/>
+                          {/* Files */}
+                          <FilesStrip files={filesToShow} onImageClick={(urls, index) => setLightbox({ urls, index })} />
 
-{/* Agent2 (summary + re-run) */}
-<Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
+                          {/* Agent2 */}
+                          <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
 
-                          {/* Tx display */}
+                          {/* Tx */}
                           {(m.paymentTxHash || m.safePaymentTxHash) && (
                             <p className="text-sm text-green-600 mt-2 break-all">
                               Paid ✅ Tx: {m.paymentTxHash || m.safePaymentTxHash}
                             </p>
                           )}
-                          {!hasProof(m) && !approved && (
-                            <p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>
-                          )}
+                          {!hasProof(m) && !approved && <p className="text-sm text-amber-600 mt-2">No proof submitted yet.</p>}
                         </div>
 
                         <div className="flex flex-col gap-2">
@@ -1612,33 +1266,33 @@ async function mergeLatestProofsFromTable(rows: any[]) {
                                 const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
                                 const isLocked = rejectedLocal.has(rKey);
                                 const disabled = isProcessing || isLocked;
-
                                 return (
                                   <button
                                     onClick={() => handleReject(bid.bidId, origIdx)}
                                     disabled={disabled}
-                                    className={['px-4 py-2 rounded disabled:opacity-50', disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'].join(' ')}
+                                    className={['px-4 py-2 rounded disabled:opacity-50', disabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'].join(
+                                      ' '
+                                    )}
                                   >
                                     {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
                                   </button>
                                 );
                               })()}
 
-                              {/* Hide buttons if paid (including local override) */}
                               {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
                                 <div className="flex items-center gap-2">
-                                  {/* Manual payment */}
                                   <button
                                     type="button"
                                     onClick={() => handlePay(bid.bidId, origIdx)}
                                     disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                    className={['px-4 py-2 rounded text-white', processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'].join(' ')}
+                                    className={['px-4 py-2 rounded text-white', processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'].join(
+                                      ' '
+                                    )}
                                     title="Release payment manually (EOA)"
                                   >
                                     {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Release Payment'}
                                   </button>
 
-                                  {/* SAFE */}
                                   <SafePayButton
                                     bidId={bid.bidId}
                                     milestoneIndex={origIdx}
@@ -1689,10 +1343,7 @@ async function mergeLatestProofsFromTable(rows: any[]) {
 
       {/* Lightbox */}
       {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-        >
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightbox.urls[lightbox.index]}
