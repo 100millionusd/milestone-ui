@@ -31,6 +31,108 @@ import {
   isPaymentPending as msIsPaymentPending,
 } from '@/lib/milestonePaymentState';
 
+// ---- Files helpers (IPFS + thumbnails) ----
+const IPFS_GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace(/\/+$/,'') ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY?.replace(/\/+$/,'') ||
+  "https://gateway.pinata.cloud";
+
+function fileUrlFrom(x: any): string {
+  const url: string | undefined = x?.url || x?.link || x?.href;
+  const cid: string | undefined = x?.cid || x?.ipfsCid || x?.ipfs_cid;
+  if (url) {
+    if (url.startsWith("ipfs://")) return `${IPFS_GATEWAY}/ipfs/${url.slice(7)}`;
+    // already http(s)
+    return url;
+  }
+  if (cid) return `${IPFS_GATEWAY}/ipfs/${cid}`;
+  return "";
+}
+function fileNameFrom(x: any): string {
+  return x?.name || x?.filename || x?.originalname || x?.original || x?.key || "file";
+}
+function fileSizeFrom(x: any): number|undefined {
+  const n = x?.size ?? x?.bytes ?? x?.length;
+  return Number.isFinite(Number(n)) ? Number(n) : undefined;
+}
+function fmtBytes(n?: number) {
+  if (!n && n !== 0) return "";
+  const u = ["B","KB","MB","GB"]; let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v < 10 && i>0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+}
+function isImage(x: any): boolean {
+  const mt = (x?.mimetype || x?.mime || "").toLowerCase();
+  const name = (fileNameFrom(x) || "").toLowerCase();
+  return mt.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(name);
+}
+
+// accept multiple backend shapes: files[], doc, attachments[], proof_files[]
+function extractFiles(m: any): any[] {
+  const a: any[] = [];
+  const push = (v: any)=> { if (v && (v.url || v.cid || v.name)) a.push(v); };
+
+  if (Array.isArray(m?.files)) m.files.forEach(push);
+  if (Array.isArray(m?.attachments)) m.attachments.forEach(push);
+  if (Array.isArray(m?.proof_files)) m.proof_files.forEach(push);
+  if (Array.isArray(m?.proofFiles)) m.proofFiles.forEach(push);
+  if (m?.doc) push(m.doc);
+  if (m?.document) push(m.document);
+
+  // de-dup by url/cid/name
+  const seen = new Set<string>();
+  return a.filter(f => {
+    const key = `${fileUrlFrom(f)}|${f.cid || ""}|${fileNameFrom(f)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// small UI block for files
+function FilesStrip({ files }: { files: any[] }) {
+  if (!files?.length) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-medium text-neutral-600 mb-1">Files</div>
+      <div className="flex flex-wrap gap-2">
+        {files.map((f, i) => {
+          const url = fileUrlFrom(f);
+          const name = fileNameFrom(f);
+          const size = fileSizeFrom(f);
+          const image = isImage(f);
+          return (
+            <a
+              key={i}
+              href={url || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={name}
+              className="group inline-flex items-center gap-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white/70 dark:bg-neutral-900/50 hover:bg-neutral-50 dark:hover:bg-neutral-800 px-2 py-1"
+            >
+              {image ? (
+                <img
+                  src={url}
+                  alt={name}
+                  className="h-10 w-10 rounded object-cover border border-neutral-200 dark:border-neutral-700"
+                />
+              ) : (
+                <div className="h-10 w-10 grid place-items-center rounded border border-neutral-200 dark:border-neutral-700 text-xs font-mono">
+                  {name.split(".").pop()?.toUpperCase() || "FILE"}
+                </div>
+              )}
+              <div className="min-w-[140px] max-w-[260px]">
+                <div className="text-xs truncate">{name}</div>
+                <div className="text-[11px] text-neutral-500 truncate">{size ? fmtBytes(size) : url?.replace(/^https?:\/\//,'')}</div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // -------------------------------
 // Config / endpoints
 // -------------------------------
@@ -1172,12 +1274,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                           <p className="text-sm text-gray-600">Amount: ${m.amount} | Due: {m.dueDate}</p>
 
- {/* Proof */}
+{/* Proof */}
 {renderProof(m)}
+
+{/* Files submitted with this proof */}
+<FilesStrip files={extractFiles(m)} />
 
 {/* Agent2 (summary + re-run) */}
 <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
-
 
                           {/* Tx display */}
                           {(m.paymentTxHash || m.safePaymentTxHash) && (
