@@ -80,7 +80,11 @@ export default async function ProposalDetailPage({ params }: PageProps) {
       new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
 
     // --- normalize proposal attachments (proposal.docs is already an array) ---
-    const proposalDocs = normList((proposal as any)?.docs);
+    // --- normalize proposal attachments: support doc (single), docs[], files[] ---
+const legacyP = normList((proposal as any)?.doc);
+const docsP   = normList((proposal as any)?.docs);
+const filesP  = normList((proposal as any)?.files);
+const proposalDocs = [...docsP, ...filesP, ...legacyP].filter(Boolean);
 
     return (
       <div className="p-6 space-y-6">
