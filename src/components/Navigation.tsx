@@ -10,7 +10,7 @@ import { getAuthRoleOnce } from '@/lib/api';
 type Role = 'admin' | 'vendor' | 'guest';
 
 type NavItem =
-  | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean } // ← added requiresApproval (optional)
+  | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean }
   | {
       label: string;
       roles?: Array<Role>;
@@ -31,25 +31,18 @@ export default function Navigation() {
 
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
-  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null); // ← NEW
+  const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
 
   useEffect(() => setMounted(true), []);
 
-    useEffect(() => {
+  useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        // FIX: call the real helper (sends credentials)
         const info = await getAuthRoleOnce(); // { address, role, vendorStatus }
-
-        // Map backend roles → UI roles
         const backendRole = (info?.role || '').toLowerCase();
         const mappedRole: Role =
-          backendRole === 'admin'
-            ? 'admin'
-            : info?.address
-            ? 'vendor'
-            : 'guest';
+          backendRole === 'admin' ? 'admin' : info?.address ? 'vendor' : 'guest';
 
         if (alive) {
           setServerRole(mappedRole);
@@ -62,14 +55,16 @@ export default function Navigation() {
         }
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Effective role
   const role: Role = useMemo(() => serverRole ?? 'guest', [serverRole]);
- 
+
   // Only admins or approved vendors can see project lists
-  const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved'); // ← NEW
+  const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
 
   const isActive = (path: string) => {
     const clean = path.split('?')[0];
@@ -79,48 +74,32 @@ export default function Navigation() {
   const navItems: NavItem[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard' },
-      // Gate these two for pending vendors:
-      { href: '/projects', label: 'Projects', roles: ['admin','vendor'], requiresApproval: true },   // ← NEW flag
-      { href: '/public', label: 'Public Projects', roles: ['admin','vendor'], requiresApproval: true }, // ← NEW flag
+      { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+      { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/new', label: 'Submit Proposal' },
       {
         label: 'Admin',
         roles: ['admin'],
         children: [
-          { href: '/admin/oversight', label: 'Oversight' },  // NEW: this page
+          { href: '/admin/oversight', label: 'Oversight' },
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/entities', label: 'Entities' },
-          { href: '/admin/vendors', label: 'Vendors' },      // FIX: back to the Vendors page
-        ]
+          { href: '/admin/vendors', label: 'Vendors' },
+        ],
       },
       { href: '/vendor/dashboard', label: 'MyDesk' },
-      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor','admin'] }, // ← kept as you had; hidden for admin via showItem below
+      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor', 'admin'] },
     ],
     []
   );
 
   const showItem = (item: NavItem) => {
-    // NEW: hide items that require approval for pending vendors
-    if (!('children' in item) && (item as any).requiresApproval && !canSeeProjects) {
-      return false;
-    }
-
-    // Hide "My Activity" for admins everywhere
-    if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') {
-      return false;
-    }
-
-    // Hide "Submit Proposal" for admins everywhere
-    if (!('children' in item) && item.href === '/new' && role === 'admin') {
-      return false;
-    }
-
-    // Hide the public/vendor "Vendors" link for admins (keep Admin → Vendors)
-    if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') {
-      return false;
-    }
+    if (!('children' in item) && (item as any).requiresApproval && !canSeeProjects) return false;
+    if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') return false;
+    if (!('children' in item) && item.href === '/new' && role === 'admin') return false;
+    if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') return false;
 
     if (role === 'admin') return true;
     if ('roles' in item && item.roles) return item.roles.includes(role ?? 'guest');
@@ -132,7 +111,7 @@ export default function Navigation() {
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
   return (
-    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
+    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -143,112 +122,85 @@ export default function Navigation() {
             <h1 className="text-xl font-semibold">LithiumX</h1>
           </Link>
 
- {/* Desktop Navigation */}
-<nav className="hidden md:flex items-center space-x-1 relative">
-  {navItems.filter(showItem).map((item) => (
-    'children' in item ? (
-      <div key={item.label} className="relative">
-        <button
-          onClick={() => setIsAdminOpen((o) => !o)}
-          className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-            pathname.startsWith('/admin')
-              ? 'text-cyan-400 bg-gray-700'
-              : 'text-gray-300 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          {item.label}
-          <svg
-            className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {isAdminOpen && (
-          <div
-            className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-            onClickCapture={() => setIsAdminOpen(false)}
-          >
-            {item.children.map((sub) => (
-              <Link
-                prefetch={false}
-                key={sub.href}
-                href={sub.href}
-                className={`block px-4 py-2 text-sm ${
-                  isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                }`}
-              >
-                {sub.label}
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-    ) : (
-      item.href.startsWith('/vendor/') ? (
-        <button
-          key={item.href}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setIsAdminOpen(false);
-            setIsMobileMenuOpen(false);
-            router.push(resolveHref(item.href));
-          }}
-          onClick={(e) => {
-            e.preventDefault();
-            setIsAdminOpen(false);
-            setIsMobileMenuOpen(false);
-            router.push(resolveHref(item.href));
-          }}
-          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-            isActive(item.href)
-              ? 'text-cyan-400 bg-gray-700'
-              : 'text-gray-300 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          {item.label}
-        </button>
-      ) : (
-        <Link
-          prefetch={false}
-          key={item.href}
-          href={resolveHref(item.href)}
-          onClick={() => {
-            setIsAdminOpen(false);
-            setIsMobileMenuOpen(false);
-          }}
-          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-            isActive(item.href)
-              ? 'text-cyan-400 bg-gray-700'
-              : 'text-gray-300 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          {item.label}
-        </Link>
-      )
-    )
-  ))}
-</nav>
- <Link
-  prefetch={false}
-  key={item.href}
-  href={resolveHref(item.href)}
-  onClick={item.href === '/public'
-    ? () => {
-        const before = location.href;
-        setTimeout(() => {
-          if (location.href === before) location.assign('/public');
-        }, 1200);
-      }
-    : undefined}
-  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-  }`}
->
-  {item.label}
-</Link>
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center space-x-1 relative">
+            {navItems.filter(showItem).map((item) =>
+              'children' in item ? (
+                <div key={item.label} className="relative">
+                  <button
+                    onClick={() => setIsAdminOpen((o) => !o)}
+                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
+                      pathname.startsWith('/admin')
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                    <svg
+                      className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {isAdminOpen && (
+                    <div
+                      className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
+                      onClickCapture={() => setIsAdminOpen(false)}
+                    >
+                      {item.children.map((sub) => (
+                        <Link
+                          prefetch={false}
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block px-4 py-2 text-sm ${
+                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                          }`}
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.href.startsWith('/vendor/') ? (
+                <button
+                  key={item.href}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setIsAdminOpen(false);
+                    setIsMobileMenuOpen(false);
+                    router.push(resolveHref(item.href)); // SPA nav only
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault(); // keyboard/AT fallback
+                    setIsAdminOpen(false);
+                    setIsMobileMenuOpen(false);
+                    router.push(resolveHref(item.href));
+                  }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ) : (
+                <Link
+                  prefetch={false}
+                  key={item.href}
+                  href={resolveHref(item.href)}
+                  onClick={() => {
+                    setIsAdminOpen(false);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </Link>
               )
             )}
           </nav>
@@ -279,14 +231,14 @@ export default function Navigation() {
                         prefetch={false}
                         href="/vendor/profile"
                         className="block px-4 py-2 text-sm hover:bg-gray-100"
-                        onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
+                        onClick={() => setIsProfileOpen(false)}
                       >
                         Vendor Profile
                       </Link>
 
                       <button
                         onClick={async () => {
-                          setIsProfileOpen(false);                     // close immediately
+                          setIsProfileOpen(false);
                           await logout();
                           router.push('/vendor/login');
                         }}
@@ -318,79 +270,92 @@ export default function Navigation() {
           >
             <span className="sr-only">Open main menu</span>
             <div className="w-6 h-6 space-y-1">
-              <span className={`block w-6 h-0.5 bg-current transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`} />
-              <span className={`block w-6 h-0.5 bg-current transition-opacity ${isMobileMenuOpen ? 'opacity-0' : ''}`} />
-              <span className={`block w-6 h-0.5 bg-current transition-transform ${isMobileMenuOpen ? '-rotate-45 -translate-y-1.5' : ''}`} />
+              <span
+                className={`block w-6 h-0.5 bg-current transition-transform ${
+                  isMobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''
+                }`}
+              />
+              <span
+                className={`block w-6 h-0.5 bg-current transition-opacity ${
+                  isMobileMenuOpen ? 'opacity-0' : ''
+                }`}
+              />
+              <span
+                className={`block w-6 h-0.5 bg-current transition-transform ${
+                  isMobileMenuOpen ? '-rotate-45 -translate-y-1.5' : ''
+                }`}
+              />
             </div>
           </button>
         </div>
 
- {navItems.filter(showItem).map((item) =>
-  'children' in item ? (
-    /* ... keep as-is ... */
-  ) : (
-    item.href.startsWith('/vendor/')
-      ? (
-        <button
-          key={item.href}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setIsMobileMenuOpen(false);
-            setIsAdminOpen(false);
-            router.push(resolveHref(item.href));
-          }}
-          onClick={(e) => {
-            e.preventDefault();
-            setIsMobileMenuOpen(false);
-            setIsAdminOpen(false);
-            router.push(resolveHref(item.href));
-          }}
-          className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-            isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          {item.label}
-        </button>
-      )
-      : (
-        <Link
-          prefetch={false}
-          key={item.href}
-          href={resolveHref(item.href)}
-          onClick={() => setIsMobileMenuOpen(false)}
-          className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-            isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-          }`}
-        >
-          {item.label}
-        </Link>
-      )
-  )
-)}
- <Link
-  prefetch={false}
-  key={item.href}
-  href={resolveHref(item.href)}
-  onClick={(e) => {
-    setIsMobileMenuOpen(false);
-    if (item.href === '/public') {
-      const before = location.href;
-      setTimeout(() => {
-        if (location.href === before) location.assign('/public');
-      }, 1200);
-    }
-  }}
-  className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-  }`}
->
-  {item.label}
-</Link>
+        {/* Mobile Navigation */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden border-t border-gray-700">
+            <div className="px-2 pt-2 pb-3 space-y-1">
+              {navItems.filter(showItem).map((item) =>
+                'children' in item ? (
+                  <div key={item.label}>
+                    <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
+                    {item.children.map((sub) => (
+                      <Link
+                        prefetch={false}
+                        key={sub.href}
+                        href={sub.href}
+                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                          isActive(sub.href)
+                            ? 'text-cyan-400 bg-gray-700'
+                            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                        }`}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                      >
+                        {sub.label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : item.href.startsWith('/vendor/') ? (
+                  <button
+                    key={item.href}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setIsMobileMenuOpen(false);
+                      setIsAdminOpen(false);
+                      router.push(resolveHref(item.href));
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setIsMobileMenuOpen(false);
+                      setIsAdminOpen(false);
+                      router.push(resolveHref(item.href));
+                    }}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                      isActive(item.href)
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ) : (
+                  <Link
+                    prefetch={false}
+                    key={item.href}
+                    href={resolveHref(item.href)}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                      isActive(item.href)
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
                 )
               )}
 
               {address && (
-                <Link prefetch={false}
+                <Link
+                  prefetch={false}
                   href="/vendor/profile"
                   className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
                   onClick={() => setIsMobileMenuOpen(false)}
