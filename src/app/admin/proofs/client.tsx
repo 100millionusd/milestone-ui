@@ -1340,18 +1340,16 @@ const renderProof = (m: any) => {
                           {/* Agent2 */}
                           <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
 
-{/* Change Requests (inline history for this milestone) */}
-{hasProof(m) && !isArchived(bid.bidId, origIdx) && (
-  <div className="mt-3">
-    <div className="text-sm font-medium text-slate-700 mb-1">
-      Change Requests & Answers
-    </div>
+{/* Change Request Thread (scoped to THIS milestone) */}
+{!isArchived(bid.bidId, origIdx) && (
+  <div className="mt-4">
+    <h4 className="text-sm font-semibold mb-2">Change Request Thread</h4>
     <ChangeRequestsPanel
-      key={`inlineCR:${bid.proposalId}:${bid.bidId}:${origIdx}`}
-      proposalId={bid.proposalId}
-      milestoneIndex={origIdx}
-      initialMilestoneIndex={origIdx}
-      bidId={bid.bidId}
+      key={`cr:${bid.proposalId}:${origIdx}`}           // force remount per milestone
+      proposalId={Number(bid.proposalId)}              // ensure number
+      initialMilestoneIndex={origIdx}                  // initial selection
+      forceMilestoneIndex={origIdx}                    // HARD scope to this milestone
+      hideMilestoneTabs                                 // no switching to other milestones here
     />
   </div>
 )}
@@ -1507,10 +1505,10 @@ const renderProof = (m: any) => {
         {/* Existing thread / list (same as project page) */}
  <ChangeRequestsPanel
   key={`cr:${crFor.proposalId}:${crFor.milestoneIndex}:${dataCache.lastUpdated}`}
-  proposalId={crFor.proposalId}
-  milestoneIndex={crFor.milestoneIndex}
+  proposalId={Number(crFor.proposalId)}
   initialMilestoneIndex={crFor.milestoneIndex}
-  bidId={crFor.bidId}
+  forceMilestoneIndex={crFor.milestoneIndex}
+  hideMilestoneTabs
 />
 
         {/* Composer (spacing/labels synced 1:1) */}
