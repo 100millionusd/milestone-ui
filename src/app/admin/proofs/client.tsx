@@ -424,6 +424,8 @@ function toggleCR(key: string) { setCrOpen(prev => ({ ...prev, [key]: !prev[key]
     try { bcRef.current?.postMessage({ type: 'mx:ms:updated', ...detail }); } catch {}
   }
 
+// --- Change Request submit helper ---
+// IMPORTANT: hit the Next.js API route (relative), NOT the backend base URL.
 async function submitCR(proposalId: number, bidId: number, milestoneIndex: number) {
   const key = mkKey(bidId, milestoneIndex);
   const comment = (crText[key] || '').trim();
@@ -431,6 +433,39 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
     alert('Type what to change.');
     return;
   }
+
+  setCrBusy(prev => ({ ...prev, [key]: true }));
+  setCrErr(prev => ({ ...prev, [key]: null }));
+
+  try {
+    // ✅ Relative path → Next API (same origin)
+    const r = await fetch('/api/proofs/change-requests', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        proposalId,
+        milestoneIndex,
+        comment,
+        bidId, // optional but useful
+      }),
+    });
+
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json())?.error || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    setCrText(prev => ({ ...prev, [key]: '' }));
+    // Nudge UI to reload any panels/lists
+    emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
+  } catch (e: any) {
+    setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
+  } finally {
+    setCrBusy(prev => ({ ...prev, [key]: false }));
+  }
+}
 
   setCrBusy(prev => ({ ...prev, [key]: true }));
   setCrErr(prev => ({ ...prev, [key]: null }));
