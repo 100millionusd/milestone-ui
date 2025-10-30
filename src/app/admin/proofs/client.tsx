@@ -1483,10 +1483,13 @@ const renderProof = (m: any) => {
       {/* Body (panel + composer) */}
       <div className="p-4">
         {/* Existing thread / list (same as project page) */}
-        <ChangeRequestsPanel
-          proposalId={crFor.proposalId}
-          initialMilestoneIndex={crFor.milestoneIndex}
-        />
+ <ChangeRequestsPanel
+  key={`cr:${crFor.proposalId}:${crFor.milestoneIndex}:${dataCache.lastUpdated}`}
+  proposalId={crFor.proposalId}
+  milestoneIndex={crFor.milestoneIndex}
+  initialMilestoneIndex={crFor.milestoneIndex}
+  bidId={crFor.bidId}
+/>
 
         {/* Composer (spacing/labels synced 1:1) */}
         {(() => {
