@@ -1340,6 +1340,19 @@ const renderProof = (m: any) => {
                           {/* Agent2 */}
                           <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
 
+{/* Change Requests (inline history for this milestone) */}
+{hasProof(m) && (
+  <div className="mt-3">
+    <div className="text-sm font-medium text-slate-700 mb-1">
+      Change Requests & Answers
+    </div>
+    <ChangeRequestsPanel
+      proposalId={bid.proposalId}
+      initialMilestoneIndex={origIdx}
+    />
+  </div>
+)}
+
                           {/* Tx */}
                           {(m.paymentTxHash || m.safePaymentTxHash) && (
                             <p className="text-sm text-green-600 mt-2 break-all">
