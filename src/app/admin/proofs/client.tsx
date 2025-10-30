@@ -1291,6 +1291,11 @@ const renderProof = (m: any) => {
                   const localPending = pendingPay.has(key);
                   const hasRealSafeHash = !!readSafeTxHash(m);
                   const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
+                  const showRequestChanges =
+  hasProof(m) &&
+  !approved &&
+  !paid &&
+  !isArchived(bid.bidId, origIdx);
 
                   // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
                   const lp = latestProofByKey[key];
@@ -1407,20 +1412,21 @@ const renderProof = (m: any) => {
                             </>
                           )}
 
-{/* Request Changes (open MODAL like project page) */}
-<button
-  onClick={() =>
-    setCrFor({
-      bidId: Number(bid.bidId),
-      proposalId: Number(bid.proposalId),
-      milestoneIndex: origIdx,
-    })
-  }
-  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
-  title="Ask the vendor for fixes or additional proof"
->
-  Request Changes
-</button>
+{showRequestChanges && (
+  <button
+    onClick={() =>
+      setCrFor({
+        bidId: Number(bid.bidId),
+        proposalId: Number(bid.proposalId),
+        milestoneIndex: origIdx,
+      })
+    }
+    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
+    title="Ask the vendor for fixes or additional proof"
+  >
+    Request Changes
+  </button>
+)}
 
 
                           {!isArchived(bid.bidId, origIdx) ? (
