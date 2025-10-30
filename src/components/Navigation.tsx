@@ -122,88 +122,68 @@ export default function Navigation() {
             <h1 className="text-xl font-semibold">LithiumX</h1>
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-1 relative">
-            {navItems.filter(showItem).map((item) =>
-              'children' in item ? (
-                <div key={item.label} className="relative">
-                  <button
-                    onClick={() => setIsAdminOpen((o) => !o)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      pathname.startsWith('/admin')
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {item.label}
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {isAdminOpen && (
-                    <div
-                      className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-                      onClickCapture={() => setIsAdminOpen(false)}
-                    >
-                      {item.children.map((sub) => (
-                        <Link
-                          prefetch={false}
-                          key={sub.href}
-                          href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                          }`}
-                        >
-                          {sub.label}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : item.href.startsWith('/vendor/') ? (
-                <button
-                  key={item.href}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setIsAdminOpen(false);
-                    setIsMobileMenuOpen(false);
-                    router.push(resolveHref(item.href)); // SPA nav only
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault(); // keyboard/AT fallback
-                    setIsAdminOpen(false);
-                    setIsMobileMenuOpen(false);
-                    router.push(resolveHref(item.href));
-                  }}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ) : (
-                <Link
-                  prefetch={false}
-                  key={item.href}
-                  href={resolveHref(item.href)}
-                  onClick={() => {
-                    setIsAdminOpen(false);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              )
-            )}
-          </nav>
+ {/* Desktop Navigation */}
+<nav className="hidden md:flex items-center space-x-1 relative">
+  {navItems.filter(showItem).map((item) =>
+    'children' in item ? (
+      <div key={item.label} className="relative">
+        <button
+          onClick={() => setIsAdminOpen((o) => !o)}
+          className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
+            pathname.startsWith('/admin')
+              ? 'text-cyan-400 bg-gray-700'
+              : 'text-gray-300 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          {item.label}
+          <svg
+            className={`w-4 h-4 transform transition-transform ${isAdminOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {isAdminOpen && (
+          <div
+            className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
+            onClickCapture={() => setIsAdminOpen(false)}
+          >
+            {item.children.map((sub) => (
+              <Link
+                prefetch={false}
+                key={sub.href}
+                href={sub.href}
+                className={`block px-4 py-2 text-sm ${
+                  isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                }`}
+              >
+                {sub.label}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    ) : (
+      <Link
+        prefetch={false}
+        key={item.href}
+        href={resolveHref(item.href)}
+        onClick={() => {
+          setIsAdminOpen(false);
+          setIsMobileMenuOpen(false);
+        }}
+        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+        }`}
+      >
+        {item.label}
+      </Link>
+    )
+  )}
+</nav>
 
           {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
@@ -289,84 +269,53 @@ export default function Navigation() {
           </button>
         </div>
 
-        {/* Mobile Navigation */}
-        {isMobileMenuOpen && (
-          <div className="md:hidden border-t border-gray-700">
-            <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.filter(showItem).map((item) =>
-                'children' in item ? (
-                  <div key={item.label}>
-                    <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
-                    {item.children.map((sub) => (
-                      <Link
-                        prefetch={false}
-                        key={sub.href}
-                        href={sub.href}
-                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                          isActive(sub.href)
-                            ? 'text-cyan-400 bg-gray-700'
-                            : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                        }`}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                      >
-                        {sub.label}
-                      </Link>
-                    ))}
-                  </div>
-                ) : item.href.startsWith('/vendor/') ? (
-                  <button
-                    key={item.href}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setIsMobileMenuOpen(false);
-                      setIsAdminOpen(false);
-                      router.push(resolveHref(item.href));
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setIsMobileMenuOpen(false);
-                      setIsAdminOpen(false);
-                      router.push(resolveHref(item.href));
-                    }}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href)
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ) : (
-                  <Link
-                    prefetch={false}
-                    key={item.href}
-                    href={resolveHref(item.href)}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href)
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                )
-              )}
-
-              {address && (
-                <Link
-                  prefetch={false}
-                  href="/vendor/profile"
-                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Vendor Profile
-                </Link>
-              )}
-            </div>
+ {/* Mobile Navigation */}
+{isMobileMenuOpen && (
+  <div className="md:hidden border-t border-gray-700">
+    <div className="px-2 pt-2 pb-3 space-y-1">
+      {navItems.filter(showItem).map((item) =>
+        'children' in item ? (
+          <div key={item.label}>
+            <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
+            {item.children.map((sub) => (
+              <Link
+                prefetch={false}
+                key={sub.href}
+                href={sub.href}
+                className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                }`}
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                {sub.label}
+              </Link>
+            ))}
           </div>
-        )}
-      </div>
-    </header>
-  );
-}
+        ) : (
+          <Link
+            prefetch={false}
+            key={item.href}
+            href={resolveHref(item.href)}
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+              isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+            }`}
+          >
+            {item.label}
+          </Link>
+        )
+      )}
+
+      {address && (
+        <Link
+          prefetch={false}
+          href="/vendor/profile"
+          className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          Vendor Profile
+        </Link>
+      )}
+    </div>
+  </div>
+)}
