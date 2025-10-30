@@ -28,6 +28,8 @@ import {
   isApproved as msIsApproved,
   canShowPayButtons as msCanShowPayButtons,
 } from '@/lib/milestonePaymentState';
+import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
+
 
 // ---------------- IPFS Gateway (project-page style, unified) ----------------
 const BASE_GW = (
@@ -44,6 +46,10 @@ const GW = `${BASE_GW}/ipfs/`;
 const DEBUG_FILES =
   typeof window !== 'undefined' &&
   (localStorage.getItem('debug_files') === 'true' || process.env.NODE_ENV === 'development');
+
+const [openCR, setOpenCR] = useState<Record<string, boolean>>({});
+const toggleCR = (k: string) => setOpenCR(prev => ({ ...prev, [k]: !prev[k] }));
+
 
 // ---------------- Small utils ----------------
 function isImg(s?: string) {
@@ -1350,6 +1356,22 @@ const renderProof = (m: any) => {
                               )}
                             </>
                           )}
+
+{/* Request Changes (opens inline panel) */}
+<button
+  onClick={() => toggleCR(`${bid.bidId}-${origIdx}`)}
+  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
+  title="Ask the vendor for fixes or additional proof"
+>
+  {openCR[`${bid.bidId}-${origIdx}`] ? 'Hide Change Request' : 'Request Changes'}
+</button>
+
+{openCR[`${bid.bidId}-${origIdx}`] && (
+  <div className="mt-3 border rounded-lg p-3">
+    {/* Same panel the Project page uses — requires only proposalId */}
+    <ChangeRequestsPanel proposalId={Number(bid.proposalId)} />
+  </div>
+)}
 
                           {!isArchived(bid.bidId, origIdx) ? (
                             <button
