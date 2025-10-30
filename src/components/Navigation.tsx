@@ -1,7 +1,7 @@
 // src/components/Navigation.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
@@ -11,7 +11,11 @@ type Role = 'admin' | 'vendor' | 'guest';
 
 type NavItem =
   | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean }
-  | { label: string; roles?: Array<Role>; children: { href: string; label: string }[] };
+  | {
+      label: string;
+      roles?: Array<Role>;
+      children: { href: string; label: string }[];
+    };
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -20,6 +24,8 @@ export default function Navigation() {
 
   const pathname = usePathname();
   const router = useRouter();
+  const adminDropdownRef = useRef<HTMLDivElement>(null);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
 
   // Wallet context
   const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
@@ -32,7 +38,7 @@ export default function Navigation() {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRoleOnce(); // { address, role, vendorStatus }
+        const info = await getAuthRoleOnce();
         const backendRole = (info?.role || '').toLowerCase();
         const mappedRole: Role = backendRole === 'admin' ? 'admin' : info?.address ? 'vendor' : 'guest';
         if (alive) {
@@ -58,8 +64,10 @@ export default function Navigation() {
   const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
 
   const isActive = (path: string) => {
-    const clean = path.split('?')[0];
-    return pathname === clean || pathname.startsWith(clean + '/');
+    if (path === '/') {
+      return pathname === '/';
+    }
+    return pathname.startsWith(path);
   };
 
   const navItems: NavItem[] = useMemo(
@@ -97,17 +105,40 @@ export default function Navigation() {
     return true;
   };
 
-  // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
-  // Capture-phase hard nav just for /vendor/* to beat any page-level click traps on the Project page
-  const hardNavCapture = (href: string) => (e: React.SyntheticEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsAdminOpen(false);
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (adminDropdownRef.current && !adminDropdownRef.current.contains(event.target as Node)) {
+        setIsAdminOpen(false);
+      }
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleLogout = async () => {
+    setIsProfileOpen(false);
     setIsMobileMenuOpen(false);
-    window.location.assign(href);
+    try {
+      await logout();
+      router.push('/vendor/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      router.push('/vendor/login');
+    }
+  };
+
+  const handleLinkClick = () => {
+    setIsMobileMenuOpen(false);
+    setIsAdminOpen(false);
+    setIsProfileOpen(false);
   };
 
   return (
@@ -115,7 +146,11 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link prefetch={false} href="/" className="flex items-center space-x-2">
+          <Link 
+            href="/" 
+            className="flex items-center space-x-2"
+            onClick={handleLinkClick}
+          >
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
             </div>
@@ -126,11 +161,11 @@ export default function Navigation() {
           <nav className="hidden md:flex items-center space-x-1 relative">
             {navItems.filter(showItem).map((item) =>
               'children' in item ? (
-                <div key={item.label} className="relative">
+                <div key={item.label} className="relative" ref={adminDropdownRef}>
                   <button
-                    onClick={() => setIsAdminOpen((o) => !o)}
+                    onClick={() => setIsAdminOpen(!isAdminOpen)}
                     className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      pathname.startsWith('/admin')
+                      isActive('/admin')
                         ? 'text-cyan-400 bg-gray-700'
                         : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
@@ -145,19 +180,17 @@ export default function Navigation() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
+
                   {isAdminOpen && (
-                    <div
-                      className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-                      onClickCapture={() => setIsAdminOpen(false)}
-                    >
+                    <div className="absolute top-full left-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                       {item.children.map((sub) => (
                         <Link
-                          prefetch={false}
                           key={sub.href}
                           href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                          className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
+                            isActive(sub.href) ? 'text-cyan-600 bg-gray-50' : 'text-gray-700'
                           }`}
+                          onClick={handleLinkClick}
                         >
                           {sub.label}
                         </Link>
@@ -165,32 +198,14 @@ export default function Navigation() {
                     </div>
                   )}
                 </div>
-              ) : item.href.startsWith('/vendor/') ? (
-                // Use a real <a> with capture-phase handler to force hard navigation for vendor pages
-                <a
-                  key={item.href}
-                  href={resolveHref(item.href)}
-                  onPointerDownCapture={hardNavCapture(resolveHref(item.href))}
-                  onMouseDownCapture={hardNavCapture(resolveHref(item.href))}
-                  onClick={(e) => e.preventDefault()}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  {item.label}
-                </a>
               ) : (
                 <Link
-                  prefetch={false}
                   key={item.href}
                   href={resolveHref(item.href)}
-                  onClick={() => {
-                    setIsAdminOpen(false);
-                    setIsMobileMenuOpen(false);
-                  }}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
+                  onClick={handleLinkClick}
                 >
                   {item.label}
                 </Link>
@@ -200,10 +215,10 @@ export default function Navigation() {
 
           {/* User Actions */}
           <div className="hidden md:flex items-center space-x-4 relative">
-            <div className="relative">
+            <div className="relative" ref={profileDropdownRef}>
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
-                onClick={() => setIsProfileOpen((o) => !o)}
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
               >
                 <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
                   {address ? address.slice(2, 4).toUpperCase() : 'G'}
@@ -217,39 +232,32 @@ export default function Navigation() {
               </div>
 
               {isProfileOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
+                <div className="absolute right-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                   {address ? (
                     <>
                       <Link
-                        prefetch={false}
                         href="/vendor/profile"
-                        className="block px-4 py-2 text-sm hover:bg-gray-100"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
                         onClick={() => setIsProfileOpen(false)}
                       >
                         Vendor Profile
                       </Link>
 
                       <button
-                        onClick={async () => {
-                          setIsProfileOpen(false);
-                          await logout();
-                          router.push('/vendor/login');
-                        }}
-                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                        onClick={handleLogout}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
                       >
                         Logout
                       </button>
                     </>
                   ) : (
-                    <button
-                      onClick={() => {
-                        setIsProfileOpen(false);
-                        router.push('/vendor/login');
-                      }}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    <Link
+                      href="/vendor/login"
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                      onClick={() => setIsProfileOpen(false)}
                     >
                       Login
-                    </button>
+                    </Link>
                   )}
                 </div>
               )}
@@ -258,7 +266,7 @@ export default function Navigation() {
 
           {/* Mobile menu button */}
           <button
-            onClick={() => setIsMobileMenuOpen((o) => !o)}
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none"
           >
             <span className="sr-only">Open main menu</span>
@@ -277,58 +285,59 @@ export default function Navigation() {
               {navItems.filter(showItem).map((item) =>
                 'children' in item ? (
                   <div key={item.label}>
-                    <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
-                    {item.children.map((sub) => (
-                      <Link
-                        prefetch={false}
-                        key={sub.href}
-                        href={sub.href}
-                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                          isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                        }`}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                      >
-                        {sub.label}
-                      </Link>
-                    ))}
+                    <p className="px-3 py-2 text-gray-400 text-xs uppercase font-medium">{item.label}</p>
+                    <div className="ml-2 space-y-1">
+                      {item.children.map((sub) => (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                            isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                          }`}
+                          onClick={handleLinkClick}
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
-                ) : item.href.startsWith('/vendor/') ? (
-                  // capture-phase hard nav for vendor links
-                  <a
-                    key={item.href}
-                    href={resolveHref(item.href)}
-                    onPointerDownCapture={hardNavCapture(resolveHref(item.href))}
-                    onMouseDownCapture={hardNavCapture(resolveHref(item.href))}
-                    onClick={(e) => e.preventDefault()}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {item.label}
-                  </a>
                 ) : (
                   <Link
-                    prefetch={false}
                     key={item.href}
                     href={resolveHref(item.href)}
-                    onClick={() => setIsMobileMenuOpen(false)}
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                       isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
+                    onClick={handleLinkClick}
                   >
                     {item.label}
                   </Link>
                 )
               )}
 
-              {address && (
+              {address ? (
+                <>
+                  <Link
+                    href="/vendor/profile"
+                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                    onClick={handleLinkClick}
+                  >
+                    Vendor Profile
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
                 <Link
-                  prefetch={false}
-                  href="/vendor/profile"
+                  href="/vendor/login"
                   className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                  onClick={() => setIsMobileMenuOpen(false)}
+                  onClick={handleLinkClick}
                 >
-                  Vendor Profile
+                  Login
                 </Link>
               )}
             </div>
