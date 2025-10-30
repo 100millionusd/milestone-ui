@@ -389,14 +389,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [crFor, setCrFor] = useState<{ bidId: number; proposalId: number; milestoneIndex: number } | null>(null);
 
   // --- Change Requests (composer) ---
-const [crOpen, setCrOpen] = useState<Record<string, boolean>>({});
+
 const [crText, setCrText] = useState<Record<string, string>>({});
 const [crBusy, setCrBusy] = useState<Record<string, boolean>>({});
 const [crErr, setCrErr] = useState<Record<string, string | null>>({});
-
-function isCROpen(key: string) { return !!crOpen[key]; }
-function toggleCR(key: string) { setCrOpen(prev => ({ ...prev, [key]: !prev[key] })); }
-
 
  
   // 🔑 The missing piece: cache latest proof (same source Agent2 uses)
@@ -439,32 +435,34 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
   setCrErr(prev => ({ ...prev, [key]: null }));
 
   try {
-    const r = await fetch(apiUrl('/api/proofs/change-requests'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        proposalId,
-        milestoneIndex,
-        comment,
-        bidId, // optional but nice to attach
-      }),
-    });
+  const r = await fetch('/api/proofs/change-requests', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({
+      proposalId,
+      milestoneIndex,
+      comment,
+      bidId, // optional but nice to attach
+    }),
+  });
 
-    if (!r.ok) {
-      const t = await r.text();
-      throw new Error(t || `HTTP ${r.status}`);
-    }
-
-    // Clear the textbox and let the panel refresh
-    setCrText(prev => ({ ...prev, [key]: '' }));
-    // Kick any listeners (and ChangeRequestsPanel) to refetch
-    emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
-  } catch (e: any) {
-    setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
-  } finally {
-    setCrBusy(prev => ({ ...prev, [key]: false }));
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(t || `HTTP ${r.status}`);
   }
+
+  // Clear the textbox and let the panel refresh
+  setCrText(prev => ({ ...prev, [key]: '' }));
+  // Kick any listeners (and ChangeRequestsPanel) to refetch
+  emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
+
+  // ⬇️ CLOSE THE MODAL ON SUCCESS
+  setCrFor(null);
+} catch (e: any) {
+  setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
+} finally {
+  setCrBusy(prev => ({ ...prev, [key]: false }));
 }
 
   function addPending(key: string) {
@@ -1409,69 +1407,20 @@ const renderProof = (m: any) => {
                             </>
                           )}
 
-{/* Request Changes (button + inline panel with composer) */}
+{/* Request Changes (open MODAL like project page) */}
 <button
-  onClick={() => toggleCR(key)}
+  onClick={() =>
+    setCrFor({
+      bidId: Number(bid.bidId),
+      proposalId: Number(bid.proposalId),
+      milestoneIndex: origIdx,
+    })
+  }
   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
   title="Ask the vendor for fixes or additional proof"
 >
-  {isCROpen(key) ? 'Hide Change Request' : 'Request Changes'}
+  Request Changes
 </button>
-
-{isCROpen(key) && (
-  <div className="mt-3 border rounded-lg p-3">
-    <div className="flex items-center justify-between mb-2">
-      <h4 className="font-medium">Request Changes — Milestone #{origIdx + 1}</h4>
-      <button
-        type="button"
-        className="text-sm text-slate-600 hover:underline"
-        onClick={() => toggleCR(key)}
-      >
-        Close
-      </button>
-    </div>
-
-    {/* History (same component used on the Project page) */}
-    <ChangeRequestsPanel
-      proposalId={Number(bid.proposalId)}
-      initialMilestoneIndex={origIdx}
-    />
-
-    {/* Composer */}
-    <div className="border-t mt-3 pt-3">
-      <label className="text-sm text-slate-700 block mb-1">
-        Comment (what to change)
-      </label>
-      <textarea
-        rows={4}
-        value={crText[key] || ''}
-        onChange={(e) => setCrText(prev => ({ ...prev, [key]: e.target.value }))}
-        className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
-        placeholder="Be specific about what needs to change or what extra evidence is required…"
-      />
-      {crErr[key] && (
-        <div className="text-sm text-rose-600 mt-1">{crErr[key]}</div>
-      )}
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => submitCR(Number(bid.proposalId), Number(bid.bidId), origIdx)}
-          disabled={!!crBusy[key]}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded disabled:opacity-50"
-        >
-          {crBusy[key] ? 'Sending…' : 'Send to Vendor'}
-        </button>
-        <button
-          type="button"
-          className="px-3 py-2 rounded border"
-          onClick={() => toggleCR(key)}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-)}
 
 
                           {!isArchived(bid.bidId, origIdx) ? (
