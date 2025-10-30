@@ -386,9 +386,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set()
   );
 
-  const [openCR, setOpenCR] = useState<Record<string, boolean>>({});
-  const toggleCR = (k: string) => setOpenCR(prev => ({ ...prev, [k]: !prev[k] }));
-
+ 
   // 🔑 The missing piece: cache latest proof (same source Agent2 uses)
   const [latestProofByKey, setLatestProofByKey] = useState<
     Record<string, { description?: string; files?: any[] }>
@@ -1356,21 +1354,14 @@ const renderProof = (m: any) => {
                             </>
                           )}
 
-{/* Request Changes (opens inline panel) */}
+{/* Request Changes (opens MODAL like the Project page) */}
 <button
-  onClick={() => toggleCR(`${bid.bidId}-${origIdx}`)}
+  onClick={() => setCrFor({ bidId: bid.bidId, proposalId: Number(bid.proposalId), milestoneIndex: origIdx })}
   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
   title="Ask the vendor for fixes or additional proof"
 >
-  {openCR[`${bid.bidId}-${origIdx}`] ? 'Hide Change Request' : 'Request Changes'}
+  Request Changes
 </button>
-
-{openCR[`${bid.bidId}-${origIdx}`] && (
-  <div className="mt-3 border rounded-lg p-3">
-    {/* Same panel the Project page uses — requires only proposalId */}
-    <ChangeRequestsPanel proposalId={Number(bid.proposalId)} />
-  </div>
-)}
 
                           {!isArchived(bid.bidId, origIdx) ? (
                             <button
@@ -1401,6 +1392,43 @@ const renderProof = (m: any) => {
           ))}
         </div>
       )}
+
+{/* ===== Change Request Modal (Project-page style) ===== */}
+{crFor && (
+  <div
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+    onClick={() => setCrFor(null)}
+  >
+    <div
+      className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <h3 className="text-base font-semibold">
+          Request Changes — Milestone #{crFor.milestoneIndex + 1}
+        </h3>
+        <button
+          onClick={() => setCrFor(null)}
+          className="rounded px-2 py-1 text-slate-600 hover:bg-slate-100"
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="p-4">
+        {/* Use the exact panel used on Project page */}
+        <ChangeRequestsPanel
+          proposalId={crFor.proposalId}
+          initialMilestoneIndex={crFor.milestoneIndex}  // ✅ pre-select the milestone
+          // If your component supports an onSubmitted or onClose prop, uncomment:
+          // onSubmitted={() => setCrFor(null)}
+          // onClose={() => setCrFor(null)}
+        />
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Lightbox */}
       {lightbox && (
