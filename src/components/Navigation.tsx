@@ -164,6 +164,26 @@ export default function Navigation() {
                     </div>
                   )}
                 </div>
+              ) : item.href.startsWith('/vendor/') ? (
+                // Hard navigate for vendor pages so Project page can't swallow SPA clicks
+                <a
+                  key={item.href}
+                  href={resolveHref(item.href)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setIsAdminOpen(false);
+                    setIsMobileMenuOpen(false);
+                    window.location.assign(resolveHref(item.href));
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                  }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </a>
               ) : (
                 <Link
                   prefetch={false}
@@ -277,6 +297,28 @@ export default function Navigation() {
                       </Link>
                     ))}
                   </div>
+                ) : item.href.startsWith('/vendor/') ? (
+                  // Hard navigate for vendor pages on mobile too
+                  <a
+                    key={item.href}
+                    href={resolveHref(item.href)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setIsMobileMenuOpen(false);
+                      setIsAdminOpen(false);
+                      window.location.assign(resolveHref(item.href));
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                    }}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                      isActive(item.href)
+                        ? 'text-cyan-400 bg-gray-700'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                  </a>
                 ) : (
                   <Link
                     prefetch={false}
