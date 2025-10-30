@@ -134,17 +134,39 @@ export default function Navigation() {
     }
   };
 
+  // Force navigation for vendor pages to bypass any client-side routing issues
+  const handleVendorNavigation = (href: string) => {
+    setIsAdminOpen(false);
+    setIsMobileMenuOpen(false);
+    setIsProfileOpen(false);
+    
+    // Use window.location for vendor pages to ensure complete navigation
+    // This bypasses any potential client-side routing conflicts
+    window.location.href = resolveHref(href);
+  };
+
+  // Standard navigation for other pages
+  const handleStandardNavigation = (href: string) => {
+    setIsAdminOpen(false);
+    setIsMobileMenuOpen(false);
+    setIsProfileOpen(false);
+    router.push(resolveHref(href));
+  };
+
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link prefetch={false} href="/" className="flex items-center space-x-2">
+          <div 
+            onClick={() => handleStandardNavigation('/')}
+            className="flex items-center space-x-2 cursor-pointer"
+          >
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
             </div>
             <h1 className="text-xl font-semibold">LithiumX</h1>
-          </Link>
+          </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
@@ -173,36 +195,41 @@ export default function Navigation() {
                   {isAdminOpen && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                       {item.children.map((sub) => (
-                        <Link
-                          prefetch={false}
+                        <div
                           key={sub.href}
-                          href={sub.href}
-                          onClick={() => setIsAdminOpen(false)}
-                          className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
+                          onClick={() => handleStandardNavigation(sub.href)}
+                          className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer ${
                             isActive(sub.href) ? 'text-cyan-600 bg-gray-50' : 'text-gray-700'
                           }`}
                         >
                           {sub.label}
-                        </Link>
+                        </div>
                       ))}
                     </div>
                   )}
                 </div>
-              ) : (
-                <Link
-                  prefetch={false}
+              ) : item.href.startsWith('/vendor/') ? (
+                // Use forced navigation for vendor pages
+                <div
                   key={item.href}
-                  href={resolveHref(item.href)}
-                  onClick={() => {
-                    setIsAdminOpen(false);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  onClick={() => handleVendorNavigation(item.href)}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                 >
                   {item.label}
-                </Link>
+                </div>
+              ) : (
+                // Use standard navigation for other pages
+                <div
+                  key={item.href}
+                  onClick={() => handleStandardNavigation(item.href)}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </div>
               )
             )}
           </nav>
@@ -229,14 +256,12 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                   {address ? (
                     <>
-                      <Link
-                        prefetch={false}
-                        href="/vendor/profile"
-                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                        onClick={() => setIsProfileOpen(false)}
+                      <div
+                        onClick={() => handleVendorNavigation('/vendor/profile')}
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
                       >
                         Vendor Profile
-                      </Link>
+                      </div>
 
                       <button
                         onClick={handleLogout}
@@ -246,13 +271,12 @@ export default function Navigation() {
                       </button>
                     </>
                   ) : (
-                    <Link
-                      href="/vendor/login"
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                      onClick={() => setIsProfileOpen(false)}
+                    <div
+                      onClick={() => handleVendorNavigation('/vendor/login')}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
                     >
                       Login
-                    </Link>
+                    </div>
                   )}
                 </div>
               )}
@@ -283,45 +307,51 @@ export default function Navigation() {
                     <p className="px-3 py-2 text-gray-400 text-xs uppercase font-medium">{item.label}</p>
                     <div className="ml-2 space-y-1">
                       {item.children.map((sub) => (
-                        <Link
-                          prefetch={false}
+                        <div
                           key={sub.href}
-                          href={sub.href}
-                          className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          onClick={() => handleStandardNavigation(sub.href)}
+                          className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
                             isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                           }`}
-                          onClick={() => setIsMobileMenuOpen(false)}
                         >
                           {sub.label}
-                        </Link>
+                        </div>
                       ))}
                     </div>
                   </div>
-                ) : (
-                  <Link
-                    prefetch={false}
+                ) : item.href.startsWith('/vendor/') ? (
+                  // Use forced navigation for vendor pages on mobile
+                  <div
                     key={item.href}
-                    href={resolveHref(item.href)}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                    onClick={() => handleVendorNavigation(item.href)}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${
                       isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
                   >
                     {item.label}
-                  </Link>
+                  </div>
+                ) : (
+                  // Use standard navigation for other pages on mobile
+                  <div
+                    key={item.href}
+                    onClick={() => handleStandardNavigation(item.href)}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${
+                      isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    {item.label}
+                  </div>
                 )
               )}
 
               {address ? (
                 <>
-                  <Link
-                    prefetch={false}
-                    href="/vendor/profile"
-                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                    onClick={() => setIsMobileMenuOpen(false)}
+                  <div
+                    onClick={() => handleVendorNavigation('/vendor/profile')}
+                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
                   >
                     Vendor Profile
-                  </Link>
+                  </div>
                   <button
                     onClick={() => {
                       setIsMobileMenuOpen(false);
@@ -333,13 +363,12 @@ export default function Navigation() {
                   </button>
                 </>
               ) : (
-                <Link
-                  href="/vendor/login"
-                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                  onClick={() => setIsMobileMenuOpen(false)}
+                <div
+                  onClick={() => handleVendorNavigation('/vendor/login')}
+                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
                 >
                   Login
-                </Link>
+                </div>
               )}
             </div>
           </div>
