@@ -26,6 +26,15 @@ export default function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
 
+  const forceNavigate = (href: string) => {
+  const before = location.href;
+  router.push(href);
+  // If SPA nav is blocked for any reason (only happens on /projects/[id]), hard navigate.
+  setTimeout(() => {
+    if (location.href === before) location.assign(href);
+  }, 600);
+};
+
   // Wallet context
   const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
 
