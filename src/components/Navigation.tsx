@@ -21,7 +21,6 @@ export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
   const pathname = usePathname();
   const router = useRouter();
@@ -32,8 +31,6 @@ export default function Navigation() {
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
   const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
-
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     let alive = true;
@@ -104,7 +101,6 @@ export default function Navigation() {
     return true;
   };
 
-  // Send guests to login when they click "Submit Proposal"
   const resolveHref = (href: string) =>
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
@@ -165,7 +161,7 @@ export default function Navigation() {
                   )}
                 </div>
               ) : item.href.startsWith('/vendor/') ? (
-                // Hard navigate for vendor pages so Project page can't swallow SPA clicks
+                // Force hard navigation ONLY for vendor pages (bypasses any Project-page click traps)
                 <a
                   key={item.href}
                   href={resolveHref(item.href)}
@@ -175,9 +171,7 @@ export default function Navigation() {
                     setIsMobileMenuOpen(false);
                     window.location.assign(resolveHref(item.href));
                   }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                  }}
+                  onClick={(e) => e.preventDefault()}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
@@ -308,9 +302,7 @@ export default function Navigation() {
                       setIsAdminOpen(false);
                       window.location.assign(resolveHref(item.href));
                     }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                    }}
+                    onClick={(e) => e.preventDefault()}
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                       isActive(item.href)
                         ? 'text-cyan-400 bg-gray-700'
