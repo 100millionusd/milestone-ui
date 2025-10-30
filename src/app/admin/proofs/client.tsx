@@ -430,39 +430,39 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
     return;
   }
 
-
   setCrBusy(prev => ({ ...prev, [key]: true }));
   setCrErr(prev => ({ ...prev, [key]: null }));
 
   try {
-  const r = await fetch('/api/proofs/change-requests', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({
-      proposalId,
-      milestoneIndex,
-      comment,
-      bidId, // optional but nice to attach
-    }),
-  });
+    const r = await fetch('/api/proofs/change-requests', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        proposalId,
+        milestoneIndex,
+        comment,
+        bidId, // optional but nice to attach
+      }),
+    });
 
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(t || `HTTP ${r.status}`);
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(t || `HTTP ${r.status}`);
+    }
+
+    // Clear the textbox and let the panel refresh
+    setCrText(prev => ({ ...prev, [key]: '' }));
+    // Kick any listeners (and ChangeRequestsPanel) to refetch
+    emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
+
+    // CLOSE THE MODAL ON SUCCESS
+    setCrFor(null);
+  } catch (e: any) {
+    setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
+  } finally {
+    setCrBusy(prev => ({ ...prev, [key]: false }));
   }
-
-  // Clear the textbox and let the panel refresh
-  setCrText(prev => ({ ...prev, [key]: '' }));
-  // Kick any listeners (and ChangeRequestsPanel) to refetch
-  emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
-
-  // ⬇️ CLOSE THE MODAL ON SUCCESS
-  setCrFor(null);
-} catch (e: any) {
-  setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
-} finally {
-  setCrBusy(prev => ({ ...prev, [key]: false }));
 }
 
   function addPending(key: string) {
