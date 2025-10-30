@@ -1455,45 +1455,79 @@ const renderProof = (m: any) => {
 
 {/* ===== Change Request Modal (Project-page style) ===== */}
 {crFor && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={() => setCrFor(null)}>
-    <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+  <div
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+    onClick={() => setCrFor(null)}
+  >
+    <div
+      className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="cr-modal-title"
+    >
+      {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h3 className="text-base font-semibold">
+        <h3 id="cr-modal-title" className="text-base font-semibold">
           Request Changes — Milestone #{crFor.milestoneIndex + 1}
         </h3>
-        <button onClick={() => setCrFor(null)} className="rounded px-2 py-1 text-slate-600 hover:bg-slate-100" aria-label="Close">✕</button>
+        <button
+          onClick={() => setCrFor(null)}
+          className="rounded px-2 py-1 text-slate-600 hover:bg-slate-100"
+          aria-label="Close"
+        >
+          ✕
+        </button>
       </div>
 
+      {/* Body (panel + composer) */}
       <div className="p-4">
+        {/* Existing thread / list (same as project page) */}
         <ChangeRequestsPanel
           proposalId={crFor.proposalId}
           initialMilestoneIndex={crFor.milestoneIndex}
         />
 
-        {/* Composer */}
+        {/* Composer (spacing/labels synced 1:1) */}
         {(() => {
-          const key = mkKey(crFor.bidId, crFor.milestoneIndex);
+          const key = `${crFor.bidId}-${crFor.milestoneIndex}`;
           return (
             <div className="border-t mt-4 pt-3">
-              <label className="text-sm text-slate-700 block mb-1">Comment (what to change)</label>
+              <label className="text-sm text-slate-700 block mb-1">
+                Comment (what to change)
+              </label>
               <textarea
                 rows={4}
                 value={crText[key] || ''}
-                onChange={(e) => setCrText(prev => ({ ...prev, [key]: e.target.value }))}
+                onChange={(e) =>
+                  setCrText((prev) => ({ ...prev, [key]: e.target.value }))
+                }
                 className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Be specific about what needs to change…"
+                autoFocus
               />
-              {crErr[key] && <div className="text-sm text-rose-600 mt-1">{crErr[key]}</div>}
+              {crErr[key] && (
+                <div className="text-sm text-rose-600 mt-1">{crErr[key]}</div>
+              )}
+
               <div className="mt-2 flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => submitCR(crFor.proposalId, crFor.bidId, crFor.milestoneIndex)}
+                  onClick={() =>
+                    submitCR(crFor.proposalId, crFor.bidId, crFor.milestoneIndex)
+                  }
                   disabled={!!crBusy[key]}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded disabled:opacity-50"
                 >
                   {crBusy[key] ? 'Sending…' : 'Send to Vendor'}
                 </button>
-                <button type="button" className="px-3 py-2 rounded border" onClick={() => setCrFor(null)}>Close</button>
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded border"
+                  onClick={() => setCrFor(null)}
+                >
+                  Close
+                </button>
               </div>
             </div>
           );
