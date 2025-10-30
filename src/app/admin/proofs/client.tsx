@@ -434,38 +434,6 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
     return;
   }
 
-  setCrBusy(prev => ({ ...prev, [key]: true }));
-  setCrErr(prev => ({ ...prev, [key]: null }));
-
-  try {
-    // ✅ Relative path → Next API (same origin)
-    const r = await fetch('/api/proofs/change-requests', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        proposalId,
-        milestoneIndex,
-        comment,
-        bidId, // optional but useful
-      }),
-    });
-
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { msg = (await r.json())?.error || msg; } catch {}
-      throw new Error(msg);
-    }
-
-    setCrText(prev => ({ ...prev, [key]: '' }));
-    // Nudge UI to reload any panels/lists
-    emitMilestonesUpdated({ bidId, milestoneIndex, changeRequestCreated: true });
-  } catch (e: any) {
-    setCrErr(prev => ({ ...prev, [key]: e?.message || 'Failed' }));
-  } finally {
-    setCrBusy(prev => ({ ...prev, [key]: false }));
-  }
-}
 
   setCrBusy(prev => ({ ...prev, [key]: true }));
   setCrErr(prev => ({ ...prev, [key]: null }));
@@ -1538,36 +1506,49 @@ const renderProof = (m: any) => {
 
 {/* ===== Change Request Modal (Project-page style) ===== */}
 {crFor && (
-  <div
-    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
-    onClick={() => setCrFor(null)}
-  >
-    <div
-      className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"
-      onClick={(e) => e.stopPropagation()}
-    >
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={() => setCrFor(null)}>
+    <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h3 className="text-base font-semibold">
           Request Changes — Milestone #{crFor.milestoneIndex + 1}
         </h3>
-        <button
-          onClick={() => setCrFor(null)}
-          className="rounded px-2 py-1 text-slate-600 hover:bg-slate-100"
-          aria-label="Close"
-        >
-          ✕
-        </button>
+        <button onClick={() => setCrFor(null)} className="rounded px-2 py-1 text-slate-600 hover:bg-slate-100" aria-label="Close">✕</button>
       </div>
 
       <div className="p-4">
-        {/* Use the exact panel used on Project page */}
         <ChangeRequestsPanel
           proposalId={crFor.proposalId}
-          initialMilestoneIndex={crFor.milestoneIndex}  // ✅ pre-select the milestone
-          // If your component supports an onSubmitted or onClose prop, uncomment:
-          // onSubmitted={() => setCrFor(null)}
-          // onClose={() => setCrFor(null)}
+          initialMilestoneIndex={crFor.milestoneIndex}
         />
+
+        {/* Composer */}
+        {(() => {
+          const key = mkKey(crFor.bidId, crFor.milestoneIndex);
+          return (
+            <div className="border-t mt-4 pt-3">
+              <label className="text-sm text-slate-700 block mb-1">Comment (what to change)</label>
+              <textarea
+                rows={4}
+                value={crText[key] || ''}
+                onChange={(e) => setCrText(prev => ({ ...prev, [key]: e.target.value }))}
+                className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Be specific about what needs to change…"
+              />
+              {crErr[key] && <div className="text-sm text-rose-600 mt-1">{crErr[key]}</div>}
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => submitCR(crFor.proposalId, crFor.bidId, crFor.milestoneIndex)}
+                  disabled={!!crBusy[key]}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded disabled:opacity-50"
+                >
+                  {crBusy[key] ? 'Sending…' : 'Send to Vendor'}
+                </button>
+                <button type="button" className="px-3 py-2 rounded border" onClick={() => setCrFor(null)}>Close</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   </div>
