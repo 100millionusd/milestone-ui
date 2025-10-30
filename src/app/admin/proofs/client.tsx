@@ -386,6 +386,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set()
   );
 
+  const [crFor, setCrFor] = useState<{ bidId: number; proposalId: number; milestoneIndex: number } | null>(null);
+
  
   // 🔑 The missing piece: cache latest proof (same source Agent2 uses)
   const [latestProofByKey, setLatestProofByKey] = useState<
