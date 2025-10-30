@@ -132,7 +132,7 @@ export default function Navigation() {
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
   return (
-    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
+    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000] pointer-events-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
