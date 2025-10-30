@@ -144,7 +144,7 @@ export default function Navigation() {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-1 relative">
+          <nav className="hidden md:flex items-center space-x-1 relative z-[1001] pointer-events-auto">
             {navItems.filter(showItem).map((item) =>
               'children' in item ? (
                 <div key={item.label} className="relative">
@@ -191,20 +191,20 @@ export default function Navigation() {
   prefetch={false}
   key={item.href}
   href={resolveHref(item.href)}
-  onClick={item.href === '/public'
-    ? () => {
-        const before = location.href;
-        setTimeout(() => {
-          if (location.href === before) location.assign('/public');
-        }, 1200);
-      }
-    : undefined}
-  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+  onClick={(e) => {
+    e.preventDefault();           // stop any page-specific handler
+    setIsMobileMenuOpen(false);
+    forceNavigate(resolveHref(item.href));
+  }}
+  className={`relative z-[1002] pointer-events-auto px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+    isActive(item.href)
+      ? 'text-cyan-400 bg-gray-700'
+      : 'text-gray-300 hover:text-white hover:bg-gray-700'
   }`}
 >
   {item.label}
 </Link>
+
               )
             )}
           </nav>
@@ -308,20 +308,19 @@ export default function Navigation() {
   key={item.href}
   href={resolveHref(item.href)}
   onClick={(e) => {
+    e.preventDefault();
     setIsMobileMenuOpen(false);
-    if (item.href === '/public') {
-      const before = location.href;
-      setTimeout(() => {
-        if (location.href === before) location.assign('/public');
-      }, 1200);
-    }
+    forceNavigate(resolveHref(item.href));
   }}
   className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+    isActive(item.href)
+      ? 'text-cyan-400 bg-gray-700'
+      : 'text-gray-300 hover:text-white hover:bg-gray-700'
   }`}
 >
   {item.label}
 </Link>
+
                 )
               )}
 
