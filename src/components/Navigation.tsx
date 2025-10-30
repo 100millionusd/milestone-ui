@@ -231,7 +231,6 @@ export default function Navigation() {
     )
   ))}
 </nav>
-
  <Link
   prefetch={false}
   key={item.href}
