@@ -11,6 +11,8 @@ import {
   Proof,
   archiveProof,
 } from '@/lib/api';
+import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
+
 
 export default function VendorProofPage() {
   const params = useParams();
@@ -244,6 +246,17 @@ export default function VendorProofPage() {
                 ))}
               </select>
             </div>
+
+ {/* Change Requests (history & replies for the selected milestone) */}
+<div className="mb-6 rounded-lg border border-slate-200">
+  <ChangeRequestsPanel
+    proposalId={bid.proposalId}
+    initialMilestoneIndex={selectedOriginalIndex}
+    // Key forces re-mount when the admin/vendor switches milestone,
+    // so the thread always matches the dropdown selection.
+    key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
+  />
+</div>
 
             {/* Title (optional) */}
             <div className="mb-4">
