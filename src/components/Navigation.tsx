@@ -180,18 +180,28 @@ export default function Navigation() {
                       className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
                       onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
                     >
-                      {item.children.map((sub) => (
-                        <Link
-                          prefetch={false}
-                          key={sub.href}
-                          href={sub.href}
-                          className={`block px-4 py-2 text-sm ${
-                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-                          }`}
-                        >
-                          {sub.label}
-                        </Link>
-                      ))}
+ {item.children.map((sub) => (
+  <Link
+    prefetch={false}
+    key={sub.href}
+    href={sub.href}
+    onMouseDown={(e) => {
+      e.preventDefault();
+      setIsAdminOpen(false);
+      forceNavigate(sub.href);
+    }}
+    onClick={(e) => {
+      e.preventDefault();
+      setIsAdminOpen(false);
+      forceNavigate(sub.href);
+    }}
+    className={`block px-4 py-2 text-sm ${
+      isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+    }`}
+  >
+    {sub.label}
+  </Link>
+))}
                     </div>
                   )}
                 </div>
@@ -200,8 +210,17 @@ export default function Navigation() {
   prefetch={false}
   key={item.href}
   href={resolveHref(item.href)}
+  onMouseDown={(e) => {
+    // Navigate before any page-level click handlers can cancel the click
+    e.preventDefault();
+    setIsAdminOpen(false);
+    setIsMobileMenuOpen(false);
+    forceNavigate(resolveHref(item.href));
+  }}
   onClick={(e) => {
-    e.preventDefault();           // stop any page-specific handler
+    // Fallback for keyboard/assistive tech activation
+    e.preventDefault();
+    setIsAdminOpen(false);
     setIsMobileMenuOpen(false);
     forceNavigate(resolveHref(item.href));
   }}
@@ -240,15 +259,23 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
                     <>
-                      <Link
-                        prefetch={false}
-                        href="/vendor/profile"
-                        className="block px-4 py-2 text-sm hover:bg-gray-100"
-                        onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
-                      >
-                        Vendor Profile
-                      </Link>
-
+ <Link
+  prefetch={false}
+  href="/vendor/profile"
+  className="block px-4 py-2 text-sm hover:bg-gray-100"
+  onMouseDown={(e) => {
+    e.preventDefault();
+    setIsProfileOpen(false);
+    forceNavigate('/vendor/profile');
+  }}
+  onClick={(e) => {
+    e.preventDefault();
+    setIsProfileOpen(false);
+    forceNavigate('/vendor/profile');
+  }}
+>
+  Vendor Profile
+</Link>
                       <button
                         onClick={async () => {
                           setIsProfileOpen(false);                     // close immediately
@@ -261,15 +288,21 @@ export default function Navigation() {
                       </button>
                     </>
                   ) : (
-                    <button
-                      onClick={() => {
-                        setIsProfileOpen(false);
-                        router.push('/vendor/login');
-                      }}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Login
-                    </button>
+ <button
+  onMouseDown={(e) => {
+    e.preventDefault();
+    setIsProfileOpen(false);
+    forceNavigate('/vendor/login');
+  }}
+  onClick={(e) => {
+    e.preventDefault();
+    setIsProfileOpen(false);
+    forceNavigate('/vendor/login');
+  }}
+  className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+>
+  Login
+</button>
                   )}
                 </div>
               )}
@@ -316,9 +349,16 @@ export default function Navigation() {
   prefetch={false}
   key={item.href}
   href={resolveHref(item.href)}
+  onMouseDown={(e) => {
+    e.preventDefault();
+    setIsMobileMenuOpen(false);
+    setIsAdminOpen(false);
+    forceNavigate(resolveHref(item.href));
+  }}
   onClick={(e) => {
     e.preventDefault();
     setIsMobileMenuOpen(false);
+    setIsAdminOpen(false);
     forceNavigate(resolveHref(item.href));
   }}
   className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
@@ -329,6 +369,7 @@ export default function Navigation() {
 >
   {item.label}
 </Link>
+
 
                 )
               )}
