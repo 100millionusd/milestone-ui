@@ -39,59 +39,109 @@ function isImageHref(href: string) {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 }
 
-export default function ChangeRequestsPanel({ proposalId }: { proposalId: number }) {
+type Props = {
+  proposalId: number;
+  initialMilestoneIndex?: number;
+  // hard scoping from parent:
+  forceMilestoneIndex?: number;
+  hideMilestoneTabs?: boolean;
+};
+
+export default function ChangeRequestsPanel(props: Props) {
+  const {
+    proposalId,
+    initialMilestoneIndex = 0,
+    forceMilestoneIndex,
+    hideMilestoneTabs,
+  } = props;
+
+  // keep local state for tabs when not forced
+  const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
+  // FINAL index used everywhere
+  const idx =
+    typeof forceMilestoneIndex === 'number'
+      ? forceMilestoneIndex
+      : activeMilestoneIndex;
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
-    if (!Number.isFinite(proposalId)) return;
-    setLoading(true);
-    setErr(null);
-    try {
-      const r = await fetch(
-        `/api/proofs/change-requests?proposalId=${encodeURIComponent(proposalId)}&include=responses&status=all`,
-        { credentials: 'include', cache: 'no-store' }
-      );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const list = await r.json();
-      setRows(Array.isArray(list) ? list : []);
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load change requests');
-      setRows([]);
-    } finally {
-      setLoading(false);
+  if (!Number.isFinite(proposalId)) return;
+  setLoading(true);
+  setErr(null);
+  try {
+    // Build URL and pass milestoneIndex ONLY when the parent forces it
+    const url = new URL('/api/proofs/change-requests', window.location.origin);
+    url.searchParams.set('proposalId', String(proposalId));
+    url.searchParams.set('include', 'responses');
+    url.searchParams.set('status', 'all');
+    if (typeof forceMilestoneIndex === 'number') {
+      url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
     }
+
+    const r = await fetch(url.toString(), {
+      credentials: 'include',
+      cache: 'no-store',
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const list = await r.json();
+    setRows(Array.isArray(list) ? list : []);
+  } catch (e: any) {
+    setErr(e?.message || 'Failed to load change requests');
+    setRows([]);
+  } finally {
+    setLoading(false);
   }
+}
 
-  useEffect(() => { load(); /* on mount & when proposal changes */ }, [proposalId]);
+  // on mount & when proposal OR effective milestone index changes
+useEffect(() => { load(); }, [proposalId, idx]);
 
-  // Live refresh when proofs saved
-  useEffect(() => {
-    const onAny = (ev: any) => {
-      const pid = Number(ev?.detail?.proposalId);
-      if (!Number.isFinite(pid) || pid === proposalId) load();
-    };
-    window.addEventListener('proofs:updated', onAny);
-    window.addEventListener('proofs:changed', onAny);
-    return () => {
-      window.removeEventListener('proofs:updated', onAny);
-      window.removeEventListener('proofs:changed', onAny);
-    };
-  }, [proposalId]);
+
+ useEffect(() => {
+  const onAny = (ev: any) => {
+    const pid = Number(ev?.detail?.proposalId);
+    // reload when it's our proposal or when no proposalId is provided
+    if (!Number.isFinite(pid) || pid === proposalId) load();
+  };
+  window.addEventListener('proofs:updated', onAny);
+  window.addEventListener('proofs:changed', onAny);
+  window.addEventListener('milestones:updated', onAny); // NEW
+  return () => {
+    window.removeEventListener('proofs:updated', onAny);
+    window.removeEventListener('proofs:changed', onAny);
+    window.removeEventListener('milestones:updated', onAny);
+  };
+}, [proposalId, idx]);
+
+  // Narrow to the currently scoped milestone
+  const filteredRows = (rows || []).filter((cr) =>
+    (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx
+  );
+
+  // Optional tabs only when NOT forced and not hidden
+  const allMilestones = Array.from(
+    new Set((rows || []).map(r => r.milestoneIndex))
+  ).sort((a, b) => a - b);
+
+  const showTabs =
+    !hideMilestoneTabs &&
+    typeof forceMilestoneIndex !== 'number' &&
+    allMilestones.length > 1;
 
   if (loading) return <div className="mt-4 text-sm text-gray-500">Loading change requests…</div>;
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
-  if (!rows.length) {
+  if (!filteredRows.length) {
     return (
       <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
-        No change requests yet.
+        No change requests yet for Milestone {idx + 1}.
       </div>
     );
   }
 
-  return (
+      return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold">Change Request Thread</h4>
@@ -103,8 +153,27 @@ export default function ChangeRequestsPanel({ proposalId }: { proposalId: number
         </button>
       </div>
 
+      {showTabs && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {allMilestones.map(mi => (
+            <button
+              key={mi}
+              onClick={() => setActiveMilestoneIndex(mi)}
+              className={[
+                'px-3 py-1.5 rounded-full text-xs border',
+                mi === idx
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              ].join(' ')}
+            >
+              Milestone {mi + 1}
+            </button>
+          ))}
+        </div>
+      )}
+
       <ol className="space-y-4">
-        {rows.map((cr) => {
+        {filteredRows.map((cr) => {
           const responses = Array.isArray(cr.responses) ? cr.responses : [];
           return (
             <li key={cr.id} className="border rounded p-3 bg-white">
