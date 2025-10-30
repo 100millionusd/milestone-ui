@@ -1341,14 +1341,17 @@ const renderProof = (m: any) => {
                           <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
 
 {/* Change Requests (inline history for this milestone) */}
-{hasProof(m) && (
+{hasProof(m) && !isArchived(bid.bidId, origIdx) && (
   <div className="mt-3">
     <div className="text-sm font-medium text-slate-700 mb-1">
       Change Requests & Answers
     </div>
     <ChangeRequestsPanel
+      key={`inlineCR:${bid.proposalId}:${bid.bidId}:${origIdx}`}
       proposalId={bid.proposalId}
+      milestoneIndex={origIdx}
       initialMilestoneIndex={origIdx}
+      bidId={bid.bidId}
     />
   </div>
 )}
