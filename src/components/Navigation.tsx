@@ -289,15 +289,9 @@ export default function Navigation() {
                     </>
                   ) : (
  <button
-  onMouseDown={(e) => {
-    e.preventDefault();
+  onClick={() => {
     setIsProfileOpen(false);
-    forceNavigate('/vendor/login');
-  }}
-  onClick={(e) => {
-    e.preventDefault();
-    setIsProfileOpen(false);
-    forceNavigate('/vendor/login');
+    router.push('/vendor/login');
   }}
   className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
 >
