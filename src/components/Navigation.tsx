@@ -26,10 +26,6 @@ export default function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const forceNavigate = (href: string) => {
-  router.push(href);
-};
-
   // Wallet context
   const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
 
@@ -136,7 +132,7 @@ export default function Navigation() {
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
   return (
-    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000] pointer-events-auto">
+    <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -148,7 +144,7 @@ export default function Navigation() {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-1 relative z-[1001] pointer-events-auto">
+          <nav className="hidden md:flex items-center space-x-1 relative">
             {navItems.filter(showItem).map((item) =>
               'children' in item ? (
                 <div key={item.label} className="relative">
@@ -175,28 +171,18 @@ export default function Navigation() {
                       className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
                       onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
                     >
- {item.children.map((sub) => (
-  <Link
-    prefetch={false}
-    key={sub.href}
-    href={sub.href}
-    onMouseDown={(e) => {
-      e.preventDefault();
-      setIsAdminOpen(false);
-      forceNavigate(sub.href);
-    }}
-    onClick={(e) => {
-      e.preventDefault();
-      setIsAdminOpen(false);
-      forceNavigate(sub.href);
-    }}
-    className={`block px-4 py-2 text-sm ${
-      isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
-    }`}
-  >
-    {sub.label}
-  </Link>
-))}
+                      {item.children.map((sub) => (
+                        <Link
+                          prefetch={false}
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block px-4 py-2 text-sm ${
+                            isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
+                          }`}
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -205,29 +191,20 @@ export default function Navigation() {
   prefetch={false}
   key={item.href}
   href={resolveHref(item.href)}
-  onMouseDown={(e) => {
-    // Navigate before any page-level click handlers can cancel the click
-    e.preventDefault();
-    setIsAdminOpen(false);
-    setIsMobileMenuOpen(false);
-    forceNavigate(resolveHref(item.href));
-  }}
-  onClick={(e) => {
-    // Fallback for keyboard/assistive tech activation
-    e.preventDefault();
-    setIsAdminOpen(false);
-    setIsMobileMenuOpen(false);
-    forceNavigate(resolveHref(item.href));
-  }}
-  className={`relative z-[1002] pointer-events-auto px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-    isActive(item.href)
-      ? 'text-cyan-400 bg-gray-700'
-      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+  onClick={item.href === '/public'
+    ? () => {
+        const before = location.href;
+        setTimeout(() => {
+          if (location.href === before) location.assign('/public');
+        }, 1200);
+      }
+    : undefined}
+  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
   }`}
 >
   {item.label}
 </Link>
-
               )
             )}
           </nav>
@@ -254,23 +231,15 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
                     <>
- <Link
-  prefetch={false}
-  href="/vendor/profile"
-  className="block px-4 py-2 text-sm hover:bg-gray-100"
-  onMouseDown={(e) => {
-    e.preventDefault();
-    setIsProfileOpen(false);
-    forceNavigate('/vendor/profile');
-  }}
-  onClick={(e) => {
-    e.preventDefault();
-    setIsProfileOpen(false);
-    forceNavigate('/vendor/profile');
-  }}
->
-  Vendor Profile
-</Link>
+                      <Link
+                        prefetch={false}
+                        href="/vendor/profile"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100"
+                        onClick={() => setIsProfileOpen(false)}        // close AFTER click, navigation still happens
+                      >
+                        Vendor Profile
+                      </Link>
+
                       <button
                         onClick={async () => {
                           setIsProfileOpen(false);                     // close immediately
@@ -283,15 +252,15 @@ export default function Navigation() {
                       </button>
                     </>
                   ) : (
- <button
-  onClick={() => {
-    setIsProfileOpen(false);
-    router.push('/vendor/login');
-  }}
-  className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
->
-  Login
-</button>
+                    <button
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        router.push('/vendor/login');
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                    >
+                      Login
+                    </button>
                   )}
                 </div>
               )}
@@ -338,28 +307,21 @@ export default function Navigation() {
   prefetch={false}
   key={item.href}
   href={resolveHref(item.href)}
-  onMouseDown={(e) => {
-    e.preventDefault();
-    setIsMobileMenuOpen(false);
-    setIsAdminOpen(false);
-    forceNavigate(resolveHref(item.href));
-  }}
   onClick={(e) => {
-    e.preventDefault();
     setIsMobileMenuOpen(false);
-    setIsAdminOpen(false);
-    forceNavigate(resolveHref(item.href));
+    if (item.href === '/public') {
+      const before = location.href;
+      setTimeout(() => {
+        if (location.href === before) location.assign('/public');
+      }, 1200);
+    }
   }}
   className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-    isActive(item.href)
-      ? 'text-cyan-400 bg-gray-700'
-      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
   }`}
 >
   {item.label}
 </Link>
-
-
                 )
               )}
 
