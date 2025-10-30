@@ -1,7 +1,7 @@
 // src/components/Navigation.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
@@ -24,8 +24,6 @@ export default function Navigation() {
 
   const pathname = usePathname();
   const router = useRouter();
-  const adminDropdownRef = useRef<HTMLDivElement>(null);
-  const profileDropdownRef = useRef<HTMLDivElement>(null);
 
   // Wallet context
   const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
@@ -64,10 +62,8 @@ export default function Navigation() {
   const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
 
   const isActive = (path: string) => {
-    if (path === '/') {
-      return pathname === '/';
-    }
-    return pathname.startsWith(path);
+    const clean = path.split('?')[0];
+    return pathname === clean || pathname.startsWith(clean + '/');
   };
 
   const navItems: NavItem[] = useMemo(
@@ -108,24 +104,7 @@ export default function Navigation() {
   const resolveHref = (href: string) =>
     href === '/new' && role === 'guest' ? `/vendor/login?next=${encodeURIComponent('/new')}` : href;
 
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (adminDropdownRef.current && !adminDropdownRef.current.contains(event.target as Node)) {
-        setIsAdminOpen(false);
-      }
-      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
-        setIsProfileOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   const handleLogout = async () => {
-    setIsProfileOpen(false);
-    setIsMobileMenuOpen(false);
     try {
       await logout();
       router.push('/vendor/login');
@@ -135,22 +114,12 @@ export default function Navigation() {
     }
   };
 
-  const handleLinkClick = () => {
-    setIsMobileMenuOpen(false);
-    setIsAdminOpen(false);
-    setIsProfileOpen(false);
-  };
-
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link 
-            href="/" 
-            className="flex items-center space-x-2"
-            onClick={handleLinkClick}
-          >
+          <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
             </div>
@@ -158,14 +127,14 @@ export default function Navigation() {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-1 relative">
+          <nav className="hidden md:flex items-center space-x-1">
             {navItems.filter(showItem).map((item) =>
               'children' in item ? (
-                <div key={item.label} className="relative" ref={adminDropdownRef}>
+                <div key={item.label} className="relative">
                   <button
                     onClick={() => setIsAdminOpen(!isAdminOpen)}
                     className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      isActive('/admin')
+                      pathname.startsWith('/admin')
                         ? 'text-cyan-400 bg-gray-700'
                         : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
@@ -190,7 +159,7 @@ export default function Navigation() {
                           className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
                             isActive(sub.href) ? 'text-cyan-600 bg-gray-50' : 'text-gray-700'
                           }`}
-                          onClick={handleLinkClick}
+                          onClick={() => setIsAdminOpen(false)}
                         >
                           {sub.label}
                         </Link>
@@ -205,7 +174,6 @@ export default function Navigation() {
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
-                  onClick={handleLinkClick}
                 >
                   {item.label}
                 </Link>
@@ -214,8 +182,8 @@ export default function Navigation() {
           </nav>
 
           {/* User Actions */}
-          <div className="hidden md:flex items-center space-x-4 relative">
-            <div className="relative" ref={profileDropdownRef}>
+          <div className="hidden md:flex items-center space-x-4">
+            <div className="relative">
               <div
                 className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-700"
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -242,7 +210,6 @@ export default function Navigation() {
                       >
                         Vendor Profile
                       </Link>
-
                       <button
                         onClick={handleLogout}
                         className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
@@ -294,7 +261,7 @@ export default function Navigation() {
                           className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                             isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                           }`}
-                          onClick={handleLinkClick}
+                          onClick={() => setIsMobileMenuOpen(false)}
                         >
                           {sub.label}
                         </Link>
@@ -308,7 +275,7 @@ export default function Navigation() {
                     className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                       isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
-                    onClick={handleLinkClick}
+                    onClick={() => setIsMobileMenuOpen(false)}
                   >
                     {item.label}
                   </Link>
@@ -320,12 +287,15 @@ export default function Navigation() {
                   <Link
                     href="/vendor/profile"
                     className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                    onClick={handleLinkClick}
+                    onClick={() => setIsMobileMenuOpen(false)}
                   >
                     Vendor Profile
                   </Link>
                   <button
-                    onClick={handleLogout}
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      handleLogout();
+                    }}
                     className="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
                   >
                     Logout
@@ -335,7 +305,7 @@ export default function Navigation() {
                 <Link
                   href="/vendor/login"
                   className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
-                  onClick={handleLinkClick}
+                  onClick={() => setIsMobileMenuOpen(false)}
                 >
                   Login
                 </Link>
