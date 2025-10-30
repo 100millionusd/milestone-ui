@@ -145,7 +145,7 @@ export default function Navigation() {
 
  {/* Desktop Navigation */}
 <nav className="hidden md:flex items-center space-x-1 relative">
-  {navItems.filter(showItem).map((item) =>
+  {navItems.filter(showItem).map((item) => (
     'children' in item ? (
       <div key={item.label} className="relative">
         <button
@@ -169,7 +169,7 @@ export default function Navigation() {
         {isAdminOpen && (
           <div
             className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50"
-            onClickCapture={() => setIsAdminOpen(false)}   // ← closes as soon as a link is clicked
+            onClickCapture={() => setIsAdminOpen(false)}
           >
             {item.children.map((sub) => (
               <Link
@@ -187,52 +187,51 @@ export default function Navigation() {
         )}
       </div>
     ) : (
-      item.href.startsWith('/vendor/')
-        ? (
-          <button
-            key={item.href}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsAdminOpen(false);
-              setIsMobileMenuOpen(false);
-              router.push(resolveHref(item.href)); // SPA nav only
-            }}
-            onClick={(e) => {
-              e.preventDefault(); // keyboard/AT fallback
-              setIsAdminOpen(false);
-              setIsMobileMenuOpen(false);
-              router.push(resolveHref(item.href));
-            }}
-            className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-              isActive(item.href)
-                ? 'text-cyan-400 bg-gray-700'
-                : 'text-gray-300 hover:text-white hover:bg-gray-700'
-            }`}
-          >
-            {item.label}
-          </button>
-        )
-        : (
-          <Link
-            prefetch={false}
-            key={item.href}
-            href={resolveHref(item.href)}
-            onClick={() => {
-              setIsAdminOpen(false);
-              setIsMobileMenuOpen(false);
-            }}
-            className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-              isActive(item.href)
-                ? 'text-cyan-400 bg-gray-700'
-                : 'text-gray-300 hover:text-white hover:bg-gray-700'
-            }`}
-          >
-            {item.label}
-          </Link>
-        )
+      item.href.startsWith('/vendor/') ? (
+        <button
+          key={item.href}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsAdminOpen(false);
+            setIsMobileMenuOpen(false);
+            router.push(resolveHref(item.href));
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            setIsAdminOpen(false);
+            setIsMobileMenuOpen(false);
+            router.push(resolveHref(item.href));
+          }}
+          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            isActive(item.href)
+              ? 'text-cyan-400 bg-gray-700'
+              : 'text-gray-300 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          {item.label}
+        </button>
+      ) : (
+        <Link
+          prefetch={false}
+          key={item.href}
+          href={resolveHref(item.href)}
+          onClick={() => {
+            setIsAdminOpen(false);
+            setIsMobileMenuOpen(false);
+          }}
+          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            isActive(item.href)
+              ? 'text-cyan-400 bg-gray-700'
+              : 'text-gray-300 hover:text-white hover:bg-gray-700'
+          }`}
+        >
+          {item.label}
+        </Link>
+      )
     )
-  )}
+  ))}
 </nav>
+
  <Link
   prefetch={false}
   key={item.href}
