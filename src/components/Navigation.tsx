@@ -124,20 +124,28 @@ export default function Navigation() {
     router.push(href);
   };
 
+  const handleLogout = async () => {
+    setIsProfileOpen(false);
+    try {
+      await logout();
+      router.push('/vendor/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      router.push('/vendor/login');
+    }
+  };
+
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <div 
-            onClick={() => handleNavigation('/')}
-            className="flex items-center space-x-2 cursor-pointer"
-          >
+          <Link prefetch={false} href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">L</span>
             </div>
             <h1 className="text-xl font-semibold">LithiumX</h1>
-          </div>
+          </Link>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-1 relative">
@@ -169,29 +177,39 @@ export default function Navigation() {
                   {isAdminOpen && (
                     <div className="absolute mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                       {item.children.map((sub) => (
-                        <div
+                        <Link
+                          prefetch={false}
                           key={sub.href}
-                          onClick={() => handleNavigation(sub.href)}
-                          className={`block px-4 py-2 text-sm cursor-pointer ${
+                          href={sub.href}
+                          onClick={() => {
+                            setIsAdminOpen(false);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`block px-4 py-2 text-sm ${
                             isActive(sub.href) ? 'bg-gray-100 text-cyan-600' : 'hover:bg-gray-100'
                           }`}
                         >
                           {sub.label}
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   )}
                 </div>
               ) : (
-                <div
+                <Link
+                  prefetch={false}
                   key={item.href}
-                  onClick={() => handleNavigation(resolveHref(item.href))}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                  href={resolveHref(item.href)}
+                  onClick={() => {
+                    setIsAdminOpen(false);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
                 >
                   {item.label}
-                </div>
+                </Link>
               )
             )}
           </nav>
@@ -221,31 +239,30 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50">
                   {address ? (
                     <>
-                      <div
-                        onClick={() => handleNavigation('/vendor/profile')}
-                        className="block px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      <Link
+                        prefetch={false}
+                        href="/vendor/profile"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100"
+                        onClick={() => setIsProfileOpen(false)}
                       >
                         Vendor Profile
-                      </div>
+                      </Link>
 
-                      <div
-                        onClick={async () => {
-                          setIsProfileOpen(false);
-                          await logout();
-                          router.push('/vendor/login');
-                        }}
-                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      <button
+                        onClick={handleLogout}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
                       >
                         Logout
-                      </div>
+                      </button>
                     </>
                   ) : (
-                    <div
-                      onClick={() => handleNavigation('/vendor/login')}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    <Link
+                      href="/vendor/login"
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      onClick={() => setIsProfileOpen(false)}
                     >
                       Login
-                    </div>
+                    </Link>
                   )}
                 </div>
               )}
@@ -278,37 +295,62 @@ export default function Navigation() {
                   <div key={item.label}>
                     <p className="px-3 py-2 text-gray-400 text-xs uppercase">{item.label}</p>
                     {item.children.map((sub) => (
-                      <div
+                      <Link
+                        prefetch={false}
                         key={sub.href}
-                        onClick={() => handleNavigation(sub.href)}
-                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${
+                        href={sub.href}
+                        className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                           isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                         }`}
+                        onClick={() => setIsMobileMenuOpen(false)}
                       >
                         {sub.label}
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 ) : (
-                  <div
+                  <Link
+                    prefetch={false}
                     key={item.href}
-                    onClick={() => handleNavigation(resolveHref(item.href))}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${
+                    href={resolveHref(item.href)}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                       isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
                   >
                     {item.label}
-                  </div>
+                  </Link>
                 )
               )}
 
-              {address && (
-                <div
-                  onClick={() => handleNavigation('/vendor/profile')}
-                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
+              {address ? (
+                <>
+                  <Link
+                    prefetch={false}
+                    href="/vendor/profile"
+                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    Vendor Profile
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      handleLogout();
+                    }}
+                    className="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <Link
+                  href="/vendor/login"
+                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
+                  onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  Vendor Profile
-                </div>
+                  Login
+                </Link>
               )}
             </div>
           </div>
