@@ -47,10 +47,6 @@ const DEBUG_FILES =
   typeof window !== 'undefined' &&
   (localStorage.getItem('debug_files') === 'true' || process.env.NODE_ENV === 'development');
 
-const [openCR, setOpenCR] = useState<Record<string, boolean>>({});
-const toggleCR = (k: string) => setOpenCR(prev => ({ ...prev, [k]: !prev[k] }));
-
-
 // ---------------- Small utils ----------------
 function isImg(s?: string) {
   if (!s) return false;
@@ -389,6 +385,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [paidOverride, setPaidOverride] = useState<Set<string>>(() =>
     typeof window !== 'undefined' ? loadSet(PAID_OVERRIDE_LS_KEY) : new Set()
   );
+
+  const [openCR, setOpenCR] = useState<Record<string, boolean>>({});
+  const toggleCR = (k: string) => setOpenCR(prev => ({ ...prev, [k]: !prev[k] }));
 
   // 🔑 The missing piece: cache latest proof (same source Agent2 uses)
   const [latestProofByKey, setLatestProofByKey] = useState<
