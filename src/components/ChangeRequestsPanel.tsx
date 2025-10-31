@@ -397,44 +397,53 @@ useEffect(() => { load(); }, [proposalId, idx]);
                 cid: typeof f === 'string' ? undefined : f?.cid,
                 name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
               });
+
               const displayName =
-                (typeof f === 'string'
+                typeof f === 'string'
                   ? (href.split('/').pop() || '')
-                  : (f?.name ?? f?.filename ?? (href.split('/').pop() || '')));
+                  : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
 
               const img = isImageHref(href) || isImageHref(displayName);
 
-              return img ? (
-                <a
-                  key={i}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative overflow-hidden rounded border"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={href}
-                    alt={displayName || 'image'}
-                    className="h-24 w-full object-cover group-hover:scale-105 transition"
-                  />
-                  <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                    {displayName}
-                  </div>
-                </a>
-              ) : href && href !== '#' ? (
-                <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-                  <div className="truncate mb-1">{displayName}</div>
+              if (img) {
+                return (
                   <a
+                    key={i}
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
+                    className="group relative overflow-hidden rounded border"
                   >
-                    Open
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={href}
+                      alt={displayName || 'image'}
+                      className="h-24 w-full object-cover group-hover:scale-105 transition"
+                    />
+                    <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+                      {displayName}
+                    </div>
                   </a>
-                </div>
-              ) : (
+                );
+              }
+
+              if (href && href !== '#') {
+                return (
+                  <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
+                    <div className="truncate mb-1">{displayName}</div>
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
+                      Open
+                    </a>
+                  </div>
+                );
+              }
+
+              return (
                 <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
                   Unrecognized file URL
                 </div>
