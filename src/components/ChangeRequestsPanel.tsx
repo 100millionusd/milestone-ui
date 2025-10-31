@@ -315,6 +315,63 @@ useEffect(() => { load(); }, [proposalId, idx]);
                 </div>
               )}
 
+              {/* Admin attachments on the request */}
+{(() => {
+  // Accept multiple possible shapes from the API
+  const af =
+    (cr as any).requestFiles ??
+    (cr as any).files ??
+    (cr as any).attachments ??
+    (cr as any).request?.files ??
+    [];
+  const adminFiles: any[] = Array.isArray(af) ? af : [];
+  if (!adminFiles.length) return null;
+
+  return (
+    <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+      {adminFiles.map((f: any, i: number) => {
+        const href = toUrl({ url: f?.url ?? f?.href ?? f?.path, cid: f?.cid, name: f?.name });
+        const img = isImageHref(href) || isImageHref(f?.name);
+        return img ? (
+          <a
+            key={i}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group relative overflow-hidden rounded border"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={href}
+              alt={f?.name || 'image'}
+              className="h-24 w-full object-cover group-hover:scale-105 transition"
+            />
+            <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+              {f?.name || (href.split('/').pop() || '')}
+            </div>
+          </a>
+        ) : href && href !== '#' ? (
+          <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
+            <div className="truncate mb-1">{f?.name || (href.split('/').pop() || '')}</div>
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              Open
+            </a>
+          </div>
+        ) : (
+          <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
+            Unrecognized file URL
+          </div>
+        );
+      })}
+    </div>
+  );
+})()}
+
               {/* Vendor replies (ALL files in the window) */}
               {responses.length > 0 ? (
                 <div className="mt-3">
