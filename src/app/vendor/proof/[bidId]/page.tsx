@@ -190,26 +190,6 @@ useEffect(() => {
 // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [bid, pending, desiredMilestoneIndexFromUrl]);
 
-  // ---- URL-driven auto-select (maps URL -> ORIGINAL milestone index)
-  useEffect(() => {
-    if (!bid) return;
-    if (typeof desiredMilestoneIndexFromUrl !== 'number' || desiredMilestoneIndexFromUrl < 0) return;
-
-    // Find that original index inside the vendor "pending" list
-    const idxInPending = pending.findIndex(
-      (p) => Number(p.originalIndex) === Number(desiredMilestoneIndexFromUrl)
-    );
-
-    // If it's in the dropdown, move the selection to it
-    if (idxInPending >= 0) {
-      setSelectedPendingIdx(idxInPending);
-    }
-    // If it's not pending, do nothing here—the thread is still force-scoped via:
-    // <ChangeRequestsPanel forceMilestoneIndex={selectedOriginalIndex} />
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bid, pending, desiredMilestoneIndexFromUrl]);
-
-  // ========== ADD THIS USEEFFECT RIGHT HERE ==========
   // Refresh change requests when milestones update
   useEffect(() => {
     const handleMilestonesUpdated = () => {
