@@ -61,6 +61,30 @@ function toUrl(f: CRResponseFile) {
   return u;
 }
 
+/** Heuristic: is this URL very likely an image? */
+function isImageHref(href?: string): boolean {
+  try {
+    if (!href) return false;
+    // data: URLs
+    if (/^data:image\//i.test(href)) return true;
+
+    // Strip query/hash and lowercase
+    const base = href.split('#')[0].split('?')[0].toLowerCase();
+
+    // Common image extensions
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(base)) return true;
+
+    // IPFS paths sometimes have filename after the CID
+    // e.g. /ipfs/<cid>/photo.jpg
+    const last = base.split('/').pop() || '';
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(last)) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 type Props = {
   proposalId: number;
   initialMilestoneIndex?: number;
