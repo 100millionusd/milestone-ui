@@ -61,37 +61,6 @@ function toUrl(f: CRResponseFile) {
   return u;
 }
 
-  const rawUrl = (file as any).url ? String((file as any).url).trim() : '';
-  const rawCid = (file as any).cid ? String((file as any).cid).trim() : '';
-
-  // Only CID provided
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    return `${GW}/${rawCid}`;
-  }
-  if (!rawUrl) return '#';
-
-  let u = rawUrl;
-
-  // Bare CID (optionally with query)
-  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
-
-  // Normalize ipfs:// and leading ipfs/ or slashes
-  u = u.replace(/^ipfs:\/\//i, '');
-  u = u.replace(/^\/+/, '');
-  u = u.replace(/^(?:ipfs\/)+/i, '');
-
-  // Prepend gateway if not absolute http(s)
-  if (!/^https?:\/\//i.test(u)) {
-    u = `${GW}/${u}`;
-  }
-
-  // De-dupe /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-
-  return u;
-}
-
 type Props = {
   proposalId: number;
   initialMilestoneIndex?: number;
@@ -315,20 +284,45 @@ useEffect(() => { load(); }, [proposalId, idx]);
 
                       {resp.files?.length ? (
                         <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {resp.files.map((f, i) => {
- ) : href && href !== '#' ? (
-  <div className="p-2 rounded border bg-gray-50 text-xs">
-    <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-      Open
+ {resp.files.map((f, i) => {
+  const href = toUrl(f);
+  const img = isImageHref(href);
+  return img ? (
+    <a
+      key={i}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group relative overflow-hidden rounded border"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={href}
+        alt={f.name || 'image'}
+        className="h-24 w-full object-cover group-hover:scale-105 transition"
+      />
+      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+        {f.name || href.split('/').pop()}
+      </div>
     </a>
-  </div>
-) : (
-  <div className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-    Unrecognized file URL
-  </div>
-);
-                          })}
+  ) : href && href !== '#' ? (
+    <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
+      <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:underline"
+      >
+        Open
+      </a>
+    </div>
+  ) : (
+    <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
+      Unrecognized file URL
+    </div>
+  );
+})}
                         </div>
                       ) : (
                         <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
