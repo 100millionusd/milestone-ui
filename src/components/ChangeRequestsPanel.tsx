@@ -33,32 +33,33 @@ function isImageHref(href: string) {
   return /\.(png|jpe?g|gif|webp|svg)(?=($|[?#]))/i.test(href || '');
 }
 
-function toUrl(file?: CRResponseFile): string {
-  const GW = String(PINATA_GATEWAY).replace(/\/+$/, '');
-  if (!file) return '#';
+// REPLACE your existing toUrl with this whole function
+function toUrl(f: CRResponseFile) {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  const rawUrl = (f?.url ?? '').trim();
+  const rawCid = (f?.cid ?? '').trim();
 
-  const rawUrl = file.url ? String(file.url).trim() : '';
-  const rawCid = file.cid ? String(file.cid).trim() : '';
-
-  // only CID → gateway
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
+  // CID only
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    return `${GW}/${rawCid}`;
+  }
   if (!rawUrl) return '#';
 
   let u = rawUrl;
 
-  // bare CID (optionally with query)
+  // Bare CID (optionally with query)
   const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
   if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
 
-  // normalize ipfs://, leading slashes, and ipfs/ prefixes
+  // Normalize ipfs:// and leading ipfs/ or slashes
   u = u.replace(/^ipfs:\/\//i, '');
   u = u.replace(/^\/+/, '');
   u = u.replace(/^(?:ipfs\/)+/i, '');
 
-  // if not absolute http(s), prepend gateway
+  // If still not http(s), force through gateway
   if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
 
-  // de-dupe /ipfs/ipfs/
+  // De-dupe /ipfs/ipfs/
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
 
   return u;
