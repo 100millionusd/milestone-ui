@@ -29,13 +29,40 @@ const PINATA_GATEWAY =
         : 'https://gateway.pinata.cloud/ipfs');
 
 function isImageHref(href: string) {
-  // Match extensions even when followed by ?filename=... or hashes
+  // also matches when filename is in query (?filename=pic.jpg)
   return /\.(png|jpe?g|gif|webp|svg)(?=($|[?#]))/i.test(href || '');
 }
 
 function toUrl(file?: CRResponseFile): string {
   const GW = String(PINATA_GATEWAY).replace(/\/+$/, '');
   if (!file) return '#';
+
+  const rawUrl = file.url ? String(file.url).trim() : '';
+  const rawCid = file.cid ? String(file.cid).trim() : '';
+
+  // only CID → gateway
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
+  if (!rawUrl) return '#';
+
+  let u = rawUrl;
+
+  // bare CID (optionally with query)
+  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
+
+  // normalize ipfs://, leading slashes, and ipfs/ prefixes
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  // if not absolute http(s), prepend gateway
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+
+  // de-dupe /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+
+  return u;
+}
 
   const rawUrl = (file as any).url ? String((file as any).url).trim() : '';
   const rawCid = (file as any).cid ? String((file as any).cid).trim() : '';
@@ -292,26 +319,18 @@ useEffect(() => { load(); }, [proposalId, idx]);
                       {resp.files?.length ? (
                         <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
                           {resp.files.map((f, i) => {
-                            const href = toUrl(f);
-                            const img = isImageHref(href);
-                            return img ? (
-                              <a key={i} href={href} target="_blank" rel="noopener noreferrer"
-                                 className="group relative overflow-hidden rounded border">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={href} alt={f.name || 'image'}
-                                     className="h-24 w-full object-cover group-hover:scale-105 transition" />
-                                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                                  {f.name || href.split('/').pop()}
-                                </div>
-                              </a>
-                            ) : (
-                              <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-                                <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
-                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                                  Open
-                                </a>
-                              </div>
-                            );
+ ) : href && href !== '#' ? (
+  <div className="p-2 rounded border bg-gray-50 text-xs">
+    <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+      Open
+    </a>
+  </div>
+) : (
+  <div className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
+    Unrecognized file URL
+  </div>
+);
                           })}
                         </div>
                       ) : (
