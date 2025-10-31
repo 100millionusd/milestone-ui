@@ -27,66 +27,16 @@ const PINATA_GATEWAY =
     : ((typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY)
         ? String((process as any).env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/,'')
         : 'https://gateway.pinata.cloud/ipfs');
-; // <-- DO NOT DELETE: this semicolon is required so the next function isn’t glued to the template above.
 
-/** Robust resolver for file {url,cid} -> final HTTP URL */
-function toUrl(f: CRResponseFile | string) {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
-  if (typeof f === 'string') {
-    const s = f.trim();
-    if (!s) return '#';
-    return toUrl({ url: s });
-  }
-  const rawUrl = (f?.url ?? '').trim();
-  const rawCid = (f?.cid ?? '').trim();
-
-  // CID only
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    return `${GW}/${rawCid}`;
-  }
-  if (!rawUrl) return '#';
-
-  let u = rawUrl;
-
-  // Bare CID (optionally with query)
-  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
-  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
-
-  // Normalize ipfs:// and leading ipfs/ or slashes
-  u = u.replace(/^ipfs:\/\//i, '');
-  u = u.replace(/^\/+/, '');
-  u = u.replace(/^(?:ipfs\/)+/i, '');
-
-  // If still not http(s), force through gateway
-  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
-
-  // De-dupe /ipfs/ipfs/
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-
-  return u;
+function toUrl(f: CRResponseFile) {
+  if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
+  if (f?.url) return `https://${f.url.replace(/^https?:\/\//,'')}`;
+  if (f?.cid) return `${PINATA_GATEWAY}/${f.cid}`;
+  return '#';
 }
 
-/** Heuristic: is this URL very likely an image? */
-function isImageHref(href?: string): boolean {
-  try {
-    if (!href) return false;
-    // data: URLs
-    if (/^data:image\//i.test(href)) return true;
-
-    // Strip query/hash and lowercase
-    const base = href.split('#')[0].split('?')[0].toLowerCase();
-
-    // Common image extensions
-    if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(base)) return true;
-
-    // IPFS paths sometimes have filename after the CID
-    const last = base.split('/').pop() || '';
-    if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(last)) return true;
-
-    return false;
-  } catch {
-    return false;
-  }
+function isImageHref(href: string) {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
 }
 
 type Props = {
@@ -107,96 +57,63 @@ export default function ChangeRequestsPanel(props: Props) {
 
   // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
-
-  // Allow URL to set default milestone: ?ms=4 / ?milestone=4 (1-based) or ?mi=3 (0-based)
-  useEffect(() => {
-    if (typeof forceMilestoneIndex === 'number') return;
-    try {
-      const sp = new URLSearchParams(window.location.search);
-      const ms1 = Number(sp.get('ms') ?? sp.get('milestone')); // 1-based
-      const mi0 = Number(sp.get('mi'));                         // 0-based
-
-      let desired: number | null = null;
-      if (Number.isFinite(mi0) && mi0 >= 0) desired = mi0;
-      else if (Number.isFinite(ms1) && ms1 > 0) desired = ms1 - 1;
-
-      if (desired !== null) setActiveMilestoneIndex(desired);
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // FINAL index used everywhere
   const idx =
     typeof forceMilestoneIndex === 'number'
       ? forceMilestoneIndex
       : activeMilestoneIndex;
-
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
-    if (!Number.isFinite(proposalId)) return;
-    setLoading(true);
-    setErr(null);
-    try {
-      // Build URL and pass milestoneIndex ONLY when the parent forces it
-      const url = new URL('/api/proofs/change-requests', window.location.origin);
-      url.searchParams.set('proposalId', String(proposalId));
-      url.searchParams.set('include', 'responses');
-      url.searchParams.set('status', 'all');
-      if (typeof forceMilestoneIndex === 'number') {
-        url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
-      }
-
-      const r = await fetch(url.toString(), {
-        credentials: 'include',
-        cache: 'no-store',
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const list: ChangeRequestRow[] = await r.json();
-      const safeList = Array.isArray(list) ? list : [];
-
-      setRows(safeList);
-
-      // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
-      if (typeof forceMilestoneIndex !== 'number') {
-        const present = new Set<number>(
-          safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
-        );
-
-        // if current idx has no rows, pivot to the highest existing milestone with rows
-        if (!present.has(idx) && present.size > 0) {
-          const latest = Math.max(...Array.from(present.values()));
-          setActiveMilestoneIndex(latest);
-        }
-      }
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load change requests');
-      setRows([]);
-    } finally {
-      setLoading(false);
+  if (!Number.isFinite(proposalId)) return;
+  setLoading(true);
+  setErr(null);
+  try {
+    // Build URL and pass milestoneIndex ONLY when the parent forces it
+    const url = new URL('/api/proofs/change-requests', window.location.origin);
+    url.searchParams.set('proposalId', String(proposalId));
+    url.searchParams.set('include', 'responses');
+    url.searchParams.set('status', 'all');
+    if (typeof forceMilestoneIndex === 'number') {
+      url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
     }
+
+    const r = await fetch(url.toString(), {
+      credentials: 'include',
+      cache: 'no-store',
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const list = await r.json();
+    setRows(Array.isArray(list) ? list : []);
+  } catch (e: any) {
+    setErr(e?.message || 'Failed to load change requests');
+    setRows([]);
+  } finally {
+    setLoading(false);
   }
+}
 
   // on mount & when proposal OR effective milestone index changes
-  useEffect(() => { load(); }, [proposalId, idx]);
+useEffect(() => { load(); }, [proposalId, idx]);
 
-  useEffect(() => {
-    const onAny = (ev: any) => {
-      const pid = Number(ev?.detail?.proposalId);
-      // reload when it's our proposal or when no proposalId is provided
-      if (!Number.isFinite(pid) || pid === proposalId) load();
-    };
-    window.addEventListener('proofs:updated', onAny);
-    window.addEventListener('proofs:changed', onAny);
-    window.addEventListener('milestones:updated', onAny);
-    return () => {
-      window.removeEventListener('proofs:updated', onAny);
-      window.removeEventListener('proofs:changed', onAny);
-      window.removeEventListener('milestones:updated', onAny);
-    };
-  }, [proposalId, idx]);
+
+ useEffect(() => {
+  const onAny = (ev: any) => {
+    const pid = Number(ev?.detail?.proposalId);
+    // reload when it's our proposal or when no proposalId is provided
+    if (!Number.isFinite(pid) || pid === proposalId) load();
+  };
+  window.addEventListener('proofs:updated', onAny);
+  window.addEventListener('proofs:changed', onAny);
+  window.addEventListener('milestones:updated', onAny); // NEW
+  return () => {
+    window.removeEventListener('proofs:updated', onAny);
+    window.removeEventListener('proofs:changed', onAny);
+    window.removeEventListener('milestones:updated', onAny);
+  };
+}, [proposalId, idx]);
 
   // Narrow to the currently scoped milestone
   const filteredRows = (rows || []).filter((cr) =>
@@ -217,30 +134,6 @@ export default function ChangeRequestsPanel(props: Props) {
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
   if (!filteredRows.length) {
-    if (rows.length > 0) {
-      const otherMilestones = Array.from(new Set(rows.map(r => r.milestoneIndex))).sort((a,b)=>a-b);
-      return (
-        <div className="mt-4 p-3 border rounded bg-white text-sm">
-          <div className="text-gray-600">No change requests yet for Milestone {idx + 1}.</div>
-          <div className="mt-2 flex gap-2 flex-wrap">
-            {otherMilestones.map(mi => (
-              <button
-                key={mi}
-                onClick={() => setActiveMilestoneIndex(mi)}
-                className={[
-                  'px-3 py-1.5 rounded-full text-xs border',
-                  mi === idx
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                ].join(' ')}
-              >
-                View Milestone {mi + 1}
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
         No change requests yet for Milestone {idx + 1}.
@@ -248,7 +141,7 @@ export default function ChangeRequestsPanel(props: Props) {
     );
   }
 
-  return (
+      return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold">Change Request Thread</h4>
@@ -316,74 +209,6 @@ export default function ChangeRequestsPanel(props: Props) {
                 </div>
               )}
 
-              {/* Admin attachments on the request */}
-              {(() => {
-                // Accept multiple possible shapes from the API
-                const af =
-                  (cr as any).requestFiles ??
-                  (cr as any).files ??
-                  (cr as any).attachments ??
-                  (cr as any).request?.files ??
-                  [];
-                const adminFiles: any[] = Array.isArray(af) ? af : [];
-                if (!adminFiles.length) return null;
-
-                return (
-                  <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {adminFiles.map((f: any, i: number) => {
-                      const href = toUrl({
-                        url:
-                          typeof f === 'string'
-                            ? f
-                            : (f?.url ?? f?.href ?? f?.path ?? f?.fileUrl ?? ''),
-                        cid: typeof f === 'string' ? undefined : f?.cid,
-                        name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
-                      });
-                      const displayName =
-                        typeof f === 'string'
-                          ? (href.split('/').pop() || '')
-                          : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
-                      const img = isImageHref(href) || isImageHref(displayName);
-                      return img ? (
-                        <a
-                          key={i}
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group relative overflow-hidden rounded border"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={href}
-                            alt={displayName || 'image'}
-                            className="h-24 w-full object-cover group-hover:scale-105 transition"
-                          />
-                          <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                            {displayName}
-                          </div>
-                        </a>
-                      ) : href && href !== '#' ? (
-                        <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-                          <div className="truncate mb-1">{displayName}</div>
-                          <a
-                            href={href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline"
-                          >
-                            Open
-                          </a>
-                        </div>
-                      ) : (
-                        <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-                          Unrecognized file URL
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
               {/* Vendor replies (ALL files in the window) */}
               {responses.length > 0 ? (
                 <div className="mt-3">
@@ -399,58 +224,27 @@ export default function ChangeRequestsPanel(props: Props) {
                         </div>
                       )}
 
-                      {Array.isArray(resp.files) && resp.files.length ? (
+                      {resp.files?.length ? (
                         <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {resp.files.map((f: any, i: number) => {
-                            const href = toUrl({
-                              url:
-                                typeof f === 'string'
-                                  ? f
-                                  : (f?.url ?? f?.href ?? f?.path ?? f?.fileUrl ?? ''),
-                              cid: typeof f === 'string' ? undefined : f?.cid,
-                              name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
-                            });
-
-                            const displayName =
-                              typeof f === 'string'
-                                ? (href.split('/').pop() || '')
-                                : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
-
-                            const img = isImageHref(href) || isImageHref(displayName);
-
+                          {resp.files.map((f, i) => {
+                            const href = toUrl(f);
+                            const img = isImageHref(href);
                             return img ? (
-                              <a
-                                key={i}
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="group relative overflow-hidden rounded border"
-                              >
+                              <a key={i} href={href} target="_blank" rel="noopener noreferrer"
+                                 className="group relative overflow-hidden rounded border">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={href}
-                                  alt={displayName || 'image'}
-                                  className="h-24 w-full object-cover group-hover:scale-105 transition"
-                                />
+                                <img src={href} alt={f.name || 'image'}
+                                     className="h-24 w-full object-cover group-hover:scale-105 transition" />
                                 <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                                  {displayName}
+                                  {f.name || href.split('/').pop()}
                                 </div>
                               </a>
-                            ) : href && href !== '#' ? (
+                            ) : (
                               <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-                                <div className="truncate mb-1">{displayName}</div>
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline"
-                                >
+                                <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
+                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                                   Open
                                 </a>
-                              </div>
-                            ) : (
-                              <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-                                Unrecognized file URL
                               </div>
                             );
                           })}
