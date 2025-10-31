@@ -216,12 +216,36 @@ useEffect(() => { load(); }, [proposalId, idx]);
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
   if (!filteredRows.length) {
+  if (rows.length > 0) {
+    const otherMilestones = Array.from(new Set(rows.map(r => r.milestoneIndex))).sort((a,b)=>a-b);
     return (
-      <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
-        No change requests yet for Milestone {idx + 1}.
+      <div className="mt-4 p-3 border rounded bg-white text-sm">
+        <div className="text-gray-600">No change requests yet for Milestone {idx + 1}.</div>
+        <div className="mt-2 flex gap-2 flex-wrap">
+          {otherMilestones.map(mi => (
+            <button
+              key={mi}
+              onClick={() => setActiveMilestoneIndex(mi)}
+              className={[
+                'px-3 py-1.5 rounded-full text-xs border',
+                mi === idx
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              ].join(' ')}
+            >
+              View Milestone {mi + 1}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
+  return (
+    <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
+      No change requests yet for Milestone {idx + 1}.
+    </div>
+  );
+}
 
       return (
     <div className="mt-6">
