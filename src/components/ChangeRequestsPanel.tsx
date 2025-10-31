@@ -27,13 +27,9 @@ const PINATA_GATEWAY =
     : ((typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY)
         ? String((process as any).env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/,'')
         : 'https://gateway.pinata.cloud/ipfs');
+; // <-- DO NOT DELETE: this semicolon is required so the next function isn’t glued to the template above.
 
-function isImageHref(href: string) {
-  // also matches when filename is in query (?filename=pic.jpg)
-  return /\.(png|jpe?g|gif|webp|svg)(?=($|[?#]))/i.test(href || '');
-}
-
-// REPLACE your existing toUrl with this whole function
+/** Robust resolver for file {url,cid} -> final HTTP URL */
 function toUrl(f: CRResponseFile) {
   const GW = PINATA_GATEWAY.replace(/\/+$/, '');
   const rawUrl = (f?.url ?? '').trim();
