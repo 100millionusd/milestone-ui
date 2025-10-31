@@ -57,6 +57,20 @@ export default function ChangeRequestsPanel(props: Props) {
 
   // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
+  // Allow URL to set default milestone: ?ms=4 or ?milestone=4
+useEffect(() => {
+  if (typeof forceMilestoneIndex === 'number') return;
+  try {
+    const url = new URL(window.location.href);
+    const q = url.searchParams.get('ms') ?? url.searchParams.get('milestone');
+    const n = q ? Number(q) : NaN;
+    if (Number.isFinite(n) && n >= 0) {
+      setActiveMilestoneIndex(n);
+    }
+  } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
   // FINAL index used everywhere
   const idx =
     typeof forceMilestoneIndex === 'number'
@@ -85,8 +99,23 @@ export default function ChangeRequestsPanel(props: Props) {
       cache: 'no-store',
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const list = await r.json();
-    setRows(Array.isArray(list) ? list : []);
+    const list: ChangeRequestRow[] = await r.json();
+    const safeList = Array.isArray(list) ? list : [];
+
+    setRows(safeList);
+
+    // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
+    if (typeof forceMilestoneIndex !== 'number') {
+      const present = new Set<number>(
+        safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
+      );
+
+      // if current idx has no rows, pivot to the highest existing milestone with rows
+      if (!present.has(idx) && present.size > 0) {
+        const latest = Math.max(...Array.from(present.values()));
+        setActiveMilestoneIndex(latest);
+      }
+    }
   } catch (e: any) {
     setErr(e?.message || 'Failed to load change requests');
     setRows([]);
