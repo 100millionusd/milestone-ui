@@ -37,15 +37,6 @@ export default function VendorProofPage() {
   const [error, setError] = useState<string>('');
 
   const bidId = Number(params.bidId);
-  // --- URL param milestone selection (?ms=4 or ?milestone=4)
-const search = useSearchParams();
-const msParamRaw = (search?.get('ms') || search?.get('milestone') || '').trim();
-const desiredMilestoneIndexFromUrl = (() => {
-  const n = parseInt(msParamRaw || '', 10);
-  // URL is 1-based (ms=4 means milestone index 3). Coerce to 0-based; -1 if invalid.
-  return Number.isFinite(n) && n > 0 ? n - 1 : -1;
-})();
-
 
   useEffect(() => {
     (async () => {
@@ -72,10 +63,36 @@ const desiredMilestoneIndexFromUrl = (() => {
       .filter(({ m }) => !m?.completed);
   }, [bid]);
   
+ const searchParams = useSearchParams();
+
+const desiredMilestoneIndexFromUrl = useMemo(() => {
+  const sp = searchParams;
+  if (!sp) return undefined;
+
+  // Accept ?ms=4 or ?milestone=4 as 1-based; also accept ?mi=3 as 0-based.
+  const ms1 = Number(sp.get('ms') ?? sp.get('milestone'));
+  const mi0 = Number(sp.get('mi'));
+
+  if (Number.isFinite(mi0) && mi0 >= 0) return mi0;       // already 0-based
+  if (Number.isFinite(ms1) && ms1 > 0) return ms1 - 1;    // 1-based -> 0-based
+  return undefined;
+}, [searchParams]);
+
   const selectedOriginalIndex = useMemo(() => {
-    const row = pending[selectedPendingIdx];
-    return row ? row.originalIndex : 0;
-  }, [pending, selectedPendingIdx]);
+  // If the URL requested a specific milestone index:
+  if (typeof desiredMilestoneIndexFromUrl === 'number' && desiredMilestoneIndexFromUrl >= 0) {
+    // If it exists in pending, use that; if it’s not pending, still return the requested index
+    const idxInPending = pending.findIndex(
+      p => Number(p.originalIndex) === Number(desiredMilestoneIndexFromUrl)
+    );
+    if (idxInPending >= 0) return pending[idxInPending].originalIndex;
+    return desiredMilestoneIndexFromUrl; // completed/non-pending → still show thread via forceMilestoneIndex
+  }
+
+  // Default: current dropdown selection
+  const row = pending[selectedPendingIdx];
+  return row ? row.originalIndex : 0;
+}, [pending, selectedPendingIdx, desiredMilestoneIndexFromUrl]);
 
   // ---- URL-driven auto-select (maps URL -> ORIGINAL milestone index)
 useEffect(() => {
