@@ -28,15 +28,44 @@ const PINATA_GATEWAY =
         ? String((process as any).env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/,'')
         : 'https://gateway.pinata.cloud/ipfs');
 
-function toUrl(f: CRResponseFile) {
-  if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
-  if (f?.url) return `https://${f.url.replace(/^https?:\/\//,'')}`;
-  if (f?.cid) return `${PINATA_GATEWAY}/${f.cid}`;
-  return '#';
+function isImageHref(href: string) {
+  // Match extensions even when followed by ?filename=... or hashes
+  return /\.(png|jpe?g|gif|webp|svg)(?=($|[?#]))/i.test(href || '');
 }
 
-function isImageHref(href: string) {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(href);
+function toUrl(file?: CRResponseFile): string {
+  const GW = String(PINATA_GATEWAY).replace(/\/+$/, '');
+  if (!file) return '#';
+
+  const rawUrl = (file as any).url ? String((file as any).url).trim() : '';
+  const rawCid = (file as any).cid ? String((file as any).cid).trim() : '';
+
+  // Only CID provided
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    return `${GW}/${rawCid}`;
+  }
+  if (!rawUrl) return '#';
+
+  let u = rawUrl;
+
+  // Bare CID (optionally with query)
+  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
+
+  // Normalize ipfs:// and leading ipfs/ or slashes
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  // Prepend gateway if not absolute http(s)
+  if (!/^https?:\/\//i.test(u)) {
+    u = `${GW}/${u}`;
+  }
+
+  // De-dupe /ipfs/ipfs/
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+
+  return u;
 }
 
 type Props = {
@@ -58,15 +87,19 @@ export default function ChangeRequestsPanel(props: Props) {
   // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
   // Allow URL to set default milestone: ?ms=4 or ?milestone=4
+// Allow URL to set default milestone: ?ms=4 / ?milestone=4 (1-based) or ?mi=3 (0-based)
 useEffect(() => {
   if (typeof forceMilestoneIndex === 'number') return;
   try {
-    const url = new URL(window.location.href);
-    const q = url.searchParams.get('ms') ?? url.searchParams.get('milestone');
-    const n = q ? Number(q) : NaN;
-    if (Number.isFinite(n) && n >= 0) {
-      setActiveMilestoneIndex(n);
-    }
+    const sp = new URLSearchParams(window.location.search);
+    const ms1 = Number(sp.get('ms') ?? sp.get('milestone')); // 1-based
+    const mi0 = Number(sp.get('mi'));                         // 0-based
+
+    let desired: number | null = null;
+    if (Number.isFinite(mi0) && mi0 >= 0) desired = mi0;
+    else if (Number.isFinite(ms1) && ms1 > 0) desired = ms1 - 1;
+
+    if (desired !== null) setActiveMilestoneIndex(desired);
   } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
@@ -148,6 +181,9 @@ useEffect(() => { load(); }, [proposalId, idx]);
   const filteredRows = (rows || []).filter((cr) =>
     (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx
   );
+
+  console.debug('[CRPanel] idx=', idx, 'rows=', rows.length, 'filtered=', filteredRows.length);
+
 
   // Optional tabs only when NOT forced and not hidden
   const allMilestones = Array.from(
