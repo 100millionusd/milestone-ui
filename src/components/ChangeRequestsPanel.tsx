@@ -367,7 +367,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
             Unrecognized file URL
           </div>
         );
-      })}
+      })
     </div>
   );
 })()}
@@ -448,7 +448,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
                   Unrecognized file URL
                 </div>
               );
-            })}
+            })
           </div>
         ) : (
           <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
@@ -493,7 +493,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
       Unrecognized file URL
     </div>
   );
-})}
+})
                         </div>
                       ) : (
                         <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
@@ -506,7 +506,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
               )}
             </li>
           );
-        })}
+        })
       </ol>
     </div>
   );
