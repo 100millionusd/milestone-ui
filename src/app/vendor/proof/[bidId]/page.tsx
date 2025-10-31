@@ -13,6 +13,81 @@ import {
 } from '@/lib/api';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 
+// ========== ADD THIS CODE RIGHT HERE ==========
+// ---------------- File Display Utilities ----------------
+const BASE_GW = (
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  'https://gateway.pinata.cloud'
+)
+  .replace(/\/+$/, '')
+  .replace(/(?:\/ipfs)+$/i, '');
+
+const GW = `${BASE_GW}/ipfs/`;
+
+function toGatewayUrl(file: { url?: string; cid?: string; name?: string } | string | undefined): string {
+  const G = GW.replace(/\/+$/, '/');
+  if (!file) return '';
+
+  if (typeof file === 'string') {
+    let s = file.trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    s = s.replace(/^ipfs:\/\//i, '').replace(/^\/+/, '').replace(/^(?:ipfs\/)+/i, '');
+    if (/^https?:\/\//i.test(s)) return s;
+    return `${G}${s}`;
+  }
+
+  const rawUrl = file?.url ? String(file.url).trim() : '';
+  const rawCid = file?.cid ? String(file.cid).trim() : '';
+  const name = file?.name;
+
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
+    const url = `${G}${rawCid.replace(/^ipfs\//i, '')}`;
+    return withFilename(url, name);
+  }
+  if (!rawUrl) return '';
+
+  const cidOnly = rawUrl.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
+  if (cidOnly) {
+    const url = `${G}${cidOnly[1]}${cidOnly[2] || ''}`;
+    return withFilename(url, name);
+  }
+
+  let u = rawUrl
+    .replace(/^ipfs:\/\//i, '')
+    .replace(/^\/+/, '')
+    .replace(/^(?:ipfs\/)+/i, '');
+
+  if (!/^https?:\/\//i.test(u)) u = `${G}${u}`;
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+
+  return withFilename(u, name);
+}
+
+function withFilename(url: string, name?: string) {
+  if (!url || !name) return url;
+  try {
+    const u = new URL(url);
+    if (/\/ipfs\/[^/?#]+$/.test(u.pathname) && !u.search) {
+      u.search = `?filename=${encodeURIComponent(name)}`;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isImg(s?: string) {
+  if (!s) return false;
+  return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
+}
+
+function isImageFile(f: any, href: string): boolean {
+  const mime = f?.mime || f?.mimetype || f?.contentType || f?.['content-type'] || '';
+  const name = f?.name || '';
+  return isImg(href) || isImg(name) || /^data:image\//i.test(href) || /^image\//i.test(String(mime));
+}
 
 export default function VendorProofPage() {
   const params = useParams();
@@ -35,6 +110,8 @@ export default function VendorProofPage() {
   const [lastProof, setLastProof] = useState<Proof | null>(null);
   const [rerunBusy, setRerunBusy] = useState(false);
   const [error, setError] = useState<string>('');
+  
+  const [crRefreshKey, setCrRefreshKey] = useState(0);
 
   const bidId = Number(params.bidId);
 
@@ -113,6 +190,36 @@ useEffect(() => {
 // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [bid, pending, desiredMilestoneIndexFromUrl]);
 
+  // ---- URL-driven auto-select (maps URL -> ORIGINAL milestone index)
+  useEffect(() => {
+    if (!bid) return;
+    if (typeof desiredMilestoneIndexFromUrl !== 'number' || desiredMilestoneIndexFromUrl < 0) return;
+
+    // Find that original index inside the vendor "pending" list
+    const idxInPending = pending.findIndex(
+      (p) => Number(p.originalIndex) === Number(desiredMilestoneIndexFromUrl)
+    );
+
+    // If it's in the dropdown, move the selection to it
+    if (idxInPending >= 0) {
+      setSelectedPendingIdx(idxInPending);
+    }
+    // If it's not pending, do nothing here—the thread is still force-scoped via:
+    // <ChangeRequestsPanel forceMilestoneIndex={selectedOriginalIndex} />
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bid, pending, desiredMilestoneIndexFromUrl]);
+
+  // ========== ADD THIS USEEFFECT RIGHT HERE ==========
+  // Refresh change requests when milestones update
+  useEffect(() => {
+    const handleMilestonesUpdated = () => {
+      setCrRefreshKey(prev => prev + 1);
+    };
+
+    window.addEventListener('milestones:updated', handleMilestonesUpdated);
+    return () => window.removeEventListener('milestones:updated', handleMilestonesUpdated);
+  }, []);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const newFiles = Array.from(e.target.files);
@@ -162,19 +269,18 @@ useEffect(() => {
       });
 
       setLastProof(res);
-      try {
-  window.dispatchEvent(new CustomEvent('milestones:updated', {
-    detail: { bidId, milestoneIndex: selectedOriginalIndex, proofSubmitted: true }
-  }));
-} catch {}
-
+ try {
+        window.dispatchEvent(new CustomEvent('milestones:updated', {
+          detail: { bidId, milestoneIndex: selectedOriginalIndex, proofSubmitted: true }
+        }));
+        // Force refresh change requests
+        setCrRefreshKey(prev => prev + 1);
+      } catch {}
 
       // 3) Success message
       if (res?.proofId) {
-        // New route path: we have a stored proof with id (Agent2 may already be in aiAnalysis)
         alert('Proof submitted successfully! You can review the Agent 2 analysis below.');
       } else {
-        // Legacy fallback (no proofId) – analysis not available for this submission
         alert('Proof submitted successfully! (Legacy mode). Admin will review and release payment.');
       }
     } catch (e: any) {
@@ -298,15 +404,19 @@ useEffect(() => {
               </select>
             </div>
 
- {/* Change Requests (history & replies for the selected milestone) */}
+{/* Change Requests (history & replies for the selected milestone) */}
 <div className="mb-6 rounded-lg border border-slate-200">
-<ChangeRequestsPanel
-  proposalId={Number(bid.proposalId)}
-  initialMilestoneIndex={selectedOriginalIndex}
-  forceMilestoneIndex={selectedOriginalIndex}   // HARD scope to selected milestone
-  hideMilestoneTabs                             // no tabs in vendor view
-  key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
-/>
+  <ChangeRequestsPanel
+    proposalId={Number(bid.proposalId)}
+    initialMilestoneIndex={selectedOriginalIndex}
+    forceMilestoneIndex={selectedOriginalIndex}
+    hideMilestoneTabs
+    // ========== ADD THESE PROPS ==========
+    userRole="vendor"
+    vendorView={true}
+    showVendorReplies={true}
+    key={`cr-${bid.proposalId}-${selectedOriginalIndex}-${crRefreshKey}`}
+  />
 </div>
 
             {/* Title (optional) */}
