@@ -30,8 +30,13 @@ const PINATA_GATEWAY =
 ; // <-- DO NOT DELETE: this semicolon is required so the next function isn’t glued to the template above.
 
 /** Robust resolver for file {url,cid} -> final HTTP URL */
-function toUrl(f: CRResponseFile) {
+function toUrl(f: CRResponseFile | string) {
   const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  if (typeof f === 'string') {
+    const s = f.trim();
+    if (!s) return '#';
+    return toUrl({ url: s });
+  }
   const rawUrl = (f?.url ?? '').trim();
   const rawCid = (f?.cid ?? '').trim();
 
@@ -44,7 +49,7 @@ function toUrl(f: CRResponseFile) {
   let u = rawUrl;
 
   // Bare CID (optionally with query)
-  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  const cidOnly = u.match(/^([A-Za-z0-9]{32,})(\?.*)?$/);
   if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
 
   // Normalize ipfs:// and leading ipfs/ or slashes
@@ -75,7 +80,6 @@ function isImageHref(href?: string): boolean {
     if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(base)) return true;
 
     // IPFS paths sometimes have filename after the CID
-    // e.g. /ipfs/<cid>/photo.jpg
     const last = base.split('/').pop() || '';
     if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|heic|heif)$/.test(last)) return true;
 
@@ -103,104 +107,101 @@ export default function ChangeRequestsPanel(props: Props) {
 
   // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
-  // Allow URL to set default milestone: ?ms=4 or ?milestone=4
-// Allow URL to set default milestone: ?ms=4 / ?milestone=4 (1-based) or ?mi=3 (0-based)
-useEffect(() => {
-  if (typeof forceMilestoneIndex === 'number') return;
-  try {
-    const sp = new URLSearchParams(window.location.search);
-    const ms1 = Number(sp.get('ms') ?? sp.get('milestone')); // 1-based
-    const mi0 = Number(sp.get('mi'));                         // 0-based
 
-    let desired: number | null = null;
-    if (Number.isFinite(mi0) && mi0 >= 0) desired = mi0;
-    else if (Number.isFinite(ms1) && ms1 > 0) desired = ms1 - 1;
+  // Allow URL to set default milestone: ?ms=4 / ?milestone=4 (1-based) or ?mi=3 (0-based)
+  useEffect(() => {
+    if (typeof forceMilestoneIndex === 'number') return;
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const ms1 = Number(sp.get('ms') ?? sp.get('milestone')); // 1-based
+      const mi0 = Number(sp.get('mi'));                         // 0-based
 
-    if (desired !== null) setActiveMilestoneIndex(desired);
-  } catch {}
+      let desired: number | null = null;
+      if (Number.isFinite(mi0) && mi0 >= 0) desired = mi0;
+      else if (Number.isFinite(ms1) && ms1 > 0) desired = ms1 - 1;
+
+      if (desired !== null) setActiveMilestoneIndex(desired);
+    } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+  }, []);
 
   // FINAL index used everywhere
   const idx =
     typeof forceMilestoneIndex === 'number'
       ? forceMilestoneIndex
       : activeMilestoneIndex;
+
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
-  if (!Number.isFinite(proposalId)) return;
-  setLoading(true);
-  setErr(null);
-  try {
-    // Build URL and pass milestoneIndex ONLY when the parent forces it
-    const url = new URL('/api/proofs/change-requests', window.location.origin);
-    url.searchParams.set('proposalId', String(proposalId));
-    url.searchParams.set('include', 'responses');
-    url.searchParams.set('status', 'all');
-    if (typeof forceMilestoneIndex === 'number') {
-      url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
-    }
-
-    const r = await fetch(url.toString(), {
-      credentials: 'include',
-      cache: 'no-store',
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const list: ChangeRequestRow[] = await r.json();
-    const safeList = Array.isArray(list) ? list : [];
-
-    setRows(safeList);
-
-    // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
-    if (typeof forceMilestoneIndex !== 'number') {
-      const present = new Set<number>(
-        safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
-      );
-
-      // if current idx has no rows, pivot to the highest existing milestone with rows
-      if (!present.has(idx) && present.size > 0) {
-        const latest = Math.max(...Array.from(present.values()));
-        setActiveMilestoneIndex(latest);
+    if (!Number.isFinite(proposalId)) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      // Build URL and pass milestoneIndex ONLY when the parent forces it
+      const url = new URL('/api/proofs/change-requests', window.location.origin);
+      url.searchParams.set('proposalId', String(proposalId));
+      url.searchParams.set('include', 'responses');
+      url.searchParams.set('status', 'all');
+      if (typeof forceMilestoneIndex === 'number') {
+        url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
       }
+
+      const r = await fetch(url.toString(), {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const list: ChangeRequestRow[] = await r.json();
+      const safeList = Array.isArray(list) ? list : [];
+
+      setRows(safeList);
+
+      // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
+      if (typeof forceMilestoneIndex !== 'number') {
+        const present = new Set<number>(
+          safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
+        );
+
+        // if current idx has no rows, pivot to the highest existing milestone with rows
+        if (!present.has(idx) && present.size > 0) {
+          const latest = Math.max(...Array.from(present.values()));
+          setActiveMilestoneIndex(latest);
+        }
+      }
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load change requests');
+      setRows([]);
+    } finally {
+      setLoading(false);
     }
-  } catch (e: any) {
-    setErr(e?.message || 'Failed to load change requests');
-    setRows([]);
-  } finally {
-    setLoading(false);
   }
-}
 
   // on mount & when proposal OR effective milestone index changes
-useEffect(() => { load(); }, [proposalId, idx]);
+  useEffect(() => { load(); }, [proposalId, idx]);
 
-
- useEffect(() => {
-  const onAny = (ev: any) => {
-    const pid = Number(ev?.detail?.proposalId);
-    // reload when it's our proposal or when no proposalId is provided
-    if (!Number.isFinite(pid) || pid === proposalId) load();
-  };
-  window.addEventListener('proofs:updated', onAny);
-  window.addEventListener('proofs:changed', onAny);
-  window.addEventListener('milestones:updated', onAny); // NEW
-  return () => {
-    window.removeEventListener('proofs:updated', onAny);
-    window.removeEventListener('proofs:changed', onAny);
-    window.removeEventListener('milestones:updated', onAny);
-  };
-}, [proposalId, idx]);
+  useEffect(() => {
+    const onAny = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      // reload when it's our proposal or when no proposalId is provided
+      if (!Number.isFinite(pid) || pid === proposalId) load();
+    };
+    window.addEventListener('proofs:updated', onAny);
+    window.addEventListener('proofs:changed', onAny);
+    window.addEventListener('milestones:updated', onAny);
+    return () => {
+      window.removeEventListener('proofs:updated', onAny);
+      window.removeEventListener('proofs:changed', onAny);
+      window.removeEventListener('milestones:updated', onAny);
+    };
+  }, [proposalId, idx]);
 
   // Narrow to the currently scoped milestone
   const filteredRows = (rows || []).filter((cr) =>
     (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx
   );
-
-  console.debug('[CRPanel] idx=', idx, 'rows=', rows.length, 'filtered=', filteredRows.length);
-
 
   // Optional tabs only when NOT forced and not hidden
   const allMilestones = Array.from(
@@ -216,38 +217,38 @@ useEffect(() => { load(); }, [proposalId, idx]);
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
   if (!filteredRows.length) {
-  if (rows.length > 0) {
-    const otherMilestones = Array.from(new Set(rows.map(r => r.milestoneIndex))).sort((a,b)=>a-b);
-    return (
-      <div className="mt-4 p-3 border rounded bg-white text-sm">
-        <div className="text-gray-600">No change requests yet for Milestone {idx + 1}.</div>
-        <div className="mt-2 flex gap-2 flex-wrap">
-          {otherMilestones.map(mi => (
-            <button
-              key={mi}
-              onClick={() => setActiveMilestoneIndex(mi)}
-              className={[
-                'px-3 py-1.5 rounded-full text-xs border',
-                mi === idx
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-              ].join(' ')}
-            >
-              View Milestone {mi + 1}
-            </button>
-          ))}
+    if (rows.length > 0) {
+      const otherMilestones = Array.from(new Set(rows.map(r => r.milestoneIndex))).sort((a,b)=>a-b);
+      return (
+        <div className="mt-4 p-3 border rounded bg-white text-sm">
+          <div className="text-gray-600">No change requests yet for Milestone {idx + 1}.</div>
+          <div className="mt-2 flex gap-2 flex-wrap">
+            {otherMilestones.map(mi => (
+              <button
+                key={mi}
+                onClick={() => setActiveMilestoneIndex(mi)}
+                className={[
+                  'px-3 py-1.5 rounded-full text-xs border',
+                  mi === idx
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ].join(' ')}
+              >
+                View Milestone {mi + 1}
+              </button>
+            ))}
+          </div>
         </div>
+      );
+    }
+    return (
+      <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
+        No change requests yet for Milestone {idx + 1}.
       </div>
     );
   }
-  return (
-    <div className="mt-4 p-3 border rounded bg-white text-sm text-gray-500">
-      No change requests yet for Milestone {idx + 1}.
-    </div>
-  );
-}
 
-      return (
+  return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold">Change Request Thread</h4>
@@ -316,184 +317,143 @@ useEffect(() => { load(); }, [proposalId, idx]);
               )}
 
               {/* Admin attachments on the request */}
-{(() => {
-  // Accept multiple possible shapes from the API
-  const af =
-    (cr as any).requestFiles ??
-    (cr as any).files ??
-    (cr as any).attachments ??
-    (cr as any).request?.files ??
-    [];
-  const adminFiles: any[] = Array.isArray(af) ? af : [];
-  if (!adminFiles.length) return null;
+              {(() => {
+                // Accept multiple possible shapes from the API
+                const af =
+                  (cr as any).requestFiles ??
+                  (cr as any).files ??
+                  (cr as any).attachments ??
+                  (cr as any).request?.files ??
+                  [];
+                const adminFiles: any[] = Array.isArray(af) ? af : [];
+                if (!adminFiles.length) return null;
 
-  return (
-    <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-      {adminFiles.map((f: any, i: number) => {
-        const href = toUrl({ url: f?.url ?? f?.href ?? f?.path, cid: f?.cid, name: f?.name });
-        const img = isImageHref(href) || isImageHref(f?.name);
-        return img ? (
-          <a
-            key={i}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative overflow-hidden rounded border"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={href}
-              alt={f?.name || 'image'}
-              className="h-24 w-full object-cover group-hover:scale-105 transition"
-            />
-            <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-              {f?.name || (href.split('/').pop() || '')}
-            </div>
-          </a>
-        ) : href && href !== '#' ? (
-          <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-            <div className="truncate mb-1">{f?.name || (href.split('/').pop() || '')}</div>
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            >
-              Open
-            </a>
-          </div>
-        ) : (
-          <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-            Unrecognized file URL
-          </div>
-        );
-      })
-    </div>
-  );
-})()}
-
- {responses.length > 0 ? (
-  <div className="mt-3">
-    {responses.map((resp, idx) => (
-      <div key={idx} className="mt-3">
-        <div className="text-xs text-gray-500">
-          Vendor reply at {new Date(resp.createdAt).toLocaleString()}
-        </div>
-
-        {resp.note && (
-          <div className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
-            {resp.note}
-          </div>
-        )}
-
-        {Array.isArray(resp.files) && resp.files.length ? (
-          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-            {resp.files.map((f: any, i: number) => {
-              const href = toUrl({
-                url:
-                  typeof f === 'string'
-                    ? f
-                    : (f?.url ?? f?.href ?? f?.path ?? f?.fileUrl ?? ''),
-                cid: typeof f === 'string' ? undefined : f?.cid,
-                name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
-              });
-
-              const displayName =
-                typeof f === 'string'
-                  ? (href.split('/').pop() || '')
-                  : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
-
-              const img = isImageHref(href) || isImageHref(displayName);
-
-              if (img) {
                 return (
-                  <a
-                    key={i}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative overflow-hidden rounded border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={href}
-                      alt={displayName || 'image'}
-                      className="h-24 w-full object-cover group-hover:scale-105 transition"
-                    />
-                    <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                      {displayName}
-                    </div>
-                  </a>
-                );
-              }
-
-              if (href && href !== '#') {
-                return (
-                  <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-                    <div className="truncate mb-1">{displayName}</div>
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline"
-                    >
-                      Open
-                    </a>
+                  <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {adminFiles.map((f: any, i: number) => {
+                      const href = toUrl({
+                        url:
+                          typeof f === 'string'
+                            ? f
+                            : (f?.url ?? f?.href ?? f?.path ?? f?.fileUrl ?? ''),
+                        cid: typeof f === 'string' ? undefined : f?.cid,
+                        name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
+                      });
+                      const displayName =
+                        typeof f === 'string'
+                          ? (href.split('/').pop() || '')
+                          : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
+                      const img = isImageHref(href) || isImageHref(displayName);
+                      return img ? (
+                        <a
+                          key={i}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group relative overflow-hidden rounded border"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={href}
+                            alt={displayName || 'image'}
+                            className="h-24 w-full object-cover group-hover:scale-105 transition"
+                          />
+                          <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+                            {displayName}
+                          </div>
+                        </a>
+                      ) : href && href !== '#' ? (
+                        <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
+                          <div className="truncate mb-1">{displayName}</div>
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            Open
+                          </a>
+                        </div>
+                      ) : (
+                        <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
+                          Unrecognized file URL
+                        </div>
+                      );
+                    })}
                   </div>
                 );
-              }
+              })()}
 
-              return (
-                <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-                  Unrecognized file URL
-                </div>
-              );
-            })
-          </div>
-        ) : (
-          <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
-        )}
-      </div>
-    ))}
-  </div>
-) : (
-  <div className="mt-3 text-xs text-gray-500">No vendor reply yet.</div>
-)}
-    <a
-      key={i}
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group relative overflow-hidden rounded border"
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={href}
-        alt={f.name || 'image'}
-        className="h-24 w-full object-cover group-hover:scale-105 transition"
-      />
-      <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-        {f.name || href.split('/').pop()}
-      </div>
-    </a>
-  ) : href && href !== '#' ? (
-    <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
-      <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:underline"
-      >
-        Open
-      </a>
-    </div>
-  ) : (
-    <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
-      Unrecognized file URL
-    </div>
-  );
-})
+              {/* Vendor replies (ALL files in the window) */}
+              {responses.length > 0 ? (
+                <div className="mt-3">
+                  {responses.map((resp, idx) => (
+                    <div key={idx} className="mt-3">
+                      <div className="text-xs text-gray-500">
+                        Vendor reply at {new Date(resp.createdAt).toLocaleString()}
+                      </div>
+
+                      {resp.note && (
+                        <div className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
+                          {resp.note}
+                        </div>
+                      )}
+
+                      {Array.isArray(resp.files) && resp.files.length ? (
+                        <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {resp.files.map((f: any, i: number) => {
+                            const href = toUrl({
+                              url:
+                                typeof f === 'string'
+                                  ? f
+                                  : (f?.url ?? f?.href ?? f?.path ?? f?.fileUrl ?? ''),
+                              cid: typeof f === 'string' ? undefined : f?.cid,
+                              name: typeof f === 'string' ? undefined : (f?.name ?? f?.filename),
+                            });
+
+                            const displayName =
+                              typeof f === 'string'
+                                ? (href.split('/').pop() || '')
+                                : (f?.name ?? f?.filename ?? (href.split('/').pop() || ''));
+
+                            const img = isImageHref(href) || isImageHref(displayName);
+
+                            return img ? (
+                              <a
+                                key={i}
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group relative overflow-hidden rounded border"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={href}
+                                  alt={displayName || 'image'}
+                                  className="h-24 w-full object-cover group-hover:scale-105 transition"
+                                />
+                                <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+                                  {displayName}
+                                </div>
+                              </a>
+                            ) : href && href !== '#' ? (
+                              <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
+                                <div className="truncate mb-1">{displayName}</div>
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  Open
+                                </a>
+                              </div>
+                            ) : (
+                              <div key={i} className="p-2 rounded border bg-amber-50 text-xs text-amber-800">
+                                Unrecognized file URL
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
@@ -506,7 +466,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
               )}
             </li>
           );
-        })
+        })}
       </ol>
     </div>
   );
