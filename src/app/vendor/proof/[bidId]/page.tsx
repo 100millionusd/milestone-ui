@@ -389,9 +389,12 @@ useEffect(() => {
   <ChangeRequestsPanel
     proposalId={Number(bid.proposalId)}
     initialMilestoneIndex={selectedOriginalIndex}
+    forceMilestoneIndex={selectedOriginalIndex}
+    hideMilestoneTabs
     key={`cr-${bid.proposalId}-${selectedOriginalIndex}-${crRefreshKey}`}
   />
 </div>
+
 
             {/* Title (optional) */}
             <div className="mb-4">
