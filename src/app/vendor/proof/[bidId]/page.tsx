@@ -406,11 +406,11 @@ useEffect(() => {
 
 {/* Change Requests (history & replies for the selected milestone) */}
 <div className="mb-6 rounded-lg border border-slate-200">
-  <<ChangeRequestsPanel
-  proposalId={Number(bid.proposalId)}
-  initialMilestoneIndex={selectedOriginalIndex}
-  key={`cr-${bid.proposalId}-${selectedOriginalIndex}-${crRefreshKey}`}
-/>
+  <ChangeRequestsPanel
+    proposalId={Number(bid.proposalId)}
+    initialMilestoneIndex={selectedOriginalIndex}
+    key={`cr-${bid.proposalId}-${selectedOriginalIndex}-${crRefreshKey}`}
+  />
 </div>
 
             {/* Title (optional) */}
