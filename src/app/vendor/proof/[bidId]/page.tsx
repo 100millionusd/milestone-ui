@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getBid,
   uploadFileToIPFS,
@@ -37,6 +37,15 @@ export default function VendorProofPage() {
   const [error, setError] = useState<string>('');
 
   const bidId = Number(params.bidId);
+  // --- URL param milestone selection (?ms=4 or ?milestone=4)
+const search = useSearchParams();
+const msParamRaw = (search?.get('ms') || search?.get('milestone') || '').trim();
+const desiredMilestoneIndexFromUrl = (() => {
+  const n = parseInt(msParamRaw || '', 10);
+  // URL is 1-based (ms=4 means milestone index 3). Coerce to 0-based; -1 if invalid.
+  return Number.isFinite(n) && n > 0 ? n - 1 : -1;
+})();
+
 
   useEffect(() => {
     (async () => {
@@ -62,11 +71,30 @@ export default function VendorProofPage() {
       .map((m, i) => ({ m, originalIndex: i }))
       .filter(({ m }) => !m?.completed);
   }, [bid]);
-
+  
   const selectedOriginalIndex = useMemo(() => {
     const row = pending[selectedPendingIdx];
     return row ? row.originalIndex : 0;
   }, [pending, selectedPendingIdx]);
+
+  // ---- URL-driven auto-select (maps URL -> ORIGINAL milestone index)
+useEffect(() => {
+  if (!bid) return;
+  if (typeof desiredMilestoneIndexFromUrl !== 'number' || desiredMilestoneIndexFromUrl < 0) return;
+
+  // Find that original index inside the vendor "pending" list
+  const idxInPending = pending.findIndex(
+    (p) => Number(p.originalIndex) === Number(desiredMilestoneIndexFromUrl)
+  );
+
+  // If it's in the dropdown, move the selection to it
+  if (idxInPending >= 0) {
+    setSelectedPendingIdx(idxInPending);
+  }
+  // If it's not pending, do nothing here—the thread is still force-scoped via:
+  // <ChangeRequestsPanel forceMilestoneIndex={selectedOriginalIndex} />
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [bid, pending, desiredMilestoneIndexFromUrl]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -117,6 +145,12 @@ export default function VendorProofPage() {
       });
 
       setLastProof(res);
+      try {
+  window.dispatchEvent(new CustomEvent('milestones:updated', {
+    detail: { bidId, milestoneIndex: selectedOriginalIndex, proofSubmitted: true }
+  }));
+} catch {}
+
 
       // 3) Success message
       if (res?.proofId) {
@@ -249,13 +283,13 @@ export default function VendorProofPage() {
 
  {/* Change Requests (history & replies for the selected milestone) */}
 <div className="mb-6 rounded-lg border border-slate-200">
-  <ChangeRequestsPanel
-    proposalId={bid.proposalId}
-    initialMilestoneIndex={selectedOriginalIndex}
-    // Key forces re-mount when the admin/vendor switches milestone,
-    // so the thread always matches the dropdown selection.
-    key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
-  />
+<ChangeRequestsPanel
+  proposalId={Number(bid.proposalId)}
+  initialMilestoneIndex={selectedOriginalIndex}
+  forceMilestoneIndex={selectedOriginalIndex}   // HARD scope to selected milestone
+  hideMilestoneTabs                             // no tabs in vendor view
+  key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
+/>
 </div>
 
             {/* Title (optional) */}
