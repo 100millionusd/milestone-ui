@@ -965,33 +965,44 @@ const bidFiles = safeBids.flatMap((b: any) => {
             </div>
           </div>
 
-          <div className="border rounded p-4">
-            <h3 className="font-semibold mb-3">Bids snapshot</h3>
-            {safeBids.length ? (
-              <ul className="space-y-2 text-sm">
-                {safeBids.slice(0, 5).map((b) => (
-                  <li key={b.bidId} className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{b.vendorName}</div>
-                      <div className="opacity-70">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
-                    </div>
-                    <span className={classNames(
-                      'px-2 py-1 rounded text-xs',
-                      b.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : b.status === 'rejected'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    )}>
-                      {b.status}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : <p className="text-sm text-gray-500">No bids yet.</p>}
+           <div className="flex flex-col gap-6">
+            <div className="border rounded p-4">
+              <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
+              <ChangeRequestsPanel proposalId={projectIdNum} />
+            </div>
+
+            <div className="border rounded p-4">
+              <h3 className="font-semibold mb-3">Bids snapshot</h3>
+              {safeBids.length ? (
+                <ul className="space-y-2 text-sm">
+                  {safeBids.slice(0, 5).map((b) => (
+                    <li key={b.bidId} className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{b.vendorName}</div>
+                        <div className="opacity-70">
+                          {currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}
+                        </div>
+                      </div>
+                      <span
+                        className={classNames(
+                          'px-2 py-1 rounded text-xs',
+                          b.status === 'approved'
+                            ? 'bg-green-100 text-green-800'
+                            : b.status === 'rejected'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        )}
+                      >
+                        {b.status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">No bids yet.</p>
+              )}
+            </div>
           </div>
-        </section>
-      )}
 
       {/* Timeline */}
       {tab === 'timeline' && (
