@@ -5,82 +5,10 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import AgentDigestWidget from "@/components/AgentDigestWidget";
 
-// ===== normalize payments (bid, milestone, tx, status, amount) =====
-type PaymentRow = {
-  id: string;
-  bid_id: number | null;
-  milestone_index: number | null;
-  status: 'pending' | 'released';
-  amount_usd: number | null;
-  tx_hash: string | null;
-  released_at: string | null;
-};
-
-function parseAmountUSD(v: any): number | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  const n = Number(s.replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : null;
-}
-
-function pickTx(r: any): string | null {
-  const t = r?.tx || r?.txHash || r?.hash || r?.transactionHash || r?.tx_hash;
-  return typeof t === 'string' && t ? t : null;
-}
-
-function pickBidId(r: any): number | null {
-  const cand = r?.bidId ?? r?.bid_id ?? r?.bid ?? r?.proposalBidId;
-  if (cand !== undefined && cand !== null && String(cand).trim() !== '') {
-    const n = Number(cand);
-    if (Number.isFinite(n)) return n;
-  }
-  const fromText = String(r?.note || r?.name || r?.title || r?.description || '')
-    .match(/#(\d+)/);
-  return fromText ? Number(fromText[1]) : null;
-}
-
-function pickMsIndex(r: any): number | null {
-  const cand = r?.milestoneIndex ?? r?.milestone_index ?? r?.milestone;
-  if (cand !== undefined && cand !== null && String(cand).trim() !== '') {
-    const n = Number(cand);
-    if (Number.isFinite(n)) return n;
-  }
-  const fromText = String(r?.note || r?.name || r?.title || r?.description || '')
-    .match(/Milestone\s+(\d+)/i);
-  return fromText ? Number(fromText[1]) : null;
-}
-
-function pickReleasedAt(r: any): string | null {
-  return (
-    r?.releasedAt ??
-    r?.released_at ??
-    r?.updated_at ??
-    r?.created_at ??
-    r?.timestamp ??
-    null
-  ) || null;
-}
-
-function pickStatus(r: any): 'pending' | 'released' {
-  const s = String(r?.status || '').toLowerCase();
-  if (r?.released === true) return 'released';
-  if (['released', 'paid', 'complete', 'completed', 'done'].includes(s)) return 'released';
-  return 'pending';
-}
-
-function shortTx(tx?: string | null) {
-  if (!tx || typeof tx !== 'string') return '—';
-  if (!tx.startsWith('0x') || tx.length < 10) return tx;
-  return `${tx.slice(0, 8)}…${tx.slice(-6)}`;
-}
-
 // ———————————————————————————————————————————
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
-const EXPLORER_BASE = (process.env.NEXT_PUBLIC_EXPLORER_BASE || 'https://sepolia.etherscan.io').replace(/\/+$/, '');
-
 
 // ———————————————————————————————————————————
 // Types
@@ -117,6 +45,17 @@ type MilestoneRow = {
   last_update?: string | null;
 };
 
+type PaymentRow = {
+  id: number | string;
+  bid_id: number | null;
+  milestone_index: number | null;
+  amount_usd: number | string | null;
+  status?: string | null;
+  released_at?: string | null;
+  tx_hash?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 // ———————————————————————————————————————————
 // Helpers
@@ -254,87 +193,56 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// Replace your existing normalizePayments with this:
-function normalizePayments(list: any[]): PaymentRow[] {
-  const out: PaymentRow[] = [];
+// ADD THE MISSING normalizePayments FUNCTION
+function normalizePayments(rows: any[]): PaymentRow[] {
+  return (rows || []).map((r: any, index) => {
+    console.log('Raw payment data:', r); // Debug log
+    
+    // Handle different ID fields
+    const id = r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? 
+               r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+    
+    // Handle different bid ID fields
+    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
+    
+    // Handle different milestone index fields
+    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
+                           r?.index ?? r?.i;
+    
+    // Handle different amount fields
+    let amount_usd = r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount;
+    if (amount_usd == null && r?.usdCents != null) {
+      amount_usd = r.usdCents / 100;
+    }
+    
+    // Handle different status fields
+    const status = r?.status ?? r?.state ?? r?.payout_status ?? 
+                  (r?.completed ? 'completed' : 'pending');
+    
+    // Handle different date fields
+    const released_at = r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? 
+                       r?.created_at ?? r?.createdAt;
+    const created_at = r?.created_at ?? r?.createdAt;
+    const updated_at = r?.updated_at ?? r?.updatedAt;
 
-  const toNum = (v: any) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  const first = (...vals: any[]) =>
-    vals.find((v) => v !== undefined && v !== null && String(v).trim() !== '') ?? null;
+    // IMPROVED: Handle transaction hash - check multiple possible fields
+    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? 
+                   r?.txHash ?? r?.transactionHash ?? r?.payment_hash ??
+                   r?.onchain_tx_id ?? r?.onchain_tx_hash ?? null;
 
-  list.forEach((r: any, i: number) => {
-    const note = first(r.note, r.description, r.title, r.message);
-    const m = note ? String(note).match(/#?(\d+)[^\d]+milestone\s+(\d+)/i) : null;
-    const parsedBid = m ? toNum(m[1]) : null;
-    const parsedMs = m ? toNum(m[2]) : null;
-
-    const bid_id = first(toNum(r.bid_id), toNum(r.bidId), toNum(r.bid), parsedBid);
-    const milestone_index = first(
-      toNum(r.milestone_index),
-      toNum(r.milestoneIndex),
-      toNum(r.milestone),
-      parsedMs
-    );
-
-    const released_at_raw = first(
-      r.released_at,
-      r.releasedAt,
-      r.paid_at,
-      r.paidAt,
-      r.updated_at,
-      r.updatedAt,
-      r.created_at,
-      r.createdAt,
-      r.time,
-      r.timestamp
-    );
-    const released_at = released_at_raw ? new Date(released_at_raw as any).toISOString() : null;
-
-    const tx_hash = first(
-      r.tx_hash,
-      r.txHash,
-      r.transactionHash,
-      r.hash,
-      r.tx?.hash,
-      r.tx
-    );
-
-    const amount_usd =
-      first(
-        toNum(r.amount_usd),
-        r.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null,
-        toNum(r.amountUsd),
-        toNum(r.usd),
-        toNum(r.amount)
-      ) ?? null;
-
-    const status: 'pending' | 'released' =
-      String(r.status || '').toLowerCase() === 'released' || r.released === true
-        ? 'released'
-        : 'pending';
-
-    const id = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
-
-    // IMPORTANT: raw first, computed after (so 0s from raw can't overwrite computed)
-    out.push({
-      ...r,
-      id,
-      bid_id: bid_id ?? null,
-      milestone_index: milestone_index ?? null,
-      released_at,
+    return {
+      id: String(id),
+      bid_id: bid_id != null ? Number(bid_id) : null,
+      milestone_index: milestone_index != null ? Number(milestone_index) : null,
       amount_usd,
-      tx_hash: typeof tx_hash === 'string' && tx_hash ? tx_hash : null,
       status,
-    } as PaymentRow);
+      released_at,
+      tx_hash,
+      created_at,
+      updated_at,
+    };
   });
-
-  out.sort((a, b) => String(b.released_at || '').localeCompare(String(a.released_at || '')));
-  return out;
 }
-
 
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
   const byKey = new Map<string, MilestoneRow>();
@@ -540,8 +448,6 @@ export default function VendorOversightPage() {
     );
   }, [payments, query]);
 
-  const paymentRows = useMemo(() => normalizePayments(payments || []), [payments]);
-
   // ——— UI
   const tabs = [
     { key: 'overview', label: 'Overview' },
@@ -734,68 +640,78 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
-{/* Payments */}
-<Card
-  title={`Payments (${paymentRows.length})`}
-  subtitle="Latest first"
-  right={
-    <button
-      onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, paymentRows)}
-      className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-    >
-      ⬇ CSV
-    </button>
-  }
->
-  <div className="overflow-x-auto">
-    <table className="min-w-full text-sm">
-      <thead className="text-xs uppercase text-neutral-500">
-        <tr className="border-b">
-          <th className="py-2 px-3 text-left">ID</th>
-          <th className="py-2 px-3 text-left">BID</th>
-          <th className="py-2 px-3 text-left">MILESTONE</th>
-          <th className="py-2 px-3 text-left">STATUS</th>
-          <th className="py-2 px-3 text-left">RELEASED</th>
-          <th className="py-2 px-3 text-left">AMOUNT</th>
-          <th className="py-2 px-3 text-left">TX</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y">
-        {paymentRows.map((r) => (
-          <tr key={r.id}>
-            <td className="py-2 px-3">{r.id}</td>
-            <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
-            <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
-            <td className="py-2 px-3">
-              <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                {r.status}
-              </span>
-            </td>
-            <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
-            <td className="py-2 px-3">{r.amount_usd != null ? `$${Number(r.amount_usd).toLocaleString()}` : '—'}</td>
-            <td className="py-2 px-3">
-              {r.tx_hash ? (
-                <a
-                  href={`${EXPLORER_BASE}/tx/${r.tx_hash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
-                  title={r.tx_hash}
-                >
-                  {shortTx(r.tx_hash)}
-                </a>
-              ) : (
-                '—'
-              )}
-            </td>
+ {/* ——— Payments ——— */}
+{tab === 'payments' && (
+  <Card
+    title={`Payments (${filteredPayments.length})`}
+    subtitle="Latest first"
+    right={
+      <button
+        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
+        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+      >
+        ⬇ CSV
+      </button>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
+          <tr>
+            <Th>ID</Th>
+            <Th>Bid</Th>
+            <Th>Milestone</Th>
+            <Th>Status</Th>
+            <Th>Released</Th>
+            <Th>Amount</Th>
+            <Th>Tx</Th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-</Card>
-
-
+        </thead>
+        <tbody>
+          {!payments && <RowPlaceholder cols={7} />}
+          {payments && filteredPayments.length === 0 && (
+            <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
+          )}
+          {filteredPayments
+            .slice()
+            .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
+            .map(p => (
+            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
+              <Td className="font-mono text-xs">{String(p.id)}</Td>
+              <Td>{p.bid_id ?? '—'}</Td>
+              <Td>{p.milestone_index ?? '—'}</Td>
+              <Td>
+                <Badge tone={
+                  p.status === 'completed' ? 'success' :
+                  p.status === 'released' ? 'success' :
+                  p.status === 'pending' ? 'warning' : 'neutral'
+                }>
+                  {p.status ?? '—'}
+                </Badge>
+              </Td>
+              <Td>{humanTime(p.released_at || p.created_at)}</Td>
+              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
+              <Td className="max-w-[160px] truncate">
+                {p.tx_hash ? (
+                  <a 
+                    href={`https://etherscan.io/tx/${p.tx_hash}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="font-mono text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-800/50 hover:shadow-sm transition-all inline-block"
+                  >
+                    {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
+                  </a>
+                ) : (
+                  <span className="text-neutral-400">—</span>
+                )}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
         <Card
