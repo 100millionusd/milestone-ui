@@ -124,17 +124,6 @@ type MilestoneRow = {
   last_update?: string | null;
 };
 
-type PaymentRow = {
-  id: number | string;
-  bid_id: number | null;
-  milestone_index: number | null;
-  amount_usd: number | string | null;
-  status?: string | null;
-  released_at?: string | null;
-  tx_hash?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
 
 // ———————————————————————————————————————————
 // Helpers
@@ -775,61 +764,65 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
- {/* Payments */}
-<Card title={`Payments (${payments?.length ?? 0})`} subtitle="Latest first" right={<ExportCSV rows={payments} />}>
-  <div className="overflow-x-auto">
-    {(() => {
-      const rows = normalizePayments(payments || []);
-
-      return (
-        <table className="min-w-full text-sm">
-          <thead className="text-xs uppercase text-neutral-500">
-            <tr className="border-b">
-              <th className="py-2 px-3 text-left">ID</th>
-              <th className="py-2 px-3 text-left">BID</th>
-              <th className="py-2 px-3 text-left">MILESTONE</th>
-              <th className="py-2 px-3 text-left">STATUS</th>
-              <th className="py-2 px-3 text-left">RELEASED</th>
-              <th className="py-2 px-3 text-left">AMOUNT</th>
-              <th className="py-2 px-3 text-left">TX</th>
+{tab === 'payments' && (
+  <Card
+    title={`Payments (${payments?.length ?? 0})`}
+    subtitle="Latest first"
+    right={
+      <button
+        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, payments ?? [])}
+        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+      >
+        ⬇ CSV
+      </button>
+    }
+  >
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="text-xs uppercase text-neutral-500">
+          <tr className="border-b">
+            <th className="py-2 px-3 text-left">ID</th>
+            <th className="py-2 px-3 text-left">BID</th>
+            <th className="py-2 px-3 text-left">MILESTONE</th>
+            <th className="py-2 px-3 text-left">STATUS</th>
+            <th className="py-2 px-3 text-left">RELEASED</th>
+            <th className="py-2 px-3 text-left">AMOUNT</th>
+            <th className="py-2 px-3 text-left">TX</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {(payments ?? []).map((r) => (
+            <tr key={r.id}>
+              <td className="py-2 px-3">{r.id}</td>
+              <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
+              <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
+              <td className="py-2 px-3">
+                <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {r.status}
+                </span>
+              </td>
+              <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
+              <td className="py-2 px-3">{r.amount_usd != null ? `$${Number(r.amount_usd).toLocaleString()}` : '—'}</td>
+              <td className="py-2 px-3">
+                {r.tx_hash ? (
+                  <a
+                    href={`https://sepolia.etherscan.io/tx/${r.tx_hash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                    title={r.tx_hash}
+                  >
+                    {shortTx(r.tx_hash)}
+                  </a>
+                ) : '—'}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="py-2 px-3">{r.id}</td>
-                <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
-                <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
-                <td className="py-2 px-3">
-                  <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {r.status}
-                  </span>
-                </td>
-                <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
-                <td className="py-2 px-3">{r.amount_usd != null ? `$${r.amount_usd.toLocaleString()}` : '—'}</td>
-                <td className="py-2 px-3">
-                  {r.tx ? (
-                    <a
-                      href={`https://sepolia.etherscan.io/tx/${r.tx}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline"
-                      title={r.tx}
-                    >
-                      {shortTx(r.tx)}
-                    </a>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    })()}
-  </div>
-</Card>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+)}
 
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
