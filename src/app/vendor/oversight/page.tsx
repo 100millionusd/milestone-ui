@@ -830,7 +830,7 @@ export default function VendorOversightPage() {
     })()}
   </div>
 </Card>
-)}
+
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
         <Card
