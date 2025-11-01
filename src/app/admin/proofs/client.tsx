@@ -569,55 +569,77 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
     }
   }
 
-  // ---------------- Init ----------------
-  useEffect(() => {
-    let bc: BroadcastChannel | null = null;
+ // ---------------- Init ----------------
+useEffect(() => {
+  let bc: BroadcastChannel | null = null;
+  try {
+    bc = new BroadcastChannel('mx-payments');
+    bcRef.current = bc;
+  } catch {}
+
+  if (bc) {
+    bc.onmessage = (e: MessageEvent) => {
+      const { type, bidId, milestoneIndex, archived, reason } = (e?.data || {}) as any;
+      if (!type) return;
+
+      if (type === 'mx:pay:queued') {
+        const key = mkKey(Number(bidId), Number(milestoneIndex));
+        addPending(key);
+        pollUntilPaid(Number(bidId), Number(milestoneIndex)).catch(() => {});
+        return; // no full reload here
+      }
+
+      if (type === 'mx:pay:done') {
+        removePending(mkKey(Number(bidId), Number(milestoneIndex)));
+        return; // no full reload here
+      }
+
+      if (type === 'mx:ms:updated') {
+        // If archive info is provided, flip UI instantly without refetch.
+        if (
+          Number.isFinite(Number(bidId)) &&
+          Number.isFinite(Number(milestoneIndex)) &&
+          typeof archived === 'boolean'
+        ) {
+          const k = mkKey(Number(bidId), Number(milestoneIndex));
+          setArchMap(prev => ({
+            ...prev,
+            [k]: archived
+              ? { archived: true, archivedAt: new Date().toISOString(), archiveReason: reason ?? null }
+              : { archived: false, archivedAt: null, archiveReason: null },
+          }));
+          return;
+        }
+        // Fallback: re-hydrate archive map from server if no explicit info came through
+        hydrateArchiveStatuses(bids).catch(() => {});
+      }
+    };
+  }
+
+  if (initialBids.length === 0) {
+    loadProofs();
+  } else {
+    hydrateArchiveStatuses(initialBids).catch(() => {});
     try {
-      bc = new BroadcastChannel('mx-payments');
-      bcRef.current = bc;
-    } catch {}
-    if (bc) {
-      bc.onmessage = (e: MessageEvent) => {
-        const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-        if (!type) return;
-        if (type === 'mx:pay:queued') {
-          const key = mkKey(bidId, milestoneIndex);
-          addPending(key);
-          pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-          loadProofs(true);
-        } else if (type === 'mx:pay:done') {
-          removePending(mkKey(bidId, milestoneIndex));
-          loadProofs(true);
-        } else if (type === 'mx:ms:updated') {
-          loadProofs(true);
-        }
-      };
-    }
-
-    if (initialBids.length === 0) {
-      loadProofs();
-    } else {
-      hydrateArchiveStatuses(initialBids).catch(() => {});
-      try {
-        for (const bid of initialBids) {
-          const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
-          for (let i = 0; i < ms.length; i++) {
-            const key = mkKey(bid.bidId, i);
-            if (msIsPaid(ms[i])) {
-              removePending(key);
-              setPaidOverrideKey(key, false);
-              continue;
-            }
-            const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
-            if (needsPoll && !pollers.current.has(key)) pollUntilPaid(bid.bidId, i).catch(() => {});
+      for (const bid of initialBids) {
+        const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
+        for (let i = 0; i < ms.length; i++) {
+          const key = mkKey(bid.bidId, i);
+          if (msIsPaid(ms[i])) {
+            removePending(key);
+            setPaidOverrideKey(key, false);
+            continue;
           }
+          const needsPoll = pendingPay.has(key) || (msHasSafeMarker(ms[i]) && !!readSafeTxHash(ms[i]));
+          if (needsPoll && !pollers.current.has(key)) pollUntilPaid(bid.bidId, i).catch(() => {});
         }
-      } catch {}
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      }
+    } catch {}
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
-  useMilestonesUpdated(loadProofs);
+useMilestonesUpdated(loadProofs);
 
   // ---------------- Data loading ----------------
   async function loadProofs(forceRefresh = false) {
@@ -728,60 +750,77 @@ async function submitCR(proposalId: number, bidId: number, milestoneIndex: numbe
     }
   }
 
-  async function hydrateArchiveStatuses(allBids: any[]) {
-    const uniqueBidIds = [...new Set(allBids.map((bid) => bid.bidId))];
-    if (uniqueBidIds.length === 0) {
-      setArchMap({});
-      return;
+ // ===== REPLACE FROM HERE =====
+async function hydrateArchiveStatuses(allBids: any[]) {
+  const uniqueBidIds = Array.from(
+    new Set(allBids.map((bid) => Number(bid.bidId)).filter(Number.isFinite))
+  );
+
+  if (uniqueBidIds.length === 0) {
+    setArchMap({});
+    return;
+  }
+
+  try {
+    const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
+    updateBulkArchiveCache(bulkArchiveStatus);
+
+    // Build a fresh map each time so UI updates immediately after archive/unarchive
+    const nextMap: Record<string, ArchiveInfo> = {};
+
+    for (const bid of allBids) {
+      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+      const byIdx = bulkArchiveStatus[bid.bidId] || {};
+
+      for (let index = 0; index < ms.length; index++) {
+        const key = mkKey(bid.bidId, index);
+        const info = byIdx[index] || { archived: false };
+        nextMap[key] = {
+          archived: !!info.archived,
+          archivedAt: info.archivedAt ?? null,
+          archiveReason: info.archiveReason ?? null,
+        };
+      }
     }
-    try {
-      const bulkArchiveStatus = await getBulkArchiveStatus(uniqueBidIds);
-      updateBulkArchiveCache(bulkArchiveStatus);
-      const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-      allBids.forEach((bid) => {
-        const bidArchiveStatus = bulkArchiveStatus[bid.bidId] || {};
-        const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-        ms.forEach((_, index) => {
-          const key = mkKey(bid.bidId, index);
-          if (nextMap[key] === undefined) nextMap[key] = bidArchiveStatus[index] || { archived: false };
-        });
-      });
-      setArchMap(nextMap);
-    } catch {
-      await hydrateArchiveStatusesFallback(allBids);
+
+    setArchMap(nextMap);
+  } catch {
+    await hydrateArchiveStatusesFallback(allBids);
+  }
+}
+
+async function hydrateArchiveStatusesFallback(allBids: any[]) {
+  const tasks: Array<Promise<void>> = [];
+  // Build from scratch so we don't keep stale keys around
+  const nextMap: Record<string, ArchiveInfo> = {};
+
+  for (const bid of allBids || []) {
+    const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
+    for (let i = 0; i < ms.length; i++) {
+      const key = mkKey(bid.bidId, i);
+      tasks.push(
+        (async () => {
+          try {
+            const j = await getMilestoneArchive(bid.bidId, i);
+            const mi = j?.milestone ?? j;
+            nextMap[key] = {
+              archived: !!mi?.archived,
+              archivedAt: mi?.archivedAt ?? null,
+              archiveReason: mi?.archiveReason ?? null,
+            };
+          } catch {
+            nextMap[key] = { archived: false };
+          }
+        })()
+      );
     }
   }
 
-  async function hydrateArchiveStatusesFallback(allBids: any[]) {
-    const tasks: Array<Promise<void>> = [];
-    const nextMap: Record<string, ArchiveInfo> = { ...archMap };
-    for (const bid of allBids || []) {
-      const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
-      for (let i = 0; i < ms.length; i++) {
-        const key = mkKey(bid.bidId, i);
-        if (nextMap[key] !== undefined) continue;
-        tasks.push(
-          (async () => {
-            try {
-              const j = await getMilestoneArchive(bid.bidId, i);
-              const mi = j?.milestone ?? j;
-              nextMap[key] = {
-                archived: !!mi?.archived,
-                archivedAt: mi?.archivedAt ?? null,
-                archiveReason: mi?.archiveReason ?? null,
-              };
-            } catch {
-              nextMap[key] = { archived: false };
-            }
-          })()
-        );
-      }
-    }
-    if (tasks.length) {
-      await Promise.all(tasks);
-      setArchMap(nextMap);
-    }
+  if (tasks.length) {
+    await Promise.all(tasks);
   }
+  setArchMap(nextMap);
+}
 
   // ---------------- Helpers ----------------
   function hasProof(m: any): boolean {
