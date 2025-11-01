@@ -12,7 +12,7 @@ type PaymentRow = {
   milestone_index: number | null;
   status: 'pending' | 'released';
   amount_usd: number | null;
-  tx: string | null;
+  tx_hash: string | null;
   released_at: string | null;
 };
 
@@ -79,7 +79,7 @@ function shortTx(tx?: string | null) {
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
-const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || 'https://sepolia.etherscan.io';
+const EXPLORER_BASE = (process.env.NEXT_PUBLIC_EXPLORER_BASE || 'https://sepolia.etherscan.io').replace(/\/+$/, '');
 
 
 // ———————————————————————————————————————————
@@ -255,41 +255,31 @@ function normalizeProofs(rows: any[]): ProofRow[] {
 }
 
 // Replace your existing normalizePayments with this:
-function normalizePayments(list: any[]): any[] {
-  const out: any[] = [];
+function normalizePayments(list: any[]): PaymentRow[] {
+  const out: PaymentRow[] = [];
 
-  function toNum(v: any): number | null {
+  const toNum = (v: any) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
-  }
-  function first<T>(...vals: T[]): T | null {
-    for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== '') return v as T;
-    return null;
-  }
-  function parseBidMs(text?: string): { bidId: number | null; ms: number | null } {
-    if (!text) return { bidId: null, ms: null };
-    // e.g. "#176 — Milestone 5" or "bid 176, milestone 5"
-    const m = String(text).match(/#?(\d+)[^\d]+milestone\s+(\d+)/i);
-    return m ? { bidId: toNum(m[1]), ms: toNum(m[2]) } : { bidId: null, ms: null };
-  }
+  };
+  const first = (...vals: any[]) =>
+    vals.find((v) => v !== undefined && v !== null && String(v).trim() !== '') ?? null;
 
   list.forEach((r: any, i: number) => {
-    // --- source fields (many aliases) ---
     const note = first(r.note, r.description, r.title, r.message);
-    const parsed = parseBidMs(String(note || ''));
+    const m = note ? String(note).match(/#?(\d+)[^\d]+milestone\s+(\d+)/i) : null;
+    const parsedBid = m ? toNum(m[1]) : null;
+    const parsedMs = m ? toNum(m[2]) : null;
 
-    const bidId =
-      first(toNum(r.bid_id), toNum(r.bidId), toNum(r.bid), parsed.bidId) ?? null;
+    const bid_id = first(toNum(r.bid_id), toNum(r.bidId), toNum(r.bid), parsedBid);
+    const milestone_index = first(
+      toNum(r.milestone_index),
+      toNum(r.milestoneIndex),
+      toNum(r.milestone),
+      parsedMs
+    );
 
-    const msIndex =
-      first(
-        toNum(r.milestone_index),
-        toNum(r.milestoneIndex),
-        toNum(r.milestone),
-        parsed.ms
-      ) ?? null;
-
-    const releasedAtRaw = first(
+    const released_at_raw = first(
       r.released_at,
       r.releasedAt,
       r.paid_at,
@@ -301,65 +291,50 @@ function normalizePayments(list: any[]): any[] {
       r.time,
       r.timestamp
     );
-    const releasedAt =
-      releasedAtRaw ? new Date(releasedAtRaw as any).toISOString() : null;
+    const released_at = released_at_raw ? new Date(released_at_raw as any).toISOString() : null;
 
-    const txHash = first(
+    const tx_hash = first(
       r.tx_hash,
       r.txHash,
+      r.transactionHash,
       r.hash,
-      r.tx?.hash
-    ) as string | null;
+      r.tx?.hash,
+      r.tx
+    );
 
-    const txUrl = first(
-      r.tx_url,
-      r.txUrl,
-      r.tx?.url
-    ) as string | null;
-
-    const amountUsd =
+    const amount_usd =
       first(
         toNum(r.amount_usd),
-        toNum(r.amountUsd),
         r.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null,
+        toNum(r.amountUsd),
         toNum(r.usd),
         toNum(r.amount)
       ) ?? null;
 
-    // --- emit BOTH snake_case and camelCase so UI finds what it needs ---
-    const row: any = {
-      id: r.id || `payment-${i + 1}`,
+    const status: 'pending' | 'released' =
+      String(r.status || '').toLowerCase() === 'released' || r.released === true
+        ? 'released'
+        : 'pending';
 
-      // status: only "released" rows are shown on this page
-      status: 'released',
+    const id = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
 
-      // snake_case (table uses these)
-      bid_id: bidId,
-      milestone_index: msIndex,
-      released_at: releasedAt,
-      amount_usd: amountUsd,
-      tx_hash: txHash,
-      tx_url: txUrl,
-
-      // camelCase (future / other components)
-      bidId,
-      milestoneIndex: msIndex,
-      releasedAt: releasedAt,
-      amountUsd: amountUsd,
-      txHash: txHash,
-      txUrl: txUrl,
-
-      // keep any original fields in case the UI touches them
+    // IMPORTANT: raw first, computed after (so 0s from raw can't overwrite computed)
+    out.push({
       ...r,
-    };
-
-    out.push(row);
+      id,
+      bid_id: bid_id ?? null,
+      milestone_index: milestone_index ?? null,
+      released_at,
+      amount_usd,
+      tx_hash: typeof tx_hash === 'string' && tx_hash ? tx_hash : null,
+      status,
+    } as PaymentRow);
   });
 
-  // latest first if timestamps exist
   out.sort((a, b) => String(b.released_at || '').localeCompare(String(a.released_at || '')));
   return out;
 }
+
 
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
   const byKey = new Map<string, MilestoneRow>();
@@ -565,6 +540,8 @@ export default function VendorOversightPage() {
     );
   }, [payments, query]);
 
+  const paymentRows = useMemo(() => normalizePayments(payments || []), [payments]);
+
   // ——— UI
   const tabs = [
     { key: 'overview', label: 'Overview' },
@@ -759,11 +736,11 @@ export default function VendorOversightPage() {
 
 {/* Payments */}
 <Card
-  title={`Payments (${(payments ?? []).length})`}
+  title={`Payments (${paymentRows.length})`}
   subtitle="Latest first"
   right={
     <button
-      onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, payments ?? [])}
+      onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, paymentRows)}
       className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
     >
       ⬇ CSV
@@ -784,47 +761,35 @@ export default function VendorOversightPage() {
         </tr>
       </thead>
       <tbody className="divide-y">
-        {(payments ?? []).map((r: any, i: number) => {
-          const bidId   = pickBidId(r);
-          const ms      = pickMsIndex(r);
-          const when    = pickReleasedAt(r);
-          const tx      = pickTx(r);
-          const amt =
-            (r?.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null) ??
-            parseAmountUSD(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount);
-          const status  = pickStatus(r);
-          const id      = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
-
-          return (
-            <tr key={id}>
-              <td className="py-2 px-3">{id}</td>
-              <td className="py-2 px-3">{bidId ?? '—'}</td>
-              <td className="py-2 px-3">{ms ?? '—'}</td>
-              <td className="py-2 px-3">
-                <span className={`px-2 py-1 rounded-full text-xs ${status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {status}
-                </span>
-              </td>
-              <td className="py-2 px-3">{when ? new Date(when).toLocaleString() : '—'}</td>
-              <td className="py-2 px-3">{amt != null ? `$${Number(amt).toLocaleString()}` : '—'}</td>
-              <td className="py-2 px-3">
-                {tx ? (
-                  <a
-                    href={`${EXPLORER_BASE}/tx/${tx}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
-                    title={tx}
-                  >
-                    {shortTx(tx)}
-                  </a>
-                ) : (
-                  '—'
-                )}
-              </td>
-            </tr>
-          );
-        })}
+        {paymentRows.map((r) => (
+          <tr key={r.id}>
+            <td className="py-2 px-3">{r.id}</td>
+            <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
+            <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
+            <td className="py-2 px-3">
+              <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                {r.status}
+              </span>
+            </td>
+            <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
+            <td className="py-2 px-3">{r.amount_usd != null ? `$${Number(r.amount_usd).toLocaleString()}` : '—'}</td>
+            <td className="py-2 px-3">
+              {r.tx_hash ? (
+                <a
+                  href={`${EXPLORER_BASE}/tx/${r.tx_hash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                  title={r.tx_hash}
+                >
+                  {shortTx(r.tx_hash)}
+                </a>
+              ) : (
+                '—'
+              )}
+            </td>
+          </tr>
+        ))}
       </tbody>
     </table>
   </div>
