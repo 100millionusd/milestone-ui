@@ -71,6 +71,8 @@ function shortTx(tx?: string | null) {
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
+const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || 'https://sepolia.etherscan.io';
+
 
 // ———————————————————————————————————————————
 // Types
@@ -747,65 +749,81 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
-{tab === 'payments' && (
-  <Card
-    title={`Payments (${payments?.length ?? 0})`}
-    subtitle="Latest first"
-    right={
-      <button
-        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, payments ?? [])}
-        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-      >
-        ⬇ CSV
-      </button>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead className="text-xs uppercase text-neutral-500">
-          <tr className="border-b">
-            <th className="py-2 px-3 text-left">ID</th>
-            <th className="py-2 px-3 text-left">BID</th>
-            <th className="py-2 px-3 text-left">MILESTONE</th>
-            <th className="py-2 px-3 text-left">STATUS</th>
-            <th className="py-2 px-3 text-left">RELEASED</th>
-            <th className="py-2 px-3 text-left">AMOUNT</th>
-            <th className="py-2 px-3 text-left">TX</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {(payments ?? []).map((r) => (
-            <tr key={r.id}>
-              <td className="py-2 px-3">{r.id}</td>
-              <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
-              <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
+/* Payments */
+<Card
+  title={`Payments (${payments?.length ?? 0})`}
+  subtitle="Latest first"
+  right={
+    <button
+      onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, payments ?? [])}
+      className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
+    >
+      ⬇ CSV
+    </button>
+  }
+>
+  <div className="overflow-x-auto">
+    <table className="min-w-full text-sm">
+      <thead className="text-xs uppercase text-neutral-500">
+        <tr className="border-b">
+          <th className="py-2 px-3 text-left">ID</th>
+          <th className="py-2 px-3 text-left">BID</th>
+          <th className="py-2 px-3 text-left">MILESTONE</th>
+          <th className="py-2 px-3 text-left">STATUS</th>
+          <th className="py-2 px-3 text-left">RELEASED</th>
+          <th className="py-2 px-3 text-left">AMOUNT</th>
+          <th className="py-2 px-3 text-left">TX</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y">
+        {(payments ?? []).map((r: any, i: number) => {
+          // Derive display fields from whatever shape comes back
+          const bidId = pickBidId(r);                    // uses bid_id | bidId | note text
+          const ms    = pickMsIndex(r);                  // milestone_index | milestoneIndex | note text
+          const when  = pickReleasedAt(r);               // released_at | paid_at | updated_at | created_at | timestamp
+          const tx    = pickTx(r);                       // tx_hash | txHash | hash | transactionHash
+          const amt   =
+            (r?.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null) ??
+            parseAmountUSD(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount);
+          const status = pickStatus(r);                  // 'released' if paid-like
+
+          const id = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
+
+          return (
+            <tr key={id}>
+              <td className="py-2 px-3">{id}</td>
+              <td className="py-2 px-3">{bidId ?? '—'}</td>
+              <td className="py-2 px-3">{ms ?? '—'}</td>
               <td className="py-2 px-3">
-                <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {r.status}
+                <span className={`px-2 py-1 rounded-full text-xs ${status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {status}
                 </span>
               </td>
-              <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
-              <td className="py-2 px-3">{r.amount_usd != null ? `$${Number(r.amount_usd).toLocaleString()}` : '—'}</td>
+              <td className="py-2 px-3">{when ? new Date(when).toLocaleString() : '—'}</td>
+              <td className="py-2 px-3">{amt != null ? `$${Number(amt).toLocaleString()}` : '—'}</td>
               <td className="py-2 px-3">
-                {r.tx_hash ? (
+                {tx ? (
                   <a
-                    href={`https://sepolia.etherscan.io/tx/${r.tx_hash}`}
+                    href={`${EXPLORER_BASE}/tx/${tx}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
-                    title={r.tx_hash}
+                    title={tx}
                   >
-                    {shortTx(r.tx_hash)}
+                    {shortTx(tx)}
                   </a>
-                ) : '—'}
+                ) : (
+                  '—'
+                )}
               </td>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </Card>
-)}
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+</Card>
+
 
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
