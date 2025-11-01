@@ -195,18 +195,32 @@ function normalizeProofs(rows: any[]): ProofRow[] {
 }
 
 // REPLACE the existing normalizePayments with this:
+// REPLACE normalizePayments with this version (drop-in)
 function normalizePayments(rows: any[]): PaymentRow[] {
+  const tryParseJSON = (v: any) => {
+    if (typeof v !== 'string') return null;
+    const s = v.trim();
+    if (!s.startsWith('{') && !s.startsWith('[')) return null;
+    try { return JSON.parse(s); } catch { return null; }
+  };
+
+  const mergeObjects = (...objs: any[]) =>
+    objs.filter((o) => o && typeof o === 'object' && !Array.isArray(o))
+        .reduce((acc, o) => Object.assign(acc, o), {} as any);
+
   return (rows || []).map((r: any, index) => {
-    // id
-    const id =
-      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
-      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+    // 1) Build a single merged "nested" bag of fields (don’t let a numeric milestone short-circuit us)
+    const nestedParsed = mergeObjects(
+      tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
+      tryParseJSON(r?.metadata), tryParseJSON(r?.meta)
+    );
+    const nested = mergeObjects(
+      r?.context, r?.metadata, r?.meta, r?.details, r?.extra, nestedParsed,
+      typeof r?.milestone === 'object' ? r?.milestone : undefined // only if it’s an object
+    );
 
-    // common nested containers where backend often puts metadata
-    const nested = (r?.milestone ?? r?.context ?? r?.metadata ?? r?.meta ?? {}) as any;
-
-    // allow parsing from free-text notes (e.g., "Bid #123 Milestone 2")
-    const parseFromNote = (s?: string) => {
+    // 2) Fallback parse from free-text
+    const parseFromText = (s?: string) => {
       if (!s) return {};
       const bidM = s.match(/bid\s*#?\s*(\d+)/i);
       const msM  = s.match(/milestone\s*#?\s*(\d+)/i);
@@ -215,27 +229,32 @@ function normalizePayments(rows: any[]): PaymentRow[] {
         milestoneIndex: msM ? Number(msM[1]) : undefined,
       };
     };
-    const fromNote = parseFromNote(r?.note || r?.notes || r?.description || r?.memo || '');
+    const fromText = parseFromText(r?.note || r?.notes || r?.description || r?.memo || '');
 
-    // bid + milestone (prefer explicit, then nested, then note-derived)
+    // 3) Map out fields
+    const id =
+      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
+      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+
     const bid_id =
       r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
       nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id ??
-      fromNote.bidId ?? null;
+      fromText.bidId ?? null;
 
     const milestone_index =
-      r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? r?.index ?? r?.i ??
+      r?.milestone_index ?? r?.milestoneIndex ?? (typeof r?.milestone === 'number' ? r?.milestone : undefined) ??
+      r?.index ?? r?.i ??
       nested?.milestone_index ?? nested?.milestoneIndex ?? nested?.index ??
-      fromNote.milestoneIndex ?? null;
+      (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ??
+      fromText.milestoneIndex ?? null;
 
-    // amount in USD
     let amount_usd =
-      r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ?? nested?.amountUsd;
+      r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
+      nested?.amount_usd ?? nested?.amountUsd;
     if (amount_usd == null && (r?.usd_cents != null || r?.usdCents != null)) {
       amount_usd = (r?.usd_cents ?? r?.usdCents) / 100;
     }
 
-    // status + timestamps
     const status =
       r?.status ?? r?.state ?? r?.payout_status ?? r?.release_status ??
       ((r?.completed || r?.released || r?.paid_at) ? 'completed' : 'pending');
@@ -243,11 +262,11 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     const released_at =
       r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt;
 
-    // tx hash (check many aliases + nested)
     const tx_hash =
       r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
       r?.txHash ?? r?.transactionHash ?? r?.payment_hash ??
-      r?.onchain_tx_id ?? r?.onchain_tx_hash ?? nested?.tx_hash ?? null;
+      r?.onchain_tx_id ?? r?.onchain_tx_hash ??
+      nested?.tx_hash ?? nested?.transaction_hash ?? null;
 
     return {
       id: String(id),
