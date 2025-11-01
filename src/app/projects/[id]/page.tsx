@@ -200,6 +200,10 @@ export default function ProjectDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
+  // --- archive UI state ---
+const [archivedSet, setArchivedSet] = useState<Set<string>>(new Set());
+const archKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
+
 
   // --- SINGLE-POLL + DEBOUNCED REFRESH HELPERS ---
   const activePollsRef = useRef<Set<string>>(new Set());
@@ -361,6 +365,27 @@ export default function ProjectDetailPage() {
           });
         }
       }
+
+      // Load archived flags for a bid and cache them locally
+async function reloadArchivedForBid(bidId: number, msCount: number) {
+  try {
+    // endpoint: /api/milestones/[bidId]/[milestoneIndex]/archive (GET returns { archived: boolean })
+    const next = new Set<string>();
+    const fetches = Array.from({ length: msCount }, (_, i) =>
+      fetch(`/api/milestones/${bidId}/${i}/archive`, { credentials: 'include', cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : { archived: false }))
+        .then(j => ({ i, archived: !!j?.archived }))
+        .catch(() => ({ i, archived: false }))
+    );
+    const results = await Promise.all(fetches);
+    for (const { i, archived } of results) {
+      if (archived) next.add(archKey(bidId, i));
+    }
+    setArchivedSet(next);
+  } catch {
+    // ignore
+  }
+}
 
       (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
       (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
@@ -596,6 +621,14 @@ export default function ProjectDetailPage() {
 
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
+
+  useEffect(() => {
+  const bidId = Number(acceptedBid?.bidId);
+  if (Number.isFinite(bidId) && acceptedMilestones.length) {
+    reloadArchivedForBid(bidId, acceptedMilestones.length);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [acceptedBid?.bidId, acceptedMilestones.length]);
 
   async function pollUntilPaid(
     bidId: number,
@@ -1087,54 +1120,49 @@ const bidFiles = safeBids.flatMap((b: any) => {
               </tr>
             </thead>
             <tbody>
-              {acceptedMilestones.map((m, idx) => {
-                const src =
-                  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+ {acceptedMilestones.map((m, idx) => {
+  const src =
+    (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-                const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
-                const paid = msIsPaid(src);
-                const localPending = safePending.has(key);
-                const safeInFlight =
-                  msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
+  const key = msKey(Number(acceptedBid?.bidId || 0), idx);
+  const paid = msIsPaid(src);
+  const localPending = safePending.has(key);
+  const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
 
-                const completedRow = paid || !!(src as any)?.completed;
-                const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
+  const completedRow = paid || !!(src as any)?.completed;
+  const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
 
-                const status = paid
-                  ? 'paid'
-                  : safeInFlight
-                  ? 'payment_pending'
-                  : completedRow
-                  ? 'completed'
-                  : hasProofNow
-                  ? 'submitted'
-                  : 'pending';
+  // NEW: hide archived rows immediately
+  const isArchived = !!acceptedBid && archivedSet.has(archKey(Number(acceptedBid.bidId), idx));
+  if (isArchived) return null;
 
-                return (
-                  <tr key={idx} className="border-t">
-                    <td className="py-2 pr-4">M{idx + 1}</td>
-                    <td className="py-2 pr-4">{m.name || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {m.amount ? currency.format(Number(m.amount)) : '—'}
-                    </td>
-                    <td className="py-2 pr-4">{status}</td>
-                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {fmt(
-                        (m as any).paymentDate ||
-                          (paid ? (src as any).paidAt || (src as any).safeExecutedAt : null)
-                      ) || '—'}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
-                        ? `${String(
-                            (src as any).paymentTxHash || (src as any).safePaymentTxHash
-                          ).slice(0, 10)}…`
-                        : '—'}
-                    </td>
-                  </tr>
-                );
-              })}
+  const status =
+    paid ? 'paid'
+    : safeInFlight ? 'payment_pending'
+    : completedRow ? 'completed'
+    : hasProofNow ? 'submitted'
+    : 'pending';
+
+  return (
+    <tr key={idx} className="border-t">
+      <td className="py-2 pr-4">M{idx + 1}</td>
+      <td className="py-2 pr-4">{m.name || '—'}</td>
+      <td className="py-2 pr-4">
+        {m.amount ? currency.format(Number(m.amount)) : '—'}
+      </td>
+      <td className="py-2 pr-4">{status}</td>
+      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+      <td className="py-2 pr-4">
+        {fmt((m as any).paymentDate || (paid ? ((src as any).paidAt || (src as any).safeExecutedAt) : null)) || '—'}
+      </td>
+      <td className="py-2 pr-4">
+        {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
+          ? `${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(0, 10)}…`
+          : '—'}
+      </td>
+    </tr>
+  );
+})}
             </tbody>
           </table>
         </div>
