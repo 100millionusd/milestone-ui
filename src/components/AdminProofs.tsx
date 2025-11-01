@@ -491,8 +491,8 @@ function ProofCard(props: ProofCardProps) {
     if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
   }
 
+  // APPROVE — hit API_BASE JSON endpoint; if 404/400 or HTML, fallback to adminCompleteMilestone
   // APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
-// APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
 async function handleApprove() {
   setErr(null);
   setBusyApprove(true);
@@ -540,29 +540,7 @@ async function handleApprove() {
       }
     }
 
-    // 3) Refresh this component's data
     await onRefresh();
-
-    // 4) 🔔 Notify other tabs/components so "RELEASE PAYMENT" appears immediately
-    try {
-      const bidId = Number(proof.bidId);
-      const milestoneIndex = Number(proof.milestoneIndex);
-
-      // CustomEvent used by pages with useMilestonesUpdated(...)
-      window.dispatchEvent(
-        new CustomEvent('milestones:updated', {
-          detail: { bidId, milestoneIndex, approved: true }
-        })
-      );
-
-      // BroadcastChannel used by admin proofs grid client
-      try {
-        const bc = new BroadcastChannel('mx-payments');
-        bc.postMessage({ type: 'mx:ms:updated', bidId, milestoneIndex, approved: true });
-        bc.close();
-      } catch {}
-    } catch {}
-
   } catch (e: any) {
     const msg = String(e?.message || '');
     setErr(/<!doctype html|<html[\s>]/i.test(msg) ? 'Approve failed (unexpected HTML from server).' : msg || 'Approve failed');
