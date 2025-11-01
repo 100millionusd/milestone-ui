@@ -392,14 +392,15 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum]);
 
-  // Re-fetch on archive/unarchive
-  useMilestonesUpdated(async () => {
-    await refreshProofs();
-    requestDebouncedRefresh(async () => {
-      const next = await getBids(projectIdNum);
-      setBids(Array.isArray(next) ? next : []);
-    }, 500);
-  });
+  // Re-hydrate when any page archives/unarchives a milestone
+useMilestonesUpdated(async () => {
+  await refreshApproved(); // <— NEW: ensures `approvedFull` is fresh
+  await refreshProofs();
+  requestDebouncedRefresh(async () => {
+    const next = await getBids(projectIdNum);
+    setBids(Array.isArray(next) ? next : []);
+  }, 500);
+});
 
   // Cross-page payment sync
   const payChanRef = useRef<BroadcastChannel | null>(null);
@@ -419,6 +420,11 @@ export default function ProjectDetailPage() {
           removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
         }
 
+ if (type === 'mx:ms:updated') {
+  // Proof was approved elsewhere → milestone marked completed.
+  await refreshApproved(Number(bidId)); // refresh the full bid (drives the payments UI)
+}
+       
         await refreshProofs();
         requestDebouncedRefresh(async () => {
           const next = await getBids(projectIdNum);
