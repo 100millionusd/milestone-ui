@@ -226,7 +226,7 @@ export default function Agent2ProgressModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6 max-h-[85vh] flex flex-col">
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold">Submitting Bid · Agent2 Checking</h3>
           <button
@@ -241,7 +241,7 @@ export default function Agent2ProgressModal({
           </button>
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-3 overflow-y-auto pr-2 flex-1 min-h-0">
           <div className="flex flex-col gap-3">
             {stepBadge(step !== 'submitting', 'Submitting your bid')}
             {stepBadge(step === 'done' || step === 'error' || step === 'analyzing', 'Agent2 analyzing')}
