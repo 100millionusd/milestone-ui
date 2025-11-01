@@ -194,65 +194,129 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// REPLACE the existing normalizePayments with this:
-// REPLACE normalizePayments with this version (drop-in)
+// ---- helpers for robust extraction (must sit ABOVE normalizePayments) ----
+function toNumberLoose(v: any): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const m = v.match(/-?\d+/);
+    if (m) return Number(m[0]);
+  }
+  return null;
+}
+
+function tryParseJSON(val: any) {
+  if (typeof val !== 'string') return null;
+  const s = val.trim();
+  if (!s || (!s.startsWith('{') && !s.startsWith('['))) return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+// Depth-first scan for a number under any key that matches keyRegex.
+function deepFindNumber(obj: any, keyRegex: RegExp, maxDepth = 6): number | null {
+  const seen = new Set<any>();
+  const stack: Array<{v:any; d:number}> = [{ v: obj, d: 0 }];
+
+  while (stack.length) {
+    const { v, d } = stack.pop()!;
+    if (!v || typeof v !== 'object' || seen.has(v) || d > maxDepth) continue;
+    seen.add(v);
+
+    if (Array.isArray(v)) {
+      for (const it of v) stack.push({ v: it, d: d + 1 });
+      continue;
+    }
+
+    for (const [k, val] of Object.entries(v)) {
+      if (keyRegex.test(k)) {
+        const num = toNumberLoose(val);
+        if (num != null) return num;
+      }
+      if (val && typeof val === 'object') stack.push({ v: val, d: d + 1 });
+      if (typeof val === 'string') {
+        const parsed = tryParseJSON(val);
+        if (parsed) stack.push({ v: parsed, d: d + 1 });
+      }
+    }
+  }
+  return null;
+}
+
+// Scrape IDs from free text like "bid:123", "Milestone 2", "ms=2"
+function parseIdsFromText(...texts: Array<string | undefined | null>) {
+  let bidId: number | null = null;
+  let milestoneIndex: number | null = null;
+  for (const t of texts) {
+    if (!t) continue;
+    if (bidId == null) {
+      const m = t.match(/(?:^|[^a-z])(bid(?:[_\s-]?id)?)[\s:=-]*#?\s*(\d+)/i);
+      if (m) bidId = Number(m[2]);
+    }
+    if (milestoneIndex == null) {
+      const m = t.match(/(?:^|[^a-z])(ms|milestone|mil)[\s:=-]*#?\s*(\d+)/i);
+      if (m) milestoneIndex = Number(m[2] ?? m[1]);
+    }
+    if (bidId != null && milestoneIndex != null) break;
+  }
+  return { bidId, milestoneIndex };
+}
+
+// Shallow merge for object-likes
+function mergeObjects(...objs: any[]) {
+  return objs
+    .filter(o => o && typeof o === 'object' && !Array.isArray(o))
+    .reduce((acc, o) => Object.assign(acc, o), {} as any);
+}
+
+// ---- robust payments normalizer (REPLACE your normalizePayments with this) ----
 function normalizePayments(rows: any[]): PaymentRow[] {
-  const tryParseJSON = (v: any) => {
-    if (typeof v !== 'string') return null;
-    const s = v.trim();
-    if (!s.startsWith('{') && !s.startsWith('[')) return null;
-    try { return JSON.parse(s); } catch { return null; }
-  };
-
-  const mergeObjects = (...objs: any[]) =>
-    objs.filter((o) => o && typeof o === 'object' && !Array.isArray(o))
-        .reduce((acc, o) => Object.assign(acc, o), {} as any);
-
   return (rows || []).map((r: any, index) => {
-    // 1) Build a single merged "nested" bag of fields (don’t let a numeric milestone short-circuit us)
+    // Build one "nested" bag from likely containers and any JSON-ish strings
     const nestedParsed = mergeObjects(
       tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
-      tryParseJSON(r?.metadata), tryParseJSON(r?.meta)
+      tryParseJSON(r?.metadata), tryParseJSON(r?.meta), tryParseJSON(r?.data)
     );
     const nested = mergeObjects(
       r?.context, r?.metadata, r?.meta, r?.details, r?.extra, nestedParsed,
-      typeof r?.milestone === 'object' ? r?.milestone : undefined // only if it’s an object
+      (typeof r?.milestone === 'object' ? r?.milestone : undefined)
     );
 
-    // 2) Fallback parse from free-text
-    const parseFromText = (s?: string) => {
-      if (!s) return {};
-      const bidM = s.match(/bid\s*#?\s*(\d+)/i);
-      const msM  = s.match(/milestone\s*#?\s*(\d+)/i);
-      return {
-        bidId: bidM ? Number(bidM[1]) : undefined,
-        milestoneIndex: msM ? Number(msM[1]) : undefined,
-      };
-    };
-    const fromText = parseFromText(r?.note || r?.notes || r?.description || r?.memo || '');
+    // Free-text scrape fallback
+    const fromText = parseIdsFromText(
+      r?.note, r?.notes, r?.description, r?.memo, r?.id,
+      typeof r?.metadata === 'string' ? r?.metadata : undefined,
+      typeof r?.meta === 'string' ? r?.meta : undefined
+    );
 
-    // 3) Map out fields
+    // id
     const id =
       r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
       r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
 
-    const bid_id =
-      r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
-      nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id ??
+    // bid_id — explicit → nested → deep-scan → text
+    let bid_id: number | null =
+      (toNumberLoose(r?.bid_id) ?? toNumberLoose(r?.bidId) ?? toNumberLoose(r?.bid?.id) ?? toNumberLoose(r?.bid)) ??
+      (toNumberLoose(nested?.bid_id) ?? toNumberLoose(nested?.bidId) ?? toNumberLoose(nested?.bid?.id)) ??
+      deepFindNumber(r, /^(bid(_?id)?|^bid)$/i) ??
+      deepFindNumber(nested, /^(bid(_?id)?|^bid)$/i) ??
       fromText.bidId ?? null;
 
-    const milestone_index =
-      r?.milestone_index ?? r?.milestoneIndex ?? (typeof r?.milestone === 'number' ? r?.milestone : undefined) ??
-      r?.index ?? r?.i ??
-      nested?.milestone_index ?? nested?.milestoneIndex ?? nested?.index ??
-      (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ??
+    // milestone_index — explicit → nested → deep-scan → text
+    let milestone_index: number | null =
+      (toNumberLoose(r?.milestone_index) ?? toNumberLoose(r?.milestoneIndex) ??
+       (typeof r?.milestone === 'number' ? r?.milestone : null) ?? toNumberLoose(r?.index) ?? toNumberLoose(r?.i)) ??
+      (toNumberLoose(nested?.milestone_index) ?? toNumberLoose(nested?.milestoneIndex) ??
+       (typeof nested?.milestone === 'number' ? nested?.milestone : null) ?? toNumberLoose(nested?.index)) ??
+      deepFindNumber(r, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
+      deepFindNumber(nested, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
       fromText.milestoneIndex ?? null;
 
+    // amount (with cents fallback, search nested too)
     let amount_usd =
       r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
-      nested?.amount_usd ?? nested?.amountUsd;
-    if (amount_usd == null && (r?.usd_cents != null || r?.usdCents != null)) {
-      amount_usd = (r?.usd_cents ?? r?.usdCents) / 100;
+      nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount;
+    if (amount_usd == null) {
+      const cents = (r?.usd_cents ?? r?.usdCents ?? nested?.usd_cents ?? nested?.usdCents);
+      if (cents != null) amount_usd = Number(cents) / 100;
     }
 
     const status =
@@ -655,7 +719,7 @@ export default function VendorOversightPage() {
                   .map(p => (
                   <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800">
                     <Td>#{p.id}</Td>
-                    <Td>{p.bid_id ?? '—'}</Td>
+                    <Td>{p.bid_id != null ? `#${p.bid_id}` : '—'}</Td>
                     <Td>{p.milestone_index ?? '—'}</Td>
                     <Td>
                       <Badge tone={
