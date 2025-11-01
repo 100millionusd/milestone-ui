@@ -200,10 +200,6 @@ export default function ProjectDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
-  // --- archive UI state ---
-const [archivedSet, setArchivedSet] = useState<Set<string>>(new Set());
-const archKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
-
 
   // --- SINGLE-POLL + DEBOUNCED REFRESH HELPERS ---
   const activePollsRef = useRef<Set<string>>(new Set());
@@ -365,27 +361,6 @@ const archKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
           });
         }
       }
-
-      // Load archived flags for a bid and cache them locally
-async function reloadArchivedForBid(bidId: number, msCount: number) {
-  try {
-    // endpoint: /api/milestones/[bidId]/[milestoneIndex]/archive (GET returns { archived: boolean })
-    const next = new Set<string>();
-    const fetches = Array.from({ length: msCount }, (_, i) =>
-      fetch(`/api/milestones/${bidId}/${i}/archive`, { credentials: 'include', cache: 'no-store' })
-        .then(r => (r.ok ? r.json() : { archived: false }))
-        .then(j => ({ i, archived: !!j?.archived }))
-        .catch(() => ({ i, archived: false }))
-    );
-    const results = await Promise.all(fetches);
-    for (const { i, archived } of results) {
-      if (archived) next.add(archKey(bidId, i));
-    }
-    setArchivedSet(next);
-  } catch {
-    // ignore
-  }
-}
 
       (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
       (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
@@ -621,14 +596,6 @@ async function reloadArchivedForBid(bidId: number, msCount: number) {
 
   const acceptedBid = safeBids.find((b) => b.status === 'approved') || null;
   const acceptedMilestones = parseMilestones(acceptedBid?.milestones);
-
-  useEffect(() => {
-  const bidId = Number(acceptedBid?.bidId);
-  if (Number.isFinite(bidId) && acceptedMilestones.length) {
-    reloadArchivedForBid(bidId, acceptedMilestones.length);
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [acceptedBid?.bidId, acceptedMilestones.length]);
 
   async function pollUntilPaid(
     bidId: number,
@@ -1120,74 +1087,67 @@ const bidFiles = safeBids.flatMap((b: any) => {
               </tr>
             </thead>
             <tbody>
- {acceptedMilestones.map((m, idx) => {
-  const src =
-    (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+              {acceptedMilestones.map((m, idx) => {
+                const src =
+                  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-  const key = msKey(Number(acceptedBid?.bidId || 0), idx);
-  const paid = msIsPaid(src);
-  const localPending = safePending.has(key);
-  const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
+                const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
+                const paid = msIsPaid(src);
+                const localPending = safePending.has(key);
+                const safeInFlight =
+                  msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
 
-  const completedRow = paid || !!(src as any)?.completed;
-  const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
+                const completedRow = paid || !!(src as any)?.completed;
+                const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
 
-  // NEW: hide archived rows immediately
-  const isArchived = !!acceptedBid && archivedSet.has(archKey(Number(acceptedBid.bidId), idx));
-  if (isArchived) return null;
+                const status = paid
+                  ? 'paid'
+                  : safeInFlight
+                  ? 'payment_pending'
+                  : completedRow
+                  ? 'completed'
+                  : hasProofNow
+                  ? 'submitted'
+                  : 'pending';
 
-  const status =
-    paid ? 'paid'
-    : safeInFlight ? 'payment_pending'
-    : completedRow ? 'completed'
-    : hasProofNow ? 'submitted'
-    : 'pending';
-
-  return (
-    <tr key={idx} className="border-t">
-      <td className="py-2 pr-4">M{idx + 1}</td>
-      <td className="py-2 pr-4">{m.name || '—'}</td>
-      <td className="py-2 pr-4">
-        {m.amount ? currency.format(Number(m.amount)) : '—'}
-      </td>
-      <td className="py-2 pr-4">{status}</td>
-      <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-      <td className="py-2 pr-4">
-        {fmt((m as any).paymentDate || (paid ? ((src as any).paidAt || (src as any).safeExecutedAt) : null)) || '—'}
-      </td>
-      <td className="py-2 pr-4">
-        {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
-          ? `${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(0, 10)}…`
-          : '—'}
-      </td>
-    </tr>
-  );
-})}
+                return (
+                  <tr key={idx} className="border-t">
+                    <td className="py-2 pr-4">M{idx + 1}</td>
+                    <td className="py-2 pr-4">{m.name || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {m.amount ? currency.format(Number(m.amount)) : '—'}
+                    </td>
+                    <td className="py-2 pr-4">{status}</td>
+                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {fmt(
+                        (m as any).paymentDate ||
+                          (paid ? (src as any).paidAt || (src as any).safeExecutedAt : null)
+                      ) || '—'}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
+                        ? `${String(
+                            (src as any).paymentTxHash || (src as any).safePaymentTxHash
+                          ).slice(0, 10)}…`
+                        : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-{(acceptedBid || safeBids[0]) && (
-  <div className="mt-6">
-    <MilestonePayments
-      bid={acceptedBid || safeBids[0]}
-      proposalId={projectIdNum}
-      onUpdate={async () => {
-        // 1) keep proofs fresh
-        try { await refreshProofs(); } catch {}
-
-        // 2) immediately refresh bids (no debounce) so archived milestone disappears from Active list
-        try {
-          const next = await getBids(projectIdNum);
-          setBids(Array.isArray(next) ? next : []);
-        } catch {}
-
-        // 3) refresh the expanded approved bid snapshot used in the table rows
-        try { await refreshApproved((acceptedBid || safeBids[0])?.bidId); } catch {}
-      }}
-    />
-  </div>
-)}
+        {(acceptedBid || safeBids[0]) && (
+          <div className="mt-6">
+            <MilestonePayments
+              bid={acceptedBid || safeBids[0]}
+              onUpdate={refreshProofs}
+              proposalId={projectIdNum}
+            />
+          </div>
+        )}
 
         {/* Moved here from Overview */}
         <div className="mt-6 border rounded p-4">
