@@ -30,16 +30,24 @@ function pickTx(r: any): string | null {
 }
 
 function pickBidId(r: any): number | null {
-  const cand = r?.bidId ?? r?.bid_id ?? r?.bid ?? r?.proposalBidId ?? null;
-  if (Number.isFinite(Number(cand))) return Number(cand);
-  const fromText = String(r?.name || r?.title || r?.note || '').match(/#(\d+)/);
+  const cand = r?.bidId ?? r?.bid_id ?? r?.bid ?? r?.proposalBidId;
+  if (cand !== undefined && cand !== null && String(cand).trim() !== '') {
+    const n = Number(cand);
+    if (Number.isFinite(n)) return n;
+  }
+  const fromText = String(r?.note || r?.name || r?.title || r?.description || '')
+    .match(/#(\d+)/);
   return fromText ? Number(fromText[1]) : null;
 }
 
 function pickMsIndex(r: any): number | null {
-  const cand = r?.milestoneIndex ?? r?.milestone_index ?? r?.milestone ?? null;
-  if (Number.isFinite(Number(cand))) return Number(cand);
-  const fromText = String(r?.name || r?.title || r?.note || '').match(/Milestone\s+(\d+)/i);
+  const cand = r?.milestoneIndex ?? r?.milestone_index ?? r?.milestone;
+  if (cand !== undefined && cand !== null && String(cand).trim() !== '') {
+    const n = Number(cand);
+    if (Number.isFinite(n)) return n;
+  }
+  const fromText = String(r?.note || r?.name || r?.title || r?.description || '')
+    .match(/Milestone\s+(\d+)/i);
   return fromText ? Number(fromText[1]) : null;
 }
 
@@ -749,9 +757,9 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
-/* Payments */
+{/* Payments */}
 <Card
-  title={`Payments (${payments?.length ?? 0})`}
+  title={`Payments (${(payments ?? []).length})`}
   subtitle="Latest first"
   right={
     <button
@@ -777,17 +785,15 @@ export default function VendorOversightPage() {
       </thead>
       <tbody className="divide-y">
         {(payments ?? []).map((r: any, i: number) => {
-          // Derive display fields from whatever shape comes back
-          const bidId = pickBidId(r);                    // uses bid_id | bidId | note text
-          const ms    = pickMsIndex(r);                  // milestone_index | milestoneIndex | note text
-          const when  = pickReleasedAt(r);               // released_at | paid_at | updated_at | created_at | timestamp
-          const tx    = pickTx(r);                       // tx_hash | txHash | hash | transactionHash
-          const amt   =
+          const bidId   = pickBidId(r);
+          const ms      = pickMsIndex(r);
+          const when    = pickReleasedAt(r);
+          const tx      = pickTx(r);
+          const amt =
             (r?.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null) ??
             parseAmountUSD(r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount);
-          const status = pickStatus(r);                  // 'released' if paid-like
-
-          const id = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
+          const status  = pickStatus(r);
+          const id      = String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`);
 
           return (
             <tr key={id}>
