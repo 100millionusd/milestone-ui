@@ -200,6 +200,16 @@ export default function ProjectDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [proofJustSent, setProofJustSent] = useState<Record<string, boolean>>({});
   const [releasingKey, setReleasingKey] = useState<string | null>(null);
+  // --- Optimistic archive state ---
+const [archivingKey, setArchivingKey] = useState<string | null>(null);
+const [archivedLocal, setArchivedLocal] = useState<Set<string>>(new Set());
+const markArchivedLocal = (bidId: number, idx: number) =>
+  setArchivedLocal(prev => {
+    const next = new Set(prev);
+    next.add(msKey(bidId, idx));
+    return next;
+  });
+
 
   // --- SINGLE-POLL + DEBOUNCED REFRESH HELPERS ---
   const activePollsRef = useRef<Set<string>>(new Set());
@@ -670,6 +680,49 @@ export default function ProjectDetailPage() {
     }
   }
 
+  // Admin action: archive (optimistic hide + server sync)
+async function archiveMs(bidId: number, idx: number) {
+  const k = msKey(bidId, idx);
+  try {
+    setArchivingKey(k);
+
+    // optimistic hide
+    markArchivedLocal(bidId, idx);
+
+    // server call
+    await fetch(`/api/milestones/${bidId}/${idx}/archive`, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+    });
+
+    // notify listeners and refresh data
+    try {
+      window.dispatchEvent(
+        new CustomEvent('milestones:updated', {
+          detail: { bidId, milestoneIndex: idx, proposalId: projectIdNum },
+        })
+      );
+    } catch {}
+
+    await refreshApproved(bidId);
+    requestDebouncedRefresh(async () => {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    }, 200);
+  } catch (e: any) {
+    // rollback optimistic state on failure
+    setArchivedLocal(prev => {
+      const next = new Set(prev);
+      next.delete(k);
+      return next;
+    });
+    alert(e?.message || 'Failed to archive milestone.');
+  } finally {
+    setArchivingKey(null);
+  }
+}
+
   const projectDocs = parseDocs(project?.docs) || [];
 
   const canEdit =
@@ -1075,17 +1128,18 @@ const bidFiles = safeBids.flatMap((b: any) => {
       <>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-2 pr-4">#</th>
-                <th className="py-2 pr-4">Title</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Completed</th>
-                <th className="py-2 pr-4">Paid</th>
-                <th className="py-2 pr-4">Tx</th>
-              </tr>
-            </thead>
+ <thead>
+  <tr className="text-left text-gray-600">
+    <th className="py-2 pr-4">#</th>
+    <th className="py-2 pr-4">Title</th>
+    <th className="py-2 pr-4">Amount</th>
+    <th className="py-2 pr-4">Status</th>
+    <th className="py-2 pr-4">Completed</th>
+    <th className="py-2 pr-4">Paid</th>
+    <th className="py-2 pr-4">Tx</th>
+    <th className="py-2 pr-4">Action</th>
+  </tr>
+</thead>
             <tbody>
               {acceptedMilestones.map((m, idx) => {
                 const src =
@@ -1109,6 +1163,11 @@ const bidFiles = safeBids.flatMap((b: any) => {
                   : hasProofNow
                   ? 'submitted'
                   : 'pending';
+
+                    const isArchivedServer = Boolean((src as any)?.archived || (src as any)?.archivedAt);
+                    const isArchivedLocal = archivedLocal.has(key);
+                    if (isArchivedServer || isArchivedLocal) return null; // hide immediately when archived
+
 
                 return (
                   <tr key={idx} className="border-t">
