@@ -56,6 +56,10 @@ type PaymentRow = {
   tx_hash?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  // NEW (optional, used for robust joins / debugging)
+  proof_id?: number | string | null;
+  milestone_id?: number | string | null;
+  __raw_index?: number; // index in the original array
 };
 
 // ———————————————————————————————————————————
@@ -267,10 +271,67 @@ function mergeObjects(...objs: any[]) {
     .reduce((acc, o) => Object.assign(acc, o), {} as any);
 }
 
-// ---- robust payments normalizer (REPLACE your normalizePayments with this) ----
 function normalizePayments(rows: any[]): PaymentRow[] {
+  const toNumberLoose = (v: any): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const m = v.match(/-?\d+/);
+      if (m) return Number(m[0]);
+    }
+    return null;
+  };
+
+  const tryParseJSON = (val: any) => {
+    if (typeof val !== 'string') return null;
+    const s = val.trim();
+    if (!s || (!s.startsWith('{') && !s.startsWith('['))) return null;
+    try { return JSON.parse(s); } catch { return null; }
+  };
+
+  const mergeObjects = (...objs: any[]) =>
+    objs.filter(o => o && typeof o === 'object' && !Array.isArray(o))
+        .reduce((acc, o) => Object.assign(acc, o), {} as any);
+
+  const deepFind = (obj: any, keyRegex: RegExp, maxDepth = 6): any => {
+    const seen = new Set<any>();
+    const stack: Array<{ v: any; d: number }> = [{ v: obj, d: 0 }];
+    while (stack.length) {
+      const { v, d } = stack.pop()!;
+      if (!v || typeof v !== 'object' || seen.has(v) || d > maxDepth) continue;
+      seen.add(v);
+      if (Array.isArray(v)) { for (const it of v) stack.push({ v: it, d: d + 1 }); continue; }
+      for (const [k, val] of Object.entries(v)) {
+        if (keyRegex.test(k)) return val;
+        if (val && typeof val === 'object') stack.push({ v: val, d: d + 1 });
+        if (typeof val === 'string') {
+          const parsed = tryParseJSON(val);
+          if (parsed) stack.push({ v: parsed, d: d + 1 });
+        }
+      }
+    }
+    return null;
+  };
+
+  const idsFromText = (...texts: Array<string | undefined | null>) => {
+    let bidId: number | null = null;
+    let milestoneIndex: number | null = null;
+    for (const t of texts) {
+      if (!t) continue;
+      if (bidId == null) {
+        const m = t.match(/(?:^|[^a-z])(bid(?:[_\s-]?id)?)[\s:=-]*#?\s*(\d+)/i);
+        if (m) bidId = Number(m[2]);
+      }
+      if (milestoneIndex == null) {
+        const m = t.match(/(?:^|[^a-z])(ms|milestone|mil)[\s:=-]*#?\s*(\d+)/i);
+        if (m) milestoneIndex = Number(m[2] ?? m[1]);
+      }
+      if (bidId != null && milestoneIndex != null) break;
+    }
+    return { bidId, milestoneIndex };
+  };
+
   return (rows || []).map((r: any, index) => {
-    // Build one "nested" bag from likely containers and any JSON-ish strings
+    // Build merged “nested” bag (don’t let numeric milestone short-circuit object scans)
     const nestedParsed = mergeObjects(
       tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
       tryParseJSON(r?.metadata), tryParseJSON(r?.meta), tryParseJSON(r?.data)
@@ -280,37 +341,38 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       (typeof r?.milestone === 'object' ? r?.milestone : undefined)
     );
 
-    // Free-text scrape fallback
-    const fromText = parseIdsFromText(
+    // Free-text fallback
+    const text = idsFromText(
       r?.note, r?.notes, r?.description, r?.memo, r?.id,
       typeof r?.metadata === 'string' ? r?.metadata : undefined,
       typeof r?.meta === 'string' ? r?.meta : undefined
     );
 
-    // id
-    const id =
-      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
-      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+    // ids (explicit → nested → deep → text)
+    const rawBid =
+      r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
+      nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id ??
+      deepFind(r, /^(bid(_?id)?|^bid)$/i) ??
+      deepFind(nested, /^(bid(_?id)?|^bid)$/i);
+    const bid_id = rawBid != null ? toNumberLoose(rawBid) : text.bidId ?? null;
 
-    // bid_id — explicit → nested → deep-scan → text
-    let bid_id: number | null =
-      (toNumberLoose(r?.bid_id) ?? toNumberLoose(r?.bidId) ?? toNumberLoose(r?.bid?.id) ?? toNumberLoose(r?.bid)) ??
-      (toNumberLoose(nested?.bid_id) ?? toNumberLoose(nested?.bidId) ?? toNumberLoose(nested?.bid?.id)) ??
-      deepFindNumber(r, /^(bid(_?id)?|^bid)$/i) ??
-      deepFindNumber(nested, /^(bid(_?id)?|^bid)$/i) ??
-      fromText.bidId ?? null;
+    const rawMs =
+      r?.milestone_index ?? r?.milestoneIndex ?? (typeof r?.milestone === 'number' ? r?.milestone : undefined) ??
+      r?.index ?? r?.i ??
+      nested?.milestone_index ?? nested?.milestoneIndex ?? (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ?? nested?.index ??
+      deepFind(r, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
+      deepFind(nested, /^(milestone(_?index)?|milestoneIndex|ms)$/i);
+    const milestone_index = rawMs != null ? toNumberLoose(rawMs) : text.milestoneIndex ?? null;
 
-    // milestone_index — explicit → nested → deep-scan → text
-    let milestone_index: number | null =
-      (toNumberLoose(r?.milestone_index) ?? toNumberLoose(r?.milestoneIndex) ??
-       (typeof r?.milestone === 'number' ? r?.milestone : null) ?? toNumberLoose(r?.index) ?? toNumberLoose(r?.i)) ??
-      (toNumberLoose(nested?.milestone_index) ?? toNumberLoose(nested?.milestoneIndex) ??
-       (typeof nested?.milestone === 'number' ? nested?.milestone : null) ?? toNumberLoose(nested?.index)) ??
-      deepFindNumber(r, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
-      deepFindNumber(nested, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
-      fromText.milestoneIndex ?? null;
+    // also carry optional proof_id / milestone_id if present (for future joins)
+    const rawProofId =
+      r?.proof_id ?? r?.proofId ?? nested?.proof_id ?? nested?.proofId ??
+      deepFind(r, /^proof(_?id)?$/i) ?? deepFind(nested, /^proof(_?id)?$/i);
+    const rawMilestoneId =
+      r?.milestone_id ?? r?.milestoneId ?? nested?.milestone_id ?? nested?.milestoneId ??
+      deepFind(r, /^milestone(_?id)?$/i) ?? deepFind(nested, /^milestone(_?id)?$/i);
 
-    // amount (with cents fallback, search nested too)
+    // amount
     let amount_usd =
       r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
       nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount;
@@ -332,6 +394,10 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       r?.onchain_tx_id ?? r?.onchain_tx_hash ??
       nested?.tx_hash ?? nested?.transaction_hash ?? null;
 
+    const id =
+      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
+      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+
     return {
       id: String(id),
       bid_id: bid_id != null ? Number(bid_id) : null,
@@ -342,6 +408,9 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       tx_hash,
       created_at: r?.created_at ?? r?.createdAt ?? null,
       updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+      proof_id: rawProofId ?? null,
+      milestone_id: rawMilestoneId ?? null,
+      __raw_index: index,
     };
   });
 }
@@ -476,7 +545,15 @@ export default function VendorOversightPage() {
           setProofs(normalizedProofs);
           console.log('Normalized proofs:', normalizedProofs); // Debug log
           
-          const normalizedPayments = normalizePayments(data.payments || []);
+          // accept multiple backend shapes (payments | payouts | releases | transfers | milestone_payments)
+const rawPayments =
+  data.payments ??
+  data.payouts ??
+  data.releases ??
+  data.transfers ??
+  data.milestone_payments ??
+  [];
+const normalizedPayments = normalizePayments(rawPayments);
           setPayments(normalizedPayments);
           console.log('Normalized payments:', normalizedPayments); // Debug log
           
