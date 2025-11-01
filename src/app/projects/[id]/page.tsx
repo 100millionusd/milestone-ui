@@ -6,13 +6,18 @@ import Link from 'next/link';
 import { getProposal, getBids, getBid, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
-import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 import SafePayButton from '@/components/SafePayButton';
 import {
   isPaid as msIsPaid,
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
+import dynamic from 'next/dynamic';
+const ChangeRequestsPanel = dynamic(() => import('@/components/ChangeRequestsPanel'), {
+  ssr: false,
+  loading: () => <div className="mt-2 text-sm text-gray-500">Loading change requests…</div>,
+});
+
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
