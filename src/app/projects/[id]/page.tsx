@@ -1139,15 +1139,27 @@ const bidFiles = safeBids.flatMap((b: any) => {
           </table>
         </div>
 
-        {(acceptedBid || safeBids[0]) && (
-          <div className="mt-6">
-            <MilestonePayments
-              bid={acceptedBid || safeBids[0]}
-              onUpdate={refreshProofs}
-              proposalId={projectIdNum}
-            />
-          </div>
-        )}
+{(acceptedBid || safeBids[0]) && (
+  <div className="mt-6">
+    <MilestonePayments
+      bid={acceptedBid || safeBids[0]}
+      proposalId={projectIdNum}
+      onUpdate={async () => {
+        // 1) keep proofs fresh
+        try { await refreshProofs(); } catch {}
+
+        // 2) immediately refresh bids (no debounce) so archived milestone disappears from Active list
+        try {
+          const next = await getBids(projectIdNum);
+          setBids(Array.isArray(next) ? next : []);
+        } catch {}
+
+        // 3) refresh the expanded approved bid snapshot used in the table rows
+        try { await refreshApproved((acceptedBid || safeBids[0])?.bidId); } catch {}
+      }}
+    />
+  </div>
+)}
 
         {/* Moved here from Overview */}
         <div className="mt-6 border rounded p-4">
