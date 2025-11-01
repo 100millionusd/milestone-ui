@@ -61,23 +61,6 @@ function pickStatus(r: any): 'pending' | 'released' {
   return 'pending';
 }
 
-function normalizePayments(list: any[]): PaymentRow[] {
-  const out: PaymentRow[] = [];
-  (Array.isArray(list) ? list : []).forEach((r: any, i: number) => {
-    out.push({
-      id: String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`),
-      bid_id: pickBidId(r),
-      milestone_index: pickMsIndex(r),
-      status: pickStatus(r),
-      amount_usd: parseAmountUSD(r?.amount_usd ?? r?.amountUSD ?? r?.amount ?? r?.usd),
-      tx: pickTx(r),
-      released_at: pickReleasedAt(r),
-    });
-  });
-  out.sort((a, b) => String(b.released_at || '').localeCompare(String(a.released_at || '')));
-  return out;
-}
-
 function shortTx(tx?: string | null) {
   if (!tx || typeof tx !== 'string') return '—';
   if (!tx.startsWith('0x') || tx.length < 10) return tx;
