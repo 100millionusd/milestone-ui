@@ -80,6 +80,13 @@ function toMilestones(raw: any): any[] {
   return [];
 }
 
+// Let other views (project Admin tab) react immediately (e.g., show "Release Payment")
+function emitMilestonesUpdated(detail: any) {
+  try {
+    window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
+  } catch {}
+}
+
 // ---------- Archive helpers (server-backed, milestone-level) ----------
 type AdminView = 'active' | 'archived';
 type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
@@ -491,8 +498,8 @@ function ProofCard(props: ProofCardProps) {
     if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
   }
 
-  // APPROVE — hit API_BASE JSON endpoint; if 404/400 or HTML, fallback to adminCompleteMilestone
   // APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
+// APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
 async function handleApprove() {
   setErr(null);
   setBusyApprove(true);
@@ -504,7 +511,7 @@ async function handleApprove() {
       throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
     }
 
-    // 1) Approve the proof (Express)
+    // 1) Approve the proof (Express JSON endpoint)
     if (hasProofId) {
       try {
         console.debug('[approve] proofId=%s bidId=%s ms=%s', proof.proofId, proof.bidId, proof.milestoneIndex);
@@ -520,13 +527,12 @@ async function handleApprove() {
             : msg || 'Approve failed';
           throw new Error(clean);
         }
-
         // Proof not found/JSON mismatch → fall back to milestone completion
         console.debug('[approve→fallback] proof missing; will complete milestone bidId=%s ms=%s', proof.bidId, proof.milestoneIndex);
       }
     }
 
-    // 2) ALWAYS complete the milestone (Express) so the project page reflects the change
+    // 2) ALWAYS complete the milestone so the project page reflects the change
     if (hasMs) {
       try {
         await adminCompleteMilestone(
@@ -535,11 +541,19 @@ async function handleApprove() {
           'Approved by admin'
         );
       } catch (e: any) {
-        // Don’t block the UI if milestone is already completed/approved; log and move on
-        console.warn('[approve] milestone completion failed (proof may still be approved):', e?.message || e);
+        // If already completed/approved, don't block the UI
+        console.warn('[approve] milestone completion note:', e?.message || e);
       }
     }
 
+    // 3) 🔔 Notify the Admin tab on /projects/[id] immediately → shows "Release Payment" without refresh
+    emitMilestonesUpdated({
+      bidId: Number(proof.bidId),
+      milestoneIndex: Number(proof.milestoneIndex),
+      approved: true,
+    });
+
+    // 4) Refresh this list too
     await onRefresh();
   } catch (e: any) {
     const msg = String(e?.message || '');
