@@ -193,42 +193,70 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// ADD THE MISSING normalizePayments FUNCTION
+// REPLACE the whole normalizePayments with this
 function normalizePayments(rows: any[]): PaymentRow[] {
   return (rows || []).map((r: any, index) => {
-    console.log('Raw payment data:', r); // Debug log
-    
-    // Handle different ID fields
-    const id = r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ?? 
-               r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
-    
-    // Handle different bid ID fields
-    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
-    
-    // Handle different milestone index fields
-    const milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? 
-                           r?.index ?? r?.i;
-    
-    // Handle different amount fields
-    let amount_usd = r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount;
+    // id
+    const id =
+      r?.id ??
+      r?.payment_id ??
+      r?.payout_id ??
+      r?.transfer_id ??
+      r?.hash ??
+      r?.tx_hash ??
+      `payment-${index + 1}`;
+
+    // bid / milestone
+    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ?? null;
+    const milestone_index =
+      r?.milestone_index ??
+      r?.milestoneIndex ??
+      r?.milestone ??
+      r?.index ??
+      r?.i ??
+      null;
+
+    // amount
+    let amount_usd =
+      r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount ?? null;
     if (amount_usd == null && r?.usdCents != null) {
       amount_usd = r.usdCents / 100;
     }
-    
-    // Handle different status fields
-    const status = r?.status ?? r?.state ?? r?.payout_status ?? 
-                  (r?.completed ? 'completed' : 'pending');
-    
-    // Handle different date fields
-    const released_at = r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? 
-                       r?.created_at ?? r?.createdAt;
-    const created_at = r?.created_at ?? r?.createdAt;
-    const updated_at = r?.updated_at ?? r?.updatedAt;
 
-    // IMPROVED: Handle transaction hash - check multiple possible fields
-    const tx_hash = r?.tx_hash ?? r?.transaction_hash ?? r?.hash ?? 
-                   r?.txHash ?? r?.transactionHash ?? r?.payment_hash ??
-                   r?.onchain_tx_id ?? r?.onchain_tx_hash ?? null;
+    // timing + tx
+    const released_at =
+      r?.released_at ??
+      r?.releasedAt ??
+      r?.paid_at ??
+      r?.created_at ??
+      r?.createdAt ??
+      null;
+
+    const tx_hash =
+      r?.tx_hash ??
+      r?.transaction_hash ??
+      r?.hash ??
+      r?.txHash ??
+      r?.transactionHash ??
+      r?.payment_hash ??
+      r?.onchain_tx_id ??
+      r?.onchain_tx_hash ??
+      null;
+
+    // status (treat any clear release signal as released)
+    let status: string | null =
+      r?.status ?? r?.state ?? r?.payout_status ?? null;
+
+    const hasReleaseSignal =
+      !!released_at || !!tx_hash || r?.completed === true || r?.success === true;
+
+    if (!status) {
+      status = hasReleaseSignal ? 'released' : 'pending';
+    } else if (String(status).toLowerCase() === 'pending' && hasReleaseSignal) {
+      status = 'released';
+    } else if (/^(paid|completed)$/i.test(String(status))) {
+      status = 'released';
+    }
 
     return {
       id: String(id),
@@ -238,8 +266,8 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       status,
       released_at,
       tx_hash,
-      created_at,
-      updated_at,
+      created_at: r?.created_at ?? r?.createdAt ?? null,
+      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
     };
   });
 }
