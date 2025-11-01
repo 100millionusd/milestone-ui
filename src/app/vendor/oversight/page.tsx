@@ -194,82 +194,111 @@ function normalizeProofs(rows: any[]): ProofRow[] {
 }
 
 // REPLACE the whole normalizePayments with this
-function normalizePayments(rows: any[]): PaymentRow[] {
-  return (rows || []).map((r: any, index) => {
-    // id
-    const id =
-      r?.id ??
-      r?.payment_id ??
-      r?.payout_id ??
-      r?.transfer_id ??
-      r?.hash ??
-      r?.tx_hash ??
-      `payment-${index + 1}`;
+// Replace your existing normalizePayments with this:
+function normalizePayments(list: any[]): any[] {
+  const out: any[] = [];
 
-    // bid / milestone
-    const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ?? null;
-    const milestone_index =
-      r?.milestone_index ??
-      r?.milestoneIndex ??
-      r?.milestone ??
-      r?.index ??
-      r?.i ??
-      null;
+  function toNum(v: any): number | null {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  function first<T>(...vals: T[]): T | null {
+    for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== '') return v as T;
+    return null;
+  }
+  function parseBidMs(text?: string): { bidId: number | null; ms: number | null } {
+    if (!text) return { bidId: null, ms: null };
+    // e.g. "#176 — Milestone 5" or "bid 176, milestone 5"
+    const m = String(text).match(/#?(\d+)[^\d]+milestone\s+(\d+)/i);
+    return m ? { bidId: toNum(m[1]), ms: toNum(m[2]) } : { bidId: null, ms: null };
+  }
 
-    // amount
-    let amount_usd =
-      r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? r?.amount ?? null;
-    if (amount_usd == null && r?.usdCents != null) {
-      amount_usd = r.usdCents / 100;
-    }
+  list.forEach((r: any, i: number) => {
+    // --- source fields (many aliases) ---
+    const note = first(r.note, r.description, r.title, r.message);
+    const parsed = parseBidMs(String(note || ''));
 
-    // timing + tx
-    const released_at =
-      r?.released_at ??
-      r?.releasedAt ??
-      r?.paid_at ??
-      r?.created_at ??
-      r?.createdAt ??
-      null;
+    const bidId =
+      first(toNum(r.bid_id), toNum(r.bidId), toNum(r.bid), parsed.bidId) ?? null;
 
-    const tx_hash =
-      r?.tx_hash ??
-      r?.transaction_hash ??
-      r?.hash ??
-      r?.txHash ??
-      r?.transactionHash ??
-      r?.payment_hash ??
-      r?.onchain_tx_id ??
-      r?.onchain_tx_hash ??
-      null;
+    const msIndex =
+      first(
+        toNum(r.milestone_index),
+        toNum(r.milestoneIndex),
+        toNum(r.milestone),
+        parsed.ms
+      ) ?? null;
 
-    // status (treat any clear release signal as released)
-    let status: string | null =
-      r?.status ?? r?.state ?? r?.payout_status ?? null;
+    const releasedAtRaw = first(
+      r.released_at,
+      r.releasedAt,
+      r.paid_at,
+      r.paidAt,
+      r.updated_at,
+      r.updatedAt,
+      r.created_at,
+      r.createdAt,
+      r.time,
+      r.timestamp
+    );
+    const releasedAt =
+      releasedAtRaw ? new Date(releasedAtRaw as any).toISOString() : null;
 
-    const hasReleaseSignal =
-      !!released_at || !!tx_hash || r?.completed === true || r?.success === true;
+    const txHash = first(
+      r.tx_hash,
+      r.txHash,
+      r.hash,
+      r.tx?.hash
+    ) as string | null;
 
-    if (!status) {
-      status = hasReleaseSignal ? 'released' : 'pending';
-    } else if (String(status).toLowerCase() === 'pending' && hasReleaseSignal) {
-      status = 'released';
-    } else if (/^(paid|completed)$/i.test(String(status))) {
-      status = 'released';
-    }
+    const txUrl = first(
+      r.tx_url,
+      r.txUrl,
+      r.tx?.url
+    ) as string | null;
 
-    return {
-      id: String(id),
-      bid_id: bid_id != null ? Number(bid_id) : null,
-      milestone_index: milestone_index != null ? Number(milestone_index) : null,
-      amount_usd,
-      status,
-      released_at,
-      tx_hash,
-      created_at: r?.created_at ?? r?.createdAt ?? null,
-      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+    const amountUsd =
+      first(
+        toNum(r.amount_usd),
+        toNum(r.amountUsd),
+        r.amount_usd_cents != null ? Number(r.amount_usd_cents) / 100 : null,
+        toNum(r.usd),
+        toNum(r.amount)
+      ) ?? null;
+
+    // --- emit BOTH snake_case and camelCase so UI finds what it needs ---
+    const row: any = {
+      id: r.id || `payment-${i + 1}`,
+
+      // status: only "released" rows are shown on this page
+      status: 'released',
+
+      // snake_case (table uses these)
+      bid_id: bidId,
+      milestone_index: msIndex,
+      released_at: releasedAt,
+      amount_usd: amountUsd,
+      tx_hash: txHash,
+      tx_url: txUrl,
+
+      // camelCase (future / other components)
+      bidId,
+      milestoneIndex: msIndex,
+      releasedAt: releasedAt,
+      amountUsd: amountUsd,
+      txHash: txHash,
+      txUrl: txUrl,
+
+      // keep any original fields in case the UI touches them
+      ...r,
     };
+
+    out.push(row);
   });
+
+  // latest first if timestamps exist
+  out.sort((a, b) => String(b.released_at || '').localeCompare(String(a.released_at || '')));
+  return out;
 }
 
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
