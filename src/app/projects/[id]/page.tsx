@@ -934,7 +934,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
         </div>
       </div>
 
-      {/* Overview */}
+       {/* Overview */}
       {tab === 'overview' && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 border rounded p-4">
@@ -943,7 +943,13 @@ const bidFiles = safeBids.flatMap((b: any) => {
 
             <div className="mt-6">
               <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
-              <Progress value={acceptedMilestones.length ? Math.round((msCompleted / acceptedMilestones.length) * 100) : 0} />
+              <Progress
+                value={
+                  acceptedMilestones.length
+                    ? Math.round((msCompleted / acceptedMilestones.length) * 100)
+                    : 0
+                }
+              />
               <p className="text-xs text-gray-600 mt-1">
                 {msCompleted}/{acceptedMilestones.length} completed • {msPaid}/{acceptedMilestones.length} paid
               </p>
@@ -955,7 +961,12 @@ const bidFiles = safeBids.flatMap((b: any) => {
                 <ul className="text-sm space-y-1">
                   {timeline.slice(-5).reverse().map((e, i) => (
                     <li key={i}>
-                      <b>{e.label}</b> • {fmt(e.at)} {e.meta ? <>• <span className="opacity-70">{e.meta}</span></> : null}
+                      <b>{e.label}</b> • {fmt(e.at)}{' '}
+                      {e.meta ? (
+                        <>
+                          • <span className="opacity-70">{e.meta}</span>
+                        </>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -965,7 +976,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
             </div>
           </div>
 
-           <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-6">
             <div className="border rounded p-4">
               <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
               <ChangeRequestsPanel proposalId={projectIdNum} />
@@ -1003,6 +1014,8 @@ const bidFiles = safeBids.flatMap((b: any) => {
               )}
             </div>
           </div>
+        </section>
+      )}
 
       {/* Timeline */}
       {tab === 'timeline' && (
