@@ -14,6 +14,9 @@ import {
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // ---------------- Consts ----------------
 const PINATA_GATEWAY = (() => {
   const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
@@ -964,6 +967,11 @@ const bidFiles = safeBids.flatMap((b: any) => {
               )}
             </div>
           </div>
+
+          <div className="mt-8">
+  <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
+  <ChangeRequestsPanel proposalId={projectIdNum} />
+</div>
 
           <div className="border rounded p-4">
             <h3 className="font-semibold mb-3">Bids snapshot</h3>
