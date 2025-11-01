@@ -976,44 +976,39 @@ const bidFiles = safeBids.flatMap((b: any) => {
             </div>
           </div>
 
-          <div className="flex flex-col gap-6">
-            <div className="border rounded p-4">
-              <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
-              <ChangeRequestsPanel proposalId={projectIdNum} />
+ <div className="flex flex-col gap-6">
+  <div className="border rounded p-4">
+    <h3 className="font-semibold mb-3">Bids snapshot</h3>
+    {safeBids.length ? (
+      <ul className="space-y-2 text-sm">
+        {safeBids.slice(0, 5).map((b) => (
+          <li key={b.bidId} className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">{b.vendorName}</div>
+              <div className="opacity-70">
+                {currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}
+              </div>
             </div>
-
-            <div className="border rounded p-4">
-              <h3 className="font-semibold mb-3">Bids snapshot</h3>
-              {safeBids.length ? (
-                <ul className="space-y-2 text-sm">
-                  {safeBids.slice(0, 5).map((b) => (
-                    <li key={b.bidId} className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{b.vendorName}</div>
-                        <div className="opacity-70">
-                          {currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}
-                        </div>
-                      </div>
-                      <span
-                        className={classNames(
-                          'px-2 py-1 rounded text-xs',
-                          b.status === 'approved'
-                            ? 'bg-green-100 text-green-800'
-                            : b.status === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        )}
-                      >
-                        {b.status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500">No bids yet.</p>
+            <span
+              className={classNames(
+                'px-2 py-1 rounded text-xs',
+                b.status === 'approved'
+                  ? 'bg-green-100 text-green-800'
+                  : b.status === 'rejected'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-yellow-100 text-yellow-800'
               )}
-            </div>
-          </div>
+            >
+              {b.status}
+            </span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className="text-sm text-gray-500">No bids yet.</p>
+    )}
+  </div>
+</div>
         </section>
       )}
 
@@ -1070,87 +1065,101 @@ const bidFiles = safeBids.flatMap((b: any) => {
         </section>
       )}
 
-      {/* Milestones (read-only) */}
-      {tab === 'milestones' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">
-            Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
-          </h3>
+ {tab === 'milestones' && (
+  <section className="border rounded p-4">
+    <h3 className="font-semibold mb-3">
+      Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+    </h3>
 
-          {acceptedMilestones.length ? (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-600">
-                      <th className="py-2 pr-4">#</th>
-                      <th className="py-2 pr-4">Title</th>
-                      <th className="py-2 pr-4">Amount</th>
-                      <th className="py-2 pr-4">Status</th>
-                      <th className="py-2 pr-4">Completed</th>
-                      <th className="py-2 pr-4">Paid</th>
-                      <th className="py-2 pr-4">Tx</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {acceptedMilestones.map((m, idx) => {
-                      const src =
-                        (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+    {acceptedMilestones.length ? (
+      <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2 pr-4">#</th>
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Amount</th>
+                <th className="py-2 pr-4">Status</th>
+                <th className="py-2 pr-4">Completed</th>
+                <th className="py-2 pr-4">Paid</th>
+                <th className="py-2 pr-4">Tx</th>
+              </tr>
+            </thead>
+            <tbody>
+              {acceptedMilestones.map((m, idx) => {
+                const src =
+                  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
 
-                      const key = msKey(Number(acceptedBid?.bidId || 0), idx);
-                      const paid = msIsPaid(src);
-                      const localPending = safePending.has(key);
-                      const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
+                const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
+                const paid = msIsPaid(src);
+                const localPending = safePending.has(key);
+                const safeInFlight =
+                  msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
 
-                      const completedRow = paid || !!(src as any)?.completed;
-                      const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
+                const completedRow = paid || !!(src as any)?.completed;
+                const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
 
-                      const status =
-                        paid ? 'paid'
-                        : safeInFlight ? 'payment_pending'
-                        : completedRow ? 'completed'
-                        : hasProofNow ? 'submitted'
-                        : 'pending';
+                const status = paid
+                  ? 'paid'
+                  : safeInFlight
+                  ? 'payment_pending'
+                  : completedRow
+                  ? 'completed'
+                  : hasProofNow
+                  ? 'submitted'
+                  : 'pending';
 
-                      return (
-                        <tr key={idx} className="border-t">
-                          <td className="py-2 pr-4">M{idx + 1}</td>
-                          <td className="py-2 pr-4">{m.name || '—'}</td>
-                          <td className="py-2 pr-4">
-                            {m.amount ? currency.format(Number(m.amount)) : '—'}
-                          </td>
-                          <td className="py-2 pr-4">{status}</td>
-                          <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                          <td className="py-2 pr-4">{fmt((m as any).paymentDate || (paid ? ((src as any).paidAt || (src as any).safeExecutedAt) : null)) || '—'}</td>
-                          <td className="py-2 pr-4">
-                            {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
-                              ? `${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(0, 10)}…`
-                              : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                return (
+                  <tr key={idx} className="border-t">
+                    <td className="py-2 pr-4">M{idx + 1}</td>
+                    <td className="py-2 pr-4">{m.name || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {m.amount ? currency.format(Number(m.amount)) : '—'}
+                    </td>
+                    <td className="py-2 pr-4">{status}</td>
+                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {fmt(
+                        (m as any).paymentDate ||
+                          (paid ? (src as any).paidAt || (src as any).safeExecutedAt : null)
+                      ) || '—'}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
+                        ? `${String(
+                            (src as any).paymentTxHash || (src as any).safePaymentTxHash
+                          ).slice(0, 10)}…`
+                        : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
-              {(acceptedBid || safeBids[0]) && (
-                <div className="mt-6">
-                  <MilestonePayments
-                    bid={acceptedBid || safeBids[0]}
-                    onUpdate={refreshProofs}
-                    proposalId={projectIdNum}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-gray-500">
-              No milestones defined yet.
-            </p>
-          )}
-        </section>
-      )}
+        {(acceptedBid || safeBids[0]) && (
+          <div className="mt-6">
+            <MilestonePayments
+              bid={acceptedBid || safeBids[0]}
+              onUpdate={refreshProofs}
+              proposalId={projectIdNum}
+            />
+          </div>
+        )}
+
+        {/* Moved here from Overview */}
+        <div className="mt-6 border rounded p-4">
+          <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
+          <ChangeRequestsPanel proposalId={projectIdNum} />
+        </div>
+      </>
+    ) : (
+      <p className="text-sm text-gray-500">No milestones defined yet.</p>
+    )}
+  </section>
+)}
 
 {/* Files */}
 {tab === 'files' && (
