@@ -18,6 +18,17 @@ import {
 } from '@/lib/api';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
+// === broadcast milestone updates (top-level so ProofCard can use it)
+function notifyMsChange(bidId: number, milestoneIndex: number) {
+  try {
+    window.dispatchEvent(new CustomEvent('milestones:updated', { detail: { bidId, milestoneIndex } }));
+  } catch {}
+  try {
+    new BroadcastChannel('mx-payments').postMessage({ type: 'mx:ms:updated', bidId, milestoneIndex });
+  } catch {}
+}
+
+
 // ---------- Gateway + helpers ----------
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY
@@ -147,18 +158,6 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   // Archive view + server-backed status map
   const [view, setView] = useState<AdminView>('active');
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
-  const router = useRouter();
-
-// Fire both the window event and a BroadcastChannel message so other views react immediately
-  function notifyMsChange(bidId: number, milestoneIndex: number) {
-    try {
-      window.dispatchEvent(new CustomEvent('milestones:updated', { detail: { bidId, milestoneIndex } }));
-    } catch {}
-    try {
-      // One-shot broadcast; channel auto-closes when GC'd
-      new BroadcastChannel('mx-payments').postMessage({ type: 'mx:ms:updated', bidId, milestoneIndex });
-    } catch {}
-  }
 
   async function loadProofs() {
   try {
@@ -434,6 +433,8 @@ function ProofCard(props: ProofCardProps) {
     isArchived, pkey, onArchive,
   } = props;
 
+  const router = useRouter();
+
   const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -512,7 +513,7 @@ function ProofCard(props: ProofCardProps) {
   }
 
 // APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
-// APPROVE — always approve the proof AND complete the milestone, then notify listeners and refresh UI
+// APPROVE — approve proof (if available) + complete milestone, then notify listeners + refresh UI immediately
 async function handleApprove() {
   setErr(null);
   setBusyApprove(true);
@@ -524,56 +525,49 @@ async function handleApprove() {
       throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
     }
 
-    // 1) Approve the proof via JSON API (tolerate legacy backends)
+    // 1) Approve the proof via JSON API (tolerate legacy backend)
     if (hasProofId) {
       try {
-        await (async function approveViaApi(proofId: number) {
-          const r = await fetch(`${API_BASE}/proofs/${proofId}/approve`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { Accept: 'application/json' },
-            cache: 'no-store',
-          });
-          const ct = r.headers.get('content-type') || '';
-          if (!r.ok) {
-            if (ct.includes('application/json')) {
-              const j = await r.json().catch(() => ({}));
-              throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
-            } else {
-              const txt = await r.text().catch(() => '');
-              throw new Error(
-                /<!doctype html|<html[\s>]/i.test(txt)
-                  ? `Unexpected HTML from server. HTTP ${r.status}`
-                  : `HTTP ${r.status}`
-              );
-            }
+        const r = await fetch(`${API_BASE}/proofs/${proof.proofId}/approve`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        const ct = r.headers.get('content-type') || '';
+        if (!r.ok) {
+          if (ct.includes('application/json')) {
+            const j = await r.json().catch(() => ({}));
+            throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
+          } else {
+            const txt = await r.text().catch(() => '');
+            throw new Error(/<!doctype html|<html[\s>]/i.test(txt) ? 'Unexpected HTML from server.' : `HTTP ${r.status}`);
           }
-          if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
-        })(proof.proofId as number);
+        }
+        if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
       } catch (e: any) {
-        // If JSON endpoint isn’t there, we’ll still proceed to milestone completion
         const msg = String(e?.message || '');
         const mayFallback = /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
         if (!mayFallback || !hasMs) throw new Error(msg || 'Approve failed');
       }
     }
 
-    // 2) ALWAYS complete the milestone (keeps project page in sync)
+    // 2) ALWAYS complete the milestone (keeps /projects/[id] in sync for pay buttons)
     if (hasMs) {
       try {
         await adminCompleteMilestone(Number(proof.bidId), Number(proof.milestoneIndex), 'Approved by admin');
       } catch (e: any) {
-        // Do not block if already completed/approved
+        // ok if already completed/approved
         console.warn('[approve] milestone completion note:', e?.message || e);
       }
     }
 
-    // 3) 🔔 Notify other views immediately (Admin tab listens to these)
+    // 3) notify other views (project admin tab, payments list, etc.)
     notifyMsChange(Number(proof.bidId), Number(proof.milestoneIndex));
 
-    // 4) Refresh this list AND force the route to revalidate so buttons appear instantly
-    await onRefresh?.();
-    router.refresh(); // ← forces the Admin tab to re-evaluate button conditions right now
+    // 4) refresh this page route so "Release Payment" appears immediately
+    onRefresh?.();
+    router.refresh();
   } catch (e: any) {
     const msg = String(e?.message || '');
     setErr(/<!doctype html|<html[\s>]/i.test(msg) ? 'Approve failed (server returned HTML).' : msg || 'Approve failed');
