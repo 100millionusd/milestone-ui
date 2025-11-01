@@ -5,6 +5,85 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import AgentDigestWidget from "@/components/AgentDigestWidget";
 
+// ===== normalize payments (bid, milestone, tx, status, amount) =====
+type PaymentRow = {
+  id: string;
+  bid_id: number | null;
+  milestone_index: number | null;
+  status: 'pending' | 'released';
+  amount_usd: number | null;
+  tx: string | null;
+  released_at: string | null;
+};
+
+function parseAmountUSD(v: any): number | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function pickTx(r: any): string | null {
+  const t = r?.tx || r?.txHash || r?.hash || r?.transactionHash || r?.tx_hash;
+  return typeof t === 'string' && t ? t : null;
+}
+
+function pickBidId(r: any): number | null {
+  const cand = r?.bidId ?? r?.bid_id ?? r?.bid ?? r?.proposalBidId ?? null;
+  if (Number.isFinite(Number(cand))) return Number(cand);
+  const fromText = String(r?.name || r?.title || r?.note || '').match(/#(\d+)/);
+  return fromText ? Number(fromText[1]) : null;
+}
+
+function pickMsIndex(r: any): number | null {
+  const cand = r?.milestoneIndex ?? r?.milestone_index ?? r?.milestone ?? null;
+  if (Number.isFinite(Number(cand))) return Number(cand);
+  const fromText = String(r?.name || r?.title || r?.note || '').match(/Milestone\s+(\d+)/i);
+  return fromText ? Number(fromText[1]) : null;
+}
+
+function pickReleasedAt(r: any): string | null {
+  return (
+    r?.releasedAt ??
+    r?.released_at ??
+    r?.updated_at ??
+    r?.created_at ??
+    r?.timestamp ??
+    null
+  ) || null;
+}
+
+function pickStatus(r: any): 'pending' | 'released' {
+  const s = String(r?.status || '').toLowerCase();
+  if (r?.released === true) return 'released';
+  if (['released', 'paid', 'complete', 'completed', 'done'].includes(s)) return 'released';
+  return 'pending';
+}
+
+function normalizePayments(list: any[]): PaymentRow[] {
+  const out: PaymentRow[] = [];
+  (Array.isArray(list) ? list : []).forEach((r: any, i: number) => {
+    out.push({
+      id: String(r?.id ?? r?.paymentId ?? r?.uuid ?? `payment-${i + 1}`),
+      bid_id: pickBidId(r),
+      milestone_index: pickMsIndex(r),
+      status: pickStatus(r),
+      amount_usd: parseAmountUSD(r?.amount_usd ?? r?.amountUSD ?? r?.amount ?? r?.usd),
+      tx: pickTx(r),
+      released_at: pickReleasedAt(r),
+    });
+  });
+  out.sort((a, b) => String(b.released_at || '').localeCompare(String(a.released_at || '')));
+  return out;
+}
+
+function shortTx(tx?: string | null) {
+  if (!tx || typeof tx !== 'string') return '—';
+  if (!tx.startsWith('0x') || tx.length < 10) return tx;
+  return `${tx.slice(0, 8)}…${tx.slice(-6)}`;
+}
+
 // ———————————————————————————————————————————
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
@@ -193,7 +272,6 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// REPLACE the whole normalizePayments with this
 // Replace your existing normalizePayments with this:
 function normalizePayments(list: any[]): any[] {
   const out: any[] = [];
@@ -697,77 +775,61 @@ export default function VendorOversightPage() {
         </Card>
       )}
 
- {/* ——— Payments ——— */}
-{tab === 'payments' && (
-  <Card
-    title={`Payments (${filteredPayments.length})`}
-    subtitle="Latest first"
-    right={
-      <button
-        onClick={() => downloadCSV(`my-payments-${new Date().toISOString().slice(0,10)}.csv`, filteredPayments)}
-        className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"
-      >
-        ⬇ CSV
-      </button>
-    }
-  >
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
-          <tr>
-            <Th>ID</Th>
-            <Th>Bid</Th>
-            <Th>Milestone</Th>
-            <Th>Status</Th>
-            <Th>Released</Th>
-            <Th>Amount</Th>
-            <Th>Tx</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {!payments && <RowPlaceholder cols={7} />}
-          {payments && filteredPayments.length === 0 && (
-            <tr><Td colSpan={7} className="text-center text-neutral-500">No payments</Td></tr>
-          )}
-          {filteredPayments
-            .slice()
-            .sort((a, b) => (new Date(b.released_at || b.created_at || 0).getTime() - new Date(a.released_at || a.created_at || 0).getTime()))
-            .map(p => (
-            <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
-              <Td className="font-mono text-xs">{String(p.id)}</Td>
-              <Td>{p.bid_id ?? '—'}</Td>
-              <Td>{p.milestone_index ?? '—'}</Td>
-              <Td>
-                <Badge tone={
-                  p.status === 'completed' ? 'success' :
-                  p.status === 'released' ? 'success' :
-                  p.status === 'pending' ? 'warning' : 'neutral'
-                }>
-                  {p.status ?? '—'}
-                </Badge>
-              </Td>
-              <Td>{humanTime(p.released_at || p.created_at)}</Td>
-              <Td className="tabular-nums">{fmtUSD0(p.amount_usd)}</Td>
-              <Td className="max-w-[160px] truncate">
-                {p.tx_hash ? (
-                  <a 
-                    href={`https://etherscan.io/tx/${p.tx_hash}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="font-mono text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-800/50 hover:shadow-sm transition-all inline-block"
-                  >
-                    {p.tx_hash.slice(0, 8)}…{p.tx_hash.slice(-6)}
-                  </a>
-                ) : (
-                  <span className="text-neutral-400">—</span>
-                )}
-              </Td>
+ {/* Payments */}
+<Card title={`Payments (${payments?.length ?? 0})`} subtitle="Latest first" right={<ExportCSV rows={payments} />}>
+  <div className="overflow-x-auto">
+    {(() => {
+      const rows = normalizePayments(payments || []);
+
+      return (
+        <table className="min-w-full text-sm">
+          <thead className="text-xs uppercase text-neutral-500">
+            <tr className="border-b">
+              <th className="py-2 px-3 text-left">ID</th>
+              <th className="py-2 px-3 text-left">BID</th>
+              <th className="py-2 px-3 text-left">MILESTONE</th>
+              <th className="py-2 px-3 text-left">STATUS</th>
+              <th className="py-2 px-3 text-left">RELEASED</th>
+              <th className="py-2 px-3 text-left">AMOUNT</th>
+              <th className="py-2 px-3 text-left">TX</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </Card>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="py-2 px-3">{r.id}</td>
+                <td className="py-2 px-3">{r.bid_id ?? '—'}</td>
+                <td className="py-2 px-3">{r.milestone_index ?? '—'}</td>
+                <td className="py-2 px-3">
+                  <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'released' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {r.status}
+                  </span>
+                </td>
+                <td className="py-2 px-3">{r.released_at ? new Date(r.released_at).toLocaleString() : '—'}</td>
+                <td className="py-2 px-3">{r.amount_usd != null ? `$${r.amount_usd.toLocaleString()}` : '—'}</td>
+                <td className="py-2 px-3">
+                  {r.tx ? (
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${r.tx}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                      title={r.tx}
+                    >
+                      {shortTx(r.tx)}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    })()}
+  </div>
+</Card>
 )}
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
