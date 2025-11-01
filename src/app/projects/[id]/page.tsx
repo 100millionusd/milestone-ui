@@ -394,46 +394,55 @@ export default function ProjectDetailPage() {
 
   // Re-hydrate when any page archives/unarchives a milestone
 useMilestonesUpdated(async () => {
-  await refreshApproved(); // <— NEW: ensures `approvedFull` is fresh
   await refreshProofs();
-  requestDebouncedRefresh(async () => {
-    const next = await getBids(projectIdNum);
-    setBids(Array.isArray(next) ? next : []);
-  }, 500);
+  await refreshApproved(); // <-- make Release button appear without page reload
+  setTimeout(async () => {
+    try { setBids(await getBids(projectIdNum)); } catch {}
+  }, 50);
 });
 
-  // Cross-page payment sync
-  const payChanRef = useRef<BroadcastChannel | null>(null);
-  useEffect(() => {
-    try { payChanRef.current = new BroadcastChannel('mx-payments'); } catch {}
-    const bc = payChanRef.current;
-    if (bc) {
-      bc.onmessage = async (e: MessageEvent) => {
-        const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
-        if (!type) return;
 
-        if (type === 'mx:pay:queued') {
-          addSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-          startPollUntilPaid(Number(bidId), Number(milestoneIndex));
-        }
-        if (type === 'mx:pay:done') {
-          removeSafePending(msKey(Number(bidId), Number(milestoneIndex)));
-        }
+ // Cross-page payment sync (REPLACE THIS ENTIRE BLOCK)
+const payChanRef = useRef<BroadcastChannel | null>(null);
+useEffect(() => {
+  let bc: BroadcastChannel | null = null;
+  try { bc = new BroadcastChannel('mx-payments'); } catch {}
+  payChanRef.current = bc;
 
- if (type === 'mx:ms:updated') {
-  // Proof was approved elsewhere → milestone marked completed.
-  await refreshApproved(Number(bidId)); // refresh the full bid (drives the payments UI)
-}
-       
-        await refreshProofs();
-        requestDebouncedRefresh(async () => {
-          const next = await getBids(projectIdNum);
-          setBids(Array.isArray(next) ? next : []);
-        }, 500);
-      };
+  const onMsg = async (e: MessageEvent) => {
+    const { type, bidId, milestoneIndex } = (e?.data || {}) as any;
+    if (!type) return;
+
+    const b = Number(bidId);
+    const i = Number(milestoneIndex);
+
+    if (type === 'mx:pay:queued') {
+      addSafePending(msKey(b, i));
+      startPollUntilPaid(b, i);
+    } else if (type === 'mx:pay:done') {
+      removeSafePending(msKey(b, i));
+    } else if (type === 'mx:ms:updated') {
+      // Proof was approved elsewhere → milestone marked completed.
+      await refreshApproved(b); // refresh the full bid (drives the payments UI)
     }
-    return () => { try { bc?.close(); } catch {} };
-  }, [projectIdNum]);
+
+    await refreshProofs();
+    requestDebouncedRefresh(async () => {
+      const next = await getBids(projectIdNum);
+      setBids(Array.isArray(next) ? next : []);
+    }, 500);
+  };
+
+  if (bc) bc.onmessage = onMsg;
+
+  return () => {
+    if (bc) {
+      try { bc.onmessage = null as any; bc.close(); } catch {}
+    }
+    payChanRef.current = null;
+  };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [projectIdNum]);
 
   useEffect(() => {
     if (tab === 'files') { refreshProofs(); }
@@ -441,12 +450,13 @@ useMilestonesUpdated(async () => {
   }, [tab]);
 
   useEffect(() => {
-    const onAnyProofUpdate = (ev: any) => {
-      const pid = Number(ev?.detail?.proposalId);
-      if (!Number.isFinite(pid) || pid === projectIdNum) {
-        refreshProofs();
-      }
-    };
+ const onAnyProofUpdate = (ev: any) => {
+  const pid = Number(ev?.detail?.proposalId);
+  if (!Number.isFinite(pid) || pid === projectIdNum) {
+    refreshProofs();
+    refreshApproved(); // <-- critical so completed status is reflected
+  }
+};
     window.addEventListener('proofs:updated', onAnyProofUpdate);
     window.addEventListener('proofs:changed', onAnyProofUpdate);
     return () => {
