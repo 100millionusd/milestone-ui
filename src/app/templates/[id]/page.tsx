@@ -19,12 +19,12 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // optional attachments (written by FileUploader inside the horizontal widget)
+  // files written by the horizontal widget's FileUploader
   const filesJson = String(formData.get('filesJson') || '[]');
   let files: string[] = [];
   try { files = JSON.parse(filesJson); } catch {}
 
-  // milestones from the horizontal template widget (calendar dates + amounts)
+  // milestones written by the horizontal widget
   const milestonesJson = String(formData.get('milestonesJson') || '[]');
   let milestones: any[] = [];
   try { milestones = JSON.parse(milestonesJson); } catch {}
@@ -39,7 +39,7 @@ async function startFromTemplate(formData: FormData) {
     vendorName,
     walletAddress,
     preferredStablecoin,
-    milestones, // ← vendor-defined split payments
+    milestones, // vendor-defined split payments
     files,
   });
 
@@ -71,9 +71,6 @@ export default async function TemplateDetailPage({ params }: Props) {
             <span className="inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs ring-1 ring-white/30">
               {t.locale}
             </span>
-            <span className="inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs ring-1 ring-white/30">
-              {t.milestones.length} milestones
-            </span>
           </div>
           {t.summary ? <p className="mt-3 max-w-3xl text-white/90">{t.summary}</p> : null}
         </div>
@@ -81,35 +78,15 @@ export default async function TemplateDetailPage({ params }: Props) {
 
       {/* Body */}
       <div className="mx-auto max-w-6xl px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Template preview (read-only suggestions) */}
+        {/* LEFT: 🔥 Horizontal emoji scopes + horizontal milestones (no preview list) */}
         <section className="lg:col-span-2">
-          <h2 className="text-base font-semibold mb-3">Milestones (vendor enters amounts & dates)</h2>
-          <ol className="space-y-4">
-            {t.milestones.map((m) => (
-              <li key={m.idx} className="rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-slate-500">Step {m.idx}</div>
-                    <h3 className="text-lg font-medium">{m.name}</h3>
-                  </div>
-                  <div className="text-right text-xs text-slate-500">
-                    <div>Suggested: ${m.amount || 0}</div>
-                    <div>ETA: +{m.days_offset}d</div>
-                  </div>
-                </div>
-                {Array.isArray(m.acceptance) && m.acceptance.length > 0 && (
-                  <ul className="mt-3 grid gap-1 text-sm text-slate-700 list-disc pl-5">
-                    {m.acceptance.map((a: string, i: number) => (
-                      <li key={i}>{a}</li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ol>
+          <TemplateRenovationHorizontal
+            hiddenFieldName="milestonesJson"
+            apiBase={process.env.NEXT_PUBLIC_API_BASE || ''}
+          />
         </section>
 
-        {/* Right: Form to instantiate bid from this template */}
+        {/* RIGHT: vendor details + submit */}
         <aside className="lg:col-span-1">
           <form action={startFromTemplate} className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
             <input type="hidden" name="id" value={t.slug || String(t.id)} />
@@ -143,14 +120,6 @@ export default async function TemplateDetailPage({ params }: Props) {
                   <option value="USDC">USDC</option>
                 </select>
               </label>
-            </div>
-
-            {/* Horizontal template with emojis → writes milestonesJson + filesJson */}
-            <div className="pt-2">
-              <TemplateRenovationHorizontal
-                hiddenFieldName="milestonesJson"
-                apiBase={process.env.NEXT_PUBLIC_API_BASE || ''}
-              />
             </div>
 
             <button type="submit" className="w-full px-4 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700">
