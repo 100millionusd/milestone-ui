@@ -1614,6 +1614,47 @@ export function testConnection() {
   return apiFetch("/test");
 }
 
+// === Templates (marketplace) ===
+export type TemplateSummary = {
+  id: number;
+  slug: string;
+  title: string;
+  locale?: string | null;
+  category?: string | null;
+  summary?: string | null;
+  default_currency?: string | null;
+  milestones: number;
+};
+export type TemplateDetail = TemplateSummary & {
+  milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
+};
+
+export async function getTemplates(): Promise<TemplateSummary[]> {
+  return apiFetch<TemplateSummary[]>(`/templates`);
+}
+
+export async function getTemplate(idOrSlug: number | string): Promise<TemplateDetail> {
+  return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
+}
+
+export async function postTemplate(input: {
+  slug: string; title: string; locale?: string; category?: string; summary?: string; default_currency?: string;
+  milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
+}): Promise<{ ok: true; templateId: number }> {
+  return postJSON(`/templates`, input);
+}
+
+export async function createBidFromTemplate(input: {
+  templateId?: number;
+  slug?: string;
+  proposalId: number;
+  vendorName: string;
+  walletAddress: string;
+  preferredStablecoin?: 'USDT' | 'USDC';
+}): Promise<{ ok: boolean; bidId: number }> {
+  return postJSON(`/bids/from-template`, input);
+}
+
 export default {
   // auth
   getAuthRole,
