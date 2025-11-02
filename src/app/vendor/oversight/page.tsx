@@ -213,6 +213,9 @@ return {
   safe_tx_hash,
   paid_at,
 };
+  });
+}
+
 
 // ---- helpers for robust extraction (must sit ABOVE normalizePayments) ----
 function toNumberLoose(v: any): number | null {
