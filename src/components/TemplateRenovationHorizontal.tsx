@@ -1,30 +1,20 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import FileUploader from '@/app/templates/[id]/FileUploader';
-
-// --- Helpers ---------------------------------------------------------------
-const newId = () =>
-  (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
-
-// We treat dates as date-only strings (YYYY-MM-DD) to avoid timezone drift.
-// The server can convert to ISO if needed.
+import FileUploader from '@/app/templates/[id]/FileUploader'; // ✅ correct path
 
 type Milestone = {
-  id: string;
   name: string;
   amount: number;
-  dueDate: string; // date-only string (YYYY-MM-DD)
+  dueDate: string; // ISO date (YYYY-MM-DD or full ISO)
   acceptance?: string[];
   archived?: boolean;
 };
 
 type Props = {
-  /** Hidden input name this component writes to */
+  /** Hidden input name that this widget writes the milestones JSON into */
   hiddenFieldName?: string;
-  /** Optional API base for the FileUploader */
+  /** Pass a custom API base to the FileUploader if needed */
   apiBase?: string;
 };
 
@@ -52,13 +42,12 @@ export default function TemplateRenovationHorizontal({
   hiddenFieldName = 'milestonesJson',
   apiBase = process.env.NEXT_PUBLIC_API_BASE || '',
 }: Props) {
-  // selected scopes (purely visual; you can decide to auto-add milestones when toggled)
+  // selected scopes
   const [sel, setSel] = useState<Record<string, boolean>>({});
 
-  // editable milestones (vendor sets amount + date). Use stable IDs instead of array index as React key
+  // editable milestones (vendor sets amount + date)
   const [milestones, setMilestones] = useState<Milestone[]>(
     SUGGESTED.map((m) => ({
-      id: newId(),
       name: m.title,
       amount: 0,
       dueDate: '',
@@ -72,11 +61,11 @@ export default function TemplateRenovationHorizontal({
   function toggleScope(key: string, label: string) {
     setSel((p) => {
       const next = { ...p, [key]: !p[key] };
-      // When toggled ON, add a blank milestone for that scope
       if (!p[key]) {
+        // when turning ON a scope, add a blank milestone for it
         setMilestones((ms) => [
           ...ms,
-          { id: newId(), name: label, amount: 0, dueDate: '', acceptance: [], archived: false },
+          { name: label, amount: 0, dueDate: '', acceptance: [], archived: false },
         ]);
       }
       return next;
@@ -86,7 +75,7 @@ export default function TemplateRenovationHorizontal({
   function updateMilestone(i: number, patch: Partial<Milestone>) {
     setMilestones((ms) => {
       const copy = ms.slice();
-      copy[i] = { ...copy[i], ...patch } as Milestone;
+      copy[i] = { ...copy[i], ...patch };
       return copy;
     });
   }
@@ -94,7 +83,7 @@ export default function TemplateRenovationHorizontal({
   function addMilestone() {
     setMilestones((ms) => [
       ...ms,
-      { id: newId(), name: 'New milestone', amount: 0, dueDate: '', acceptance: [], archived: false },
+      { name: 'New milestone', amount: 0, dueDate: '', acceptance: [], archived: false },
     ]);
   }
 
@@ -102,26 +91,14 @@ export default function TemplateRenovationHorizontal({
     setMilestones((ms) => ms.filter((_, idx) => idx !== i));
   }
 
-  function moveMilestone(i: number, dir: -1 | 1) {
-    setMilestones((ms) => {
-      const j = i + dir;
-      if (j < 0 || j >= ms.length) return ms;
-      const next = ms.slice();
-      const tmp = next[i];
-      next[i] = next[j];
-      next[j] = tmp;
-      return next;
-    });
-  }
-
   const total = milestones.reduce((a, m) => a + (Number(m.amount) || 0), 0);
 
   return (
     <section className="space-y-6">
-      {/* 1) BIG EMOJI SCOPE GRID (NO SCROLL, HORIZONTAL, WRAPS IF NEEDED) */}
+      {/* 1) BIG EMOJI SCOPE STRIP — HORIZONTAL (no scroll, wraps) */}
       <div className="rounded-2xl border bg-white shadow-sm p-4">
         <h3 className="text-base font-semibold mb-3">Select work scopes</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
+        <div className="flex flex-wrap gap-3">
           {SCOPES.map((s) => {
             const active = !!sel[s.k];
             return (
@@ -130,20 +107,12 @@ export default function TemplateRenovationHorizontal({
                 type="button"
                 onClick={() => toggleScope(s.k, s.t)}
                 className={[
-                  'group rounded-2xl border bg-white shadow-sm flex flex-col items-center justify-center gap-2 transition h-28',
+                  'group w-[180px] h-[120px] rounded-2xl border bg-white shadow-sm flex flex-col items-center justify-center gap-2 transition',
                   active ? 'ring-2 ring-cyan-600/40 bg-cyan-50/40' : 'hover:bg-slate-50 hover:shadow',
                 ].join(' ')}
-                aria-pressed={active}
               >
-                <span className="text-4xl leading-none" aria-hidden>
-                  {s.e}
-                </span>
-                <span
-                  className={[
-                    'text-sm font-medium',
-                    active ? 'text-cyan-700' : 'text-slate-800 group-hover:text-cyan-700',
-                  ].join(' ')}
-                >
+                <span className="text-4xl leading-none">{s.e}</span>
+                <span className={['text-sm font-medium', active ? 'text-cyan-700' : 'text-slate-800 group-hover:text-cyan-700'].join(' ')}>
                   {s.t}
                 </span>
               </button>
@@ -152,122 +121,62 @@ export default function TemplateRenovationHorizontal({
         </div>
       </div>
 
-      {/* 2) MILESTONES — HORIZONTAL CARDS STRIP */}
+      {/* 2) MILESTONES — HORIZONTAL CARDS STRIP (scroll if many) */}
       <div className="rounded-2xl border bg-white shadow-sm p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold">Milestones (vendor enters amount & date)</h3>
-          <button
-            type="button"
-            onClick={addMilestone}
-            className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50"
-          >
+          <button type="button" onClick={addMilestone} className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50">
             + Add milestone
           </button>
         </div>
 
         <div className="mt-4 flex gap-4 overflow-x-auto no-scrollbar pb-2">
-          {milestones.map((m, i) => {
-            const amountInvalid = Number.isNaN(m.amount) || Number(m.amount) <= 0;
-            const dateInvalid = !m.dueDate;
-            return (
-              <div key={m.id} className="shrink-0 w-[360px] rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Step {i + 1}</div>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50"
-                      onClick={() => moveMilestone(i, -1)}
-                      aria-label="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50"
-                      onClick={() => moveMilestone(i, 1)}
-                      aria-label="Move down"
-                    >
-                      ↓
-                    </button>
-                  </div>
-                </div>
-
-                <input
-                  className="mt-1 w-full border rounded-md px-2 py-1 text-lg font-semibold"
-                  value={m.name}
-                  onChange={(e) => updateMilestone(i, { name: e.target.value })}
-                />
-
-                {!!m.acceptance?.length && (
-                  <ul className="mt-2 text-sm text-slate-700 list-disc pl-5 space-y-1">
-                    {m.acceptance.map((b, bi) => (
-                      <li key={bi}>{b}</li>
-                    ))}
-                  </ul>
-                )}
-
-                <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
-                  <label className="block">
-                    Amount (USD)
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.01"
-                      className={[
-                        'mt-1 w-full border rounded-md px-2 py-1',
-                        amountInvalid ? 'border-rose-300 focus:ring-rose-200' : '',
-                      ].join(' ')}
-                      aria-invalid={amountInvalid || undefined}
-                      value={Number.isFinite(m.amount) ? m.amount : 0}
-                      onChange={(e) => updateMilestone(i, { amount: Number(e.target.value || 0) })}
-                    />
-                  </label>
-
-                  <label className="block">
-                    Date
-                    <input
-                      type="date"
-                      className={[
-                        'mt-1 w-full border rounded-md px-2 py-1',
-                        dateInvalid ? 'border-rose-300 focus:ring-rose-200' : '',
-                      ].join(' ')}
-                      aria-invalid={dateInvalid || undefined}
-                      value={m.dueDate || ''}
-                      onChange={(e) => updateMilestone(i, { dueDate: e.target.value || '' })}
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      id={`arch-${m.id}`}
-                      type="checkbox"
-                      className="rounded border"
-                      checked={!!m.archived}
-                      onChange={(e) => updateMilestone(i, { archived: e.target.checked })}
-                    />
-                    <label htmlFor={`arch-${m.id}`}>Archive</label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500">
-                      Amount now: ${Number(m.amount || 0).toFixed(2)}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50"
-                      onClick={() => deleteMilestone(i)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+          {milestones.map((m, i) => (
+            <div key={i} className="shrink-0 w-[360px] rounded-2xl border bg-white p-4 shadow-sm">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Step {i + 1}</div>
+              <input
+                className="mt-1 w-full border rounded-md px-2 py-1 text-lg font-semibold"
+                value={m.name}
+                onChange={(e) => updateMilestone(i, { name: e.target.value })}
+              />
+              {!!m.acceptance?.length && (
+                <ul className="mt-2 text-sm text-slate-700 list-disc pl-5 space-y-1">
+                  {m.acceptance.map((b, bi) => (
+                    <li key={bi}>{b}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                <label>Amount (USD)
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="mt-1 w-full border rounded-md px-2 py-1"
+                    value={m.amount}
+                    onChange={(e) => updateMilestone(i, { amount: Number(e.target.value || 0) })}
+                  />
+                </label>
+                <label>Date
+                  <input
+                    type="date"
+                    className="mt-1 w-full border rounded-md px-2 py-1"
+                    value={m.dueDate ? m.dueDate.slice(0, 10) : ''}
+                    onChange={(e) => {
+                      const d = e.target.value; // yyyy-mm-dd
+                      updateMilestone(i, { dueDate: d ? new Date(d).toISOString() : '' });
+                    }}
+                  />
+                </label>
               </div>
-            );
-          })}
+              <div className="mt-3 flex items-center justify-between">
+                <button type="button" className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50" onClick={() => deleteMilestone(i)}>
+                  Delete
+                </button>
+                <span className="text-xs text-slate-500">Amount now: ${Number(m.amount || 0).toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Hidden field consumed by the page's server action */}
@@ -278,7 +187,7 @@ export default function TemplateRenovationHorizontal({
         </div>
       </div>
 
-      {/* 3) Optional attachments */}
+      {/* 3) Optional attachments (writes filesJson) */}
       <div className="rounded-2xl border bg-white shadow-sm p-4">
         <h3 className="text-base font-semibold mb-3">Attachments (optional)</h3>
         <FileUploader apiBase={apiBase} />
@@ -291,20 +200,3 @@ export default function TemplateRenovationHorizontal({
     </section>
   );
 }
-
-// ------------------------
-// Minimal test helpers
-// ------------------------
-export function computeTotal(ms: Array<{ amount: number }>): number {
-  return ms.reduce((a, m) => a + (Number(m.amount) || 0), 0);
-}
-
-export const __test = {
-  newId,
-  sampleMilestones: (): Milestone[] => [
-    { id: 'a', name: 'One', amount: 10, dueDate: '2025-01-01', archived: false },
-    { id: 'b', name: 'Two', amount: 20.55, dueDate: '2025-02-01', archived: false },
-    { id: 'c', name: 'Three', amount: 0, dueDate: '', archived: false },
-  ],
-};
-
