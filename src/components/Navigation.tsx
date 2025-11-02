@@ -58,19 +58,23 @@ export default function Navigation() {
   // Effective role
   const role: Role = useMemo(() => serverRole ?? 'guest', [serverRole]);
 
-  // Only admins or approved vendors can see project lists
-  const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
+  // Only admins or approved vendors can see private project lists
+  const canSeePrivateProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
 
   const isActive = (path: string) => {
     const clean = path.split('?')[0];
     return pathname === clean || pathname.startsWith(clean + '/');
   };
 
+  // --- NAV ITEMS ------------------------------------------------------------
+  // Public Projects are visible to everyone at /projects/public.
+  // Private "My Projects" (vendor/admin) remain gated.
+  // "Templates" moved under Admin.
   const navItems: NavItem[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard' },
-      { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-      { href: '/templates', label: 'Templates', roles: ['admin', 'vendor'], requiresApproval: true },
+      { href: '/projects/public', label: 'Projects' }, // PUBLIC
+      { href: '/projects', label: 'My Projects', roles: ['admin', 'vendor'], requiresApproval: true }, // PRIVATE
       { href: '/new', label: 'Submit Proposal' },
       {
         label: 'Admin',
@@ -82,16 +86,17 @@ export default function Navigation() {
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/entities', label: 'Entities' },
           { href: '/admin/vendors', label: 'Vendors' },
+          { href: '/templates', label: 'Templates' }, // moved here
         ],
       },
       { href: '/vendor/dashboard', label: 'MyDesk' },
       { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor', 'admin'] },
     ],
-    []
+    [role, vendorStatus]
   );
 
   const showItem = (item: NavItem) => {
-    if (!('children' in item) && (item as any).requiresApproval && !canSeeProjects) return false;
+    if (!('children' in item) && (item as any).requiresApproval && !canSeePrivateProjects) return false;
     if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') return false;
     if (!('children' in item) && item.href === '/new' && role === 'admin') return false;
     if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') return false;
@@ -123,18 +128,12 @@ export default function Navigation() {
 
     // If we're on a project page, use a more direct approach
     if (pathname.startsWith('/projects/')) {
-      // Prevent default to handle navigation manually
       if (e) e.preventDefault();
-      
-      // Use a more direct navigation approach for project pages
       window.location.href = href;
       return;
     }
 
-    // For non-project pages, use normal navigation
-    if (e) {
-      e.preventDefault();
-    }
+    if (e) e.preventDefault();
     router.push(href);
   };
 
@@ -178,7 +177,7 @@ export default function Navigation() {
                   </button>
 
                   {isAdminOpen && (
-                    <div className="absolute top-full left-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
+                    <div className="absolute top-full left-0 mt-1 w-52 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                       {item.children.map((sub) => (
                         <div
                           key={sub.href}
