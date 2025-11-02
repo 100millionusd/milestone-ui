@@ -7,7 +7,7 @@ export const fetchCache = 'force-no-store';
 import { redirect } from 'next/navigation';
 import { getTemplate, getVendorProfile, createBidFromTemplate } from '@/lib/api';
 import FileUploader from './FileUploader';
-import ScopeToMilestonesWidget from '@/components/ScopeToMilestonesWidget';
+import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 
 type Props = { params: { id: string } };
 
@@ -25,7 +25,7 @@ async function startFromTemplate(formData: FormData) {
   let files: string[] = [];
   try { files = JSON.parse(filesJson); } catch {}
 
-  // milestones from the emoji widget (calendar dates + amounts)
+  // milestones from the horizontal template widget (calendar dates + amounts)
   const milestonesJson = String(formData.get('milestonesJson') || '[]');
   let milestones: any[] = [];
   try { milestones = JSON.parse(milestonesJson); } catch {}
@@ -146,9 +146,9 @@ export default async function TemplateDetailPage({ params }: Props) {
               </label>
             </div>
 
-            {/* Emoji scopes → calendar milestones with add/remove */}
+            {/* HORIZONTAL template with emojis → writes milestonesJson */}
             <div className="pt-2">
-              <ScopeToMilestonesWidget />
+              <TemplateRenovationHorizontal hiddenFieldName="milestonesJson" />
             </div>
 
             {/* Optional attachments */}
