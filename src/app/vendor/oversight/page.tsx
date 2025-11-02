@@ -502,6 +502,8 @@ export default function VendorOversightPage() {
   const [proofs, setProofs] = useState<ProofRow[] | null>(null);
   const [milestones, setMilestones] = useState<MilestoneRow[] | null>(null);
   const [payments, setPayments] = useState<PaymentRow[] | null>(null);
+  const [rawPayments, setRawPayments] = useState<any[]>([]);
+
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -545,17 +547,29 @@ export default function VendorOversightPage() {
           setProofs(normalizedProofs);
           console.log('Normalized proofs:', normalizedProofs); // Debug log
           
-          // accept multiple backend shapes (payments | payouts | releases | transfers | milestone_payments)
+ // accept multiple backend shapes (wide net)
 const rawPayments =
   data.payments ??
   data.payouts ??
   data.releases ??
   data.transfers ??
   data.milestone_payments ??
+  data.milestonePayments ??
+  data.vendor?.payments ??
+  data.vendor?.payouts ??
+  data.wallet?.payments ??
+  data.wallet?.transfers ??
+  (Array.isArray(data.milestones)
+    ? data.milestones.flatMap((m: any) => m?.releases ?? m?.payments ?? m?.payouts ?? [])
+    : null) ??
   [];
-const normalizedPayments = normalizePayments(rawPayments);
-          setPayments(normalizedPayments);
-          console.log('Normalized payments:', normalizedPayments); // Debug log
+
+// store raw for inspection and normalize
+setRawPayments(Array.isArray(rawPayments) ? rawPayments : []);
+const normalizedPayments = normalizePayments(Array.isArray(rawPayments) ? rawPayments : []);
+setPayments(normalizedPayments);
+console.log('RAW payments sample:', Array.isArray(rawPayments) ? rawPayments.slice(0, 2) : rawPayments);
+console.log('Normalized payments:', normalizedPayments);
           
           // Derive milestones from proofs
           const milestones = deriveMilestonesFromProofs(normalizedProofs);
@@ -886,11 +900,21 @@ const normalizedPayments = normalizePayments(rawPayments);
               </Td>
             </tr>
           ))}
-        </tbody>
+           </tbody>
       </table>
+
+      {/* Debug: show keys when backend returned rows but normalization produced 0 */}
+      {!loading && (payments?.length ?? 0) === 0 && (rawPayments?.length ?? 0) > 0 && (
+        <div className="px-3 py-2 text-xs border-t bg-amber-50 border-amber-200 text-amber-800">
+          Unexpected payments shape. First row keys:{" "}
+          <code className="break-all">{Object.keys(rawPayments[0] || {}).join(", ")}</code>
+        </div>
+      )}
+
     </div>
   </Card>
 )}
+
       {/* ——— Milestones ——— */}
       {tab === 'milestones' && (
         <Card
