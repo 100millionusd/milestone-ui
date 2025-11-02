@@ -1625,6 +1625,7 @@ export type TemplateSummary = {
   default_currency?: string | null;
   milestones: number;
 };
+
 export type TemplateDetail = TemplateSummary & {
   milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
 };
@@ -1644,6 +1645,10 @@ export async function postTemplate(input: {
   return postJSON(`/templates`, input);
 }
 
+/** Create a bid from a template.
+ *  - If `milestones` is provided, backend should use those (vendor-entered amounts/dates).
+ *  - Otherwise backend will map template milestones (amount/days_offset) into bid milestones.
+ */
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1651,7 +1656,8 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  milestones?: Array<{  // NEW
+  files?: string[]; // optional file URLs uploaded before creating the bid
+  milestones?: Array<{
     name: string;
     amount: number;
     dueDate: string;           // ISO string
@@ -1662,12 +1668,11 @@ export async function createBidFromTemplate(input: {
   return postJSON(`/bids/from-template`, input);
 }
 
-// ==== Templates → Milestone helpers (exported) ====
-export type ScopeLite = { key: string; name: string };
-export type SelectionState = Record<string, { selected: boolean; amount: number; days: number }>;
-
+/** (Optional) Helper if you want to build phased milestones in the browser.
+ * Exported for reuse by client components.
+ */
 export function splitIntoPhases(totalBOB: number, totalDays: number, baseName: string) {
-  const pct = [0.2, 0.6, 0.2];
+  const pct = [0.2, 0.6, 0.2]; // 20% Plan/Compra, 60% Instalación, 20% Entrega
   const labels = ['Planificación y compra', 'Instalación', 'Acabados y entrega'];
   const accepts = [
     ['Lista de materiales aprobada', 'Cronograma acordado'],
@@ -1690,10 +1695,12 @@ export function splitIntoPhases(totalBOB: number, totalDays: number, baseName: s
 }
 
 export function buildMilestonesFromSelection(
-  scopes: ScopeLite[],
-  sel: SelectionState
+  scopes: Array<{key:string; name:string}>,
+  sel: Record<string, {selected:boolean; amount:number; days:number}>
 ) {
-  const out: Array<{ name: string; amount: number; dueDate: string; acceptance?: string[]; archived?: boolean }> = [];
+  const out: Array<{
+    name: string; amount: number; dueDate: string; acceptance?: string[]; archived?: boolean;
+  }> = [];
   for (const s of scopes) {
     const row = sel[s.key];
     if (!row?.selected) continue;
@@ -1702,12 +1709,13 @@ export function buildMilestonesFromSelection(
   return out;
 }
 
+/* ---------- KEEP DEFAULT EXPORT AT THE VERY END ---------- */
 export default {
   // auth
   getAuthRole,
-  getAuthRoleOnce, 
+  getAuthRoleOnce,
   loginWithSignature,
-  clearBidsCache, 
+  clearBidsCache,
   updateBidMilestones,
   invalidateBidsCache,
 
@@ -1751,7 +1759,6 @@ export default {
   rejectVendor,
   listProposers,
 
-
   // admin entities
   adminArchiveEntity,
   adminUnarchiveEntity,
@@ -1771,7 +1778,7 @@ export default {
   getPublicProjects,
   getPublicProject,
 
-  // 🆕 agent digest
+  // agent digest
   getDigest,
   markDigestSeen,
 
@@ -1787,6 +1794,10 @@ export default {
   archiveMilestone,
   getMilestoneArchive,
   unarchiveMilestone,
+  getMilestonesArchiveMap,
+  getBulkArchiveStatus,
+  updateBulkArchiveCache,
+  clearBulkArchiveCache,
 
   // ipfs & misc
   uploadJsonToIPFS,
@@ -1794,11 +1805,12 @@ export default {
   healthCheck,
   testConnection,
   postJSON,
-};
 
- // templates helpers
+  // templates
+  getTemplates,
+  getTemplate,
+  postTemplate,
+  createBidFromTemplate,
   splitIntoPhases,
   buildMilestonesFromSelection,
-
-
-
+};
