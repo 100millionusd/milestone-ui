@@ -543,7 +543,11 @@ export default function AdminOversightPage() {
    process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
    "https://gateway.pinata.cloud/ipfs").replace(/\/+$/, "");
 
-const ipfsUrl = (cid: string) => `${IPFS_GATEWAY}/${cid}`;
+const ipfsUrl = (cid: string) => {
+  const base = IPFS_GATEWAY.replace(/\/+$/, "");
+  const gw = /\/ipfs$/i.test(base) ? base : base + "/ipfs";
+  return `${gw}/${cid}`;
+};
 const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}` : "—");
 
   async function load(signal?: AbortSignal) {
@@ -1368,33 +1372,80 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
  <Td>{a.bidId ?? "—"}</Td>
 <Td>
   {(() => {
-    // try common shapes: {cid}, {file:{cid}}, {ipfs:{cid}}
-    const cid = a?.details?.cid ?? a?.details?.file?.cid ?? a?.details?.ipfs?.cid;
-    return cid ? (
-      <div className="flex items-center gap-2">
+    const cid =
+      a?.details?.cid ??
+      a?.details?.file?.cid ??
+      a?.details?.ipfs?.cid;
+
+    if (!cid) return <span className="text-neutral-400">—</span>;
+
+    const src = a?.details?.source as string | undefined;
+
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Primary link (your configured gateway, now robust) */}
         <a
           href={ipfsUrl(cid)}
           target="_blank"
           rel="noopener noreferrer"
           className="font-mono text-xs underline decoration-dotted"
-          title={a?.details?.source ? `Source: ${a.details.source}` : 'Open on gateway'}
+          title={src ? `Source: ${src}` : "Open on gateway"}
         >
           {shortCid(cid)}
         </a>
-        {/* optional: quick copy */}
+
+        {/* Show why it might fail (e.g., "unpinned") */}
+        {src && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+            {src.includes("unpinned") ? "unpinned" : src}
+          </span>
+        )}
+
+        {/* Quick copy */}
         <button
           onClick={() => copy(cid, () => setToast("CID copied"))}
           className="text-[10px] underline decoration-dotted opacity-70 hover:opacity-100"
+          title="Copy CID"
         >
           copy
         </button>
-        {/* optional: show filename when available */}
+
+        {/* Fallback gateways (helpful when Pinata shows 404 for unpinned) */}
+        <div className="hidden sm:flex items-center gap-1 text-[10px]">
+          <a
+            href={`https://ipfs.io/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via ipfs.io"
+          >
+            ipfs.io
+          </a>
+          <a
+            href={`https://cloudflare-ipfs.com/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via cf-ipfs"
+          >
+            cf-ipfs
+          </a>
+          <a
+            href={`https://dweb.link/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via dweb"
+          >
+            dweb
+          </a>
+        </div>
+
+        {/* Optional filename */}
         {a?.details?.filename && (
           <span className="text-neutral-500 text-[11px]">({a.details.filename})</span>
         )}
       </div>
-    ) : (
-      <span className="text-neutral-400">—</span>
     );
   })()}
 </Td>
