@@ -538,6 +538,14 @@ export default function AdminOversightPage() {
   // Always use same-origin proxy so we never hit CORS
   const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : `/api${p}`);
 
+  const IPFS_GATEWAY =
+  (process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+   "https://gateway.pinata.cloud/ipfs").replace(/\/+$/, "");
+
+const ipfsUrl = (cid: string) => `${IPFS_GATEWAY}/${cid}`;
+const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}` : "—");
+
   async function load(signal?: AbortSignal) {
     try {
       setError(null);
@@ -1345,7 +1353,7 @@ export default function AdminOversightPage() {
               <table className="w-full text-sm">
                 <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
-                    <Th>Type</Th><Th>Created</Th><Th>Bid</Th><Th>Details</Th>
+                    <Th>Type</Th><Th>Created</Th><Th>Bid</Th><Th>File</Th><Th>Details</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1357,13 +1365,45 @@ export default function AdminOversightPage() {
                     <tr key={`${a.type}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
                       <Td><Badge tone={a.type.includes("ipfs")?"danger":"neutral"}>{a.type}</Badge></Td>
                       <Td>{humanTime(a.createdAt)}</Td>
-                      <Td>{a.bidId ?? "—"}</Td>
-                      <Td>
-                        <details className="max-w-[900px] text-xs text-neutral-600 dark:text-neutral-300">
-                          <summary className="cursor-pointer select-none underline decoration-dotted">View</summary>
-                          <pre className="whitespace-pre-wrap break-words">{JSON.stringify(a.details || {}, null, 2)}</pre>
-                        </details>
-                      </Td>
+ <Td>{a.bidId ?? "—"}</Td>
+<Td>
+  {(() => {
+    // try common shapes: {cid}, {file:{cid}}, {ipfs:{cid}}
+    const cid = a?.details?.cid ?? a?.details?.file?.cid ?? a?.details?.ipfs?.cid;
+    return cid ? (
+      <div className="flex items-center gap-2">
+        <a
+          href={ipfsUrl(cid)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-xs underline decoration-dotted"
+          title={a?.details?.source ? `Source: ${a.details.source}` : 'Open on gateway'}
+        >
+          {shortCid(cid)}
+        </a>
+        {/* optional: quick copy */}
+        <button
+          onClick={() => copy(cid, () => setToast("CID copied"))}
+          className="text-[10px] underline decoration-dotted opacity-70 hover:opacity-100"
+        >
+          copy
+        </button>
+        {/* optional: show filename when available */}
+        {a?.details?.filename && (
+          <span className="text-neutral-500 text-[11px]">({a.details.filename})</span>
+        )}
+      </div>
+    ) : (
+      <span className="text-neutral-400">—</span>
+    );
+  })()}
+</Td>
+<Td>
+  <details className="max-w-[900px] text-xs text-neutral-600 dark:text-neutral-300">
+    <summary className="cursor-pointer select-none underline decoration-dotted">View</summary>
+    <pre className="whitespace-pre-wrap break-words">{JSON.stringify(a.details || {}, null, 2)}</pre>
+  </details>
+</Td>
                     </tr>
                   ))}
                 </tbody>
