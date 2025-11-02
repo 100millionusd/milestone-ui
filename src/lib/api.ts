@@ -1649,6 +1649,7 @@ export async function postTemplate(input: {
  *  - If `milestones` is provided, backend should use those (vendor-entered amounts/dates).
  *  - Otherwise backend will map template milestones (amount/days_offset) into bid milestones.
  */
+// === Templates (marketplace) ===
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1656,7 +1657,8 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  files?: string[]; // optional file URLs uploaded before creating the bid
+  // ⬇️ accept both strings and objects; we normalize below
+  files?: Array<{ url: string; name?: string }> | string[];
   milestones?: Array<{
     name: string;
     amount: number;
@@ -1665,7 +1667,22 @@ export async function createBidFromTemplate(input: {
     archived?: boolean;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  return postJSON(`/bids/from-template`, input);
+  // normalize files to {url,name}
+  const files = Array.isArray(input.files)
+    ? input.files
+        .map((f: any) =>
+          typeof f === 'string'
+            ? { url: f, name: (f.split('/').pop() || 'file') }
+            : {
+                url: String(f?.url || ''),
+                name: f?.name || (String(f?.url || '').split('/').pop() || 'file'),
+              }
+        )
+        .filter((f) => f.url)
+    : [];
+
+  const payload = { ...input, files };
+  return postJSON(`/bids/from-template`, payload);
 }
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
@@ -1709,7 +1726,6 @@ export function buildMilestonesFromSelection(
   return out;
 }
 
-/* ---------- KEEP DEFAULT EXPORT AT THE VERY END ---------- */
 export default {
   // auth
   getAuthRole,
