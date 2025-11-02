@@ -1651,9 +1651,55 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  files?: string[]; // NEW
+  milestones?: Array<{  // NEW
+    name: string;
+    amount: number;
+    dueDate: string;           // ISO string
+    acceptance?: string[];
+    archived?: boolean;
+  }>;
 }): Promise<{ ok: boolean; bidId: number }> {
   return postJSON(`/bids/from-template`, input);
+}
+
+// ==== Templates → Milestone helpers (exported) ====
+export type ScopeLite = { key: string; name: string };
+export type SelectionState = Record<string, { selected: boolean; amount: number; days: number }>;
+
+export function splitIntoPhases(totalBOB: number, totalDays: number, baseName: string) {
+  const pct = [0.2, 0.6, 0.2];
+  const labels = ['Planificación y compra', 'Instalación', 'Acabados y entrega'];
+  const accepts = [
+    ['Lista de materiales aprobada', 'Cronograma acordado'],
+    ['Instalación realizada y sellos aplicados', 'Fotos de avance subidas'],
+    ['Prueba de cierre/sellado', 'Área limpia y lista'],
+  ];
+  const daysOffsets = [
+    Math.max(3, Math.round(totalDays * 0.2)),
+    Math.max(7, Math.round(totalDays * 0.8)),
+    Math.max(10, Math.round(totalDays * 1.0)),
+  ];
+  const now = Date.now();
+  return pct.map((p, i) => ({
+    name: `${baseName} — ${labels[i]}`,
+    amount: Math.round(totalBOB * p * 100) / 100,
+    dueDate: new Date(now + daysOffsets[i] * 86400 * 1000).toISOString(),
+    acceptance: accepts[i],
+    archived: false,
+  }));
+}
+
+export function buildMilestonesFromSelection(
+  scopes: ScopeLite[],
+  sel: SelectionState
+) {
+  const out: Array<{ name: string; amount: number; dueDate: string; acceptance?: string[]; archived?: boolean }> = [];
+  for (const s of scopes) {
+    const row = sel[s.key];
+    if (!row?.selected) continue;
+    out.push(...splitIntoPhases(row.amount, row.days, s.name));
+  }
+  return out;
 }
 
 export default {
@@ -1750,6 +1796,9 @@ export default {
   postJSON,
 };
 
+ // templates helpers
+  splitIntoPhases,
+  buildMilestonesFromSelection,
 
 
 

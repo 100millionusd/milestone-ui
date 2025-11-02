@@ -3,6 +3,7 @@ export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
 import FileUploader from './FileUploader';
+import SplitMilestonesClient from './SplitMilestonesClient'; // ✅ NEW: vendor split UI
 import { redirect } from 'next/navigation';
 import { getTemplate, createBidFromTemplate } from '@/lib/api';
 
@@ -10,6 +11,7 @@ type Props = { params: { id: string } };
 
 async function startFromTemplate(formData: FormData) {
   'use server';
+
   const slugOrId = String(formData.get('id') || '');
   const proposalId = Number(formData.get('proposalId') || 0);
   const vendorName = String(formData.get('vendorName') || '');
@@ -21,21 +23,30 @@ async function startFromTemplate(formData: FormData) {
   let files: string[] = [];
   try { files = JSON.parse(filesJson); } catch {}
 
+  // ✅ NEW: optional vendor-defined split milestones
+  const milestonesJson = String(formData.get('milestonesJson') || '[]');
+  let milestones: Array<{ name: string; amount: number; dueDate: string; acceptance?: string[]; archived?: boolean }> = [];
+  try { milestones = JSON.parse(milestonesJson); } catch {}
+
   const base =
     /^\d+$/.test(slugOrId)
       ? { templateId: Number(slugOrId) }
       : { slug: slugOrId };
 
-  const res = await createBidFromTemplate({
+  const body: any = {
     ...base,
     proposalId,
     vendorName,
     walletAddress,
     preferredStablecoin,
     files,
-  });
+  };
+  if (Array.isArray(milestones) && milestones.length > 0) {
+    body.milestones = milestones; // ← override template milestones when vendor split
+  }
 
-  // Adjust if your editor path differs
+  const res = await createBidFromTemplate(body);
+
   redirect(`/vendor/oversight?flash=bidCreated&bidId=${res.bidId}`);
 }
 
@@ -52,7 +63,7 @@ export default async function TemplateDetailPage({ params }: Props) {
       </p>
       {t.summary ? <p className="text-gray-700 mt-3">{t.summary}</p> : null}
 
-      <h2 className="text-lg font-semibold mt-6 mb-2">Milestones</h2>
+      <h2 className="text-lg font-semibold mt-6 mb-2">Milestones (de plantilla)</h2>
       <ul className="space-y-2">
         {t.milestones.map((ms) => (
           <li key={ms.idx} className="border rounded-lg p-3">
@@ -73,8 +84,9 @@ export default async function TemplateDetailPage({ params }: Props) {
         ))}
       </ul>
 
-      <form action={startFromTemplate} className="mt-8 space-y-3">
+      <form action={startFromTemplate} className="mt-8 space-y-4">
         <input type="hidden" name="id" value={t.slug || String(t.id)} />
+
         <div className="grid md:grid-cols-2 gap-3">
           <label className="block">
             <span className="text-sm">Proposal ID</span>
@@ -114,7 +126,10 @@ export default async function TemplateDetailPage({ params }: Props) {
           </label>
         </div>
 
-        {/* Optional attachments uploaded before creating the bid */}
+        {/* ✅ Vendor chooses how to split template milestones */}
+        <SplitMilestonesClient templateMilestones={t.milestones} />
+
+        {/* Optional attachments before creating the bid */}
         <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} />
 
         <button
