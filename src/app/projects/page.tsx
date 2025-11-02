@@ -201,95 +201,113 @@ export default function ProjectsPage() {
   };
 
   // --------- UI ---------
-  const renderCard = (project: Project, badge: { text: string; cls: string }, extra?: React.ReactNode) => {
-    const projectBids = getBidsForProject(project.proposalId);
-    const bidsApproved = projectBids.filter(b => b.status === 'approved').length;
-    const accepted = projectBids.find(b => b.status === 'approved') || null;
+  const renderCard = (
+  project: Project,
+  badge: { text: string; cls: string },
+  extra?: React.ReactNode
+) => {
+  const projectBids = getBidsForProject(project.proposalId);
+  const bidsApproved = projectBids.filter(b => b.status === 'approved').length;
+  const accepted = projectBids.find(b => b.status === 'approved') || null;
 
-    // Aggregate milestones across ALL bids to mirror the overview design
-    const msAgg = projectBids.reduce(
-      (acc, b) => {
-        const { total, completed, paid } = bidMsStats(b);
-        acc.total += total;
-        acc.completed += completed;
-        acc.paid += paid;
-        return acc;
-      },
-      { total: 0, completed: 0, paid: 0 }
-    );
+  // Aggregate milestones across ALL bids to mirror the overview design
+  const msAgg = projectBids.reduce(
+    (acc, b) => {
+      const { total, completed, paid } = bidMsStats(b);
+      acc.total += total;
+      acc.completed += completed;
+      acc.paid += paid;
+      return acc;
+    },
+    { total: 0, completed: 0, paid: 0 }
+  );
 
-    const lastAct = projectLastActivity(project, projectBids);
+  const lastAct = projectLastActivity(project, projectBids);
 
-    return (
-      <div
-        key={project.proposalId}
-        className="border rounded-lg p-6 hover:shadow-md transition bg-white"
-      >
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="font-semibold text-xl">{project.title}</h2>
-              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${badge.cls}`}>
-                {badge.text}
-              </span>
-            </div>
-            {project.orgName && <p className="text-gray-600">{project.orgName}</p>}
-            {typeof project.amountUSD === 'number' && (
-              <p className="text-green-600 font-medium text-lg mt-2">
-                Budget: {currency.format(Number(project.amountUSD))}
-              </p>
-            )}
+  return (
+    <div
+      key={project.proposalId}
+      className="border rounded-lg p-6 hover:shadow-md transition bg-white"
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="font-semibold text-xl">{project.title}</h2>
+            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${badge.cls}`}>
+              {badge.text}
+            </span>
           </div>
-          <div className="text-right">
-            {badge.text === 'Active' && (
-              <p className="text-sm text-gray-500 mb-3">
-                {projectBids.length} {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
-                {accepted ? 'Contract awarded' : 'Accepting bids'}
-              </p>
-            )}
-            <div className="space-x-2">
-              <Link
-                href={`/projects/${project.proposalId}`}
-                className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
-              >
-                View Project
-              </Link>
-              {!accepted && badge.text === 'Active' && (
+          {project.orgName && <p className="text-gray-600">{project.orgName}</p>}
+          {typeof project.amountUSD === 'number' && (
+            <p className="text-green-600 font-medium text-lg mt-2">
+              Budget: {currency.format(Number(project.amountUSD))}
+            </p>
+          )}
+        </div>
+
+        <div className="text-right">
+          {badge.text === 'Active' && (
+            <p className="text-sm text-gray-500 mb-3">
+              {projectBids.length} {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
+              {accepted ? 'Contract awarded' : 'Accepting bids'}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Link
+              href={`/projects/${project.proposalId}`}
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
+            >
+              View Project
+            </Link>
+
+            {/* Submit Standard Bid */}
+            {!accepted && badge.text === 'Active' && (
+              <>
                 <Link
                   href={`/bids/new?proposalId=${project.proposalId}`}
                   className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
                 >
-                  Submit a Bid
+                  Submit Standard Bid
                 </Link>
-              )}
-            </div>
+
+                {/* NEW: Use a Template */}
+                <Link
+                  href={`/templates?proposalId=${project.proposalId}`}
+                  className="bg-cyan-600 text-white px-4 py-2 rounded text-sm hover:bg-cyan-700"
+                  title="Start your bid from a predefined template"
+                >
+                  Use a Template
+                </Link>
+              </>
+            )}
           </div>
         </div>
-
-        {/* rollups */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <div className="text-gray-500">Bids</div>
-            <div className="font-medium">{bidsApproved}/{projectBids.length || 0} approved</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Milestones (completed)</div>
-            <div className="font-medium">{msAgg.completed}/{msAgg.total}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Milestones (paid)</div>
-            <div className="font-medium">{msAgg.paid}/{msAgg.total}</div>
-          </div>
-          <div className="md:text-right col-span-2 md:col-span-1">
-            <div className="text-gray-500">Last activity</div>
-            <div className="font-medium">{lastAct ? lastAct.toLocaleString() : '—'}</div>
-          </div>
-        </div>
-
-        {extra}
       </div>
-    );
-  };
+
+      {/* rollups */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <div className="text-gray-500">Bids</div>
+          <div className="font-medium">{bidsApproved}/{projectBids.length || 0} approved</div>
+        </div>
+        <div>
+          <div className="text-gray-500">Milestones (completed)</div>
+          <div className="font-medium">{msAgg.completed}/{msAgg.total}</div>
+        </div>
+        <div>
+          <div className="text-gray-500">Milestones (paid)</div>
+          <div className="font-medium">{msAgg.paid}/{msAgg.total}</div>
+        </div>
+        <div className="md:text-right col-span-2 md:col-span-1">
+          <div className="text-gray-500">Last activity</div>
+          <div className="font-medium">{lastAct ? lastAct.toLocaleString() : '—'}</div>
+        </div>
+      </div>
+
+      {extra}
+    </div>
+  );
+};
 
   const renderTabContent = () => {
     if (loading) return <div>Loading projects...</div>;
