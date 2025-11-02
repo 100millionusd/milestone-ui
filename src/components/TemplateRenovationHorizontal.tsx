@@ -5,8 +5,9 @@ import React, { useMemo, useState } from "react";
 
 type Milestone = {
   name: string;
-  amount: number;
-  dueDate: string; // ISO
+  amount?: number;          // start empty (no 0 in input)
+  dueDate: string;          // ISO
+  description?: string;     // NEW: vendor's own description of work
   acceptance?: string[];
   archived?: boolean;
 };
@@ -19,15 +20,15 @@ type ScopeDef = {
 };
 
 const SCOPES: ScopeDef[] = [
-  { key: "roof", emoji: "🏠", title: "Roof Repair", acceptance: ["No leaks after 48h rain", "Working gutters/downspouts"] },
-  { key: "windows", emoji: "🪟", title: "Windows & Doors", acceptance: ["Smooth closing & sealed", "Before/after photos uploaded"] },
-  { key: "bath", emoji: "🚿", title: "Bathrooms", acceptance: ["Pressure test no leaks", "Ventilation working"] },
-  { key: "paint", emoji: "🎨", title: "Painting + Cleaning", acceptance: ["Uniform coverage (1.5 m)", "Classrooms clean & ready"] },
-  { key: "electrical", emoji: "💡", title: "Electrical", acceptance: ["Panel labeled", "Safety test passed"] },
-  { key: "plumbing", emoji: "🚰", title: "Plumbing", acceptance: ["No visible leaks", "Fixtures working"] },
-  { key: "floor", emoji: "🧱", title: "Flooring", acceptance: ["Level & secure", "Trim/edges clean"] },
-  { key: "safety", emoji: "🧯", title: "Safety", acceptance: ["Extinguishers in place", "Signage installed"] },
-  { key: "access", emoji: "♿️", title: "Accessibility", acceptance: ["Ramps & handrails", "Door widths verified"] },
+  { key: "roof",       emoji: "🏠", title: "Roof Repair",                     acceptance: ["No leaks after 48h rain", "Working gutters/downspouts"] },
+  { key: "windows",    emoji: "🪟", title: "Windows & Doors",                 acceptance: ["Smooth closing & sealed", "Before/after photos uploaded"] },
+  { key: "bath",       emoji: "🚿", title: "Bathrooms",                       acceptance: ["Pressure test no leaks", "Ventilation working"] },
+  { key: "paint",      emoji: "🎨", title: "Painting + Cleaning",             acceptance: ["Uniform coverage (1.5 m)", "Classrooms clean & ready"] },
+  { key: "electrical", emoji: "💡", title: "Electrical",                      acceptance: ["Panel labeled", "Safety test passed"] },
+  { key: "plumbing",   emoji: "🚰", title: "Plumbing",                         acceptance: ["No visible leaks", "Fixtures working"] },
+  { key: "floor",      emoji: "🧱", title: "Flooring",                         acceptance: ["Level & secure", "Trim/edges clean"] },
+  { key: "safety",     emoji: "🧯", title: "Safety",                           acceptance: ["Extinguishers in place", "Signage installed"] },
+  { key: "access",     emoji: "♿️", title: "Accessibility",                   acceptance: ["Ramps & handrails", "Door widths verified"] },
 ];
 
 export default function TemplateRenovationHorizontal(props: {
@@ -35,23 +36,22 @@ export default function TemplateRenovationHorizontal(props: {
 }) {
   const name = props.milestonesInputName || "milestonesJson";
 
-  // Selected scopes -> milestone cards
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [cards, setCards] = useState<Milestone[]>([]);
 
   function toggleScope(s: ScopeDef) {
     const isOn = !!selected[s.key];
     if (isOn) {
-      // remove card with this title
       setCards((old) => old.filter((c) => c.name !== s.title));
     } else {
-      // add card with default acceptance, empty amount/date
+      // Add first milestone for that scope with an empty amount and description
       setCards((old) => [
         ...old,
         {
           name: s.title,
-          amount: 0,
-          dueDate: "", // vendor will select
+          amount: undefined,        // <<< empty (no 0)
+          dueDate: "",              // vendor selects
+          description: "",          // <<< NEW field
           acceptance: s.acceptance,
           archived: false,
         },
@@ -68,7 +68,6 @@ export default function TemplateRenovationHorizontal(props: {
     const title = cards[idx]?.name;
     setCards((old) => old.filter((_, i) => i !== idx));
     if (title) {
-      // also untoggle the scope if it maps 1:1
       const key = SCOPES.find((s) => s.title === title)?.key;
       if (key) setSelected((o) => ({ ...o, [key]: false }));
     }
@@ -80,20 +79,20 @@ export default function TemplateRenovationHorizontal(props: {
       ...old,
       {
         name: `Custom Milestone ${n}`,
-        amount: 0,
+        amount: undefined,
         dueDate: "",
+        description: "",
         acceptance: [],
         archived: false,
       },
     ]);
   }
 
-  // Serialize for the form
   const json = useMemo(() => JSON.stringify(cards), [cards]);
 
   return (
     <section className="space-y-4">
-      {/* 1) Horizontal scope chooser (no scrolling; it wraps) */}
+      {/* 1) Horizontal scope chooser (wrapping grid, no scroll) */}
       <div className="rounded-2xl border bg-white p-4">
         <h2 className="text-base font-semibold mb-3">Select work scopes</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -118,10 +117,10 @@ export default function TemplateRenovationHorizontal(props: {
         </div>
       </div>
 
-      {/* 2) Milestones — grid, visible (no scroll) */}
+      {/* 2) Milestones — visible grid (no scrolling) */}
       <div className="rounded-2xl border bg-white p-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">Milestones (enter amount & date)</h3>
+          <h3 className="text-base font-semibold">Milestones (enter amount, date & description)</h3>
           <button type="button" onClick={addCustom} className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50">
             + Add milestone
           </button>
@@ -129,7 +128,8 @@ export default function TemplateRenovationHorizontal(props: {
 
         {cards.length === 0 ? (
           <div className="text-sm text-slate-500 mt-3">
-            Select one or more scopes above to create milestones, then set the payment **Amount** and **Date** per milestone.
+            Click an emoji above (e.g., <span className="mx-1">🏠</span> Roof Repair). A milestone card will appear here.
+            Set **Amount**, **Date**, and **Work description** for each payment.
           </div>
         ) : null}
 
@@ -147,6 +147,17 @@ export default function TemplateRenovationHorizontal(props: {
                 </ul>
               ) : null}
 
+              {/* NEW: vendor work description */}
+              <label className="text-sm block mt-3">
+                Work description
+                <textarea
+                  className="mt-1 w-full border rounded-md px-2 py-1 h-20 resize-y"
+                  value={m.description ?? ""}
+                  onChange={(e) => updateCard(idx, { description: e.target.value })}
+                  placeholder="Describe the exact work you will deliver in this milestone…"
+                />
+              </label>
+
               <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
                 <label>
                   Amount (USD)
@@ -155,8 +166,12 @@ export default function TemplateRenovationHorizontal(props: {
                     min={0}
                     step="0.01"
                     className="mt-1 w-full border rounded-md px-2 py-1"
-                    value={Number.isFinite(m.amount) ? m.amount : 0}
-                    onChange={(e) => updateCard(idx, { amount: Number(e.target.value || 0) })}
+                    value={m.amount ?? ""}                 // <<< empty shows blank, not 0
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      updateCard(idx, { amount: val === "" ? undefined : Number(val) });
+                    }}
+                    placeholder="0.00"
                   />
                 </label>
                 <label>
@@ -187,7 +202,7 @@ export default function TemplateRenovationHorizontal(props: {
           ))}
         </div>
 
-        {/* Hidden field the page's server action reads */}
+        {/* hidden JSON for server action */}
         <input type="hidden" name={name} value={json} readOnly />
       </div>
     </section>

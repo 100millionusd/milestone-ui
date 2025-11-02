@@ -1,5 +1,4 @@
 // src/app/templates/[id]/page.tsx
-// Runtime flags
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
@@ -9,7 +8,16 @@ import { getTemplate, getVendorProfile, createBidFromTemplate } from "@/lib/api"
 import FileUploader from "./FileUploader";
 import TemplateRenovationHorizontal from "@/components/TemplateRenovationHorizontal";
 
-type Props = { params: { id: string } };
+type SearchParams = Record<string, string | string[] | undefined>;
+type Props = { params: { id: string }; searchParams?: SearchParams };
+
+function firstStr(v?: string | string[]) {
+  return Array.isArray(v) ? v[0] : v ?? "";
+}
+function toNumber(v?: string | string[]) {
+  const n = Number.parseInt(String(firstStr(v) || ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 // ---- Server action ----
 async function startFromTemplate(formData: FormData) {
@@ -25,16 +33,12 @@ async function startFromTemplate(formData: FormData) {
   // optional attachments (from FileUploader)
   const filesJson = String(formData.get("filesJson") || "[]");
   let files: string[] = [];
-  try {
-    files = JSON.parse(filesJson);
-  } catch {}
+  try { files = JSON.parse(filesJson); } catch {}
 
-  // milestones from the horizontal emoji/milestones UI
+  // milestones from the horizontal widget
   const milestonesJson = String(formData.get("milestonesJson") || "[]");
   let milestones: any[] = [];
-  try {
-    milestones = JSON.parse(milestonesJson);
-  } catch {}
+  try { milestones = JSON.parse(milestonesJson); } catch {}
 
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
@@ -46,7 +50,7 @@ async function startFromTemplate(formData: FormData) {
     vendorName,
     walletAddress,
     preferredStablecoin,
-    milestones, // ← vendor-defined (split payments)
+    milestones, // vendor-defined (split payments)
     files,
   });
 
@@ -54,7 +58,7 @@ async function startFromTemplate(formData: FormData) {
 }
 
 // ---- Page ----
-export default async function TemplateDetailPage({ params }: Props) {
+export default async function TemplateDetailPage({ params, searchParams }: Props) {
   const id = decodeURIComponent(params.id);
   const [t, profile] = await Promise.all([
     getTemplate(id).catch(() => null),
@@ -64,6 +68,7 @@ export default async function TemplateDetailPage({ params }: Props) {
 
   const preVendor = String(profile?.vendorName || "");
   const preWallet = String(profile?.walletAddress || "");
+  const proposalFromQS = toNumber(searchParams?.proposalId);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -88,7 +93,7 @@ export default async function TemplateDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Form (everything horizontal per your spec) */}
+      {/* Single form with horizontal layout */}
       <div className="mx-auto max-w-7xl px-4 py-8">
         <form
           action={startFromTemplate}
@@ -96,7 +101,7 @@ export default async function TemplateDetailPage({ params }: Props) {
         >
           <input type="hidden" name="id" value={t.slug || String(t.id)} />
 
-          {/* >>> Vendor basics BAR (HORIZONTAL) <<< */}
+          {/* HORIZONTAL vendor basics */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <label className="text-sm">
               <span className="block">Proposal ID</span>
@@ -104,6 +109,7 @@ export default async function TemplateDetailPage({ params }: Props) {
                 name="proposalId"
                 type="number"
                 required
+                defaultValue={proposalFromQS ? String(proposalFromQS) : ""}
                 className="mt-1 w-full border rounded-md px-3 py-2"
               />
             </label>
@@ -142,18 +148,15 @@ export default async function TemplateDetailPage({ params }: Props) {
             </label>
           </div>
 
-          {/* >>> Horizontal scopes + non-scrolling milestones <<< */}
+          {/* Horizontal scopes + milestones (no scrolling) */}
           <TemplateRenovationHorizontal milestonesInputName="milestonesJson" />
 
           {/* Optional attachments */}
           <div className="pt-1">
-            <FileUploader
-              // your API base will be read by the component, but we keep prop parity
-              apiBase={(process as any)?.env?.NEXT_PUBLIC_API_BASE || ""}
-            />
+            <FileUploader apiBase={(process as any)?.env?.NEXT_PUBLIC_API_BASE || ""} />
           </div>
 
-          {/* Submit lives UNDER the milestones */}
+          {/* Submit under milestones */}
           <div className="flex justify-end">
             <button
               type="submit"
