@@ -1,11 +1,11 @@
 // src/app/templates/[id]/TemplateBidClient.tsx
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
-import FileUploader from './FileUploader'; // ← THIS FIXES "Can't find variable: FileUploader"
+import FileUploader from './FileUploader';
 
 type TemplateBidClientProps = {
   slugOrId: string;                 // slug or numeric id as string
@@ -14,7 +14,7 @@ type TemplateBidClientProps = {
   initialWallet?: string;
 };
 
-type Step = 'submitting' | 'analyzing' | 'done' | 'error';
+type Step = 'idle' | 'submitting' | 'analyzing' | 'done' | 'error';
 
 function coerce(a: any) {
   if (!a) return null;
@@ -30,12 +30,24 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
 
-  // Agent2 modal state
+  // Agent2 modal + flow state
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<Step>('submitting');
+  const [step, setStep] = useState<Step>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [bidIdForModal, setBidIdForModal] = useState<number | undefined>(undefined);
+
+  const disableSubmit = useMemo(
+    () => step === 'submitting' || step === 'analyzing' || step === 'done',
+    [step]
+  );
+  const buttonLabel = useMemo(() => {
+    if (step === 'submitting') return 'Creating bid…';
+    if (step === 'analyzing')  return 'Analyzing…';
+    if (step === 'done')       return 'Bid created ✓';
+    if (step === 'error')      return 'Retry — Use this template → Create bid';
+    return 'Use this template → Create bid';
+  }, [step]);
 
   const pollAnalysis = useCallback(async (bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
@@ -52,6 +64,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (disableSubmit) return; // hard-guard against double clicks
 
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open with ?proposalId=<id> or fill the input.');
@@ -110,14 +123,14 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       const found = await pollAnalysis(bidId);
       if (found) {
         setAnalysis(found);
-        setStep('done');
+        setStep('done');               // ← keeps the button disabled permanently
         setMessage('Analysis complete.');
       } else {
-        setStep('done');
+        setStep('done');               // ← keeps the button disabled permanently
         setMessage('Analysis will appear shortly.');
       }
     } catch (err: any) {
-      setStep('error');
+      setStep('error');                // ← button becomes clickable again to retry
       setMessage(err?.message || 'Failed to submit bid from template');
     }
   }
@@ -135,6 +148,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
             defaultValue={proposalId ? String(proposalId) : ''}
             onChange={(e) => setProposalId(Number(e.target.value || 0))}
             className="mt-1 w-full border rounded-md px-3 py-2"
+            disabled={disableSubmit}
           />
         </label>
 
@@ -145,6 +159,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
             className="mt-1 w-full border rounded-md px-3 py-2"
             value={preferredStablecoin}
             onChange={(e) => setPreferredStablecoin(e.target.value as 'USDT' | 'USDC')}
+            disabled={disableSubmit}
           >
             <option value="USDT">USDT</option>
             <option value="USDC">USDC</option>
@@ -159,6 +174,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
             defaultValue={vendorName}
             onChange={(e) => setVendorName(e.target.value)}
             className="mt-1 w-full border rounded-md px-3 py-2"
+            disabled={disableSubmit}
           />
         </label>
 
@@ -171,34 +187,37 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
             onChange={(e) => setWalletAddress(e.target.value)}
             pattern="^0x[a-fA-F0-9]{40}$"
             className="mt-1 w-full border rounded-md px-3 py-2"
+            disabled={disableSubmit}
           />
         </label>
       </div>
 
-      {/* Horizontal scopes + milestones (no scrolling) 
+      {/* Horizontal scopes + milestones (no scrolling)
          MUST render <input type="hidden" name="milestonesJson" ... />
       */}
-      <TemplateRenovationHorizontal milestonesInputName="milestonesJson" />
+      <TemplateRenovationHorizontal milestonesInputName="milestonesJson" disabled={disableSubmit} />
 
       {/* File uploader MUST render <input type="hidden" name="filesJson" ... /> */}
       <div className="pt-1">
-        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} />
+        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
       </div>
 
       {/* Submit under milestones */}
       <div className="flex justify-end">
         <button
           type="submit"
-          className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700"
+          disabled={disableSubmit}
+          aria-disabled={disableSubmit}
+          className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Use this template → Create bid
+          {buttonLabel}
         </button>
       </div>
 
       {/* Agent2 modal (same UX as normal bids) */}
       <Agent2ProgressModal
         open={open}
-        step={step}
+        step={step === 'idle' ? 'submitting' : step}
         message={message}
         onClose={() => setOpen(false)}
         analysis={analysis}
