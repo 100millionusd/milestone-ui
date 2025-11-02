@@ -1,20 +1,22 @@
 // src/app/templates/[id]/page.tsx
-// Runtime flags
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 import { redirect } from "next/navigation";
-import { getTemplate, getVendorProfile, createBidFromTemplate } from "@/lib/api";
+import {
+  getTemplate,
+  getVendorProfile,
+  createBidFromTemplate,
+  analyzeBid,               // ← run Agent2 immediately
+} from "@/lib/api";
 import FileUploader from "./FileUploader";
 import TemplateRenovationHorizontal from "@/components/TemplateRenovationHorizontal";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 type Props = { params: { id: string }; searchParams?: SearchParams };
 
-function firstStr(v?: string | string[]) {
-  return Array.isArray(v) ? v[0] : v ?? "";
-}
+function firstStr(v?: string | string[]) { return Array.isArray(v) ? v[0] : v ?? ""; }
 function toNumber(v?: string | string[]) {
   const n = Number.parseInt(String(firstStr(v) || ""), 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -28,11 +30,9 @@ async function startFromTemplate(formData: FormData) {
   const proposalId = Number(formData.get("proposalId") || 0);
   const vendorName = String(formData.get("vendorName") || "");
   const walletAddress = String(formData.get("walletAddress") || "");
-  const preferredStablecoin = String(
-    formData.get("preferredStablecoin") || "USDT"
-  ) as "USDT" | "USDC";
+  const preferredStablecoin = String(formData.get("preferredStablecoin") || "USDT") as "USDT" | "USDC";
 
-  // optional attachments (from FileUploader) — keep objects, not just strings
+  // Files: keep objects (so admin list can render)
   const filesJson = String(formData.get("filesJson") || "[]");
   let files: Array<{ url: string; name?: string; cid?: string; mimetype?: string }> = [];
   try {
@@ -53,29 +53,30 @@ async function startFromTemplate(formData: FormData) {
       : [];
   } catch {}
 
-  // milestones from the horizontal widget
+  // Milestones
   const milestonesJson = String(formData.get("milestonesJson") || "[]");
   let milestones: any[] = [];
-  try {
-    const arr = JSON.parse(milestonesJson);
-    milestones = Array.isArray(arr) ? arr : [];
-  } catch {}
+  try { milestones = JSON.parse(milestonesJson); } catch {}
 
-  const base = /^\d+$/.test(slugOrId)
-    ? { templateId: Number(slugOrId) }
-    : { slug: slugOrId };
+  const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
 
-  const res = await createBidFromTemplate({
+  // Send both files & docs so existing admin UI picks them up like normal bids
+  const payload: any = {
     ...base,
     proposalId,
     vendorName,
     walletAddress,
     preferredStablecoin,
-    milestones, // vendor-defined (split payments)
-    files,
-  });
+    milestones,
+    files,           // new column many UIs read
+    docs: files,     // legacy compatibility for attachments display
+  };
 
-  redirect(`/vendor/oversight?flash=bidCreated&bidId=${res.bidId}`);
+  const res = await createBidFromTemplate(payload);
+  // Kick Agent2 immediately so the vendor sees it on next page load
+  try { await analyzeBid(res.bidId); } catch {}
+
+  redirect(`/vendor/oversight?flash=bidCreated&agent2=open&bidId=${res.bidId}`);
 }
 
 // ---- Page ----
@@ -105,43 +106,46 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
               {t.locale}
             </span>
             <span className="inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs ring-1 ring-white/30">
-              vendor defines amounts & dates
+              vendor edits titles, descriptions, amounts & dates
             </span>
           </div>
-          {t.summary ? (
-            <p className="mt-3 max-w-3xl text-white/90">{t.summary}</p>
-          ) : null}
+          {t.summary ? <p className="mt-3 max-w-3xl text-white/90">{t.summary}</p> : null}
         </div>
       </div>
 
-      {/* Single form with horizontal layout */}
+      {/* Single form — horizontal layout */}
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <form
-          action={startFromTemplate}
-          className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm"
-        >
+        <form action={startFromTemplate} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
           <input type="hidden" name="id" value={t.slug || String(t.id)} />
 
           {/* HORIZONTAL vendor basics */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <label className="text-sm">
-              <span className="block">Proposal ID</span>
-              <input
-                name="proposalId"
-                type="number"
-                required
-                defaultValue={proposalFromQS ? String(proposalFromQS) : ""}
-                className="mt-1 w-full border rounded-md px-3 py-2"
-              />
-            </label>
+            {/* Proposal: auto from query; hide input if present */}
+            {proposalFromQS ? (
+              <>
+                <input type="hidden" name="proposalId" value={String(proposalFromQS)} />
+                <div className="text-sm md:col-span-1">
+                  <span className="block text-slate-500">Proposal</span>
+                  <div className="mt-1 px-3 py-2 border rounded-md bg-slate-50">
+                    #{proposalFromQS}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <label className="text-sm">
+                <span className="block">Proposal ID</span>
+                <input
+                  name="proposalId"
+                  type="number"
+                  required
+                  className="mt-1 w-full border rounded-md px-3 py-2"
+                />
+              </label>
+            )}
 
             <label className="text-sm md:col-span-1">
               <span className="block">Stablecoin</span>
-              <select
-                name="preferredStablecoin"
-                className="mt-1 w-full border rounded-md px-3 py-2"
-                defaultValue="USDT"
-              >
+              <select name="preferredStablecoin" className="mt-1 w-full border rounded-md px-3 py-2" defaultValue="USDT">
                 <option value="USDT">USDT</option>
                 <option value="USDC">USDC</option>
               </select>
@@ -149,12 +153,7 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
 
             <label className="text-sm md:col-span-1">
               <span className="block">Vendor Name</span>
-              <input
-                name="vendorName"
-                required
-                defaultValue={preVendor}
-                className="mt-1 w-full border rounded-md px-3 py-2"
-              />
+              <input name="vendorName" required defaultValue={preVendor} className="mt-1 w-full border rounded-md px-3 py-2" />
             </label>
 
             <label className="text-sm md:col-span-1">
@@ -169,7 +168,7 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
             </label>
           </div>
 
-          {/* Horizontal scopes + milestones (no scrolling) */}
+          {/* Scopes + editable milestones (no scrolling) */}
           <TemplateRenovationHorizontal milestonesInputName="milestonesJson" />
 
           {/* Optional attachments */}
@@ -179,10 +178,7 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
 
           {/* Submit under milestones */}
           <div className="flex justify-end">
-            <button
-              type="submit"
-              className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700"
-            >
+            <button type="submit" className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700">
               Use this template → Create bid
             </button>
           </div>
