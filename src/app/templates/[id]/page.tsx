@@ -3,7 +3,12 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-import { getTemplate, getVendorProfile } from '@/lib/api';
+import { redirect } from 'next/navigation';
+import {
+  getTemplate,
+  getVendorProfile,
+  createBidFromTemplate,
+} from '@/lib/api';
 import TemplateBidClient from './TemplateBidClient';
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -13,6 +18,57 @@ function firstStr(v?: string | string[]) { return Array.isArray(v) ? v[0] : v ??
 function toNumber(v?: string | string[]) {
   const n = Number.parseInt(String(firstStr(v) || ''), 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** ✅ Server action: parse filesJson/milestonesJson, send as BOTH files & docs, then auto-open Agent2 */
+async function startFromTemplate(formData: FormData) {
+  'use server';
+
+  const slugOrId = String(formData.get('id') || '');
+  const proposalId = Number(formData.get('proposalId') || 0);
+  const vendorName = String(formData.get('vendorName') || '');
+  const walletAddress = String(formData.get('walletAddress') || '');
+  const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
+
+  // attachments from client → expect [{url,name}] (but accept strings too)
+  let filesArr: Array<{ url: string; name?: string }> = [];
+  try {
+    const raw = String(formData.get('filesJson') || '[]');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      filesArr = parsed
+        .map((x: any) => (typeof x === 'string' ? { url: x } : x))
+        .filter((x: any) => x && typeof x.url === 'string' && x.url.length > 0)
+        .map((x: any) => ({ url: String(x.url), name: x.name ? String(x.name) : undefined }));
+    }
+  } catch {}
+
+  // milestones from client
+  let milestones: any[] = [];
+  try {
+    const raw = String(formData.get('milestonesJson') || '[]');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) milestones = parsed;
+  } catch {}
+
+  const base = /^\d+$/.test(slugOrId)
+    ? { templateId: Number(slugOrId) }
+    : { slug: slugOrId };
+
+  // 🚀 Send under BOTH keys so admin UI picks them up exactly like normal bids
+  const res = await createBidFromTemplate({
+    ...base,
+    proposalId,
+    vendorName,
+    walletAddress,
+    preferredStablecoin,
+    milestones,
+    files: filesArr,
+    docs: filesArr,
+  });
+
+  // 🎯 Land on vendor bid detail and auto-open Agent2 (same UX as normal bid)
+  redirect(`/vendor/bids/${res.bidId}?autoAnalyze=1`);
 }
 
 export default async function TemplateDetailPage({ params, searchParams }: Props) {
@@ -48,13 +104,17 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
         </div>
       </div>
 
-      {/* Single horizontal form that opens Agent2 immediately on submit */}
+      {/* Single horizontal client UI (must submit a <form> with hidden filesJson & milestonesJson) */}
       <div className="mx-auto max-w-7xl px-4 py-8">
         <TemplateBidClient
+          /** hidden input name="id" should be set by the client using this value */
           slugOrId={t.slug || String(t.id)}
+          /** prefill like normal bids */
           initialProposalId={proposalFromQS}
           initialVendorName={preVendor}
           initialWallet={preWallet}
+          /** 🔗 pass the server action; use it as <form action={startFromTemplate}> inside the client */
+          startFromTemplateAction={startFromTemplate}
         />
       </div>
     </main>

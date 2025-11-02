@@ -1615,6 +1615,7 @@ export function testConnection() {
 }
 
 // === Templates (marketplace) ===
+// === Templates (marketplace) ===
 export type TemplateSummary = {
   id: number;
   slug: string;
@@ -1625,7 +1626,6 @@ export type TemplateSummary = {
   default_currency?: string | null;
   milestones: number;
 };
-
 export type TemplateDetail = TemplateSummary & {
   milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
 };
@@ -1638,17 +1638,28 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-export async function postTemplate(input: {
-  slug: string; title: string; locale?: string; category?: string; summary?: string; default_currency?: string;
-  milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
-}): Promise<{ ok: true; templateId: number }> {
-  return postJSON(`/templates`, input);
+export async function createBidFromTemplate(input: {
+  templateId?: number;
+  slug?: string;
+  proposalId: number;
+  vendorName: string;
+  walletAddress: string;
+  preferredStablecoin?: 'USDT' | 'USDC';
+  /** send file objects, not plain strings */
+  files?: Array<{ url: string; name?: string }>;
+  /** also send the same array as docs for backends that read docs */
+  docs?: Array<{ url: string; name?: string }>;
+  milestones?: Array<{
+    name: string;
+    amount: number;
+    dueDate: string;           // ISO string
+    acceptance?: string[];
+    archived?: boolean;
+  }>;
+}): Promise<{ ok: boolean; bidId: number }> {
+  return postJSON(`/bids/from-template`, input);
 }
 
-/** Create a bid from a template.
- *  - If `milestones` is provided, backend should use those (vendor-entered amounts/dates).
- *  - Otherwise backend will map template milestones (amount/days_offset) into bid milestones.
- */
 // === Templates (marketplace) ===
 export async function createBidFromTemplate(input: {
   templateId?: number;
