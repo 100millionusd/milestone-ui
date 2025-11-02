@@ -1638,29 +1638,11 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-export async function createBidFromTemplate(input: {
-  templateId?: number;
-  slug?: string;
-  proposalId: number;
-  vendorName: string;
-  walletAddress: string;
-  preferredStablecoin?: 'USDT' | 'USDC';
-  /** send file objects, not plain strings */
-  files?: Array<{ url: string; name?: string }>;
-  /** also send the same array as docs for backends that read docs */
-  docs?: Array<{ url: string; name?: string }>;
-  milestones?: Array<{
-    name: string;
-    amount: number;
-    dueDate: string;           // ISO string
-    acceptance?: string[];
-    archived?: boolean;
-  }>;
-}): Promise<{ ok: boolean; bidId: number }> {
-  return postJSON(`/bids/from-template`, input);
-}
 
 // === Templates (marketplace) ===
+
+type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
+
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1668,33 +1650,38 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  // ⬇️ accept both strings and objects; we normalize below
-  files?: Array<{ url: string; name?: string }> | string[];
+  /** Accept strings or objects; we will normalize. */
+  files?: FileInput[];
+  /** Also accept docs; we’ll send both keys so Admin UI sees them like normal bids. */
+  docs?: FileInput[];
   milestones?: Array<{
     name: string;
     amount: number;
-    dueDate: string;           // ISO string
+    dueDate: string;           // ISO
     acceptance?: string[];
     archived?: boolean;
+    /** optional free text the vendor types for this milestone */
+    description?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  // normalize files to {url,name}
-  const files = Array.isArray(input.files)
-    ? input.files
-        .map((f: any) =>
-          typeof f === 'string'
-            ? { url: f, name: (f.split('/').pop() || 'file') }
-            : {
-                url: String(f?.url || ''),
-                name: f?.name || (String(f?.url || '').split('/').pop() || 'file'),
-              }
-        )
-        .filter((f) => f.url)
-    : [];
+  const normalize = (arr?: FileInput[]) =>
+    Array.isArray(arr)
+      ? arr
+          .map((f) => (typeof f === 'string' ? { url: f } : f))
+          .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
+          .map((f: any) => ({
+            url: String(f.url),
+            name: f.name ? String(f.name) : undefined,
+          }))
+      : [];
 
-  const payload = { ...input, files };
+  const files = normalize(input.files);
+  const docs  = normalize(input.docs ?? input.files);
+
+  const payload = { ...input, files, docs };
   return postJSON(`/bids/from-template`, payload);
 }
+
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
  * Exported for reuse by client components.
