@@ -1,4 +1,5 @@
 // src/app/templates/[id]/page.tsx
+// Runtime flags
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
@@ -22,6 +23,7 @@ function toNumber(v?: string | string[]) {
 // ---- Server action ----
 async function startFromTemplate(formData: FormData) {
   "use server";
+
   const slugOrId = String(formData.get("id") || "");
   const proposalId = Number(formData.get("proposalId") || 0);
   const vendorName = String(formData.get("vendorName") || "");
@@ -30,15 +32,34 @@ async function startFromTemplate(formData: FormData) {
     formData.get("preferredStablecoin") || "USDT"
   ) as "USDT" | "USDC";
 
-  // optional attachments (from FileUploader)
+  // optional attachments (from FileUploader) — keep objects, not just strings
   const filesJson = String(formData.get("filesJson") || "[]");
-  let files: string[] = [];
-  try { files = JSON.parse(filesJson); } catch {}
+  let files: Array<{ url: string; name?: string; cid?: string; mimetype?: string }> = [];
+  try {
+    const arr = JSON.parse(filesJson);
+    files = Array.isArray(arr)
+      ? arr
+          .map((x: any) =>
+            typeof x === "string"
+              ? { url: x }
+              : {
+                  url: String(x?.url || ""),
+                  name: x?.name || (String(x?.url || "").split("/").pop() || "file"),
+                  cid: x?.cid,
+                  mimetype: x?.mimetype || x?.contentType,
+                }
+          )
+          .filter((f) => f.url)
+      : [];
+  } catch {}
 
   // milestones from the horizontal widget
   const milestonesJson = String(formData.get("milestonesJson") || "[]");
   let milestones: any[] = [];
-  try { milestones = JSON.parse(milestonesJson); } catch {}
+  try {
+    const arr = JSON.parse(milestonesJson);
+    milestones = Array.isArray(arr) ? arr : [];
+  } catch {}
 
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
