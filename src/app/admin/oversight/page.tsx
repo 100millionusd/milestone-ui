@@ -1357,7 +1357,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <RowPlaceholder cols={4} />}
+                  {loading && <RowPlaceholder cols={5} />}
                   {!loading && filteredAlerts.length === 0 && (
                     <tr><td className="p-6 text-center text-neutral-500" colSpan={4}>No alerts 🎉</td></tr>
                   )}
