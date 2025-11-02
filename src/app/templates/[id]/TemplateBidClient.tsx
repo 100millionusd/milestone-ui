@@ -1,9 +1,11 @@
+// src/app/templates/[id]/TemplateBidClient.tsx
 'use client';
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
+import FileUploader from './FileUploader'; // ← THIS FIXES "Can't find variable: FileUploader"
 
 type TemplateBidClientProps = {
   slugOrId: string;                 // slug or numeric id as string
@@ -35,10 +37,6 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [bidIdForModal, setBidIdForModal] = useState<number | undefined>(undefined);
 
-  // Hidden inputs provided by the sub-widgets
-  const milestonesInputRef = useRef<HTMLInputElement | null>(null);
-  const filesInputRef = useRef<HTMLInputElement | null>(null);
-
   const pollAnalysis = useCallback(async (bidId: number, timeoutMs = 60000, intervalMs = 1500) => {
     const stopAt = Date.now() + timeoutMs;
     while (Date.now() < stopAt) {
@@ -52,29 +50,34 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     return null;
   }, []);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open with ?proposalId=<id> or fill the input.');
       return;
     }
 
-    // read milestones from the horizontal widget
+    // Read serialized inputs from the form (hidden inputs produced by child widgets)
+    const fd = new FormData(e.currentTarget);
+
+    // milestonesJson (from TemplateRenovationHorizontal)
     let milestones: any[] = [];
     try {
-      const raw = milestonesInputRef.current?.value || '[]';
-      milestones = JSON.parse(raw);
+      const raw = String(fd.get('milestonesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) milestones = arr;
     } catch {}
 
-    // read files from FileUploader (supports ["url"] or [{url,name}])
+    // filesJson (from FileUploader)
     let files: Array<string | { url: string; name?: string }> = [];
     try {
-      const raw = filesInputRef.current?.value || '[]';
+      const raw = String(fd.get('filesJson') || '[]');
       const arr = JSON.parse(raw);
       if (Array.isArray(arr)) files = arr;
     } catch {}
 
-    // display Agent2 modal immediately (like normal bids)
+    // Show Agent2 modal immediately (match normal-bid UX)
     setOpen(true);
     setStep('submitting');
     setMessage(null);
@@ -84,7 +87,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     try {
       const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
 
-      // 1) Create bid from template (files normalized in api.ts)
+      // 1) Create bid from template
       const res = await createBidFromTemplate({
         ...base,
         proposalId,
@@ -99,7 +102,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (!bidId) throw new Error('Failed to create bid (no id)');
       setBidIdForModal(bidId);
 
-      // 2) Trigger+poll Agent2 analysis (same behavior as normal bid)
+      // 2) Trigger + poll Agent2 analysis
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
       try { await analyzeBid(bidId); } catch {}
@@ -172,20 +175,14 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </label>
       </div>
 
-      {/* Horizontal scopes + milestones (no scrolling). 
-          This component MUST render a hidden input:
-          <input type="hidden" name="milestonesJson" ref={milestonesInputRef} ... />
+      {/* Horizontal scopes + milestones (no scrolling) 
+         MUST render <input type="hidden" name="milestonesJson" ... />
       */}
-      <TemplateRenovationHorizontal
-        milestonesInputName="milestonesJson"
-        inputRef={milestonesInputRef}
-      />
+      <TemplateRenovationHorizontal milestonesInputName="milestonesJson" />
 
-      {/* File uploader MUST render: <input type="hidden" name="filesJson" ref={filesInputRef} ... /> */}
+      {/* File uploader MUST render <input type="hidden" name="filesJson" ... /> */}
       <div className="pt-1">
-        {/* Keep your existing FileUploader; just pass a ref so we can read its hidden input */}
-        {/* @ts-ignore - Your FileUploader props */}
-        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} inputRef={filesInputRef} />
+        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} />
       </div>
 
       {/* Submit under milestones */}
