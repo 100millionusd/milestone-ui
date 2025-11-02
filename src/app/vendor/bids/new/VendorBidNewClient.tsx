@@ -5,6 +5,7 @@ import React, { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
 import { createBid, getBid, analyzeBid } from '@/lib/api';
+import Link from 'next/link';
 
 type Step = 'submitting' | 'analyzing' | 'done' | 'error';
 
@@ -31,6 +32,10 @@ const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => 
 
 export default function VendorBidNewClient({ proposalId }: { proposalId: number }) {
   const router = useRouter();
+  const templateHref =
+  proposalId > 0
+    ? `/templates?proposalId=${encodeURIComponent(String(proposalId))}`
+    : '/templates';
 
   const [vendorName, setVendorName] = useState('');
   const [priceUSD, setPriceUSD] = useState<number>(0);
@@ -128,7 +133,16 @@ export default function VendorBidNewClient({ proposalId }: { proposalId: number 
 
   return (
     <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-xl font-semibold mb-4">Submit a Bid</h1>
+      <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+  <h1 className="text-xl font-semibold">Submit a Bid</h1>
+  <Link
+    href={templateHref}
+    prefetch={false}
+    className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
+  >
+    Use a template →
+  </Link>
+</div>
 
       <form
         onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
