@@ -1651,6 +1651,7 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
+  files?: string[]; // NEW
 }): Promise<{ ok: boolean; bidId: number }> {
   return postJSON(`/bids/from-template`, input);
 }

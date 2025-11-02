@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
+import FileUploader from './FileUploader';
 import { redirect } from 'next/navigation';
 import { getTemplate, createBidFromTemplate } from '@/lib/api';
 
@@ -13,16 +14,28 @@ async function startFromTemplate(formData: FormData) {
   const proposalId = Number(formData.get('proposalId') || 0);
   const vendorName = String(formData.get('vendorName') || '');
   const walletAddress = String(formData.get('walletAddress') || '');
-  const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT'|'USDC';
+  const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  const body =
+  // Optional attachments uploaded before creating the bid
+  const filesJson = String(formData.get('filesJson') || '[]');
+  let files: string[] = [];
+  try { files = JSON.parse(filesJson); } catch {}
+
+  const base =
     /^\d+$/.test(slugOrId)
-      ? { templateId: Number(slugOrId), proposalId, vendorName, walletAddress, preferredStablecoin }
-      : { slug: slugOrId, proposalId, vendorName, walletAddress, preferredStablecoin };
+      ? { templateId: Number(slugOrId) }
+      : { slug: slugOrId };
 
-  const res = await createBidFromTemplate(body);
+  const res = await createBidFromTemplate({
+    ...base,
+    proposalId,
+    vendorName,
+    walletAddress,
+    preferredStablecoin,
+    files,
+  });
 
-  // TODO: adjust if your editor path is different
+  // Adjust if your editor path differs
   redirect(`/vendor/oversight?flash=bidCreated&bidId=${res.bidId}`);
 }
 
@@ -34,18 +47,26 @@ export default async function TemplateDetailPage({ params }: Props) {
   return (
     <main className="max-w-3xl mx-auto p-6">
       <h1 className="text-2xl font-semibold">{t.title}</h1>
-      <p className="text-sm text-gray-500 mt-1">{t.category || 'General'} • {t.locale}</p>
+      <p className="text-sm text-gray-500 mt-1">
+        {t.category || 'General'} • {t.locale}
+      </p>
       {t.summary ? <p className="text-gray-700 mt-3">{t.summary}</p> : null}
 
       <h2 className="text-lg font-semibold mt-6 mb-2">Milestones</h2>
       <ul className="space-y-2">
-        {t.milestones.map(ms => (
+        {t.milestones.map((ms) => (
           <li key={ms.idx} className="border rounded-lg p-3">
-            <div className="font-medium">{ms.idx}. {ms.name}</div>
-            <div className="text-sm text-gray-600">Amount: ${ms.amount} • ETA: +{ms.days_offset}d</div>
+            <div className="font-medium">
+              {ms.idx}. {ms.name}
+            </div>
+            <div className="text-sm text-gray-600">
+              Amount: ${ms.amount} • ETA: +{ms.days_offset}d
+            </div>
             {Array.isArray(ms.acceptance) && ms.acceptance.length > 0 && (
               <ul className="list-disc pl-5 text-sm text-gray-700 mt-1">
-                {ms.acceptance.map((a, i) => <li key={i}>{a}</li>)}
+                {ms.acceptance.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
               </ul>
             )}
           </li>
@@ -57,25 +78,49 @@ export default async function TemplateDetailPage({ params }: Props) {
         <div className="grid md:grid-cols-2 gap-3">
           <label className="block">
             <span className="text-sm">Proposal ID</span>
-            <input name="proposalId" type="number" required className="mt-1 w-full border rounded-md px-3 py-2" />
+            <input
+              name="proposalId"
+              type="number"
+              required
+              className="mt-1 w-full border rounded-md px-3 py-2"
+            />
           </label>
           <label className="block">
             <span className="text-sm">Vendor Name</span>
-            <input name="vendorName" required className="mt-1 w-full border rounded-md px-3 py-2" />
+            <input
+              name="vendorName"
+              required
+              className="mt-1 w-full border rounded-md px-3 py-2"
+            />
           </label>
           <label className="block md:col-span-2">
             <span className="text-sm">Wallet (0x…)</span>
-            <input name="walletAddress" required pattern="^0x[a-fA-F0-9]{40}$" className="mt-1 w-full border rounded-md px-3 py-2" />
+            <input
+              name="walletAddress"
+              required
+              pattern="^0x[a-fA-F0-9]{40}$"
+              className="mt-1 w-full border rounded-md px-3 py-2"
+            />
           </label>
           <label className="block">
             <span className="text-sm">Stablecoin</span>
-            <select name="preferredStablecoin" className="mt-1 w-full border rounded-md px-3 py-2">
+            <select
+              name="preferredStablecoin"
+              className="mt-1 w-full border rounded-md px-3 py-2"
+            >
               <option value="USDT">USDT</option>
               <option value="USDC">USDC</option>
             </select>
           </label>
         </div>
-        <button type="submit" className="px-4 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700">
+
+        {/* Optional attachments uploaded before creating the bid */}
+        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} />
+
+        <button
+          type="submit"
+          className="px-4 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700"
+        >
           Use this template → Create bid
         </button>
       </form>
