@@ -70,7 +70,7 @@ export default function Navigation() {
     () => [
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-      { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+      { href: '/templates', label: 'Templates', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/new', label: 'Submit Proposal' },
       {
         label: 'Admin',
