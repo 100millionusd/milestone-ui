@@ -1,119 +1,116 @@
-'use client';
+// src/components/TemplateRenovationHorizontal.tsx
+"use client";
 
-import React, { useMemo, useState } from 'react';
-import FileUploader from '@/app/templates/[id]/FileUploader'; // ✅ correct path
+import React, { useMemo, useState } from "react";
 
 type Milestone = {
   name: string;
   amount: number;
-  dueDate: string; // ISO date (YYYY-MM-DD or full ISO)
+  dueDate: string; // ISO
   acceptance?: string[];
   archived?: boolean;
 };
 
-type Props = {
-  /** Hidden input name that this widget writes the milestones JSON into */
-  hiddenFieldName?: string;
-  /** Pass a custom API base to the FileUploader if needed */
-  apiBase?: string;
+type ScopeDef = {
+  key: string;
+  emoji: string;
+  title: string;
+  acceptance: string[];
 };
 
-const SUGGESTED: Array<{ title: string; bullets: string[] }> = [
-  { title: 'Assessment & Plan', bullets: ['Photo report', 'Agreed schedule'] },
-  { title: 'Roof Repair', bullets: ['No leaks after 48h rain', 'Working gutters/downspouts'] },
-  { title: 'Windows & Doors', bullets: ['Smooth closing & sealed', 'Before/after photos uploaded'] },
-  { title: 'Bathrooms (Plumbing & Fixtures)', bullets: ['Pressure test no leaks', 'Ventilation working'] },
-  { title: 'Painting + Final Cleaning', bullets: ['Uniform coverage (1.5 m)', 'Classrooms clean & ready'] },
+const SCOPES: ScopeDef[] = [
+  { key: "roof", emoji: "🏠", title: "Roof Repair", acceptance: ["No leaks after 48h rain", "Working gutters/downspouts"] },
+  { key: "windows", emoji: "🪟", title: "Windows & Doors", acceptance: ["Smooth closing & sealed", "Before/after photos uploaded"] },
+  { key: "bath", emoji: "🚿", title: "Bathrooms", acceptance: ["Pressure test no leaks", "Ventilation working"] },
+  { key: "paint", emoji: "🎨", title: "Painting + Cleaning", acceptance: ["Uniform coverage (1.5 m)", "Classrooms clean & ready"] },
+  { key: "electrical", emoji: "💡", title: "Electrical", acceptance: ["Panel labeled", "Safety test passed"] },
+  { key: "plumbing", emoji: "🚰", title: "Plumbing", acceptance: ["No visible leaks", "Fixtures working"] },
+  { key: "floor", emoji: "🧱", title: "Flooring", acceptance: ["Level & secure", "Trim/edges clean"] },
+  { key: "safety", emoji: "🧯", title: "Safety", acceptance: ["Extinguishers in place", "Signage installed"] },
+  { key: "access", emoji: "♿️", title: "Accessibility", acceptance: ["Ramps & handrails", "Door widths verified"] },
 ];
 
-const SCOPES = [
-  { k: 'roof', e: '🏠', t: 'Roof Repair' },
-  { k: 'windows', e: '🪟', t: 'Windows & Doors' },
-  { k: 'bath', e: '🚿', t: 'Bathrooms' },
-  { k: 'paint', e: '🎨', t: 'Painting + Cleaning' },
-  { k: 'electrical', e: '💡', t: 'Electrical' },
-  { k: 'plumbing', e: '🚰', t: 'Plumbing' },
-  { k: 'floor', e: '🧱', t: 'Flooring' },
-  { k: 'safety', e: '🧯', t: 'Safety' },
-  { k: 'access', e: '♿️', t: 'Accessibility' },
-];
+export default function TemplateRenovationHorizontal(props: {
+  milestonesInputName?: string; // defaults to "milestonesJson"
+}) {
+  const name = props.milestonesInputName || "milestonesJson";
 
-export default function TemplateRenovationHorizontal({
-  hiddenFieldName = 'milestonesJson',
-  apiBase = process.env.NEXT_PUBLIC_API_BASE || '',
-}: Props) {
-  // selected scopes
-  const [sel, setSel] = useState<Record<string, boolean>>({});
+  // Selected scopes -> milestone cards
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [cards, setCards] = useState<Milestone[]>([]);
 
-  // editable milestones (vendor sets amount + date)
-  const [milestones, setMilestones] = useState<Milestone[]>(
-    SUGGESTED.map((m) => ({
-      name: m.title,
-      amount: 0,
-      dueDate: '',
-      acceptance: m.bullets,
-      archived: false,
-    }))
-  );
-
-  const json = useMemo(() => JSON.stringify(milestones), [milestones]);
-
-  function toggleScope(key: string, label: string) {
-    setSel((p) => {
-      const next = { ...p, [key]: !p[key] };
-      if (!p[key]) {
-        // when turning ON a scope, add a blank milestone for it
-        setMilestones((ms) => [
-          ...ms,
-          { name: label, amount: 0, dueDate: '', acceptance: [], archived: false },
-        ]);
-      }
-      return next;
-    });
+  function toggleScope(s: ScopeDef) {
+    const isOn = !!selected[s.key];
+    if (isOn) {
+      // remove card with this title
+      setCards((old) => old.filter((c) => c.name !== s.title));
+    } else {
+      // add card with default acceptance, empty amount/date
+      setCards((old) => [
+        ...old,
+        {
+          name: s.title,
+          amount: 0,
+          dueDate: "", // vendor will select
+          acceptance: s.acceptance,
+          archived: false,
+        },
+      ]);
+    }
+    setSelected((old) => ({ ...old, [s.key]: !isOn }));
   }
 
-  function updateMilestone(i: number, patch: Partial<Milestone>) {
-    setMilestones((ms) => {
-      const copy = ms.slice();
-      copy[i] = { ...copy[i], ...patch };
-      return copy;
-    });
+  function updateCard(idx: number, patch: Partial<Milestone>) {
+    setCards((old) => old.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
   }
 
-  function addMilestone() {
-    setMilestones((ms) => [
-      ...ms,
-      { name: 'New milestone', amount: 0, dueDate: '', acceptance: [], archived: false },
+  function removeCard(idx: number) {
+    const title = cards[idx]?.name;
+    setCards((old) => old.filter((_, i) => i !== idx));
+    if (title) {
+      // also untoggle the scope if it maps 1:1
+      const key = SCOPES.find((s) => s.title === title)?.key;
+      if (key) setSelected((o) => ({ ...o, [key]: false }));
+    }
+  }
+
+  function addCustom() {
+    const n = cards.length + 1;
+    setCards((old) => [
+      ...old,
+      {
+        name: `Custom Milestone ${n}`,
+        amount: 0,
+        dueDate: "",
+        acceptance: [],
+        archived: false,
+      },
     ]);
   }
 
-  function deleteMilestone(i: number) {
-    setMilestones((ms) => ms.filter((_, idx) => idx !== i));
-  }
-
-  const total = milestones.reduce((a, m) => a + (Number(m.amount) || 0), 0);
+  // Serialize for the form
+  const json = useMemo(() => JSON.stringify(cards), [cards]);
 
   return (
-    <section className="space-y-6">
-      {/* 1) BIG EMOJI SCOPE STRIP — HORIZONTAL (no scroll, wraps) */}
-      <div className="rounded-2xl border bg-white shadow-sm p-4">
-        <h3 className="text-base font-semibold mb-3">Select work scopes</h3>
-        <div className="flex flex-wrap gap-3">
+    <section className="space-y-4">
+      {/* 1) Horizontal scope chooser (no scrolling; it wraps) */}
+      <div className="rounded-2xl border bg-white p-4">
+        <h2 className="text-base font-semibold mb-3">Select work scopes</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {SCOPES.map((s) => {
-            const active = !!sel[s.k];
+            const active = !!selected[s.key];
             return (
               <button
-                key={s.k}
+                key={s.key}
                 type="button"
-                onClick={() => toggleScope(s.k, s.t)}
-                className={[
-                  'group w-[180px] h-[120px] rounded-2xl border bg-white shadow-sm flex flex-col items-center justify-center gap-2 transition',
-                  active ? 'ring-2 ring-cyan-600/40 bg-cyan-50/40' : 'hover:bg-slate-50 hover:shadow',
-                ].join(' ')}
+                onClick={() => toggleScope(s)}
+                className={`group rounded-2xl border shadow-sm px-3 py-4 flex flex-col items-center justify-center gap-2 transition ${
+                  active ? "ring-2 ring-cyan-600 border-cyan-600" : "hover:bg-slate-50"
+                }`}
               >
-                <span className="text-4xl leading-none">{s.e}</span>
-                <span className={['text-sm font-medium', active ? 'text-cyan-700' : 'text-slate-800 group-hover:text-cyan-700'].join(' ')}>
-                  {s.t}
+                <span className="text-4xl leading-none">{s.emoji}</span>
+                <span className={`text-sm font-medium ${active ? "text-cyan-700" : "text-slate-800"}`}>
+                  {s.title}
                 </span>
               </button>
             );
@@ -121,82 +118,78 @@ export default function TemplateRenovationHorizontal({
         </div>
       </div>
 
-      {/* 2) MILESTONES — HORIZONTAL CARDS STRIP (scroll if many) */}
-      <div className="rounded-2xl border bg-white shadow-sm p-4">
+      {/* 2) Milestones — grid, visible (no scroll) */}
+      <div className="rounded-2xl border bg-white p-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">Milestones (vendor enters amount & date)</h3>
-          <button type="button" onClick={addMilestone} className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50">
+          <h3 className="text-base font-semibold">Milestones (enter amount & date)</h3>
+          <button type="button" onClick={addCustom} className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50">
             + Add milestone
           </button>
         </div>
 
-        <div className="mt-4 flex gap-4 overflow-x-auto no-scrollbar pb-2">
-          {milestones.map((m, i) => (
-            <div key={i} className="shrink-0 w-[360px] rounded-2xl border bg-white p-4 shadow-sm">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Step {i + 1}</div>
-              <input
-                className="mt-1 w-full border rounded-md px-2 py-1 text-lg font-semibold"
-                value={m.name}
-                onChange={(e) => updateMilestone(i, { name: e.target.value })}
-              />
-              {!!m.acceptance?.length && (
+        {cards.length === 0 ? (
+          <div className="text-sm text-slate-500 mt-3">
+            Select one or more scopes above to create milestones, then set the payment **Amount** and **Date** per milestone.
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {cards.map((m, idx) => (
+            <div key={idx} className="rounded-2xl border bg-white p-4 shadow-sm">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Step {idx + 1}</div>
+              <div className="text-lg font-semibold mt-0.5">{m.name}</div>
+
+              {m.acceptance && m.acceptance.length > 0 ? (
                 <ul className="mt-2 text-sm text-slate-700 list-disc pl-5 space-y-1">
-                  {m.acceptance.map((b, bi) => (
-                    <li key={bi}>{b}</li>
+                  {m.acceptance.map((b, i) => (
+                    <li key={i}>{b}</li>
                   ))}
                 </ul>
-              )}
+              ) : null}
+
               <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
-                <label>Amount (USD)
+                <label>
+                  Amount (USD)
                   <input
                     type="number"
                     min={0}
                     step="0.01"
                     className="mt-1 w-full border rounded-md px-2 py-1"
-                    value={m.amount}
-                    onChange={(e) => updateMilestone(i, { amount: Number(e.target.value || 0) })}
+                    value={Number.isFinite(m.amount) ? m.amount : 0}
+                    onChange={(e) => updateCard(idx, { amount: Number(e.target.value || 0) })}
                   />
                 </label>
-                <label>Date
+                <label>
+                  Date
                   <input
                     type="date"
                     className="mt-1 w-full border rounded-md px-2 py-1"
-                    value={m.dueDate ? m.dueDate.slice(0, 10) : ''}
+                    value={m.dueDate ? m.dueDate.slice(0, 10) : ""}
                     onChange={(e) => {
-                      const d = e.target.value; // yyyy-mm-dd
-                      updateMilestone(i, { dueDate: d ? new Date(d).toISOString() : '' });
+                      const d = e.target.value ? new Date(e.target.value + "T00:00:00") : null;
+                      updateCard(idx, { dueDate: d ? d.toISOString() : "" });
                     }}
                   />
                 </label>
               </div>
+
               <div className="mt-3 flex items-center justify-between">
-                <button type="button" className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50" onClick={() => deleteMilestone(i)}>
+                <button
+                  type="button"
+                  onClick={() => removeCard(idx)}
+                  className="text-xs rounded-lg border px-2 py-1 hover:bg-slate-50"
+                >
                   Delete
                 </button>
-                <span className="text-xs text-slate-500">Amount now: ${Number(m.amount || 0).toFixed(2)}</span>
+                <span className="text-xs text-slate-500">Suggested: $0 • ETA: +d</span>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Hidden field consumed by the page's server action */}
-        <input type="hidden" name={hiddenFieldName} value={json} readOnly />
-        <div className="mt-3 text-sm text-slate-700">
-          <span className="font-medium">Total (USD):</span>{' '}
-          {total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </div>
+        {/* Hidden field the page's server action reads */}
+        <input type="hidden" name={name} value={json} readOnly />
       </div>
-
-      {/* 3) Optional attachments (writes filesJson) */}
-      <div className="rounded-2xl border bg-white shadow-sm p-4">
-        <h3 className="text-base font-semibold mb-3">Attachments (optional)</h3>
-        <FileUploader apiBase={apiBase} />
-      </div>
-
-      <style jsx global>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </section>
   );
 }
