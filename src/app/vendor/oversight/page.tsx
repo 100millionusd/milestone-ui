@@ -35,6 +35,12 @@ type ProofRow = {
   submitted_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+
+  // NEW: used to join payments <-> proofs
+  payment_tx_hash?: string | null;        // paymentTxHash
+  safe_payment_tx_hash?: string | null;   // safePaymentTxHash
+  safe_tx_hash?: string | null;           // safeTxHash
+  paid_at?: string | null;                // paidAt/paymentDate
 };
 
 type MilestoneRow = {
@@ -183,20 +189,30 @@ function normalizeProofs(rows: any[]): ProofRow[] {
     const submitted_at = r?.completionDate ?? r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
     const created_at = r?.created_at ?? r?.createdAt ?? r?.created;
     const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated;
+    // capture tx hashes and payment time for join
+const payment_tx_hash = r?.paymentTxHash ?? r?.payment_tx_hash ?? null;
+const safe_payment_tx_hash = r?.safePaymentTxHash ?? r?.safe_payment_tx_hash ?? null;
+const safe_tx_hash = r?.safeTxHash ?? r?.safe_tx_hash ?? null;
+const paid_at = r?.paidAt ?? r?.paymentDate ?? null;
 
-    return {
-      id: Number(index + 1), // Use index as numeric ID to ensure uniqueness
-      bid_id: bid_id != null ? Number(bid_id) : null,
-      milestone_index: Number(milestone_index),
-      vendor_name,
-      title,
-      status,
-      submitted_at,
-      created_at,
-      updated_at,
-    };
-  });
-}
+
+return {
+  id: Number(index + 1),
+  bid_id: bid_id != null ? Number(bid_id) : null,
+  milestone_index: Number(milestone_index),
+  vendor_name,
+  title,
+  status,
+  submitted_at,
+  created_at,
+  updated_at,
+
+  // NEW
+  payment_tx_hash,
+  safe_payment_tx_hash,
+  safe_tx_hash,
+  paid_at,
+};
 
 // ---- helpers for robust extraction (must sit ABOVE normalizePayments) ----
 function toNumberLoose(v: any): number | null {
@@ -415,6 +431,51 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
+// Join payments to proofs by tx hash; fill bid/milestone/status/time
+function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
+  if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
+
+  // Build a lookup from any known proof hash -> proof row
+  const byHash = new Map<string, ProofRow>();
+  for (const pr of proofs) {
+    for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
+      if (h) byHash.set(String(h).toLowerCase(), pr);
+    }
+  }
+
+  const toNum = (v: any) =>
+    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
+
+  return payments.map((p) => {
+    const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
+    const match = key ? byHash.get(key) : undefined;
+
+    if (!match) return p; // no proof with that tx — leave as-is
+
+    // fill what’s missing from proof
+    const filled: PaymentRow = {
+      ...p,
+      bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
+      milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
+      released_at: p.released_at ?? match.paid_at ?? p.created_at ?? null,
+      status:
+        p.status && p.status !== 'pending'
+          ? p.status
+          : (match.status === 'paid' ? 'completed' : (p.status ?? 'pending')),
+    };
+
+    // If amount came as cents/unknown, prefer proof.amount when amounts differ wildly (optional)
+    const pAmt = toNum(p.amount_usd);
+    // @ts-ignore: some proof payloads carry `amount`
+    const prAmt = toNum((match as any).amount);
+    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
+      filled.amount_usd = prAmt;
+    }
+
+    return filled;
+  });
+}
+
 function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
   const byKey = new Map<string, MilestoneRow>();
   const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
@@ -567,13 +628,13 @@ const rawPayments =
 // store raw for inspection and normalize
 setRawPayments(Array.isArray(rawPayments) ? rawPayments : []);
 const normalizedPayments = normalizePayments(Array.isArray(rawPayments) ? rawPayments : []);
-setPayments(normalizedPayments);
-console.log('RAW payments sample:', Array.isArray(rawPayments) ? rawPayments.slice(0, 2) : rawPayments);
-console.log('Normalized payments:', normalizedPayments);
-          
-          // Derive milestones from proofs
-          const milestones = deriveMilestonesFromProofs(normalizedProofs);
-          setMilestones(milestones);
+const paymentsJoined = linkPaymentsToProofs(normalizedPayments, normalizedProofs);
+setPayments(paymentsJoined);
+console.log('Normalized payments (joined):', paymentsJoined);
+
+// Derive milestones from proofs
+const milestones = deriveMilestonesFromProofs(normalizedProofs);
+setMilestones(milestones);
           console.log('Derived milestones:', milestones); // Debug log
         }
         
