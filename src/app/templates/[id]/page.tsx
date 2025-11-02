@@ -6,7 +6,6 @@ export const fetchCache = 'force-no-store';
 
 import { redirect } from 'next/navigation';
 import { getTemplate, getVendorProfile, createBidFromTemplate } from '@/lib/api';
-import FileUploader from './FileUploader';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 
 type Props = { params: { id: string } };
@@ -18,9 +17,9 @@ async function startFromTemplate(formData: FormData) {
   const proposalId = Number(formData.get('proposalId') || 0);
   const vendorName = String(formData.get('vendorName') || '');
   const walletAddress = String(formData.get('walletAddress') || '');
-  const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT'|'USDC';
+  const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // optional attachments (from FileUploader)
+  // optional attachments (written by FileUploader inside the horizontal widget)
   const filesJson = String(formData.get('filesJson') || '[]');
   let files: string[] = [];
   try { files = JSON.parse(filesJson); } catch {}
@@ -40,7 +39,7 @@ async function startFromTemplate(formData: FormData) {
     vendorName,
     walletAddress,
     preferredStablecoin,
-    milestones, // ← vendor-defined (split payments), not template defaults
+    milestones, // ← vendor-defined split payments
     files,
   });
 
@@ -146,14 +145,12 @@ export default async function TemplateDetailPage({ params }: Props) {
               </label>
             </div>
 
-            {/* HORIZONTAL template with emojis → writes milestonesJson */}
+            {/* Horizontal template with emojis → writes milestonesJson + filesJson */}
             <div className="pt-2">
-              <TemplateRenovationHorizontal hiddenFieldName="milestonesJson" />
-            </div>
-
-            {/* Optional attachments */}
-            <div className="pt-2">
-              <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} />
+              <TemplateRenovationHorizontal
+                hiddenFieldName="milestonesJson"
+                apiBase={process.env.NEXT_PUBLIC_API_BASE || ''}
+              />
             </div>
 
             <button type="submit" className="w-full px-4 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700">
