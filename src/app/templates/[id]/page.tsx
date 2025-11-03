@@ -21,7 +21,7 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** ✅ Server action: normalize files, send BOTH files & docs, ensure single `doc`, trigger Agent2, redirect */
+/** ✅ Server action: parse filesJson/milestonesJson, send as BOTH files & docs, then auto-open Agent2 */
 async function startFromTemplate(formData: FormData) {
   'use server';
 
@@ -31,63 +31,24 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // attachments from client → normalize to real HTTP URLs
-  const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
-
-  let filesArr: Array<{ url: string; name?: string }> = [];
+  // Get files and milestones directly from form data - let the API handle processing
+  let files: any[] = [];
   try {
     const raw = String(formData.get('filesJson') ?? '[]');
-    const parsed = JSON.parse(raw);
-
-    const toHttp = (x: any) => {
-      if (!x) return null;
-
-      // string → url
-      if (typeof x === 'string') {
-        let u = x;
-        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-        if (u.startsWith('blob:')) return null;            // not fetchable by server
-        return /^https?:\/\//.test(u) ? { url: u } : null; // ensure http(s)
-      }
-
-      // object → url|href|cid|hash
-      let u: string | null =
-        (typeof x.url === 'string' && x.url) ||
-        (typeof x.href === 'string' && x.href) ||
-        (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
-        (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
-        null;
-
-      if (!u) return null;
-      if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-      if (u.startsWith('blob:')) return null;
-      if (!/^https?:\/\//.test(u)) return null;
-
-      return { url: String(u), name: x.name ? String(x.name) : undefined };
-    };
-
-    filesArr = Array.isArray(parsed)
-      ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
-      : [];
+    files = JSON.parse(raw);
   } catch {}
 
-  // SINGLE file for Agent2 (normal-bid parity)
-  const doc: { url: string; name?: string } | null = filesArr[0] ?? null;
-
-  // milestones from client
   let milestones: any[] = [];
   try {
     const raw = String(formData.get('milestonesJson') ?? '[]');
-    const parsed = JSON.parse(raw);
-    milestones = Array.isArray(parsed) ? parsed : [];
+    milestones = JSON.parse(raw);
   } catch {}
 
-  // slug or numeric template id
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  // create the bid with docs & a single doc (normal-bid shape)
+  // 🚀 Send raw files - let createBidFromTemplate handle the processing
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -95,25 +56,11 @@ async function startFromTemplate(formData: FormData) {
     walletAddress,
     preferredStablecoin,
     milestones,
-    files: filesArr,
-    docs: filesArr,
-    doc,
+    files, // Send the raw file objects from FileUploader
+    docs: files, // Also send as docs for compatibility
   });
 
-  // Immediately trigger analysis with the exact file (mirrors normal bids)
-  try {
-    if (doc?.url) {
-      await fetch(`${API_BASE}/bids/${encodeURIComponent(String(res.bidId))}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        cache: 'no-store',
-        body: JSON.stringify({ doc }),
-      });
-    }
-  } catch { /* ignore and continue */ }
-
-  // Land on vendor bid detail and auto-open Agent2
+  // 🎯 Land on vendor bid detail and auto-open Agent2 (same UX as normal bid)
   redirect(`/vendor/bids/${res.bidId}?flash=agent2`);
 }
 
