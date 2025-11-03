@@ -703,11 +703,6 @@ function MilestoneRowDisplay({
         <div className="text-sm text-gray-600">
           Amount: ${Number(m.amount).toLocaleString()} · Due: {dateDisplay(m.dueDate)}
         </div>
-        {m.description && (
-          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">
-            {m.description}
-          </p>
-        )}
       </div>
       {canEdit && (
         <button
@@ -734,22 +729,18 @@ function MilestoneRowEditor({
   onCancel: ()=>void;
 }) {
   const [name, setName] = useState<string>(value?.name || `Milestone ${index + 1}`);
-  // ↓ no visible default "0" in the input; keep it blank until vendor types
-  const [amount, setAmount] = useState<string>(
-    typeof value?.amount === 'number' ? String(value.amount) : ''
-  );
+  const [amount, setAmount] = useState<string>(String(value?.amount ?? '0'));
   const [due, setDue] = useState<string>(toDateInput(value?.dueDate));
   const [completed, setCompleted] = useState<boolean>(!!value?.completed);
-  const [desc, setDesc] = useState<string>(value?.description || ''); // ← vendor-written description
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    // amount: allow blank → 0, otherwise must be a non-negative number
-    const amt = amount === '' ? 0 : Number(amount);
+    // Validate
+    const amt = Number(amount);
     if (!Number.isFinite(amt) || amt < 0) { alert('Amount must be a non-negative number'); return; }
     if (!due) { alert('Due date is required'); return; }
 
-    // Build new milestones array (persist description)
+    // Build new milestones array
     const next = all.map((m, i) => i === index
       ? {
           ...m,
@@ -757,13 +748,13 @@ function MilestoneRowEditor({
           amount: amt,
           dueDate: new Date(due).toISOString(),
           completed,
-          description: desc, // ← persists for Admin + Agent2
         }
       : m
     );
 
     setSaving(true);
     try {
+      // Persist via dedicated endpoint
       const updated = await api.updateBidMilestones(bidId, next);
       onDone(updated);
     } catch (e:any) {
@@ -794,7 +785,6 @@ function MilestoneRowEditor({
           onChange={(e) => setAmount(e.target.value)}
           min={0}
           step="0.01"
-          placeholder="0.00" // ← hint only, no default "0"
         />
       </div>
 
@@ -818,21 +808,8 @@ function MilestoneRowEditor({
         />
       </div>
 
-      {/* NEW: vendor-written description (visible to Admin & Agent2 once saved) */}
-      <div className="sm:col-span-2">
-        <label className="text-sm text-gray-600 block">Description</label>
-        <textarea
-          className="mt-1 w-full border rounded px-2 py-1 text-sm whitespace-pre-wrap"
-          rows={3}
-          value={desc}
-          onChange={(e)=>setDesc(e.target.value)}
-          placeholder="Describe what will be done in this milestone…"
-        />
-      </div>
-
       <div className="sm:col-span-2 flex gap-2">
         <button
-          type="button"
           className="px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50"
           onClick={save}
           disabled={saving}
@@ -840,7 +817,6 @@ function MilestoneRowEditor({
           {saving ? 'Saving…' : 'Save milestone'}
         </button>
         <button
-          type="button"
           className="px-3 py-1.5 rounded bg-slate-200"
           onClick={onCancel}
           disabled={saving}
