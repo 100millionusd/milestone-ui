@@ -1651,7 +1651,7 @@ export async function createBidFromTemplate(input: {
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
   files?: FileInput[];
-  docs?: FileInput[]; // optional, we’ll also mirror files into docs
+  docs?: FileInput[]; // optional, we'll also mirror files into docs
   milestones?: Array<{
     name: string;
     amount: number;
@@ -1663,28 +1663,36 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  // Turn any File / {file: File} / string / {url} into {url,name}
+  // Improved file processing - handle already-uploaded IPFS URLs
   const toUrlEntry = async (f: FileInput | any) => {
     if (!f) return null;
 
-    // string → {url}
-    if (typeof f === 'string') return { url: f };
-
-    // { url, name }
-    if (typeof f.url === 'string') {
-      return { url: String(f.url), name: f.name ? String(f.name) : undefined };
+    // If it's already a URL object with http/https URL, use it as-is
+    if (typeof f === 'object' && f.url && typeof f.url === 'string' && f.url.startsWith('http')) {
+      return { url: f.url, name: f.name };
     }
 
-    // { file: File }
+    // If it's a string URL (http/https), use it as-is
+    if (typeof f === 'string' && f.startsWith('http')) {
+      return { url: f };
+    }
+
+    // Only upload to IPFS if it's an actual File object
+    if (typeof File !== 'undefined' && f instanceof File) {
+      const r = await uploadFileToIPFS(f);
+      return { url: r.url, name: f.name };
+    }
+
+    // Handle { file: File } pattern
     if (typeof f.file !== 'undefined' && typeof File !== 'undefined' && f.file instanceof File) {
       const r = await uploadFileToIPFS(f.file);
       return { url: r.url, name: f.name || f.file.name };
     }
 
-    // File
-    if (typeof File !== 'undefined' && f instanceof File) {
-      const r = await uploadFileToIPFS(f);
-      return { url: r.url, name: f.name || f.name === '' ? f.name : f.name };
+    // For IPFS URLs that might be in different formats, convert to HTTP
+    if (typeof f === 'string' && f.startsWith('ipfs://')) {
+      const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+      return { url: `${GW}/${f.slice('ipfs://'.length)}` };
     }
 
     return null;
@@ -1714,6 +1722,16 @@ export async function createBidFromTemplate(input: {
     milestones,
     ...(doc ? { doc } : {}),
   };
+
+  console.log('Creating bid from template with payload:', {
+    templateId: input.templateId,
+    slug: input.slug,
+    proposalId: input.proposalId,
+    filesCount: files.length,
+    docsCount: docs.length,
+    doc: doc ? 'yes' : 'no',
+    milestonesCount: milestones.length
+  });
 
   return postJSON(`/bids/from-template`, payload);
 }
