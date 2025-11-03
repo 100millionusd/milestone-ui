@@ -1683,7 +1683,6 @@ export async function createBidFromTemplate(input: {
     : [];
 
   // 🚀 CRITICAL: Match NORMAL BID structure EXACTLY
-  // Normal bids use: doc (single object) + docs (array) + files (array)
   const doc = input.doc || files[0] || docs[0] || null;
   const docsArray = docs.length ? docs : (files.length ? files : []);
   
@@ -1709,16 +1708,20 @@ export async function createBidFromTemplate(input: {
     files: docsArray,          // ALSO send as files for Agent2 compatibility
   };
 
-  console.log('📤 Sending to /bids/from-template (NORMAL BID STRUCTURE):', {
+  console.log('📤 DEBUG - Payload sent to /bids/from-template:', {
     templateId: input.templateId,
     proposalId: input.proposalId,
-    doc: normalizedDoc ? `yes (${normalizedDoc.url})` : 'no',
-    docsCount: docsArray.length,
-    filesCount: docsArray.length,
+    doc: normalizedDoc,
+    docs: docsArray,
+    files: docsArray,
     milestonesCount: milestones.length
   });
 
-  return postJSON(`/bids/from-template`, payload);
+  const result = await postJSON(`/bids/from-template`, payload);
+  
+  console.log('📥 DEBUG - Response from /bids/from-template:', result);
+  
+  return result;
 }
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
