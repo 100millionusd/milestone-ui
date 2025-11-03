@@ -8,6 +8,7 @@ import {
   getTemplate,
   getVendorProfile,
   createBidFromTemplate,
+  API_BASE,
 } from '@/lib/api';
 import TemplateBidClient from './TemplateBidClient';
 
@@ -20,7 +21,7 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** ✅ Server action: parse filesJson/milestonesJson, send as BOTH files & docs, then auto-open Agent2 */
+/** ✅ Server action: normalize files, send BOTH files & docs, ensure single `doc`, trigger Agent2, redirect */
 async function startFromTemplate(formData: FormData) {
   'use server';
 
@@ -30,63 +31,63 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // attachments from client → expect [{url,name}] (but accept strings too)
-  // attachments from client → normalize to real HTTP URLs and pick a single `doc`
-const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+  // attachments from client → normalize to real HTTP URLs
+  const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 
-let filesArr: Array<{ url: string; name?: string }> = [];
-try {
-  const raw = String(formData.get('filesJson') ?? '[]');
-  const parsed = JSON.parse(raw);
+  let filesArr: Array<{ url: string; name?: string }> = [];
+  try {
+    const raw = String(formData.get('filesJson') ?? '[]');
+    const parsed = JSON.parse(raw);
 
-  const toHttp = (x: any) => {
-    if (!x) return null;
+    const toHttp = (x: any) => {
+      if (!x) return null;
 
-    // string → url
-    if (typeof x === 'string') {
-      let u = x;
+      // string → url
+      if (typeof x === 'string') {
+        let u = x;
+        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+        if (u.startsWith('blob:')) return null;            // not fetchable by server
+        return /^https?:\/\//.test(u) ? { url: u } : null; // ensure http(s)
+      }
+
+      // object → url|href|cid|hash
+      let u: string | null =
+        (typeof x.url === 'string' && x.url) ||
+        (typeof x.href === 'string' && x.href) ||
+        (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
+        (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
+        null;
+
+      if (!u) return null;
       if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-      if (u.startsWith('blob:')) return null;            // not fetchable by server
-      return /^https?:\/\//.test(u) ? { url: u } : null; // ensure http(s)
-    }
+      if (u.startsWith('blob:')) return null;
+      if (!/^https?:\/\//.test(u)) return null;
 
-    // object → url|href|cid|hash
-    let u: string | null =
-      (typeof x.url === 'string' && x.url) ||
-      (typeof x.href === 'string' && x.href) ||
-      (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
-      (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
-      null;
+      return { url: String(u), name: x.name ? String(x.name) : undefined };
+    };
 
-    if (!u) return null;
-    if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-    if (u.startsWith('blob:')) return null;
-    if (!/^https?:\/\//.test(u)) return null;
+    filesArr = Array.isArray(parsed)
+      ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
+      : [];
+  } catch {}
 
-    return { url: String(u), name: x.name ? String(x.name) : undefined };
-  };
+  // SINGLE file for Agent2 (normal-bid parity)
+  const doc: { url: string; name?: string } | null = filesArr[0] ?? null;
 
-  filesArr = Array.isArray(parsed)
-    ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
-    : [];
-} catch {}
+  // milestones from client
+  let milestones: any[] = [];
+  try {
+    const raw = String(formData.get('milestonesJson') ?? '[]');
+    const parsed = JSON.parse(raw);
+    milestones = Array.isArray(parsed) ? parsed : [];
+  } catch {}
 
-// SINGLE file for Agent2 (normal-bid parity)
-const doc = filesArr[0] ?? null;
+  // slug or numeric template id
+  const base = /^\d+$/.test(slugOrId)
+    ? { templateId: Number(slugOrId) }
+    : { slug: slugOrId };
 
-// milestones from client
-let milestones: any[] = [];
-try {
-  const raw = String(formData.get('milestonesJson') ?? '[]');
-  const parsed = JSON.parse(raw);
-  milestones = Array.isArray(parsed) ? parsed : [];
-} catch {}
-
-const base = /^\d+$/.test(slugOrId)
-  ? { templateId: Number(slugOrId) }
-  : { slug: slugOrId };
-
-  // 🚀 Send under BOTH keys so admin UI picks them up exactly like normal bids
+  // create the bid with docs & a single doc (normal-bid shape)
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -99,7 +100,20 @@ const base = /^\d+$/.test(slugOrId)
     doc,
   });
 
-  // 🎯 Land on vendor bid detail and auto-open Agent2 (same UX as normal bid)
+  // Immediately trigger analysis with the exact file (mirrors normal bids)
+  try {
+    if (doc?.url) {
+      await fetch(`${API_BASE}/bids/${encodeURIComponent(String(res.bidId))}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({ doc }),
+      });
+    }
+  } catch { /* ignore and continue */ }
+
+  // Land on vendor bid detail and auto-open Agent2
   redirect(`/vendor/bids/${res.bidId}?flash=agent2`);
 }
 
