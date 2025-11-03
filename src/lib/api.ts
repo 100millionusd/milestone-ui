@@ -1647,20 +1647,22 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  /** Accept strings or objects; we will normalize. */
   files?: FileInput[];
-  /** Also accept docs; we’ll send both keys so Admin UI sees them like normal bids. */
-  docs?: FileInput[];
+  docs?: FileInput[]; // optional, we’ll also mirror files into docs
   milestones?: Array<{
     name: string;
     amount: number;
     dueDate: string;           // ISO
     acceptance?: string[];
     archived?: boolean;
-    /** optional free text the vendor types for this milestone */
+    /** vendor free text typed in the UI */
     description?: string;
+    /** if backend/UI already used notes/desc, keep them too */
+    notes?: string;
+    desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
+  // normalize files/docs to {url,name}
   const normalize = (arr?: FileInput[]) =>
     Array.isArray(arr)
       ? arr
@@ -1675,7 +1677,21 @@ export async function createBidFromTemplate(input: {
   const files = normalize(input.files);
   const docs  = normalize(input.docs ?? input.files);
 
-  const payload = { ...input, files, docs };
+  // 🔑 Mirror the vendor's description into notes/desc so Admin & Agent2 see it
+  const milestones = Array.isArray(input.milestones)
+    ? input.milestones.map((m) => {
+        const text = m.description ?? m.notes ?? m.desc ?? '';
+        return {
+          ...m,
+          description: text,
+          notes: text,
+          desc: text,
+        };
+      })
+    : [];
+
+  const payload = { ...input, files, docs, milestones };
+
   return postJSON(`/bids/from-template`, payload);
 }
 
