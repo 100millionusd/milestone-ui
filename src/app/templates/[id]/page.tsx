@@ -86,9 +86,6 @@ const base = /^\d+$/.test(slugOrId)
   ? { templateId: Number(slugOrId) }
   : { slug: slugOrId };
 
-  const doc = filesArr[0] ?? null;
-
-
   // 🚀 Send under BOTH keys so admin UI picks them up exactly like normal bids
   const res = await createBidFromTemplate({
     ...base,
