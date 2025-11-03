@@ -68,7 +68,7 @@ async function startFromTemplate(formData: FormData) {
   });
 
   // 🎯 Land on vendor bid detail and auto-open Agent2 (same UX as normal bid)
-  redirect(`/vendor/bids/${res.bidId}?autoAnalyze=1`);
+  redirect(`/vendor/bids/${res.bidId}?flash=agent2`);
 }
 
 export default async function TemplateDetailPage({ params, searchParams }: Props) {
