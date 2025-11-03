@@ -21,7 +21,7 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** ✅ Server action: match NORMAL BID flow exactly */
+/** ✅ Server action: match NORMAL BID flow exactly (send only {url,name}) */
 async function startFromTemplate(formData: FormData) {
   'use server';
 
@@ -31,30 +31,51 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // Get files - ensure they have proper structure for Agent2
-  let filesArr: Array<{ url: string; name?: string; mimetype?: string; size?: number }> = [];
+  // ---- Files: normalize to real HTTP URLs and STRIP size/mimetype (Agent2 expects only {url,name})
+  const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+
+  let docsClean: Array<{ url: string; name?: string }> = [];
   try {
     const raw = String(formData.get('filesJson') ?? '[]');
-    const parsed = JSON.parse(raw);
-    
-    // Normalize file objects for Agent2 compatibility
-    filesArr = (Array.isArray(parsed) ? parsed : []).map(file => ({
-      url: file.url || file.href || '',
-      name: file.name || 'document',
-      mimetype: file.mimetype || file.type || 'application/pdf',
-      size: file.size || 0
-    }));
+    const parsed: any[] = Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
 
-    console.log('🔍 DEBUG - Files being sent to createBidFromTemplate:', {
-      filesCount: filesArr.length,
-      firstFile: filesArr[0],
-      allFiles: filesArr
-    });
-  } catch (error) {
-    console.error('❌ Error parsing filesJson:', error);
+    const toHttp = (x: any) => {
+      if (!x) return null;
+
+      // strings
+      if (typeof x === 'string') {
+        let u = x;
+        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+        if (u.startsWith('blob:')) return null;                 // not fetchable by server
+        if (!/^https?:\/\//.test(u)) return null;
+        return { url: u };
+      }
+
+      // objects
+      let u: string | null =
+        (typeof x.url === 'string' && x.url) ||
+        (typeof x.href === 'string' && x.href) ||
+        (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
+        (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
+        null;
+
+      if (!u) return null;
+      if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+      if (u.startsWith('blob:')) return null;
+      if (!/^https?:\/\//.test(u)) return null;
+
+      return { url: String(u), name: x.name ? String(x.name) : undefined };
+    };
+
+    docsClean = parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>;
+  } catch {
+    docsClean = [];
   }
 
-  // Get milestones
+  // Single doc for Agent2 parity with normal bids
+  const doc = docsClean[0] ?? null;
+
+  // ---- Milestones
   let milestones: any[] = [];
   try {
     const raw = String(formData.get('milestonesJson') ?? '[]');
@@ -62,19 +83,12 @@ async function startFromTemplate(formData: FormData) {
     milestones = Array.isArray(parsed) ? parsed : [];
   } catch {}
 
+  // ---- Template slug/id base
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  console.log('🔄 Server action creating template bid:', {
-    slugOrId,
-    proposalId,
-    vendorName,
-    filesCount: filesArr.length,
-    fileStructure: filesArr[0]
-  });
-
-  // 🚀 Create bid using EXACT NORMAL BID structure
+  // 🚀 Create bid using EXACT normal-bid shape (no size/mimetype on files)
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -82,35 +96,28 @@ async function startFromTemplate(formData: FormData) {
     walletAddress,
     preferredStablecoin,
     milestones,
-    files: filesArr,
-    docs: filesArr,
-    doc: filesArr[0] || null, // Single doc for Agent2
+    files: docsClean,
+    docs: docsClean,
+    doc, // only {url,name}
   });
 
-  const bidId = Number(res?.bidId);
+  const bidId = Number((res as any)?.bidId);
   if (!bidId) {
-    console.error('❌ Template bid creation failed:', res);
     redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
   }
 
-  console.log('✅ Template bid created:', bidId);
-
-  // 🎯 DEBUG: Let's check what the created bid actually has
+  // Optional: quick debug of what was persisted (safe to keep or remove)
   try {
     const createdBid = await getBid(bidId);
-    console.log('🔍 DEBUG - Created bid structure:', {
+    console.log('[TEMPLATE CREATE DEBUG]', {
       bidId,
-      hasDoc: !!createdBid.doc,
-      hasDocs: Array.isArray(createdBid.docs) ? createdBid.docs.length : 0,
-      hasFiles: Array.isArray(createdBid.files) ? createdBid.files.length : 0,
-      docStructure: createdBid.doc,
-      docsStructure: createdBid.docs?.[0],
-      filesStructure: createdBid.files?.[0]
+      hasDoc: !!createdBid?.doc?.url,
+      docs0: createdBid?.docs?.[0],
+      files0: createdBid?.files?.[0],
     });
-  } catch (error) {
-    console.error('❌ Error checking created bid:', error);
-  }
+  } catch {}
 
+  // Same UX as normal bids: open vendor page with Agent2
   redirect(`/vendor/bids/${bidId}?flash=agent2`);
 }
 
