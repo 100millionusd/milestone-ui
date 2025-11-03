@@ -28,9 +28,20 @@ export default function VendorBidDetailPage() {
     (async () => {
       try {
         // load bid
-        const b = await api.getBid(bidId);
-        setBid(b);
-        setStatus('ready');
+const raw = await api.getBid(bidId);
+
+const fromArray =
+  (Array.isArray(raw?.docs)  && raw.docs.find((d: any)  => d?.url)) ||
+  (Array.isArray(raw?.files) && raw.files.find((f: any) => f?.url)) ||
+  null;
+
+// If normal bid already has doc, keep it exactly as-is.
+// If template bid lacks doc but has docs/files, add a single doc.
+// Otherwise, leave raw untouched.
+const b = raw?.doc ? raw : (fromArray ? { ...raw, doc: fromArray } : raw);
+
+setBid(b);
+setStatus('ready');
       } catch (e: any) {
         setError(e?.message || 'Failed to load bid');
         setStatus('error');
