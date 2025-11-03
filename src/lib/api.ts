@@ -1637,7 +1637,11 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
+type FileInput =
+  | File
+  | string
+  | { url: string; name?: string; mimetype?: string; contentType?: string }
+  | { file: File; name?: string };
 
 export async function createBidFromTemplate(input: {
   templateId?: number;
@@ -1654,25 +1658,25 @@ export async function createBidFromTemplate(input: {
     dueDate: string;           // ISO
     acceptance?: string[];
     archived?: boolean;
-    /** vendor free text typed in the UI */
-    description?: string;
-    /** if backend/UI already used notes/desc, keep them too */
+    description?: string;      // vendor free text
     notes?: string;
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
   // Turn any File / {file: File} / string / {url} into {url,name}
   const toUrlEntry = async (f: FileInput | any) => {
+    if (!f) return null;
+
     // string → {url}
     if (typeof f === 'string') return { url: f };
 
     // { url, name }
-    if (f && typeof f.url === 'string') {
+    if (typeof f.url === 'string') {
       return { url: String(f.url), name: f.name ? String(f.name) : undefined };
     }
 
     // { file: File }
-    if (f && typeof f.file !== 'undefined' && typeof File !== 'undefined' && f.file instanceof File) {
+    if (typeof f.file !== 'undefined' && typeof File !== 'undefined' && f.file instanceof File) {
       const r = await uploadFileToIPFS(f.file);
       return { url: r.url, name: f.name || f.file.name };
     }
@@ -1680,10 +1684,10 @@ export async function createBidFromTemplate(input: {
     // File
     if (typeof File !== 'undefined' && f instanceof File) {
       const r = await uploadFileToIPFS(f);
-      return { url: r.url, name: f.name };
+      return { url: r.url, name: f.name || f.name === '' ? f.name : f.name };
     }
 
-    return null; // ignore unknown shapes
+    return null;
   };
 
   const rawFiles = Array.isArray(input.files) ? input.files : [];
