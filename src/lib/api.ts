@@ -1614,45 +1614,10 @@ export function testConnection() {
   return apiFetch("/test");
 }
 
-// === Templates (marketplace) ===
-export type TemplateSummary = {
-  id: number;
-  slug: string;
-  title: string;
-  locale?: string | null;
-  category?: string | null;
-  summary?: string | null;
-  default_currency?: string | null;
-  milestones: number;
-};
-
-export type TemplateDetail = TemplateSummary & {
-  milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
-};
-
-export async function getTemplates(): Promise<TemplateSummary[]> {
-  return apiFetch<TemplateSummary[]>(`/templates`);
-}
-
-export async function getTemplate(idOrSlug: number | string): Promise<TemplateDetail> {
-  return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
-}
-
-// ---------- Bid creation from template ----------
+// Keep the same FileInput type you already have above:
 type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
 
-function normalizeUploads(arr?: FileInput[]) {
-  return Array.isArray(arr)
-    ? arr
-        .map((f) => (typeof f === 'string' ? { url: f } : f))
-        .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
-        .map((f: any) => ({
-          url: String(f.url),
-          name: f.name ? String(f.name) : (String(f.url).split('/').pop() || 'file'),
-        }))
-    : [];
-}
-
+// === Templates (marketplace) ===
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1660,41 +1625,52 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  /** Accept strings or objects; we will normalize. */
+  /** Accept strings or objects; we will normalize to BOTH shapes. */
   files?: FileInput[];
   /** Also accept docs; we’ll send both keys so Admin UI sees them like normal bids. */
   docs?: FileInput[];
   milestones?: Array<{
     name: string;
-    amount?: number;       // vendor may leave empty
-    dueDate?: string;      // ISO
+    amount: number;
+    dueDate: string;           // ISO
     acceptance?: string[];
     archived?: boolean;
-    /** free text vendor types for this milestone */
     description?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  const files = normalizeUploads(input.files);
-  const docs  = normalizeUploads(input.docs ?? input.files);
+  // Convert to url string
+  const toUrl = (f: FileInput) =>
+    typeof f === 'string' ? f : String((f as any)?.url || '');
 
-  // Normalize milestones and PRESERVE description
-  const milestones = Array.isArray(input.milestones)
-    ? input.milestones.map((m) => ({
-        name: String(m?.name ?? ''),
-        description: typeof m?.description === 'string' ? m.description : '',
-        amount: typeof m?.amount === 'number' ? m.amount : undefined,
-        dueDate: m?.dueDate ? new Date(m.dueDate).toISOString() : undefined,
-        acceptance: Array.isArray(m?.acceptance) ? m.acceptance : [],
-        archived: !!m?.archived,
-      }))
+  // Convert to {url,name} object
+  const toObj = (f: FileInput) => {
+    if (typeof f === 'string') return { url: f };
+    const url = String((f as any)?.url || '');
+    const name = (f as any)?.name ? String((f as any).name) : undefined;
+    return url ? { url, name } : null;
+  };
+
+  // Always send `files` as string[] (legacy/expected by Admin list)
+  const filesStrings: string[] = Array.isArray(input.files)
+    ? input.files.map(toUrl).filter(Boolean)
     : [];
 
-  return postJSON(`/bids/from-template`, {
+  // Also send `docs` as objects (nice names in some views); fallback to files if docs not provided
+  const docsObjects: Array<{ url: string; name?: string }> =
+    Array.isArray(input.docs ?? input.files)
+      ? (input.docs ?? input.files)
+          .map(toObj)
+          .filter((x): x is { url: string; name?: string } => !!x && !!x.url)
+      : [];
+
+  // Keep everything else the same; do NOT drop fields
+  const payload = {
     ...input,
-    files,
-    docs,
-    milestones,
-  });
+    files: filesStrings,
+    docs: docsObjects,
+  };
+
+  return postJSON(`/bids/from-template`, payload);
 }
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
