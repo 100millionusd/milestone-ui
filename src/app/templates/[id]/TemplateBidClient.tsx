@@ -8,8 +8,8 @@ import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizon
 import FileUploader from './FileUploader';
 
 type TemplateBidClientProps = {
-  slugOrId: string;
-  initialProposalId?: number;
+  slugOrId: string;                 // slug or numeric id as string
+  initialProposalId?: number;       // auto-filled from ?proposalId
   initialVendorName?: string;
   initialWallet?: string;
 };
@@ -30,7 +30,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
 
-  // Agent2 modal + flow state - KEEP THIS WORKING FLOW
+  // Agent2 modal + flow state
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -41,7 +41,6 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     () => step === 'submitting' || step === 'analyzing' || step === 'done',
     [step]
   );
-
   const buttonLabel = useMemo(() => {
     if (step === 'submitting') return 'Creating bid…';
     if (step === 'analyzing')  return 'Analyzing…';
@@ -65,14 +64,14 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (disableSubmit) return;
+    if (disableSubmit) return; // hard-guard against double clicks
 
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open with ?proposalId=<id> or fill the input.');
       return;
     }
 
-    // Read serialized inputs from the form
+    // Read serialized inputs from the form (hidden inputs produced by child widgets)
     const fd = new FormData(e.currentTarget);
 
     // milestonesJson (from TemplateRenovationHorizontal)
@@ -83,47 +82,13 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (Array.isArray(arr)) milestones = arr;
     } catch {}
 
-    // filesJson (from FileUploader) - PROCESS FILES LIKE SERVER ACTION DOES
-    let filesArr: Array<{ url: string; name?: string }> = [];
+    // filesJson (from FileUploader)
+    let files: Array<string | { url: string; name?: string }> = [];
     try {
       const raw = String(fd.get('filesJson') || '[]');
-      const parsed = JSON.parse(raw);
-      
-      const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
-      
-      const toHttp = (x: any) => {
-        if (!x) return null;
-
-        // string → url
-        if (typeof x === 'string') {
-          let u = x;
-          if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-          if (u.startsWith('blob:')) return null;
-          return /^https?:\/\//.test(u) ? { url: u } : null;
-        }
-
-        // object → url|href|cid|hash
-        let u: string | null =
-          (typeof x.url === 'string' && x.url) ||
-          (typeof x.href === 'string' && x.href) ||
-          (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
-          (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
-          null;
-
-        if (!u) return null;
-        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-        if (u.startsWith('blob:')) return null;
-        if (!/^https?:\/\//.test(u)) return null;
-
-        return { url: String(u), name: x.name ? String(x.name) : undefined };
-      };
-
-      filesArr = Array.isArray(parsed)
-        ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
-        : [];
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) files = arr;
     } catch {}
-
-    const doc = filesArr[0] ?? null;
 
     // Show Agent2 modal immediately (match normal-bid UX)
     setOpen(true);
@@ -135,7 +100,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     try {
       const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
 
-      // 1) Create bid from template WITH PROPERLY PROCESSED FILES
+      // 1) Create bid from template
       const res = await createBidFromTemplate({
         ...base,
         proposalId,
@@ -143,16 +108,14 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         walletAddress,
         preferredStablecoin,
         milestones,
-        files: filesArr,      // Use processed files array
-        docs: filesArr,       // Also send as docs for compatibility
-        doc,                  // And single doc field
+        files,
       });
 
       const bidId = Number(res?.bidId);
       if (!bidId) throw new Error('Failed to create bid (no id)');
       setBidIdForModal(bidId);
 
-      // 2) Trigger + poll Agent2 analysis - KEEP THIS WORKING FLOW
+      // 2) Trigger + poll Agent2 analysis
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
       try { await analyzeBid(bidId); } catch {}
@@ -160,21 +123,21 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       const found = await pollAnalysis(bidId);
       if (found) {
         setAnalysis(found);
-        setStep('done');
+        setStep('done');               // ← keeps the button disabled permanently
         setMessage('Analysis complete.');
       } else {
-        setStep('done');
+        setStep('done');               // ← keeps the button disabled permanently
         setMessage('Analysis will appear shortly.');
       }
     } catch (err: any) {
-      setStep('error');
+      setStep('error');                // ← button becomes clickable again to retry
       setMessage(err?.message || 'Failed to submit bid from template');
     }
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
-      {/* Vendor basics */}
+      {/* Vendor basics — horizontal row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <label className="text-sm">
           <span className="block">Proposal ID</span>
@@ -229,22 +192,29 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </label>
       </div>
 
-      {/* Milestones and file uploader */}
+      {/* Horizontal scopes + milestones (no scrolling)
+         MUST render <input type="hidden" name="milestonesJson" ... />
+      */}
       <TemplateRenovationHorizontal milestonesInputName="milestonesJson" disabled={disableSubmit} />
-      <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
 
-      {/* Submit button */}
+      {/* File uploader MUST render <input type="hidden" name="filesJson" ... /> */}
+      <div className="pt-1">
+        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
+      </div>
+
+      {/* Submit under milestones */}
       <div className="flex justify-end">
         <button
           type="submit"
           disabled={disableSubmit}
+          aria-disabled={disableSubmit}
           className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {buttonLabel}
         </button>
       </div>
 
-      {/* Agent2 modal - KEEP THIS WORKING COMPONENT */}
+      {/* Agent2 modal (same UX as normal bids) */}
       <Agent2ProgressModal
         open={open}
         step={step === 'idle' ? 'submitting' : step}
