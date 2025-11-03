@@ -1615,7 +1615,6 @@ export function testConnection() {
 }
 
 // === Templates (marketplace) ===
-// === Templates (marketplace) ===
 export type TemplateSummary = {
   id: number;
   slug: string;
@@ -1626,6 +1625,7 @@ export type TemplateSummary = {
   default_currency?: string | null;
   milestones: number;
 };
+
 export type TemplateDetail = TemplateSummary & {
   milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
 };
@@ -1638,10 +1638,20 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-
-// === Templates (marketplace) ===
-
+// ---------- Bid creation from template ----------
 type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
+
+function normalizeUploads(arr?: FileInput[]) {
+  return Array.isArray(arr)
+    ? arr
+        .map((f) => (typeof f === 'string' ? { url: f } : f))
+        .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
+        .map((f: any) => ({
+          url: String(f.url),
+          name: f.name ? String(f.name) : (String(f.url).split('/').pop() || 'file'),
+        }))
+    : [];
+}
 
 export async function createBidFromTemplate(input: {
   templateId?: number;
@@ -1656,32 +1666,36 @@ export async function createBidFromTemplate(input: {
   docs?: FileInput[];
   milestones?: Array<{
     name: string;
-    amount: number;
-    dueDate: string;           // ISO
+    amount?: number;       // vendor may leave empty
+    dueDate?: string;      // ISO
     acceptance?: string[];
     archived?: boolean;
-    /** optional free text the vendor types for this milestone */
+    /** free text vendor types for this milestone */
     description?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  const normalize = (arr?: FileInput[]) =>
-    Array.isArray(arr)
-      ? arr
-          .map((f) => (typeof f === 'string' ? { url: f } : f))
-          .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
-          .map((f: any) => ({
-            url: String(f.url),
-            name: f.name ? String(f.name) : undefined,
-          }))
-      : [];
+  const files = normalizeUploads(input.files);
+  const docs  = normalizeUploads(input.docs ?? input.files);
 
-  const files = normalize(input.files);
-  const docs  = normalize(input.docs ?? input.files);
+  // Normalize milestones and PRESERVE description
+  const milestones = Array.isArray(input.milestones)
+    ? input.milestones.map((m) => ({
+        name: String(m?.name ?? ''),
+        description: typeof m?.description === 'string' ? m.description : '',
+        amount: typeof m?.amount === 'number' ? m.amount : undefined,
+        dueDate: m?.dueDate ? new Date(m.dueDate).toISOString() : undefined,
+        acceptance: Array.isArray(m?.acceptance) ? m.acceptance : [],
+        archived: !!m?.archived,
+      }))
+    : [];
 
-  const payload = { ...input, files, docs };
-  return postJSON(`/bids/from-template`, payload);
+  return postJSON(`/bids/from-template`, {
+    ...input,
+    files,
+    docs,
+    milestones,
+  });
 }
-
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
  * Exported for reuse by client components.
