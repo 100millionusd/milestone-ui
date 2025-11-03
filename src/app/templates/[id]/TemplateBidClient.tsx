@@ -3,7 +3,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { analyzeBid, getBid } from '@/lib/api';
+import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 import FileUploader from './FileUploader';
 
@@ -12,7 +12,6 @@ type TemplateBidClientProps = {
   initialProposalId?: number;
   initialVendorName?: string;
   initialWallet?: string;
-  startFromTemplateAction: (formData: FormData) => Promise<void>;
 };
 
 type Step = 'idle' | 'submitting' | 'analyzing' | 'done' | 'error';
@@ -24,14 +23,14 @@ function coerce(a: any) {
 }
 
 export default function TemplateBidClient(props: TemplateBidClientProps) {
-  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '', startFromTemplateAction } = props;
+  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '' } = props;
 
   const [proposalId, setProposalId] = useState(initialProposalId || 0);
   const [vendorName, setVendorName] = useState(initialVendorName);
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
 
-  // Agent2 modal + flow state
+  // Agent2 modal + flow state - KEEP THIS WORKING FLOW
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -73,29 +72,60 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       return;
     }
 
-    // Create FormData and manually append all fields
-    const formData = new FormData();
-    
-    // Add basic fields
-    formData.append('id', slugOrId);
-    formData.append('proposalId', proposalId.toString());
-    formData.append('vendorName', vendorName);
-    formData.append('walletAddress', walletAddress);
-    formData.append('preferredStablecoin', preferredStablecoin);
+    // Read serialized inputs from the form
+    const fd = new FormData(e.currentTarget);
 
-    // Get milestonesJson from the form
-    const milestonesInput = e.currentTarget.querySelector('input[name="milestonesJson"]') as HTMLInputElement;
-    if (milestonesInput?.value) {
-      formData.append('milestonesJson', milestonesInput.value);
-    }
+    // milestonesJson (from TemplateRenovationHorizontal)
+    let milestones: any[] = [];
+    try {
+      const raw = String(fd.get('milestonesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) milestones = arr;
+    } catch {}
 
-    // Get filesJson from the form  
-    const filesInput = e.currentTarget.querySelector('input[name="filesJson"]') as HTMLInputElement;
-    if (filesInput?.value) {
-      formData.append('filesJson', filesInput.value);
-    }
+    // filesJson (from FileUploader) - PROCESS FILES LIKE SERVER ACTION DOES
+    let filesArr: Array<{ url: string; name?: string }> = [];
+    try {
+      const raw = String(fd.get('filesJson') || '[]');
+      const parsed = JSON.parse(raw);
+      
+      const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+      
+      const toHttp = (x: any) => {
+        if (!x) return null;
 
-    // Show Agent2 modal immediately
+        // string → url
+        if (typeof x === 'string') {
+          let u = x;
+          if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+          if (u.startsWith('blob:')) return null;
+          return /^https?:\/\//.test(u) ? { url: u } : null;
+        }
+
+        // object → url|href|cid|hash
+        let u: string | null =
+          (typeof x.url === 'string' && x.url) ||
+          (typeof x.href === 'string' && x.href) ||
+          (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
+          (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
+          null;
+
+        if (!u) return null;
+        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+        if (u.startsWith('blob:')) return null;
+        if (!/^https?:\/\//.test(u)) return null;
+
+        return { url: String(u), name: x.name ? String(x.name) : undefined };
+      };
+
+      filesArr = Array.isArray(parsed)
+        ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
+        : [];
+    } catch {}
+
+    const doc = filesArr[0] ?? null;
+
+    // Show Agent2 modal immediately (match normal-bid UX)
     setOpen(true);
     setStep('submitting');
     setMessage(null);
@@ -103,12 +133,39 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     setBidIdForModal(undefined);
 
     try {
-      // Use the server action instead of client-side API call
-      await startFromTemplateAction(formData);
-      
-      // If we reach here, the server action didn't redirect (which means it failed)
-      setStep('error');
-      setMessage('Failed to create bid from template');
+      const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
+
+      // 1) Create bid from template WITH PROPERLY PROCESSED FILES
+      const res = await createBidFromTemplate({
+        ...base,
+        proposalId,
+        vendorName,
+        walletAddress,
+        preferredStablecoin,
+        milestones,
+        files: filesArr,      // Use processed files array
+        docs: filesArr,       // Also send as docs for compatibility
+        doc,                  // And single doc field
+      });
+
+      const bidId = Number(res?.bidId);
+      if (!bidId) throw new Error('Failed to create bid (no id)');
+      setBidIdForModal(bidId);
+
+      // 2) Trigger + poll Agent2 analysis - KEEP THIS WORKING FLOW
+      setStep('analyzing');
+      setMessage('Agent2 is analyzing your bid…');
+      try { await analyzeBid(bidId); } catch {}
+
+      const found = await pollAnalysis(bidId);
+      if (found) {
+        setAnalysis(found);
+        setStep('done');
+        setMessage('Analysis complete.');
+      } else {
+        setStep('done');
+        setMessage('Analysis will appear shortly.');
+      }
     } catch (err: any) {
       setStep('error');
       setMessage(err?.message || 'Failed to submit bid from template');
@@ -117,10 +174,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
-      {/* Hidden input for template ID */}
-      <input type="hidden" name="id" value={slugOrId} />
-
-      {/* Vendor basics — horizontal row */}
+      {/* Vendor basics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <label className="text-sm">
           <span className="block">Proposal ID</span>
@@ -175,27 +229,22 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </label>
       </div>
 
-      {/* Horizontal scopes + milestones */}
+      {/* Milestones and file uploader */}
       <TemplateRenovationHorizontal milestonesInputName="milestonesJson" disabled={disableSubmit} />
+      <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
 
-      {/* File uploader */}
-      <div className="pt-1">
-        <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
-      </div>
-
-      {/* Submit under milestones */}
+      {/* Submit button */}
       <div className="flex justify-end">
         <button
           type="submit"
           disabled={disableSubmit}
-          aria-disabled={disableSubmit}
           className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {buttonLabel}
         </button>
       </div>
 
-      {/* Agent2 modal */}
+      {/* Agent2 modal - KEEP THIS WORKING COMPONENT */}
       <Agent2ProgressModal
         open={open}
         step={step === 'idle' ? 'submitting' : step}
