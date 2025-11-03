@@ -29,6 +29,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   const [vendorName, setVendorName] = useState(initialVendorName);
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
+  const [notes, setNotes] = useState(''); // 🆕 Add state for vendor notes
 
   // Agent2 modal + flow state
   const [open, setOpen] = useState(false);
@@ -90,6 +91,9 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (Array.isArray(arr)) files = arr;
     } catch {}
 
+    // 🆕 Get vendor notes from form data
+    const vendorNotes = String(fd.get('notes') || '');
+
     // Show Agent2 modal immediately (match normal-bid UX)
     setOpen(true);
     setStep('submitting');
@@ -100,7 +104,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     try {
       const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
 
-      // 1) Create bid from template
+      // 1) Create bid from template - ADD notes parameter
       const res = await createBidFromTemplate({
         ...base,
         proposalId,
@@ -109,6 +113,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         preferredStablecoin,
         milestones,
         files,
+        notes: vendorNotes, // 🆕 Pass vendor notes
       });
 
       const bidId = Number(res?.bidId);
@@ -190,6 +195,23 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
             disabled={disableSubmit}
           />
         </label>
+      </div>
+
+      {/* 🆕 ADD NOTES TEXTAREA */}
+      <div>
+        <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
+          Project Description & Notes
+        </label>
+        <textarea
+          id="notes"
+          name="notes"
+          rows={4}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Describe your approach, methodology, team experience, or any other relevant information for this project..."
+          disabled={disableSubmit}
+        />
       </div>
 
       {/* Horizontal scopes + milestones (no scrolling)
