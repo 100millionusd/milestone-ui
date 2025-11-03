@@ -1614,9 +1614,6 @@ export function testConnection() {
   return apiFetch("/test");
 }
 
-// Keep the same FileInput type you already have above:
-type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
-
 // === Templates (marketplace) ===
 export type TemplateSummary = {
   id: number;
@@ -1626,17 +1623,10 @@ export type TemplateSummary = {
   category?: string | null;
   summary?: string | null;
   default_currency?: string | null;
-  milestones: number; // count
+  milestones: number;
 };
-
 export type TemplateDetail = TemplateSummary & {
-  milestones: Array<{
-    idx: number;
-    name: string;
-    amount: number;
-    days_offset: number;
-    acceptance?: string[];
-  }>;
+  milestones: Array<{ idx: number; name: string; amount: number; days_offset: number; acceptance?: string[] }>;
 };
 
 export async function getTemplates(): Promise<TemplateSummary[]> {
@@ -1647,27 +1637,47 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-// Optional: admin create/update helper (prevents “postTemplate is not defined”)
-export type NewTemplateInput = {
-  slug: string;
-  title: string;
-  locale?: string | null;
-  category?: string | null;
-  summary?: string | null;
-  default_currency?: string | null;
-  milestones: Array<{
-    idx: number;
+
+type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
+
+export async function createBidFromTemplate(input: {
+  templateId?: number;
+  slug?: string;
+  proposalId: number;
+  vendorName: string;
+  walletAddress: string;
+  preferredStablecoin?: 'USDT' | 'USDC';
+  /** Accept strings or objects; we will normalize. */
+  files?: FileInput[];
+  /** Also accept docs; we’ll send both keys so Admin UI sees them like normal bids. */
+  docs?: FileInput[];
+  milestones?: Array<{
     name: string;
     amount: number;
-    days_offset: number;
+    dueDate: string;           // ISO
     acceptance?: string[];
+    archived?: boolean;
+    /** optional free text the vendor types for this milestone */
+    description?: string;
   }>;
-};
+}): Promise<{ ok: boolean; bidId: number }> {
+  const normalize = (arr?: FileInput[]) =>
+    Array.isArray(arr)
+      ? arr
+          .map((f) => (typeof f === 'string' ? { url: f } : f))
+          .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
+          .map((f: any) => ({
+            url: String(f.url),
+            name: f.name ? String(f.name) : undefined,
+          }))
+      : [];
 
-export async function postTemplate(body: NewTemplateInput) {
-  return postJSON(`/templates`, body);
+  const files = normalize(input.files);
+  const docs  = normalize(input.docs ?? input.files);
+
+  const payload = { ...input, files, docs };
+  return postJSON(`/bids/from-template`, payload);
 }
-
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
  * Exported for reuse by client components.
