@@ -1637,9 +1637,6 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
   return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
 }
 
-
-type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
-
 type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
 
 export async function createBidFromTemplate(input: {
@@ -1664,43 +1661,54 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  // normalize files/docs to {url,name}
-  const normalize = (arr?: FileInput[]) =>
-    Array.isArray(arr)
-      ? arr
-          .map((f) => (typeof f === 'string' ? { url: f } : f))
-          .filter((f: any) => f && typeof f.url === 'string' && f.url.length > 0)
-          .map((f: any) => ({
-            url: String(f.url),
-            name: f.name ? String(f.name) : undefined,
-          }))
-      : [];
+  // Turn any File / {file: File} / string / {url} into {url,name}
+  const toUrlEntry = async (f: FileInput | any) => {
+    // string → {url}
+    if (typeof f === 'string') return { url: f };
 
-  const files = normalize(input.files);
-  const docs  = normalize(input.docs ?? input.files);
+    // { url, name }
+    if (f && typeof f.url === 'string') {
+      return { url: String(f.url), name: f.name ? String(f.name) : undefined };
+    }
 
-  // 🔑 Mirror the vendor's description into notes/desc so Admin & Agent2 see it
+    // { file: File }
+    if (f && typeof f.file !== 'undefined' && typeof File !== 'undefined' && f.file instanceof File) {
+      const r = await uploadFileToIPFS(f.file);
+      return { url: r.url, name: f.name || f.file.name };
+    }
+
+    // File
+    if (typeof File !== 'undefined' && f instanceof File) {
+      const r = await uploadFileToIPFS(f);
+      return { url: r.url, name: f.name };
+    }
+
+    return null; // ignore unknown shapes
+  };
+
+  const rawFiles = Array.isArray(input.files) ? input.files : [];
+  const rawDocs  = Array.isArray(input.docs)  ? input.docs  : (input.files ?? []);
+
+  const files = (await Promise.all(rawFiles.map(toUrlEntry))).filter(Boolean) as Array<{url:string; name?:string}>;
+  const docs  = (await Promise.all(rawDocs .map(toUrlEntry))).filter(Boolean) as Array<{url:string; name?:string}>;
+
+  // Normalize milestone description → notes/desc (Admin & Agent2)
   const milestones = Array.isArray(input.milestones)
     ? input.milestones.map((m) => {
         const text = m.description ?? m.notes ?? m.desc ?? '';
-        return {
-          ...m,
-          description: text,
-          notes: text,
-          desc: text,
-        };
+        return { ...m, description: text, notes: text, desc: text };
       })
     : [];
 
-  // 🔑 Legacy single-file key for Agent2/legacy parsers
-  const doc = files[0] ?? docs[0];
+  // Legacy single-file shortcut for Agent2/legacy parser
+  const doc = files[0] ?? docs[0] ?? null;
 
   const payload = {
     ...input,
     files,
-    docs,
+    docs: docs.length ? docs : files,
     milestones,
-    ...(doc ? { doc } : {}), // include only if present
+    ...(doc ? { doc } : {}),
   };
 
   return postJSON(`/bids/from-template`, payload);

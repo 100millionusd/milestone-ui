@@ -9,6 +9,11 @@ import { API_BASE } from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
 import BidChatAgent from '@/components/BidChatAgent';
 
+/* ——— Template/Normal compatibility helpers ——— */
+const getMilestoneDescription = (m: any) => m?.notes ?? m?.desc ?? m?.description ?? '';
+const getDisplayFiles = (bid: any) =>
+  (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
+
 export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const routeParams = useParams();
   const bidId = Number((props.params as any)?.id ?? (routeParams as any)?.id);
@@ -270,6 +275,31 @@ setProofs(prev => {
             <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
           </div>
         </div>
+        {/* Attachments (bid.files || bid.docs) */}
+{(() => {
+  const files =
+    (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
+  if (!files?.length) return null;
+  return (
+    <div className="mt-4">
+      <div className="text-sm text-gray-500 mb-1">Attachments</div>
+      <ul className="list-disc list-inside text-sm">
+        {files.map((f: any, i: number) => (
+          <li key={i}>
+            <a
+              className="text-blue-600 hover:underline"
+              href={f.url ?? f.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {f.name ?? f.filename ?? `File ${i + 1}`}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+})()}
 
         {/* Admin-only quick edits (non-milestone fields) */}
         {me.role === 'admin' && (
@@ -691,8 +721,10 @@ function MilestonesSection({
 function MilestoneRowDisplay({
   m, index, canEdit, onEdit,
 }: {
-  m: any; index: number; canEdit: boolean; onEdit: ()=>void;
+  m: any; index: number; canEdit: boolean; onEdit: () => void;
 }) {
+  const desc = m?.notes ?? m?.desc ?? m?.description ?? '';
+
   return (
     <div className="flex items-start justify-between gap-3">
       <div>
@@ -703,6 +735,11 @@ function MilestoneRowDisplay({
         <div className="text-sm text-gray-600">
           Amount: ${Number(m.amount).toLocaleString()} · Due: {dateDisplay(m.dueDate)}
         </div>
+        {desc && (
+          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">
+            {desc}
+          </p>
+        )}
       </div>
       {canEdit && (
         <button
@@ -717,6 +754,7 @@ function MilestoneRowDisplay({
     </div>
   );
 }
+
 
 function MilestoneRowEditor({
   bidId, index, value, all, onDone, onCancel,
