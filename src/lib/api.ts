@@ -1823,7 +1823,6 @@ export default {
   // templates
   getTemplates,
   getTemplate,
-  postTemplate,
   createBidFromTemplate,
   splitIntoPhases,
   buildMilestonesFromSelection,
