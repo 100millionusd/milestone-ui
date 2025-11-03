@@ -31,7 +31,7 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // ---- Files: normalize to real HTTP URLs and STRIP size/mimetype (Agent2 expects only {url,name})
+  // ---- Files: normalize to real HTTP URLs
   const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 
   let docsClean: Array<{ url: string; name?: string }> = [];
@@ -46,7 +46,7 @@ async function startFromTemplate(formData: FormData) {
       if (typeof x === 'string') {
         let u = x;
         if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
-        if (u.startsWith('blob:')) return null;                 // not fetchable by server
+        if (u.startsWith('blob:')) return null;
         if (!/^https?:\/\//.test(u)) return null;
         return { url: u };
       }
@@ -88,7 +88,7 @@ async function startFromTemplate(formData: FormData) {
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  // 🚀 Create bid using EXACT normal-bid shape (no size/mimetype on files)
+  // Create bid using normal-bid shape
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -98,7 +98,7 @@ async function startFromTemplate(formData: FormData) {
     milestones,
     files: docsClean,
     docs: docsClean,
-    doc, // only {url,name}
+    doc,
   });
 
   const bidId = Number((res as any)?.bidId);
@@ -106,18 +106,7 @@ async function startFromTemplate(formData: FormData) {
     redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
   }
 
-  // Optional: quick debug of what was persisted (safe to keep or remove)
-  try {
-    const createdBid = await getBid(bidId);
-    console.log('[TEMPLATE CREATE DEBUG]', {
-      bidId,
-      hasDoc: !!createdBid?.doc?.url,
-      docs0: createdBid?.docs?.[0],
-      files0: createdBid?.files?.[0],
-    });
-  } catch {}
-
-  // Same UX as normal bids: open vendor page with Agent2
+  // Redirect to vendor bid page with Agent2
   redirect(`/vendor/bids/${bidId}?flash=agent2`);
 }
 
