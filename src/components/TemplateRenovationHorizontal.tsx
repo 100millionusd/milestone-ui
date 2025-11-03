@@ -84,7 +84,22 @@ export default function TemplateRenovationHorizontal({
     setMilestones((ms) => ms.map((m, i) => (i === idx ? { ...m, [key]: value } : m)));
   }
 
-  const json = useMemo(() => JSON.stringify(milestones), [milestones]);
+  // 🔧 Minimal fix: serialize description (and normalize dueDate to ISO).
+  const payload = useMemo(
+    () =>
+      milestones.map((m) => ({
+        name: String(m.name || '').trim(),
+        description: String(m.description || '').trim(),
+        // keep amount optional; omit if blank so no forced 0 in payload
+        ...(typeof m.amount === 'number' && Number.isFinite(m.amount) ? { amount: m.amount } : {}),
+        ...(m.dueDate ? { dueDate: new Date(m.dueDate).toISOString() } : {}),
+        ...(Array.isArray(m.acceptance) && m.acceptance.length ? { acceptance: m.acceptance } : {}),
+        ...(m.archived ? { archived: true } : {}),
+      })),
+    [milestones]
+  );
+
+  const json = useMemo(() => JSON.stringify(payload), [payload]);
 
   // === UI ===
   return (
