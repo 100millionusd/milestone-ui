@@ -67,7 +67,16 @@ export default function TemplateRenovationHorizontal({
     setMilestones(ms => ms.map((m, i) => (i === idx ? { ...m, [key]: value } : m)));
   }
 
-  const json = useMemo(() => JSON.stringify(milestones), [milestones]);
+  const json = useMemo(
+  () =>
+    JSON.stringify(
+      milestones.map((m) => {
+        const text = m.description ?? '';
+        return { ...m, description: text, notes: text, desc: text };
+      })
+    ),
+  [milestones]
+);
 
   return (
     <section className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
