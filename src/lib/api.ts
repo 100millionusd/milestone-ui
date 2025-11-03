@@ -1618,60 +1618,56 @@ export function testConnection() {
 type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
 
 // === Templates (marketplace) ===
-export async function createBidFromTemplate(input: {
-  templateId?: number;
-  slug?: string;
-  proposalId: number;
-  vendorName: string;
-  walletAddress: string;
-  preferredStablecoin?: 'USDT' | 'USDC';
-  /** Accept strings or objects; we will normalize to BOTH shapes. */
-  files?: FileInput[];
-  /** Also accept docs; we’ll send both keys so Admin UI sees them like normal bids. */
-  docs?: FileInput[];
-  milestones?: Array<{
+export type TemplateSummary = {
+  id: number;
+  slug: string;
+  title: string;
+  locale?: string | null;
+  category?: string | null;
+  summary?: string | null;
+  default_currency?: string | null;
+  milestones: number; // count
+};
+
+export type TemplateDetail = TemplateSummary & {
+  milestones: Array<{
+    idx: number;
     name: string;
     amount: number;
-    dueDate: string;           // ISO
+    days_offset: number;
     acceptance?: string[];
-    archived?: boolean;
-    description?: string;
   }>;
-}): Promise<{ ok: boolean; bidId: number }> {
-  // Convert to url string
-  const toUrl = (f: FileInput) =>
-    typeof f === 'string' ? f : String((f as any)?.url || '');
+};
 
-  // Convert to {url,name} object
-  const toObj = (f: FileInput) => {
-    if (typeof f === 'string') return { url: f };
-    const url = String((f as any)?.url || '');
-    const name = (f as any)?.name ? String((f as any).name) : undefined;
-    return url ? { url, name } : null;
-  };
-
-  // Always send `files` as string[] (legacy/expected by Admin list)
-  const filesStrings: string[] = Array.isArray(input.files)
-    ? input.files.map(toUrl).filter(Boolean)
-    : [];
-
-  // Also send `docs` as objects (nice names in some views); fallback to files if docs not provided
-  const docsObjects: Array<{ url: string; name?: string }> =
-    Array.isArray(input.docs ?? input.files)
-      ? (input.docs ?? input.files)
-          .map(toObj)
-          .filter((x): x is { url: string; name?: string } => !!x && !!x.url)
-      : [];
-
-  // Keep everything else the same; do NOT drop fields
-  const payload = {
-    ...input,
-    files: filesStrings,
-    docs: docsObjects,
-  };
-
-  return postJSON(`/bids/from-template`, payload);
+export async function getTemplates(): Promise<TemplateSummary[]> {
+  return apiFetch<TemplateSummary[]>(`/templates`);
 }
+
+export async function getTemplate(idOrSlug: number | string): Promise<TemplateDetail> {
+  return apiFetch<TemplateDetail>(`/templates/${encodeURIComponent(String(idOrSlug))}`);
+}
+
+// Optional: admin create/update helper (prevents “postTemplate is not defined”)
+export type NewTemplateInput = {
+  slug: string;
+  title: string;
+  locale?: string | null;
+  category?: string | null;
+  summary?: string | null;
+  default_currency?: string | null;
+  milestones: Array<{
+    idx: number;
+    name: string;
+    amount: number;
+    days_offset: number;
+    acceptance?: string[];
+  }>;
+};
+
+export async function postTemplate(body: NewTemplateInput) {
+  return postJSON(`/templates`, body);
+}
+
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
  * Exported for reuse by client components.
