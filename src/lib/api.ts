@@ -1640,6 +1640,8 @@ export async function getTemplate(idOrSlug: number | string): Promise<TemplateDe
 
 type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
 
+type FileInput = string | { url: string; name?: string; mimetype?: string; contentType?: string };
+
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1690,7 +1692,16 @@ export async function createBidFromTemplate(input: {
       })
     : [];
 
-  const payload = { ...input, files, docs, milestones };
+  // 🔑 Legacy single-file key for Agent2/legacy parsers
+  const doc = files[0] ?? docs[0];
+
+  const payload = {
+    ...input,
+    files,
+    docs,
+    milestones,
+    ...(doc ? { doc } : {}), // include only if present
+  };
 
   return postJSON(`/bids/from-template`, payload);
 }
