@@ -1650,86 +1650,61 @@ export async function createBidFromTemplate(input: {
   vendorName: string;
   walletAddress: string;
   preferredStablecoin?: 'USDT' | 'USDC';
-  files?: FileInput[];
-  docs?: FileInput[]; // optional, we'll also mirror files into docs
+  files?: any[];
+  docs?: any[];
   milestones?: Array<{
     name: string;
     amount: number;
-    dueDate: string;           // ISO
+    dueDate: string;
     acceptance?: string[];
     archived?: boolean;
-    description?: string;      // vendor free text
+    description?: string;
     notes?: string;
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  // Improved file processing - handle already-uploaded IPFS URLs
-  const toUrlEntry = async (f: FileInput | any) => {
-    if (!f) return null;
-
-    // If it's already a URL object with http/https URL, use it as-is
-    if (typeof f === 'object' && f.url && typeof f.url === 'string' && f.url.startsWith('http')) {
-      return { url: f.url, name: f.name };
-    }
-
-    // If it's a string URL (http/https), use it as-is
-    if (typeof f === 'string' && f.startsWith('http')) {
-      return { url: f };
-    }
-
-    // Only upload to IPFS if it's an actual File object
-    if (typeof File !== 'undefined' && f instanceof File) {
-      const r = await uploadFileToIPFS(f);
-      return { url: r.url, name: f.name };
-    }
-
-    // Handle { file: File } pattern
-    if (typeof f.file !== 'undefined' && typeof File !== 'undefined' && f.file instanceof File) {
-      const r = await uploadFileToIPFS(f.file);
-      return { url: r.url, name: f.name || f.file.name };
-    }
-
-    // For IPFS URLs that might be in different formats, convert to HTTP
-    if (typeof f === 'string' && f.startsWith('ipfs://')) {
-      const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
-      return { url: `${GW}/${f.slice('ipfs://'.length)}` };
-    }
-
-    return null;
-  };
-
-  const rawFiles = Array.isArray(input.files) ? input.files : [];
-  const rawDocs  = Array.isArray(input.docs)  ? input.docs  : (input.files ?? []);
-
-  const files = (await Promise.all(rawFiles.map(toUrlEntry))).filter(Boolean) as Array<{url:string; name?:string}>;
-  const docs  = (await Promise.all(rawDocs .map(toUrlEntry))).filter(Boolean) as Array<{url:string; name?:string}>;
-
+  
+  // Use the files as they are - they're already uploaded URLs
+  const files = Array.isArray(input.files) ? input.files : [];
+  const docs = Array.isArray(input.docs) ? input.docs : files;
+  
   // Normalize milestone description → notes/desc (Admin & Agent2)
   const milestones = Array.isArray(input.milestones)
     ? input.milestones.map((m) => {
         const text = m.description ?? m.notes ?? m.desc ?? '';
-        return { ...m, description: text, notes: text, desc: text };
+        return { 
+          ...m, 
+          description: text, 
+          notes: text, 
+          desc: text 
+        };
       })
     : [];
 
-  // Legacy single-file shortcut for Agent2/legacy parser
-  const doc = files[0] ?? docs[0] ?? null;
+  // 🚀 CRITICAL: Match normal bid structure exactly
+  const doc = files[0] || docs[0] || null; // Single doc for compatibility
+  const docsArray = docs.length ? docs : (files.length ? files : []);
 
   const payload = {
-    ...input,
-    files,
-    docs: docs.length ? docs : files,
-    milestones,
-    ...(doc ? { doc } : {}),
-  };
-
-  console.log('Creating bid from template with payload:', {
     templateId: input.templateId,
     slug: input.slug,
     proposalId: input.proposalId,
-    filesCount: files.length,
-    docsCount: docs.length,
+    vendorName: input.vendorName,
+    walletAddress: input.walletAddress,
+    preferredStablecoin: input.preferredStablecoin || 'USDT',
+    milestones,
+    // Match normal bid structure:
+    doc: doc, // Single document (like normal bids)
+    docs: docsArray, // Array of documents
+    files: [], // Leave empty to match normal bid behavior
+  };
+
+  console.log('📤 Sending to /bids/from-template (MATCHING NORMAL BID):', {
+    templateId: input.templateId,
+    proposalId: input.proposalId,
     doc: doc ? 'yes' : 'no',
+    docsCount: docsArray.length,
+    filesCount: 0, // Intentionally empty to match normal bids
     milestonesCount: milestones.length
   });
 
