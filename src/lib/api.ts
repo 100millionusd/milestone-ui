@@ -1652,6 +1652,7 @@ export async function createBidFromTemplate(input: {
   preferredStablecoin?: 'USDT' | 'USDC';
   files?: any[];
   docs?: any[];
+  doc?: any;
   milestones?: Array<{
     name: string;
     amount: number;
@@ -1681,9 +1682,18 @@ export async function createBidFromTemplate(input: {
       })
     : [];
 
-  // 🚀 CRITICAL: Match normal bid structure exactly
-  const doc = files[0] || docs[0] || null; // Single doc for compatibility
+  // 🚀 CRITICAL: Match NORMAL BID structure EXACTLY
+  // Normal bids use: doc (single object) + docs (array) + files (array)
+  const doc = input.doc || files[0] || docs[0] || null;
   const docsArray = docs.length ? docs : (files.length ? files : []);
+  
+  // Ensure doc has the structure Agent2 expects
+  const normalizedDoc = doc ? {
+    url: doc.url || doc.href || '',
+    name: doc.name || 'document',
+    mimetype: doc.mimetype || 'application/pdf',
+    size: doc.size || 0
+  } : null;
 
   const payload = {
     templateId: input.templateId,
@@ -1693,18 +1703,18 @@ export async function createBidFromTemplate(input: {
     walletAddress: input.walletAddress,
     preferredStablecoin: input.preferredStablecoin || 'USDT',
     milestones,
-    // Match normal bid structure:
-    doc: doc, // Single document (like normal bids)
-    docs: docsArray, // Array of documents
-    files: [], // Leave empty to match normal bid behavior
+    // 🎯 EXACTLY what normal bids send:
+    doc: normalizedDoc,        // Single document object
+    docs: docsArray,           // Array of documents
+    files: docsArray,          // ALSO send as files for Agent2 compatibility
   };
 
-  console.log('📤 Sending to /bids/from-template (MATCHING NORMAL BID):', {
+  console.log('📤 Sending to /bids/from-template (NORMAL BID STRUCTURE):', {
     templateId: input.templateId,
     proposalId: input.proposalId,
-    doc: doc ? 'yes' : 'no',
+    doc: normalizedDoc ? `yes (${normalizedDoc.url})` : 'no',
     docsCount: docsArray.length,
-    filesCount: 0, // Intentionally empty to match normal bids
+    filesCount: docsArray.length,
     milestonesCount: milestones.length
   });
 

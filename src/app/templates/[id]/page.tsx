@@ -22,6 +22,7 @@ function toNumber(v?: string | string[]) {
 }
 
 /** ✅ Server action: match NORMAL BID flow exactly */
+/** ✅ Server action: match NORMAL BID flow exactly */
 async function startFromTemplate(formData: FormData) {
   'use server';
 
@@ -31,12 +32,19 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // Get files - use as-is (already uploaded URLs)
-  let filesArr: Array<{ url: string; name?: string }> = [];
+  // Get files - ensure they have proper structure for Agent2
+  let filesArr: Array<{ url: string; name?: string; mimetype?: string; size?: number }> = [];
   try {
     const raw = String(formData.get('filesJson') ?? '[]');
     const parsed = JSON.parse(raw);
-    filesArr = Array.isArray(parsed) ? parsed : [];
+    
+    // Normalize file objects for Agent2 compatibility
+    filesArr = (Array.isArray(parsed) ? parsed : []).map(file => ({
+      url: file.url || file.href || '',
+      name: file.name || 'document',
+      mimetype: file.mimetype || 'application/pdf',
+      size: file.size || 0
+    }));
   } catch {}
 
   // Get milestones
@@ -56,10 +64,10 @@ async function startFromTemplate(formData: FormData) {
     proposalId,
     vendorName,
     filesCount: filesArr.length,
-    milestonesCount: milestones.length
+    fileStructure: filesArr[0] // Log first file structure
   });
 
-  // 🚀 Create bid using NORMAL BID structure
+  // 🚀 Create bid using EXACT NORMAL BID structure
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -68,7 +76,8 @@ async function startFromTemplate(formData: FormData) {
     preferredStablecoin,
     milestones,
     files: filesArr,
-    docs: filesArr, // Also send as docs for compatibility
+    docs: filesArr,
+    doc: filesArr[0] || null, // Single doc for Agent2
   });
 
   const bidId = Number(res?.bidId);
@@ -77,10 +86,7 @@ async function startFromTemplate(formData: FormData) {
     redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
   }
 
-  console.log('✅ Template bid created:', bidId);
-
-  // 🎯 CRITICAL: Use NORMAL BID flow - let Agent2 handle analysis naturally
-  // DO NOT force analysis - this matches normal bid behavior
+  console.log('✅ Template bid created with proper file structure:', bidId);
   redirect(`/vendor/bids/${bidId}?flash=agent2`);
 }
 
