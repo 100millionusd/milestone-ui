@@ -8,7 +8,6 @@ import {
   getTemplate,
   getVendorProfile,
   createBidFromTemplate,
-  getBid,
 } from '@/lib/api';
 import TemplateBidClient from './TemplateBidClient';
 
@@ -21,8 +20,7 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** ✅ Server action: match NORMAL BID flow exactly */
-/** ✅ Server action: match NORMAL BID flow exactly */
+/** ✅ Server action: normalize files, send BOTH files & docs, ensure single `doc`, then redirect with docUrl */
 async function startFromTemplate(formData: FormData) {
   'use server';
 
@@ -32,22 +30,50 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
 
-  // Get files - ensure they have proper structure for Agent2
-  let filesArr: Array<{ url: string; name?: string; mimetype?: string; size?: number }> = [];
+  // attachments from client → normalize to real HTTP URLs
+  const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+
+  let filesArr: Array<{ url: string; name?: string }> = [];
   try {
     const raw = String(formData.get('filesJson') ?? '[]');
     const parsed = JSON.parse(raw);
-    
-    // Normalize file objects for Agent2 compatibility
-    filesArr = (Array.isArray(parsed) ? parsed : []).map(file => ({
-      url: file.url || file.href || '',
-      name: file.name || 'document',
-      mimetype: file.mimetype || 'application/pdf',
-      size: file.size || 0
-    }));
+
+    const toHttp = (x: any) => {
+      if (!x) return null;
+
+      // string → url
+      if (typeof x === 'string') {
+        let u = x;
+        if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+        if (u.startsWith('blob:')) return null;            // not fetchable by server
+        return /^https?:\/\//.test(u) ? { url: u } : null; // ensure http(s)
+      }
+
+      // object → url|href|cid|hash
+      let u: string | null =
+        (typeof x.url === 'string' && x.url) ||
+        (typeof x.href === 'string' && x.href) ||
+        (typeof x.cid === 'string' && `${GW}/${x.cid}`) ||
+        (typeof x.hash === 'string' && `${GW}/${x.hash}`) ||
+        null;
+
+      if (!u) return null;
+      if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
+      if (u.startsWith('blob:')) return null;
+      if (!/^https?:\/\//.test(u)) return null;
+
+      return { url: String(u), name: x.name ? String(x.name) : undefined };
+    };
+
+    filesArr = Array.isArray(parsed)
+      ? (parsed.map(toHttp).filter(Boolean) as Array<{ url: string; name?: string }>)
+      : [];
   } catch {}
 
-  // Get milestones
+  // SINGLE file for Agent2 (normal-bid parity)
+  const doc: { url: string; name?: string } | null = filesArr[0] ?? null;
+
+  // milestones from client
   let milestones: any[] = [];
   try {
     const raw = String(formData.get('milestonesJson') ?? '[]');
@@ -55,19 +81,12 @@ async function startFromTemplate(formData: FormData) {
     milestones = Array.isArray(parsed) ? parsed : [];
   } catch {}
 
+  // slug or numeric template id
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  console.log('🔄 Server action creating template bid:', {
-    slugOrId,
-    proposalId,
-    vendorName,
-    filesCount: filesArr.length,
-    fileStructure: filesArr[0] // Log first file structure
-  });
-
-  // 🚀 Create bid using EXACT NORMAL BID structure
+  // Create the bid with docs & a single doc (normal-bid shape)
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -77,17 +96,16 @@ async function startFromTemplate(formData: FormData) {
     milestones,
     files: filesArr,
     docs: filesArr,
-    doc: filesArr[0] || null, // Single doc for Agent2
+    doc,
   });
 
-  const bidId = Number(res?.bidId);
-  if (!bidId) {
-    console.error('❌ Template bid creation failed:', res);
-    redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
-  }
+  // Build query so the browser page (with user cookies) can kick off Agent2 with this exact file
+  const extra = doc?.url
+    ? `&docUrl=${encodeURIComponent(doc.url)}${doc?.name ? `&docName=${encodeURIComponent(doc.name)}` : ''}`
+    : '';
 
-  console.log('✅ Template bid created with proper file structure:', bidId);
-  redirect(`/vendor/bids/${bidId}?flash=agent2`);
+  // Land on vendor bid detail and auto-open Agent2
+  redirect(`/vendor/bids/${res.bidId}?flash=agent2${extra}`);
 }
 
 export default async function TemplateDetailPage({ params, searchParams }: Props) {
@@ -123,13 +141,16 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
         </div>
       </div>
 
-      {/* Single horizontal client UI */}
+      {/* Single horizontal client UI (must submit a <form> with hidden filesJson & milestonesJson) */}
       <div className="mx-auto max-w-7xl px-4 py-8">
         <TemplateBidClient
+          /** hidden input name="id" should be set by the client using this value */
           slugOrId={t.slug || String(t.id)}
+          /** prefill like normal bids */
           initialProposalId={proposalFromQS}
           initialVendorName={preVendor}
           initialWallet={preWallet}
+          /** 🔗 pass the server action; use it as <form action={startFromTemplate}> inside the client */
           startFromTemplateAction={startFromTemplate}
         />
       </div>
