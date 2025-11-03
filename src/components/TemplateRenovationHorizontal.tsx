@@ -32,6 +32,7 @@ export default function TemplateRenovationHorizontal({
 }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [bidDescription, setBidDescription] = useState(''); // 🆕 Add overall bid description
 
   function toggleScope(s: Scope) {
     setSelected(prev => {
@@ -80,6 +81,22 @@ export default function TemplateRenovationHorizontal({
 
   return (
     <section className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
+      {/* 🆕 ADD OVERALL BID DESCRIPTION FIELD */}
+      <div>
+        <h2 className="text-base font-semibold mb-3">Bid Description & Notes</h2>
+        <label className="block text-sm">
+          <span className="text-slate-700">Overall Project Description</span>
+          <textarea
+            name="notes" // 🆕 This name="notes" is crucial - it will be read by the server action
+            className="mt-1 w-full border rounded-md px-3 py-2"
+            rows={4}
+            placeholder="Describe your overall approach, methodology, team experience, timeline, or any other relevant information for this project..."
+            value={bidDescription}
+            onChange={(e) => setBidDescription(e.target.value)}
+          />
+        </label>
+      </div>
+
       {/* scopes */}
       <div>
         <h2 className="text-base font-semibold mb-3">Select work scopes</h2>
