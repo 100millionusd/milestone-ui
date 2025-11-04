@@ -913,14 +913,6 @@ export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   return toBid(b);
 }
 
-// TEMPORARY FIX: Add this function to force update notes after bid creation
-export async function updateBidNotes(bidId: number, notes: string): Promise<{ ok: boolean }> {
-  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/notes`, {
-    method: 'PATCH',
-    body: JSON.stringify({ notes }),
-  });
-}
-
 // ---- Vendor ----
 export async function getVendorProfile(): Promise<any> {
   // returns the logged-in vendor’s profile from your backend
@@ -1705,14 +1697,7 @@ export async function createBidFromTemplate(input: {
     notes: input.notes, // Make sure notes are in payload
   };
 
-  console.log('🔍 API DEBUG - Payload to /bids/from-template:', {
-    notes: payload.notes,
-    notesLength: payload.notes?.length || 0
-  });
-
   const result = await postJSON(`/bids/from-template`, payload);
-  
-  console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
   
   return result;
 }
