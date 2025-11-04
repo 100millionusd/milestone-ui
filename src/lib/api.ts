@@ -300,13 +300,14 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 
      if (!isBrowser) {
     bases.push(trimSlashEnd(API_BASE)); // server-side: only external
- } else {
-  // Prefer same-origin (via Netlify rewrites) → lowest latency & cacheable
-  bases.push("");
-  bases.push("/api");
-  // Fallback to external API_BASE last
-  bases.push(trimSlashEnd(API_BASE));
-}
+  } else {
+    // 1) external (your current default)
+    bases.push(trimSlashEnd(API_BASE));
+    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
+    bases.push("");
+    // 3) same-origin "/api" (if your rewrites use /api/:path*)
+    bases.push("/api");
+  }
 
   let lastResp: Response | null = null;
 
@@ -360,7 +361,7 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 
 /// ---- JSON Fetch helper ----
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const reqMethod = (options.method || 'GET').toString().toUpperCase();
+  const method = (options.method || 'GET').toString().toUpperCase();
 
  // Ensure leading slash (no cache-busting)
 const basePath = path.startsWith('/') ? path : `/${path}`;
@@ -389,27 +390,12 @@ const fullPath = basePath;
     headers['Content-Type'] = 'application/json';
   }
 
-  const method = (options.method || 'GET').toString().toUpperCase();
-
-// Default: cache GETs, don't cache writes; allow callers to override.
-const cacheMode =
-  options.cache ??
-  (method === 'GET'
-    ? (isBrowser ? 'default' : 'force-cache')
-    : 'no-store');
-
-// Default creds to 'include', but let options override.
-const credsMode = options.credentials ?? 'include';
-
-const init: RequestInit = {
+  const init: RequestInit = {
   ...options,
-  // Default: cache GETs (browser uses normal caching; SSR uses force-cache).
-  // Writes (POST/PATCH/PUT/DELETE) default to no-store. Callers can still override with options.cache.
-  cache: options.cache ?? (reqMethod === 'GET' ? (isBrowser ? 'default' : 'force-cache') : 'no-store'),
+  cache: isBrowser ? 'no-store' : (options.cache ?? 'force-cache'),
   mode: 'cors',
   redirect: 'follow',
-  // Default to include cookies, but let callers override with options.credentials
-  credentials: options.credentials ?? 'include',
+  credentials: 'include',
   headers,
 };
 
@@ -1569,12 +1555,7 @@ export async function getPublicProjects(): Promise<any[]> {
       typeof window !== "undefined"
         ? "/api/public/projects"
         : `${getSiteOrigin()}/api/public/projects`;
-    const r = await fetch(
-  url,
-  typeof window === "undefined"
-    ? { cache: "force-cache", credentials: "omit", next: { revalidate: 300 } }
-    : { cache: "default", credentials: "omit" }
-);
+    const r = await fetch(url, { cache: "no-store" });
     if (r.ok) {
       const data = await r.json().catch(() => []);
       if (Array.isArray(data)) return data;
@@ -1606,6 +1587,16 @@ export async function getPublicProjects(): Promise<any[]> {
  */
 export async function getPublicProject(bidId: number): Promise<any | null> {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
+
+  // If you later add /api/public/projects/[id], uncomment this preferred path:
+  // try {
+  //   const url =
+  //     typeof window !== "undefined"
+  //       ? `/api/public/projects/${encodeURIComponent(String(bidId))}`
+  //       : `${getSiteOrigin()}/api/public/projects/${encodeURIComponent(String(bidId))}`;
+  //   const r = await fetch(url, { cache: "no-store" });
+  //   if (r.ok) return await r.json();
+  // } catch {}
 
   const id = encodeURIComponent(String(bidId));
   const candidates = [
