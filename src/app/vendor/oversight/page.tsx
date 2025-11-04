@@ -415,39 +415,41 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     const released_at =
       r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt;
 
-    const tx_hash =
+  // --- HASHES ---
+const tx_hash =
   r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
   r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
   r?.onchain_tx_id ?? r?.onchain_tx_hash ??
   nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
 
-  const method =
+// --- METHOD TAG (add this exact block) ---
+const method =
   (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
    r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
     ? 'safepay'
     : 'normal';
 
-    const id =
-      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
-      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
+// --- ID ---
+const id =
+  r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
+  r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
 
-    return {
-      id: String(id),
-      bid_id: bid_id != null ? Number(bid_id) : null,
-      milestone_index: milestone_index != null ? Number(milestone_index) : null,
-      amount_usd,
-      status,
-      released_at,
-      tx_hash,
-      method,
-      created_at: r?.created_at ?? r?.createdAt ?? null,
-      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-      proof_id: rawProofId ?? null,
-      milestone_id: rawMilestoneId ?? null,
-      __raw_index: index,
-    };
-  });
-}
+return {
+  id: String(id),
+  bid_id: bid_id != null ? Number(bid_id) : null,
+  milestone_index: milestone_index != null ? Number(milestone_index) : null,
+  amount_usd,
+  status,
+  released_at,
+  tx_hash,
+  // keep this line so we actually return the tag
+  method,
+  created_at: r?.created_at ?? r?.createdAt ?? null,
+  updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+  proof_id: rawProofId ?? null,
+  milestone_id: rawMilestoneId ?? null,
+  __raw_index: index,
+};
 
 // Build payments from proofs that clearly look paid (EOA/direct fallbacks)
 function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
