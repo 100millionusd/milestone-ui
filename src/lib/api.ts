@@ -913,6 +913,14 @@ export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   return toBid(b);
 }
 
+// TEMPORARY FIX: Add this function to force update notes after bid creation
+export async function updateBidNotes(bidId: number, notes: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/notes`, {
+    method: 'PATCH',
+    body: JSON.stringify({ notes }),
+  });
+}
+
 // ---- Vendor ----
 export async function getVendorProfile(): Promise<any> {
   // returns the logged-in vendor’s profile from your backend
@@ -1665,6 +1673,17 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
+  
+  console.log('🔍 API DEBUG - createBidFromTemplate input:', {
+    templateId: input.templateId,
+    slug: input.slug,
+    proposalId: input.proposalId,
+    vendorName: input.vendorName,
+    notes: input.notes, // Check if notes are received
+    notesLength: input.notes?.length || 0,
+    milestonesCount: input.milestones?.length || 0,
+    filesCount: input.files?.length || 0
+  });
 
   const files = Array.isArray(input.files) ? input.files : [];
   const docs = Array.isArray(input.docs) ? input.docs : files;
@@ -1697,7 +1716,14 @@ export async function createBidFromTemplate(input: {
     notes: input.notes, // Make sure notes are in payload
   };
 
+  console.log('🔍 API DEBUG - Payload to /bids/from-template:', {
+    notes: payload.notes,
+    notesLength: payload.notes?.length || 0
+  });
+
   const result = await postJSON(`/bids/from-template`, payload);
+  
+  console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
   
   return result;
 }
