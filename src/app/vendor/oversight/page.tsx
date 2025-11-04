@@ -491,7 +491,7 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
     if (g) g.push(p); else byBM.set(bm, [p]);
   }
 
-  // Helpers
+  // helpers
   const num = (v: any): number => {
     if (typeof v === 'number') return v;
     if (v == null) return NaN;
@@ -501,37 +501,44 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   const time = (p: PaymentRow) =>
     new Date(p.released_at || p.created_at || 0).getTime();
 
-  // Pick best within a group
   const pickBest = (list: PaymentRow[]) =>
     list.slice().sort((a, b) => {
       const aAmt = num(a.amount_usd), bAmt = num(b.amount_usd);
       const aHasAmt = Number.isFinite(aAmt) && aAmt > 0 ? 1 : 0;
       const bHasAmt = Number.isFinite(bAmt) && bAmt > 0 ? 1 : 0;
-      if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount
+      if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount > 0
       const aTx = a.tx_hash ? 1 : 0, bTx = b.tx_hash ? 1 : 0;
-      if (aTx !== bTx) return bTx - aTx;                   // then with tx
-      return time(b) - time(a);                            // then latest
+      if (aTx !== bTx) return bTx - aTx;                   // then prefer with tx
+      return time(b) - time(a);                            // then newest
     })[0];
 
   const out: PaymentRow[] = [];
 
-  for (const group of byBM.values()) {
+  for (const list of byBM.values()) {
     // Sub-group by tx ('' = no tx)
     const byTx = new Map<string, PaymentRow[]>();
-    for (const p of group) {
+    for (const p of list) {
       const k = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
       const g = byTx.get(k);
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    const txKeys = [...byTx.keys()].filter(k => k !== '');
-    // Keep one best row per distinct tx
-    for (const k of txKeys) out.push(pickBest(byTx.get(k)!));
+    // Push best per distinct tx (non-empty keys)
+    let hasTxRows = false;
+    for (const [k, g] of byTx) {
+      if (k === '') continue;
+      out.push(pickBest(g));
+      hasTxRows = true;
+    }
 
-    // If there are any tx-backed rows, drop no-tx synth rows for this BM.
-    // Otherwise, keep a single best no-tx row.
-    if (txKeys.length === 0 && byTx.has('')) {
-      out.push(pickBest(byTx.get('')!));
+    // Also keep one best no-tx row if it has amount>0 OR if there were no tx-backed rows
+    const noTxGroup = byTx.get('');
+    if (noTxGroup && noTxGroup.length) {
+      const bestNoTx = pickBest(noTxGroup);
+      const amt = num(bestNoTx.amount_usd);
+      if (!hasTxRows || (Number.isFinite(amt) && amt > 0)) {
+        out.push(bestNoTx);
+      }
     }
   }
 
