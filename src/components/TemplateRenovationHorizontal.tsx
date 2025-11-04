@@ -4,7 +4,6 @@ import React, { useMemo, useState } from 'react';
 
 type Milestone = {
   name: string;
-  description?: string;
   amount?: number;
   dueDate?: string;
   acceptance?: string[];
@@ -32,7 +31,7 @@ export default function TemplateRenovationHorizontal({
 }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [bidDescription, setBidDescription] = useState(''); // 🆕 Add overall bid description
+  const [bidDescription, setBidDescription] = useState('');
 
   function toggleScope(s: Scope) {
     setSelected(prev => {
@@ -43,7 +42,6 @@ export default function TemplateRenovationHorizontal({
           ...ms,
           {
             name: s.title,
-            description: '',
             amount: undefined,
             dueDate: '',
             acceptance: [],
@@ -58,7 +56,7 @@ export default function TemplateRenovationHorizontal({
   function addMilestone() {
     setMilestones(ms => [
       ...ms,
-      { name: '', description: '', amount: undefined, dueDate: '', acceptance: [], archived: false },
+      { name: '', amount: undefined, dueDate: '', acceptance: [], archived: false },
     ]);
   }
   function removeMilestone(idx: number) {
@@ -69,25 +67,19 @@ export default function TemplateRenovationHorizontal({
   }
 
   const json = useMemo(
-  () =>
-    JSON.stringify(
-      milestones.map((m) => {
-        const text = m.description ?? '';
-        return { ...m, description: text, notes: text, desc: text };
-      })
-    ),
-  [milestones]
-);
+    () => JSON.stringify(milestones),
+    [milestones]
+  );
 
   return (
     <section className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
-      {/* 🆕 ADD OVERALL BID DESCRIPTION FIELD */}
+      {/* Overall Bid Description - KEEP THIS ONE */}
       <div>
         <h2 className="text-base font-semibold mb-3">Bid Description & Notes</h2>
         <label className="block text-sm">
-          <span className="text-slate-700">Overall Project Description</span>
+          <span className="text-slate-700">Project Description</span>
           <textarea
-            name="notes" // 🆕 This name="notes" is crucial - it will be read by the server action
+            name="notes"
             className="mt-1 w-full border rounded-md px-3 py-2"
             rows={4}
             placeholder="Describe your overall approach, methodology, team experience, timeline, or any other relevant information for this project..."
@@ -123,7 +115,7 @@ export default function TemplateRenovationHorizontal({
         </div>
       </div>
 
-      {/* milestones */}
+      {/* milestones - REMOVED DESCRIPTION FIELDS */}
       <div>
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">Milestones</h2>
@@ -152,16 +144,7 @@ export default function TemplateRenovationHorizontal({
                 />
               </label>
 
-              <label className="block text-sm mt-2">
-                <span className="text-slate-700">Description</span>
-                <textarea
-                  className="mt-1 w-full border rounded-md px-2 py-1"
-                  rows={3}
-                  placeholder="Describe the work for this milestone…"
-                  value={m.description || ''}
-                  onChange={(e) => editMilestone(i, 'description', e.target.value)}
-                />
-              </label>
+              {/* REMOVED DESCRIPTION TEXTAREA */}
 
               <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
                 <label>
