@@ -1674,6 +1674,17 @@ export async function createBidFromTemplate(input: {
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
   
+  console.log('🔍 API DEBUG - createBidFromTemplate input:', {
+    templateId: input.templateId,
+    slug: input.slug,
+    proposalId: input.proposalId,
+    vendorName: input.vendorName,
+    notes: input.notes, // Check if notes are received
+    notesLength: input.notes?.length || 0,
+    milestonesCount: input.milestones?.length || 0,
+    filesCount: input.files?.length || 0
+  });
+
   const files = Array.isArray(input.files) ? input.files : [];
   const docs = Array.isArray(input.docs) ? input.docs : files;
   
@@ -1704,6 +1715,18 @@ export async function createBidFromTemplate(input: {
     files: docs,
     notes: input.notes, // Make sure notes are in payload
   };
+
+  console.log('🔍 API DEBUG - Payload to /bids/from-template:', {
+    notes: payload.notes,
+    notesLength: payload.notes?.length || 0
+  });
+
+  const result = await postJSON(`/bids/from-template`, payload);
+  
+  console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
+  
+  return result;
+}
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
  * Exported for reuse by client components.
