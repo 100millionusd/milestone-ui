@@ -300,14 +300,13 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 
      if (!isBrowser) {
     bases.push(trimSlashEnd(API_BASE)); // server-side: only external
-  } else {
-    // 1) external (your current default)
-    bases.push(trimSlashEnd(API_BASE));
-    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
-    bases.push("");
-    // 3) same-origin "/api" (if your rewrites use /api/:path*)
-    bases.push("/api");
-  }
+ } else {
+  // Prefer same-origin (via Netlify rewrites) → lowest latency & cacheable
+  bases.push("");
+  bases.push("/api");
+  // Fallback to external API_BASE last
+  bases.push(trimSlashEnd(API_BASE));
+}
 
   let lastResp: Response | null = null;
 
@@ -390,12 +389,24 @@ const fullPath = basePath;
     headers['Content-Type'] = 'application/json';
   }
 
-  const init: RequestInit = {
+  const method = (options.method || 'GET').toString().toUpperCase();
+
+// Default: cache GETs, don't cache writes; allow callers to override.
+const cacheMode =
+  options.cache ??
+  (method === 'GET'
+    ? (isBrowser ? 'default' : 'force-cache')
+    : 'no-store');
+
+// Default creds to 'include', but let options override.
+const credsMode = options.credentials ?? 'include';
+
+const init: RequestInit = {
   ...options,
-  cache: isBrowser ? 'no-store' : (options.cache ?? 'force-cache'),
+  cache: cacheMode,
   mode: 'cors',
   redirect: 'follow',
-  credentials: 'include',
+  credentials: credsMode,
   headers,
 };
 
@@ -1555,7 +1566,12 @@ export async function getPublicProjects(): Promise<any[]> {
       typeof window !== "undefined"
         ? "/api/public/projects"
         : `${getSiteOrigin()}/api/public/projects`;
-    const r = await fetch(url, { cache: "no-store" });
+    const r = await fetch(
+  url,
+  typeof window === "undefined"
+    ? { cache: "force-cache", credentials: "omit", next: { revalidate: 300 } }
+    : { cache: "default", credentials: "omit" }
+);
     if (r.ok) {
       const data = await r.json().catch(() => []);
       if (Array.isArray(data)) return data;
