@@ -538,38 +538,21 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // 1) Keep best per distinct tx, track representative tx row for amount fallback
-    let repTx: PaymentRow | undefined;
+    // 1) Keep best per distinct tx (keep amounts as-is)
+    let hasTxRows = false;
     for (const [k, g] of byTx) {
       if (k === '') continue;
-      const best = pickBest(g);
-      out.push(best);
-      if (!repTx) {
-        repTx = best;
-      } else {
-        const repAmt = num(repTx.amount_usd), bestAmt = num(best.amount_usd);
-        if (
-          (bestAmt > 0 && !(repAmt > 0)) ||
-          (bestAmt > 0 && repAmt > 0 && time(best) > time(repTx)) ||
-          (!(repAmt > 0) && !(bestAmt > 0) && time(best) > time(repTx))
-        ) {
-          repTx = best;
-        }
-      }
+      out.push(pickBest(g));
+      hasTxRows = true;
     }
 
-    // 2) Always keep one best normal/no-tx row; if it lacks amount, fill from repTx
+    // 2) ALWAYS keep one best "normal/no-tx" row — DO NOT copy amount from tx rows
     const noTxGroup = byTx.get('') || [];
     const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
-
     if (noTxNormal.length) {
-      const bestNoTx = { ...pickBest(noTxNormal) };
-      const bestNoTxAmt = num(bestNoTx.amount_usd);
-      if (!(bestNoTxAmt > 0) && repTx && num(repTx.amount_usd) > 0) {
-        bestNoTx.amount_usd = repTx.amount_usd;
-      }
-      out.push(bestNoTx);
-    } else if (!repTx && noTxGroup.length) {
+      out.push(pickBest(noTxNormal));
+    } else if (!hasTxRows && noTxGroup.length) {
+      // if there were zero tx rows at all, keep one no-tx (any)
       out.push(pickBest(noTxGroup));
     }
   }
