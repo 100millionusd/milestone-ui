@@ -31,14 +31,8 @@ async function startFromTemplate(formData: FormData) {
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
   
-  // 🆕 CRITICAL FIX: Get notes from the TemplateRenovationHorizontal component
-  const vendorNotes = String(formData.get('notes') || '');
-
-  console.log('🔍 SERVER ACTION DEBUG - Notes from form:', {
-    vendorNotes,
-    vendorNotesLength: vendorNotes.length,
-    hasNotes: !!vendorNotes
-  });
+  // Get notes from the TemplateRenovationHorizontal component
+const vendorNotes = String(formData.get('notes') || '');
 
   // ---- Files: normalize to real HTTP URLs ----
   const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
