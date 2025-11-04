@@ -360,7 +360,7 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 
 /// ---- JSON Fetch helper ----
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const method = (options.method || 'GET').toString().toUpperCase();
+  const reqMethod = (options.method || 'GET').toString().toUpperCase();
 
  // Ensure leading slash (no cache-busting)
 const basePath = path.startsWith('/') ? path : `/${path}`;
@@ -403,10 +403,13 @@ const credsMode = options.credentials ?? 'include';
 
 const init: RequestInit = {
   ...options,
-  cache: cacheMode,
+  // Default: cache GETs (browser uses normal caching; SSR uses force-cache).
+  // Writes (POST/PATCH/PUT/DELETE) default to no-store. Callers can still override with options.cache.
+  cache: options.cache ?? (reqMethod === 'GET' ? (isBrowser ? 'default' : 'force-cache') : 'no-store'),
   mode: 'cors',
   redirect: 'follow',
-  credentials: credsMode,
+  // Default to include cookies, but let callers override with options.credentials
+  credentials: options.credentials ?? 'include',
   headers,
 };
 
@@ -1603,16 +1606,6 @@ export async function getPublicProjects(): Promise<any[]> {
  */
 export async function getPublicProject(bidId: number): Promise<any | null> {
   if (!Number.isFinite(bidId)) throw new Error("Invalid bid ID");
-
-  // If you later add /api/public/projects/[id], uncomment this preferred path:
-  // try {
-  //   const url =
-  //     typeof window !== "undefined"
-  //       ? `/api/public/projects/${encodeURIComponent(String(bidId))}`
-  //       : `${getSiteOrigin()}/api/public/projects/${encodeURIComponent(String(bidId))}`;
-  //   const r = await fetch(url, { cache: "no-store" });
-  //   if (r.ok) return await r.json();
-  // } catch {}
 
   const id = encodeURIComponent(String(bidId));
   const candidates = [
