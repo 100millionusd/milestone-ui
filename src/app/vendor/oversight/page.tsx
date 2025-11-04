@@ -504,9 +504,9 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   // Group by Bid+Milestone
   const byBM = new Map<string, PaymentRow[]>();
   for (const p of arr) {
-    const bm = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
-    const g = byBM.get(bm);
-    if (g) g.push(p); else byBM.set(bm, [p]);
+    const key = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
+    const g = byBM.get(key);
+    if (g) g.push(p); else byBM.set(key, [p]);
   }
 
   const num = (v: any): number => {
@@ -515,24 +515,22 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
     const n = Number(String(v).replace(/[^0-9.-]/g, ''));
     return Number.isFinite(n) ? n : NaN;
   };
-  const time = (p: PaymentRow) =>
-    new Date(p.released_at || p.created_at || 0).getTime();
+  const time = (p: PaymentRow) => new Date(p.released_at || p.created_at || 0).getTime();
 
   const pickBest = (list: PaymentRow[]) =>
     list.slice().sort((a, b) => {
       const aAmt = num(a.amount_usd), bAmt = num(b.amount_usd);
-      const aHasAmt = Number.isFinite(aAmt) && aAmt > 0 ? 1 : 0;
-      const bHasAmt = Number.isFinite(bAmt) && bAmt > 0 ? 1 : 0;
-      if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount > 0
+      const aHas = aAmt > 0 ? 1 : 0, bHas = bAmt > 0 ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;   // prefer amount > 0
       const aTx = a.tx_hash ? 1 : 0, bTx = b.tx_hash ? 1 : 0;
-      if (aTx !== bTx) return bTx - aTx;                   // then prefer with tx
-      return time(b) - time(a);                            // then newest
+      if (aTx !== bTx) return bTx - aTx;       // then prefer with tx
+      return time(b) - time(a);                // then newest
     })[0];
 
   const out: PaymentRow[] = [];
 
   for (const list of byBM.values()) {
-    // Sub-group by tx ('' = no tx)
+    // Split by tx ('' = no tx)
     const byTx = new Map<string, PaymentRow[]>();
     for (const p of list) {
       const k = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
@@ -540,30 +538,44 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // 1) Keep one best per distinct tx
-    let hasTxRows = false;
+    // 1) Keep best per distinct tx, track representative tx row for amount fallback
+    let repTx: PaymentRow | undefined;
     for (const [k, g] of byTx) {
       if (k === '') continue;
-      out.push(pickBest(g));
-      hasTxRows = true;
+      const best = pickBest(g);
+      out.push(best);
+      if (!repTx) {
+        repTx = best;
+      } else {
+        const repAmt = num(repTx.amount_usd), bestAmt = num(best.amount_usd);
+        if (
+          (bestAmt > 0 && !(repAmt > 0)) ||
+          (bestAmt > 0 && repAmt > 0 && time(best) > time(repTx)) ||
+          (!(repAmt > 0) && !(bestAmt > 0) && time(best) > time(repTx))
+        ) {
+          repTx = best;
+        }
+      }
     }
 
-    // 2) ALWAYS keep one best "normal/no-tx" row (so normal payouts show even if $0)
+    // 2) Always keep one best normal/no-tx row; if it lacks amount, fill from repTx
     const noTxGroup = byTx.get('') || [];
     const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
+
     if (noTxNormal.length) {
-      out.push(pickBest(noTxNormal));
-    } else if (!hasTxRows && noTxGroup.length) {
-      // if there were zero tx rows at all, keep one no-tx (any)
+      const bestNoTx = { ...pickBest(noTxNormal) };
+      const bestNoTxAmt = num(bestNoTx.amount_usd);
+      if (!(bestNoTxAmt > 0) && repTx && num(repTx.amount_usd) > 0) {
+        bestNoTx.amount_usd = repTx.amount_usd;
+      }
+      out.push(bestNoTx);
+    } else if (!repTx && noTxGroup.length) {
       out.push(pickBest(noTxGroup));
     }
   }
 
   // Latest first
-  return out.sort((a, b) =>
-    (new Date(b.released_at || b.created_at || 0).getTime() -
-     new Date(a.released_at || a.created_at || 0).getTime())
-  );
+  return out.sort((a, b) => time(b) - time(a));
 }
 
 // Join payments to proofs by tx hash; fill bid/milestone/status/time/amount
