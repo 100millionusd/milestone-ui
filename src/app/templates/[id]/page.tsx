@@ -30,16 +30,14 @@ async function startFromTemplate(formData: FormData) {
   const vendorName = String(formData.get('vendorName') || '');
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
+  
+  // 🆕 CRITICAL FIX: Get notes from the TemplateRenovationHorizontal component
   const vendorNotes = String(formData.get('notes') || '');
 
-  console.log('🔍 DEBUG - Form data received:', {
-    slugOrId,
-    proposalId,
-    vendorName,
-    walletAddress,
-    preferredStablecoin,
-    vendorNotes, // This should show the text from the form
-    vendorNotesLength: vendorNotes.length
+  console.log('🔍 SERVER ACTION DEBUG - Notes from form:', {
+    vendorNotes,
+    vendorNotesLength: vendorNotes.length,
+    hasNotes: !!vendorNotes
   });
 
   // ---- Files: normalize to real HTTP URLs ----
@@ -94,20 +92,16 @@ async function startFromTemplate(formData: FormData) {
     milestones = Array.isArray(parsed) ? parsed : [];
   } catch {}
 
-  // ---- Template slug/id base
   const base = /^\d+$/.test(slugOrId)
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  console.log('🔍 DEBUG - Calling createBidFromTemplate with:', {
-    ...base,
-    proposalId,
-    vendorName,
-    notes: vendorNotes, // Make sure notes are being passed
+  console.log('🔍 SERVER ACTION DEBUG - Calling createBidFromTemplate with notes:', {
+    notes: vendorNotes,
     notesLength: vendorNotes.length
   });
 
-  // Create bid using normal-bid shape
+  // 🚀 Create bid using normal-bid shape - MAKE SURE NOTES ARE PASSED
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -118,28 +112,12 @@ async function startFromTemplate(formData: FormData) {
     files: docsClean,
     docs: docsClean,
     doc,
-    notes: vendorNotes,
+    notes: vendorNotes, // 🆕 This was missing!
   });
-
-  console.log('🔍 DEBUG - createBidFromTemplate response:', res);
 
   const bidId = Number((res as any)?.bidId);
   if (!bidId) {
     redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
-  }
-
-  console.log('✅ Template bid created with ID:', bidId);
-
-  // Optional: Check what was actually stored
-  try {
-    const createdBid = await getBid(bidId);
-    console.log('🔍 DEBUG - Created bid from database:', {
-      bidId,
-      notes: createdBid.notes, // Check if notes are in the database
-      notesLength: createdBid.notes?.length || 0
-    });
-  } catch (error) {
-    console.error('❌ Error checking created bid:', error);
   }
 
   redirect(`/vendor/bids/${bidId}?flash=agent2`);

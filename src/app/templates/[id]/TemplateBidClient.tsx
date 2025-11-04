@@ -3,7 +3,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
+import { analyzeBid, getBid } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 import FileUploader from './FileUploader';
 
@@ -12,6 +12,7 @@ type TemplateBidClientProps = {
   initialProposalId?: number;       // auto-filled from ?proposalId
   initialVendorName?: string;
   initialWallet?: string;
+  startFromTemplateAction: (formData: FormData) => Promise<void>; // Server action from page.tsx
 };
 
 type Step = 'idle' | 'submitting' | 'analyzing' | 'done' | 'error';
@@ -23,7 +24,7 @@ function coerce(a: any) {
 }
 
 export default function TemplateBidClient(props: TemplateBidClientProps) {
-  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '' } = props;
+  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '', startFromTemplateAction } = props;
 
   const [proposalId, setProposalId] = useState(initialProposalId || 0);
   const [vendorName, setVendorName] = useState(initialVendorName);
@@ -64,33 +65,18 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (disableSubmit) return; // hard-guard against double clicks
+    if (disableSubmit) return;
 
     if (!Number.isFinite(proposalId) || proposalId <= 0) {
       alert('Missing proposalId. Open with ?proposalId=<id> or fill the input.');
       return;
     }
 
-    // Read serialized inputs from the form (hidden inputs produced by child widgets)
-    const fd = new FormData(e.currentTarget);
+    // 🆕 Use FormData submission to server action
+    const formData = new FormData(e.currentTarget);
+    formData.append('id', slugOrId); // Make sure template ID is included
 
-    // milestonesJson (from TemplateRenovationHorizontal) - this includes milestone descriptions/notes
-    let milestones: any[] = [];
-    try {
-      const raw = String(fd.get('milestonesJson') || '[]');
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) milestones = arr;
-    } catch {}
-
-    // filesJson (from FileUploader)
-    let files: Array<string | { url: string; name?: string }> = [];
-    try {
-      const raw = String(fd.get('filesJson') || '[]');
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) files = arr;
-    } catch {}
-
-    // Show Agent2 modal immediately (match normal-bid UX)
+    // Show Agent2 modal immediately
     setOpen(true);
     setStep('submitting');
     setMessage(null);
@@ -98,39 +84,15 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     setBidIdForModal(undefined);
 
     try {
-      const base = /^\d+$/.test(slugOrId) ? { templateId: Number(slugOrId) } : { slug: slugOrId };
-
-      // 1) Create bid from template
-      const res = await createBidFromTemplate({
-        ...base,
-        proposalId,
-        vendorName,
-        walletAddress,
-        preferredStablecoin,
-        milestones, // This includes milestone descriptions/notes from TemplateRenovationHorizontal
-        files,
-      });
-
-      const bidId = Number(res?.bidId);
-      if (!bidId) throw new Error('Failed to create bid (no id)');
-      setBidIdForModal(bidId);
-
-      // 2) Trigger + poll Agent2 analysis
-      setStep('analyzing');
-      setMessage('Agent2 is analyzing your bid…');
-      try { await analyzeBid(bidId); } catch {}
-
-      const found = await pollAnalysis(bidId);
-      if (found) {
-        setAnalysis(found);
-        setStep('done');               // ← keeps the button disabled permanently
-        setMessage('Analysis complete.');
-      } else {
-        setStep('done');               // ← keeps the button disabled permanently
-        setMessage('Analysis will appear shortly.');
-      }
+      // Use the server action directly - this will handle everything including notes
+      await startFromTemplateAction(formData);
+      
+      // If we get here, the server action completed successfully
+      setStep('done');
+      setMessage('Bid created successfully!');
+      
     } catch (err: any) {
-      setStep('error');                // ← button becomes clickable again to retry
+      setStep('error');
       setMessage(err?.message || 'Failed to submit bid from template');
     }
   }
@@ -192,13 +154,12 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </label>
       </div>
 
-      {/* Horizontal scopes + milestones (no scrolling)
-         This includes description/notes fields for each milestone
-         MUST render <input type="hidden" name="milestonesJson" ... />
+      {/* Horizontal scopes + milestones 
+          This includes the overall bid description textarea with name="notes"
       */}
       <TemplateRenovationHorizontal milestonesInputName="milestonesJson" disabled={disableSubmit} />
 
-      {/* File uploader MUST render <input type="hidden" name="filesJson" ... /> */}
+      {/* File uploader */}
       <div className="pt-1">
         <FileUploader apiBase={process.env.NEXT_PUBLIC_API_BASE || ''} disabled={disableSubmit as any} />
       </div>
@@ -215,7 +176,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </button>
       </div>
 
-      {/* Agent2 modal (same UX as normal bids) */}
+      {/* Agent2 modal */}
       <Agent2ProgressModal
         open={open}
         step={step === 'idle' ? 'submitting' : step}
