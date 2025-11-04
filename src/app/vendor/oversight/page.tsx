@@ -663,12 +663,6 @@ const paymentsJoined2 = linkPaymentsToProofs(normalizedPaymentsLocal, normalized
 setPayments(paymentsJoined2);
 console.log('Normalized payments (joined):', paymentsJoined);
 
-// store raw for inspection and normalize
-setRawPayments(Array.isArray(rawPayments) ? rawPayments : []);
-const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPayments) ? rawPayments : []);
-const paymentsJoined2 = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
-setPayments(paymentsJoined2);
-
 // Derive milestones from proofs
 const milestones = deriveMilestonesFromProofs(normalizedProofs);
 setMilestones(milestones);
