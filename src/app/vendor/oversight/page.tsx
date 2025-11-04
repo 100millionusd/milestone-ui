@@ -5,6 +5,10 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import AgentDigestWidget from "@/components/AgentDigestWidget";
 
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+  (console as any).log = () => {};
+}
+
 // ———————————————————————————————————————————
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
@@ -97,7 +101,6 @@ function downloadCSV(filename: string, rows: any[]) {
 // Updated Normalizers for your API structure
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => {
-    console.log('Raw bid data:', r); // Debug log
     
     // Handle different ID fields
     const id = r?.id ?? r?.bidId ?? r?.bid_id;
@@ -136,7 +139,6 @@ function normalizeBids(rows: any[]): BidRow[] {
 
 function normalizeProofs(rows: any[]): ProofRow[] {
   return (rows || []).map((r: any, index) => {
-    console.log('Raw proof data:', r); // Debug log
     
     // Handle different ID fields - use a combination of bid_id and milestone_index to ensure uniqueness
     const id = r?.id ?? r?.proof_id ?? r?.proofId ?? `proof-${r.bid_id}-${r.milestone_index}-${index}`;
@@ -439,6 +441,43 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
+// Build payments from proofs that clearly look paid (EOA/direct fallbacks)
+function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
+  if (!Array.isArray(proofs)) return [];
+  const out: PaymentRow[] = [];
+  let idx = 0;
+  for (const pr of proofs) {
+    const paid = pr?.status === 'paid' || !!(pr?.paid_at || pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
+    if (!paid) continue;
+    const tx = pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash || null;
+    out.push({
+      id: `synth-${pr?.bid_id ?? 'x'}-${pr?.milestone_index ?? 'x'}-${idx++}`,
+      bid_id: pr?.bid_id != null ? Number(pr.bid_id) : null,
+      milestone_index: pr?.milestone_index != null ? Number(pr.milestone_index) : null,
+      amount_usd: null,
+      status: 'completed',
+      released_at: pr?.paid_at ?? pr?.updated_at ?? pr?.submitted_at ?? pr?.created_at ?? null,
+      tx_hash: tx,
+      created_at: pr?.created_at ?? null,
+      updated_at: pr?.updated_at ?? null,
+      proof_id: pr?.id ?? null,
+      milestone_id: null,
+      __raw_index: idx,
+    });
+  }
+  return out;
+}
+
+function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
+  const seen = new Set<string>();
+  const res: PaymentRow[] = [];
+  for (const p of arr || []) {
+    const key = `${p.tx_hash ?? ''}|${p.bid_id ?? ''}|${p.milestone_index ?? ''}|${String(p.id)}`;
+    if (!seen.has(key)) { seen.add(key); res.push(p); }
+  }
+  return res;
+}
+
 // Join payments to proofs by tx hash; fill bid/milestone/status/time
 function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
@@ -604,17 +643,14 @@ export default function VendorOversightPage() {
         const data = await response.json();
         
         if (!aborted) {
-          console.log('Vendor data:', data); // Debug log
           
           setRole(data.role || null);
           
           const normalizedBids = normalizeBids(data.bids || []);
           setBids(normalizedBids);
-          console.log('Normalized bids:', normalizedBids); // Debug log
           
           const normalizedProofs = normalizeProofs(data.proofs || []);
           setProofs(normalizedProofs);
-          console.log('Normalized proofs:', normalizedProofs); // Debug log
           
 // accept multiple backend shapes (wide net) — now handles object buckets + fallbacks
 let rawPaymentsAny: any =
@@ -660,8 +696,10 @@ if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
 setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
-setPayments(paymentsJoined);
-console.log('Normalized payments (joined):', paymentsJoined);
+const synthesized = synthesizePaymentsFromProofs(normalizedProofs);
+const finalPayments = dedupePayments([...(paymentsJoined ?? []), ...synthesized]);
+setPayments(finalPayments);
+console.log('Final payments (joined + synthesized):', finalPayments);
 
 // Derive milestones from proofs
 const milestones = deriveMilestonesFromProofs(normalizedProofs);
