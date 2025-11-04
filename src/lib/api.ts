@@ -1673,17 +1673,6 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  
-  console.log('🔍 API DEBUG - createBidFromTemplate input:', {
-    templateId: input.templateId,
-    slug: input.slug,
-    proposalId: input.proposalId,
-    vendorName: input.vendorName,
-    notes: input.notes, // Check if notes are received
-    notesLength: input.notes?.length || 0,
-    milestonesCount: input.milestones?.length || 0,
-    filesCount: input.files?.length || 0
-  });
 
   const files = Array.isArray(input.files) ? input.files : [];
   const docs = Array.isArray(input.docs) ? input.docs : files;
