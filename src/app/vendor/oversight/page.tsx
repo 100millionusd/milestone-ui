@@ -493,7 +493,7 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // 1) Keep best per distinct tx (real on-chain rows)
+    // 1) Keep best per distinct tx (keep amounts as-is)
     let hasTxRows = false;
     for (const [k, g] of byTx) {
       if (k === '') continue;
@@ -501,15 +501,14 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       hasTxRows = true;
     }
 
-    // 2) Keep one best *normal* no-tx row ONLY if there were no tx rows
-    if (!hasTxRows) {
-      const noTxGroup = byTx.get('') || [];
-      const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
-      if (noTxNormal.length) {
-        out.push(pickBest(noTxNormal));
-      } else if (noTxGroup.length) {
-        out.push(pickBest(noTxGroup));
-      }
+    // 2) ALWAYS keep one best "normal/no-tx" row — DO NOT copy amount from tx rows
+    const noTxGroup = byTx.get('') || [];
+    const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
+    if (noTxNormal.length) {
+      out.push(pickBest(noTxNormal));
+    } else if (!hasTxRows && noTxGroup.length) {
+      // if there were zero tx rows at all, keep one no-tx (any)
+      out.push(pickBest(noTxGroup));
     }
   }
 
