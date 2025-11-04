@@ -3,7 +3,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { analyzeBid, getBid } from '@/lib/api';
+import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 import FileUploader from './FileUploader';
 
@@ -12,7 +12,6 @@ type TemplateBidClientProps = {
   initialProposalId?: number;       // auto-filled from ?proposalId
   initialVendorName?: string;
   initialWallet?: string;
-  startFromTemplateAction: (formData: FormData) => Promise<void>; // Server action from page.tsx
 };
 
 type Step = 'idle' | 'submitting' | 'analyzing' | 'done' | 'error';
@@ -24,7 +23,7 @@ function coerce(a: any) {
 }
 
 export default function TemplateBidClient(props: TemplateBidClientProps) {
-  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '', startFromTemplateAction } = props;
+  const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '' } = props;
 
   const [proposalId, setProposalId] = useState(initialProposalId || 0);
   const [vendorName, setVendorName] = useState(initialVendorName);
@@ -72,9 +71,34 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       return;
     }
 
-    // 🆕 Use FormData submission to server action
-    const formData = new FormData(e.currentTarget);
-    formData.append('id', slugOrId); // Make sure template ID is included
+    // Read ALL form data including notes
+    const fd = new FormData(e.currentTarget);
+
+    // Get notes from form data
+    const vendorNotes = String(fd.get('notes') || '');
+
+    // milestonesJson (from TemplateRenovationHorizontal)
+    let milestones: any[] = [];
+    try {
+      const raw = String(fd.get('milestonesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) milestones = arr;
+    } catch {}
+
+    // filesJson (from FileUploader)
+    let files: Array<string | { url: string; name?: string }> = [];
+    try {
+      const raw = String(fd.get('filesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) files = arr;
+    } catch {}
+
+    console.log('🔍 CLIENT DEBUG - Form data:', {
+      vendorNotes,
+      vendorNotesLength: vendorNotes.length,
+      milestonesCount: milestones.length,
+      filesCount: files.length
+    });
 
     // Show Agent2 modal immediately
     setOpen(true);
@@ -84,14 +108,54 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     setBidIdForModal(undefined);
 
     try {
-      // Use the server action directly - this will handle everything including notes
-      await startFromTemplateAction(formData);
-      
-      // If we get here, the server action completed successfully
-      setStep('done');
-      setMessage('Bid created successfully!');
-      
+      const base = /^\d+$/.test(slugOrId)
+        ? { templateId: Number(slugOrId) }
+        : { slug: slugOrId };
+
+      // 🚀 Create bid with notes included
+      const res = await createBidFromTemplate({
+        ...base,
+        proposalId,
+        vendorName,
+        walletAddress,
+        preferredStablecoin,
+        milestones,
+        files,
+        notes: vendorNotes, // Make sure notes are included
+      });
+
+      console.log('🔍 CLIENT DEBUG - API response:', res);
+
+      const bidId = Number(res?.bidId);
+      if (!bidId) throw new Error('Failed to create bid (no id)');
+      setBidIdForModal(bidId);
+
+      // Trigger Agent2 analysis
+      setStep('analyzing');
+      setMessage('Agent2 is analyzing your bid…');
+      try { 
+        await analyzeBid(bidId); 
+      } catch (analyzeError) {
+        console.warn('Agent2 analysis might be delayed:', analyzeError);
+      }
+
+      const found = await pollAnalysis(bidId);
+      if (found) {
+        setAnalysis(found);
+        setStep('done');
+        setMessage('Analysis complete.');
+      } else {
+        setStep('done');
+        setMessage('Analysis will appear shortly.');
+      }
+
+      // Redirect to vendor bid page after a short delay
+      setTimeout(() => {
+        window.location.href = `/vendor/bids/${bidId}?flash=agent2`;
+      }, 2000);
+
     } catch (err: any) {
+      console.error('❌ CLIENT ERROR:', err);
       setStep('error');
       setMessage(err?.message || 'Failed to submit bid from template');
     }
@@ -154,9 +218,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         </label>
       </div>
 
-      {/* Horizontal scopes + milestones 
-          This includes the overall bid description textarea with name="notes"
-      */}
+      {/* TemplateRenovationHorizontal includes the notes textarea */}
       <TemplateRenovationHorizontal milestonesInputName="milestonesJson" disabled={disableSubmit} />
 
       {/* File uploader */}
