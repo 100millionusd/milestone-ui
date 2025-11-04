@@ -446,21 +446,33 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(proofs)) return [];
   const out: PaymentRow[] = [];
   let idx = 0;
+
   for (const pr of proofs) {
     const paid = pr?.status === 'paid' || !!(pr?.paid_at || pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
     if (!paid) continue;
+
+    // Try to lift an amount if the proof carries one under common keys
+    const anyPr: any = pr as any;
+    let amount =
+      anyPr?.amount_usd ?? anyPr?.amountUsd ?? anyPr?.valueUsd ?? anyPr?.usd ?? anyPr?.amount ?? null;
+    if (amount == null) {
+      const cents = anyPr?.usd_cents ?? anyPr?.usdCents;
+      if (cents != null) amount = Number(cents) / 100;
+    }
+
     const tx = pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash || null;
+
     out.push({
       id: `synth-${pr?.bid_id ?? 'x'}-${pr?.milestone_index ?? 'x'}-${idx++}`,
       bid_id: pr?.bid_id != null ? Number(pr.bid_id) : null,
       milestone_index: pr?.milestone_index != null ? Number(pr.milestone_index) : null,
-      amount_usd: null,
+      amount_usd: amount ?? null,
       status: 'completed',
       released_at: pr?.paid_at ?? pr?.updated_at ?? pr?.submitted_at ?? pr?.created_at ?? null,
       tx_hash: tx,
       created_at: pr?.created_at ?? null,
       updated_at: pr?.updated_at ?? null,
-      proof_id: pr?.id ?? null,
+      proof_id: (pr as any)?.id ?? null,
       milestone_id: null,
       __raw_index: idx,
     });
@@ -469,24 +481,70 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
 }
 
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
-  const seen = new Set<string>();
-  const res: PaymentRow[] = [];
+  // Group by tx when present; otherwise by bid+milestone; otherwise by id
+  const groups = new Map<string, PaymentRow[]>();
+
   for (const p of arr || []) {
-    const key = `${p.tx_hash ?? ''}|${p.bid_id ?? ''}|${p.milestone_index ?? ''}|${String(p.id)}`;
-    if (!seen.has(key)) { seen.add(key); res.push(p); }
+    const key =
+      p.tx_hash ? `tx:${String(p.tx_hash).toLowerCase()}` :
+      (p.bid_id != null && p.milestone_index != null ? `bm:${p.bid_id}-${p.milestone_index}` :
+      `id:${String(p.id)}`);
+    const g = groups.get(key);
+    if (g) g.push(p); else groups.set(key, [p]);
   }
-  return res;
+
+  // Prefer rows with a positive amount, then with a tx, then the latest time
+  const num = (v: any): number => {
+    if (typeof v === 'number') return v;
+    if (v == null) return NaN;
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : NaN;
+  };
+  const score = (x: PaymentRow) => {
+    const amt = num(x.amount_usd);
+    return [
+      Number.isFinite(amt) && amt > 0 ? 2 : 0,                             // has amount > 0
+      x.tx_hash ? 1 : 0,                                                   // has tx
+      new Date(x.released_at || x.created_at || 0).getTime(),              // latest first
+    ] as const;
+  };
+
+  const pickBest = (g: PaymentRow[]) =>
+    g.sort((a, b) => {
+      const sa = score(a), sb = score(b);
+      if (sa[0] !== sb[0]) return sb[0] - sa[0];
+      if (sa[1] !== sb[1]) return sb[1] - sa[1];
+      return sb[2] - sa[2];
+    })[0];
+
+  const out: PaymentRow[] = [];
+  for (const g of groups.values()) out.push(pickBest(g));
+
+  // Keep latest first for display
+  return out.sort((a, b) =>
+    (new Date(b.released_at || b.created_at || 0).getTime() -
+     new Date(a.released_at || a.created_at || 0).getTime())
+  );
 }
 
-// Join payments to proofs by tx hash; fill bid/milestone/status/time
+// Join payments to proofs by tx hash; fill bid/milestone/status/time/amount
 function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
 
-  // Build a lookup from any known proof hash -> proof row
+  // Hash → proof
   const byHash = new Map<string, ProofRow>();
   for (const pr of proofs) {
     for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
       if (h) byHash.set(String(h).toLowerCase(), pr);
+    }
+  }
+
+  // Fallback: bid+milestone → proof (used when a payment has no tx)
+  const byBM = new Map<string, ProofRow>();
+  for (const pr of proofs) {
+    if (pr.bid_id != null && pr.milestone_index != null) {
+      const key = `${Number(pr.bid_id)}-${Number(pr.milestone_index)}`;
+      if (!byBM.has(key)) byBM.set(key, pr);
     }
   }
 
@@ -495,11 +553,15 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
 
   return payments.map((p) => {
     const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
-    const match = key ? byHash.get(key) : undefined;
+    let match = key ? byHash.get(key) : undefined;
 
-    if (!match) return p; // no proof with that tx — leave as-is
+    // Fallback if no tx: try bid+milestone
+    if (!match && p.bid_id != null && p.milestone_index != null) {
+      match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
+    }
+    if (!match) return p; // nothing to enrich from
 
-    // fill what’s missing from proof
+    // Fill from proof
     const filled: PaymentRow = {
       ...p,
       bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
@@ -511,10 +573,12 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
           : (match.status === 'paid' ? 'completed' : (p.status ?? 'pending')),
     };
 
-    // If amount came as cents/unknown, prefer proof.amount when amounts differ wildly (optional)
+    // Lift amount from proof if payment lacks a usable amount
     const pAmt = toNum(p.amount_usd);
-    // @ts-ignore: some proof payloads carry `amount`
-    const prAmt = toNum((match as any).amount);
+    const anyMatch: any = match as any;
+    const prAmt = toNum(
+      anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount
+    );
     if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
       filled.amount_usd = prAmt;
     }
