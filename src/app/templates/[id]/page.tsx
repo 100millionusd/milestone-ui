@@ -30,8 +30,19 @@ async function startFromTemplate(formData: FormData) {
   const vendorName = String(formData.get('vendorName') || '');
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
+  const vendorNotes = String(formData.get('notes') || '');
 
-  // ---- Files: normalize to real HTTP URLs
+  console.log('🔍 DEBUG - Form data received:', {
+    slugOrId,
+    proposalId,
+    vendorName,
+    walletAddress,
+    preferredStablecoin,
+    vendorNotes, // This should show the text from the form
+    vendorNotesLength: vendorNotes.length
+  });
+
+  // ---- Files: normalize to real HTTP URLs ----
   const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 
   let docsClean: Array<{ url: string; name?: string }> = [];
@@ -88,6 +99,14 @@ async function startFromTemplate(formData: FormData) {
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
+  console.log('🔍 DEBUG - Calling createBidFromTemplate with:', {
+    ...base,
+    proposalId,
+    vendorName,
+    notes: vendorNotes, // Make sure notes are being passed
+    notesLength: vendorNotes.length
+  });
+
   // Create bid using normal-bid shape
   const res = await createBidFromTemplate({
     ...base,
@@ -99,14 +118,30 @@ async function startFromTemplate(formData: FormData) {
     files: docsClean,
     docs: docsClean,
     doc,
+    notes: vendorNotes,
   });
+
+  console.log('🔍 DEBUG - createBidFromTemplate response:', res);
 
   const bidId = Number((res as any)?.bidId);
   if (!bidId) {
     redirect(`/templates/${encodeURIComponent(slugOrId)}?error=template_create_failed`);
   }
 
-  // Redirect to vendor bid page with Agent2
+  console.log('✅ Template bid created with ID:', bidId);
+
+  // Optional: Check what was actually stored
+  try {
+    const createdBid = await getBid(bidId);
+    console.log('🔍 DEBUG - Created bid from database:', {
+      bidId,
+      notes: createdBid.notes, // Check if notes are in the database
+      notesLength: createdBid.notes?.length || 0
+    });
+  } catch (error) {
+    console.error('❌ Error checking created bid:', error);
+  }
+
   redirect(`/vendor/bids/${bidId}?flash=agent2`);
 }
 

@@ -1653,6 +1653,7 @@ export async function createBidFromTemplate(input: {
   files?: any[];
   docs?: any[];
   doc?: any;
+  notes?: string;
   milestones?: Array<{
     name: string;
     amount: number;
@@ -1665,11 +1666,20 @@ export async function createBidFromTemplate(input: {
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
   
-  // Use the files as they are - they're already uploaded URLs
+  console.log('🔍 API DEBUG - createBidFromTemplate input:', {
+    templateId: input.templateId,
+    slug: input.slug,
+    proposalId: input.proposalId,
+    vendorName: input.vendorName,
+    notes: input.notes, // Check if notes are received
+    notesLength: input.notes?.length || 0,
+    milestonesCount: input.milestones?.length || 0,
+    filesCount: input.files?.length || 0
+  });
+
   const files = Array.isArray(input.files) ? input.files : [];
   const docs = Array.isArray(input.docs) ? input.docs : files;
   
-  // Normalize milestone description → notes/desc (Admin & Agent2)
   const milestones = Array.isArray(input.milestones)
     ? input.milestones.map((m) => {
         const text = m.description ?? m.notes ?? m.desc ?? '';
@@ -1682,17 +1692,7 @@ export async function createBidFromTemplate(input: {
       })
     : [];
 
-  // Match NORMAL BID structure EXACTLY
   const doc = input.doc || files[0] || docs[0] || null;
-  const docsArray = docs.length ? docs : (files.length ? files : []);
-  
-  // Ensure doc has the structure Agent2 expects
-  const normalizedDoc = doc ? {
-    url: doc.url || doc.href || '',
-    name: doc.name || 'document',
-    mimetype: doc.mimetype || 'application/pdf',
-    size: doc.size || 0
-  } : null;
 
   const payload = {
     templateId: input.templateId,
@@ -1702,13 +1702,22 @@ export async function createBidFromTemplate(input: {
     walletAddress: input.walletAddress,
     preferredStablecoin: input.preferredStablecoin || 'USDT',
     milestones,
-    // Exactly what normal bids send:
-    doc: normalizedDoc,        // Single document object
-    docs: docsArray,           // Array of documents
-    files: docsArray,          // ALSO send as files for Agent2 compatibility
+    doc,
+    docs,
+    files: docs,
+    notes: input.notes, // Make sure notes are in payload
   };
 
-  return postJSON(`/bids/from-template`, payload);
+  console.log('🔍 API DEBUG - Payload to /bids/from-template:', {
+    notes: payload.notes,
+    notesLength: payload.notes?.length || 0
+  });
+
+  const result = await postJSON(`/bids/from-template`, payload);
+  
+  console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
+  
+  return result;
 }
 
 /** (Optional) Helper if you want to build phased milestones in the browser.
