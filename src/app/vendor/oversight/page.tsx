@@ -450,6 +450,9 @@ return {
   milestone_id: rawMilestoneId ?? null,
   __raw_index: index,
 };
+  });
+}
+
 
 // Build payments from proofs that clearly look paid (EOA/direct fallbacks)
 function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
@@ -458,10 +461,12 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
   let idx = 0;
 
   for (const pr of proofs) {
-    const paid = pr?.status === 'paid' || !!(pr?.paid_at || pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
+    const paid =
+      pr?.status === 'paid' ||
+      !!(pr?.paid_at || pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
     if (!paid) continue;
 
-    // Try to lift an amount if the proof carries one under common keys
+    // lift amount if present on proof
     const anyPr: any = pr as any;
     let amount =
       anyPr?.amount_usd ?? anyPr?.amountUsd ?? anyPr?.valueUsd ?? anyPr?.usd ?? anyPr?.amount ?? null;
@@ -471,6 +476,8 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
     }
 
     const tx = pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash || null;
+    const isSafe = !!(pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
+    const method: 'safepay' | 'normal' = isSafe ? 'safepay' : 'normal';
 
     out.push({
       id: `synth-${pr?.bid_id ?? 'x'}-${pr?.milestone_index ?? 'x'}-${idx++}`,
