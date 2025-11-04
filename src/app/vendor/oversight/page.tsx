@@ -184,7 +184,12 @@ function normalizeProofs(rows: any[]): ProofRow[] {
     if (status === 'submitted' && !r?.submitted_at && !r?.completionDate) {
       status = 'open';
     }
-    
+
+    // If payment info exists, treat as paid (covers direct/EOA payouts)
+if (r?.paidAt || r?.paymentDate || r?.paymentTxHash || r?.payment_tx_hash) {
+  status = 'paid';
+}
+
     // Handle different date fields - use completionDate for submitted_at
     const submitted_at = r?.completionDate ?? r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
     const created_at = r?.created_at ?? r?.createdAt ?? r?.created;
@@ -408,10 +413,10 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt;
 
     const tx_hash =
-      r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
-      r?.txHash ?? r?.transactionHash ?? r?.payment_hash ??
-      r?.onchain_tx_id ?? r?.onchain_tx_hash ??
-      nested?.tx_hash ?? nested?.transaction_hash ?? null;
+  r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
+  r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
+  r?.onchain_tx_id ?? r?.onchain_tx_hash ??
+  nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
 
     const id =
       r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
@@ -611,8 +616,8 @@ export default function VendorOversightPage() {
           setProofs(normalizedProofs);
           console.log('Normalized proofs:', normalizedProofs); // Debug log
           
- // accept multiple backend shapes (wide net)
-const rawPayments =
+// accept multiple backend shapes (wide net) — now handles object buckets + fallbacks
+let rawPaymentsAny: any =
   data.payments ??
   data.payouts ??
   data.releases ??
@@ -627,6 +632,36 @@ const rawPayments =
     ? data.milestones.flatMap((m: any) => m?.releases ?? m?.payments ?? m?.payouts ?? [])
     : null) ??
   [];
+
+// If payments came as an object (e.g. { safe:[], normal:[], eoa:[] }), flatten its arrays
+if (!Array.isArray(rawPaymentsAny) && rawPaymentsAny && typeof rawPaymentsAny === 'object') {
+  rawPaymentsAny = Object.values(rawPaymentsAny).flatMap((v: any) => Array.isArray(v) ? v : []);
+}
+
+// Extra keys sometimes used for direct/normal payouts
+if (Array.isArray(rawPaymentsAny) && rawPaymentsAny.length === 0) {
+  const extras = [
+    data.normal_payments, data.direct_payments, data.eoa_payments,
+    data.normalPayments, data.directPayments, data.eoaPayments,
+    data.bank_transfers, data.chain_transfers, data.onchain_payments
+  ].filter(Array.isArray).flat();
+  if (extras.length) rawPaymentsAny = extras;
+}
+
+// Final fallback: hit vendor payments endpoint if the aggregate didn’t include them
+if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
+  try {
+    const r = await fetch(api('/vendor/payments'), { credentials: 'include', cache: 'no-store' });
+    if (r.ok) rawPaymentsAny = await r.json();
+  } catch {}
+}
+
+// store raw for inspection and normalize
+setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
+const normalizedPayments = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
+const paymentsJoined = linkPaymentsToProofs(normalizedPayments, normalizedProofs);
+setPayments(paymentsJoined);
+console.log('Normalized payments (joined):', paymentsJoined);
 
 // store raw for inspection and normalize
 setRawPayments(Array.isArray(rawPayments) ? rawPayments : []);
