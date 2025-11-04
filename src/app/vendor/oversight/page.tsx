@@ -453,51 +453,6 @@ return {
   });
 }
 
-
-// Build payments from proofs that clearly look paid (EOA/direct fallbacks)
-function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
-  if (!Array.isArray(proofs)) return [];
-  const out: PaymentRow[] = [];
-  let idx = 0;
-
-  for (const pr of proofs) {
-    const paid =
-      pr?.status === 'paid' ||
-      !!(pr?.paid_at || pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
-    if (!paid) continue;
-
-    // lift amount if present on proof
-    const anyPr: any = pr as any;
-    let amount =
-      anyPr?.amount_usd ?? anyPr?.amountUsd ?? anyPr?.valueUsd ?? anyPr?.usd ?? anyPr?.amount ?? null;
-    if (amount == null) {
-      const cents = anyPr?.usd_cents ?? anyPr?.usdCents;
-      if (cents != null) amount = Number(cents) / 100;
-    }
-
-    const tx = pr?.payment_tx_hash || pr?.safe_payment_tx_hash || pr?.safe_tx_hash || null;
-    const isSafe = !!(pr?.safe_payment_tx_hash || pr?.safe_tx_hash);
-    const method: 'safepay' | 'normal' = isSafe ? 'safepay' : 'normal';
-
-    out.push({
-      id: `synth-${pr?.bid_id ?? 'x'}-${pr?.milestone_index ?? 'x'}-${idx++}`,
-      bid_id: pr?.bid_id != null ? Number(pr.bid_id) : null,
-      milestone_index: pr?.milestone_index != null ? Number(pr.milestone_index) : null,
-      amount_usd: amount ?? null,
-      status: 'completed',
-      released_at: pr?.paid_at ?? pr?.updated_at ?? pr?.submitted_at ?? pr?.created_at ?? null,
-      tx_hash: tx,
-      method,
-      created_at: pr?.created_at ?? null,
-      updated_at: pr?.updated_at ?? null,
-      proof_id: (pr as any)?.id ?? null,
-      milestone_id: null,
-      __raw_index: idx,
-    });
-  }
-  return out;
-}
-
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   if (!Array.isArray(arr)) return [];
 
@@ -538,7 +493,7 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // 1) Keep best per distinct tx (keep amounts as-is)
+    // 1) Keep best per distinct tx (real on-chain rows)
     let hasTxRows = false;
     for (const [k, g] of byTx) {
       if (k === '') continue;
@@ -546,14 +501,15 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       hasTxRows = true;
     }
 
-    // 2) ALWAYS keep one best "normal/no-tx" row — DO NOT copy amount from tx rows
-    const noTxGroup = byTx.get('') || [];
-    const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
-    if (noTxNormal.length) {
-      out.push(pickBest(noTxNormal));
-    } else if (!hasTxRows && noTxGroup.length) {
-      // if there were zero tx rows at all, keep one no-tx (any)
-      out.push(pickBest(noTxGroup));
+    // 2) Keep one best *normal* no-tx row ONLY if there were no tx rows
+    if (!hasTxRows) {
+      const noTxGroup = byTx.get('') || [];
+      const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
+      if (noTxNormal.length) {
+        out.push(pickBest(noTxNormal));
+      } else if (noTxGroup.length) {
+        out.push(pickBest(noTxGroup));
+      }
     }
   }
 
@@ -794,10 +750,9 @@ if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
 setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
-const synthesized = synthesizePaymentsFromProofs(normalizedProofs);
-const finalPayments = dedupePayments([...(paymentsJoined ?? []), ...synthesized]);
+const finalPayments = dedupePayments(paymentsJoined ?? []);
 setPayments(finalPayments);
-console.log('Final payments (joined + synthesized):', finalPayments);
+console.log('Final payments:', finalPayments);
 
 // Derive milestones from proofs
 const milestones = deriveMilestonesFromProofs(normalizedProofs);
