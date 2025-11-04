@@ -913,6 +913,14 @@ export async function analyzeBid(id: number, prompt?: string): Promise<Bid> {
   return toBid(b);
 }
 
+// TEMPORARY FIX: Add this function to force update notes after bid creation
+export async function updateBidNotes(bidId: number, notes: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/bids/${encodeURIComponent(String(bidId))}/notes`, {
+    method: 'PATCH',
+    body: JSON.stringify({ notes }),
+  });
+}
+
 // ---- Vendor ----
 export async function getVendorProfile(): Promise<any> {
   // returns the logged-in vendor’s profile from your backend
@@ -1792,6 +1800,7 @@ export default {
   archiveBid,
   updateBid,
   deleteBid,
+  updateBidNotes,
 
   // vendor/admin
   getVendorProfile,
