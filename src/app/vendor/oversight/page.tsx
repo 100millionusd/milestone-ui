@@ -481,46 +481,61 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
 }
 
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
-  // Group by tx when present; otherwise by bid+milestone; otherwise by id
-  const groups = new Map<string, PaymentRow[]>();
+  if (!Array.isArray(arr)) return [];
 
-  for (const p of arr || []) {
-    const key =
-      p.tx_hash ? `tx:${String(p.tx_hash).toLowerCase()}` :
-      (p.bid_id != null && p.milestone_index != null ? `bm:${p.bid_id}-${p.milestone_index}` :
-      `id:${String(p.id)}`);
-    const g = groups.get(key);
-    if (g) g.push(p); else groups.set(key, [p]);
+  // Group by Bid+Milestone first
+  const byBM = new Map<string, PaymentRow[]>();
+  for (const p of arr) {
+    const bm = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
+    const g = byBM.get(bm);
+    if (g) g.push(p); else byBM.set(bm, [p]);
   }
 
-  // Prefer rows with a positive amount, then with a tx, then the latest time
+  // Helpers
   const num = (v: any): number => {
     if (typeof v === 'number') return v;
     if (v == null) return NaN;
     const n = Number(String(v).replace(/[^0-9.-]/g, ''));
     return Number.isFinite(n) ? n : NaN;
   };
-  const score = (x: PaymentRow) => {
-    const amt = num(x.amount_usd);
-    return [
-      Number.isFinite(amt) && amt > 0 ? 2 : 0,                             // has amount > 0
-      x.tx_hash ? 1 : 0,                                                   // has tx
-      new Date(x.released_at || x.created_at || 0).getTime(),              // latest first
-    ] as const;
-  };
+  const time = (p: PaymentRow) =>
+    new Date(p.released_at || p.created_at || 0).getTime();
 
-  const pickBest = (g: PaymentRow[]) =>
-    g.sort((a, b) => {
-      const sa = score(a), sb = score(b);
-      if (sa[0] !== sb[0]) return sb[0] - sa[0];
-      if (sa[1] !== sb[1]) return sb[1] - sa[1];
-      return sb[2] - sa[2];
+  // Pick best within a group
+  const pickBest = (list: PaymentRow[]) =>
+    list.slice().sort((a, b) => {
+      const aAmt = num(a.amount_usd), bAmt = num(b.amount_usd);
+      const aHasAmt = Number.isFinite(aAmt) && aAmt > 0 ? 1 : 0;
+      const bHasAmt = Number.isFinite(bAmt) && bAmt > 0 ? 1 : 0;
+      if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount
+      const aTx = a.tx_hash ? 1 : 0, bTx = b.tx_hash ? 1 : 0;
+      if (aTx !== bTx) return bTx - aTx;                   // then with tx
+      return time(b) - time(a);                            // then latest
     })[0];
 
   const out: PaymentRow[] = [];
-  for (const g of groups.values()) out.push(pickBest(g));
 
-  // Keep latest first for display
+  for (const group of byBM.values()) {
+    // Sub-group by tx ('' = no tx)
+    const byTx = new Map<string, PaymentRow[]>();
+    for (const p of group) {
+      const k = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
+      const g = byTx.get(k);
+      if (g) g.push(p); else byTx.set(k, [p]);
+    }
+
+    const txKeys = [...byTx.keys()].filter(k => k !== '');
+    // Keep one best row per distinct tx
+    for (const k of txKeys) out.push(pickBest(byTx.get(k)!));
+
+    // If there are any tx-backed rows, drop no-tx synth rows for this BM.
+    // Otherwise, keep a single best no-tx row.
+    if (txKeys.length === 0 && byTx.has('')) {
+      out.push(pickBest(byTx.get('')!));
+    }
+  }
+
+  // Final sort: latest first
   return out.sort((a, b) =>
     (new Date(b.released_at || b.created_at || 0).getTime() -
      new Date(a.released_at || a.created_at || 0).getTime())
