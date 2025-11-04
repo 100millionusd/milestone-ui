@@ -66,6 +66,7 @@ type PaymentRow = {
   tx_hash?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+   method?: 'safepay' | 'normal' | string;
   // NEW (optional, used for robust joins / debugging)
   proof_id?: number | string | null;
   milestone_id?: number | string | null;
@@ -420,6 +421,12 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   r?.onchain_tx_id ?? r?.onchain_tx_hash ??
   nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
 
+  const method =
+  (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
+   r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
+    ? 'safepay'
+    : 'normal';
+
     const id =
       r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
       r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
@@ -432,6 +439,7 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       status,
       released_at,
       tx_hash,
+      method,
       created_at: r?.created_at ?? r?.createdAt ?? null,
       updated_at: r?.updated_at ?? r?.updatedAt ?? null,
       proof_id: rawProofId ?? null,
@@ -470,6 +478,7 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
       status: 'completed',
       released_at: pr?.paid_at ?? pr?.updated_at ?? pr?.submitted_at ?? pr?.created_at ?? null,
       tx_hash: tx,
+      method,
       created_at: pr?.created_at ?? null,
       updated_at: pr?.updated_at ?? null,
       proof_id: (pr as any)?.id ?? null,
@@ -483,7 +492,7 @@ function synthesizePaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   if (!Array.isArray(arr)) return [];
 
-  // Group by Bid+Milestone first
+  // Group by Bid+Milestone
   const byBM = new Map<string, PaymentRow[]>();
   for (const p of arr) {
     const bm = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
@@ -491,7 +500,6 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
     if (g) g.push(p); else byBM.set(bm, [p]);
   }
 
-  // helpers
   const num = (v: any): number => {
     if (typeof v === 'number') return v;
     if (v == null) return NaN;
@@ -523,7 +531,7 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // Push best per distinct tx (non-empty keys)
+    // 1) Keep one best per distinct tx
     let hasTxRows = false;
     for (const [k, g] of byTx) {
       if (k === '') continue;
@@ -531,18 +539,18 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       hasTxRows = true;
     }
 
-    // Also keep one best no-tx row if it has amount>0 OR if there were no tx-backed rows
-    const noTxGroup = byTx.get('');
-    if (noTxGroup && noTxGroup.length) {
-      const bestNoTx = pickBest(noTxGroup);
-      const amt = num(bestNoTx.amount_usd);
-      if (!hasTxRows || (Number.isFinite(amt) && amt > 0)) {
-        out.push(bestNoTx);
-      }
+    // 2) ALWAYS keep one best "normal/no-tx" row (so normal payouts show even if $0)
+    const noTxGroup = byTx.get('') || [];
+    const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
+    if (noTxNormal.length) {
+      out.push(pickBest(noTxNormal));
+    } else if (!hasTxRows && noTxGroup.length) {
+      // if there were zero tx rows at all, keep one no-tx (any)
+      out.push(pickBest(noTxGroup));
     }
   }
 
-  // Final sort: latest first
+  // Latest first
   return out.sort((a, b) =>
     (new Date(b.released_at || b.created_at || 0).getTime() -
      new Date(a.released_at || a.created_at || 0).getTime())
