@@ -216,7 +216,7 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// SIMPLIFIED Payment Normalization
+// SIMPLIFIED Payment Normalization - PRESERVE EXISTING STATUS
 function normalizePayments(rows: any[]): PaymentRow[] {
   return (rows || []).map((r: any, index) => {
     // Use the actual API field names
@@ -224,19 +224,23 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     const amount_usd = r?.amount ?? r?.amount_usd;
     const released_at = r?.date ?? r?.released_at;
     
+    // Preserve existing status if it exists, otherwise use success flag
+    const existingStatus = r?.status;
+    const status = existingStatus || (r?.success ? 'completed' : 'pending');
+    
     return {
       id: r?.id ?? `payment-${index + 1}`,
       bid_id: null, // Will be filled by linkPaymentsToProofs
       milestone_index: null, // Will be filled by linkPaymentsToProofs
       amount_usd,
-      status: r?.success ? 'completed' : 'pending',
+      status: status, // Use preserved or calculated status
       released_at,
       tx_hash,
-      method: 'normal',
+      method: r?.method ?? 'normal', // Preserve existing method
       created_at: r?.date ?? null,
       updated_at: r?.date ?? null,
-      proof_id: null,
-      milestone_id: null,
+      proof_id: r?.proof_id ?? null,
+      milestone_id: r?.milestone_id ?? null,
       __raw_index: index,
     };
   });
@@ -252,14 +256,15 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
       console.log(`Creating COMPLETED normal payment for proof ${proof.id}`, {
         bid_id: proof.bid_id,
         milestone_index: proof.milestone_index,
-        paid_at: proof.paid_at
+        paid_at: proof.paid_at,
+        payment_tx_hash: proof.payment_tx_hash
       });
       
       normalPayments.push({
         id: `normal-payment-${proof.id}-${index}`,
         bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
         milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
-        amount_usd: proof.amount || null,
+        amount_usd: null, // We don't have amount in proof data, set to null
         status: 'completed', // HARD-CODED as completed
         released_at: proof.paid_at,
         tx_hash: proof.payment_tx_hash,
