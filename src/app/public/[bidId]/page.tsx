@@ -116,6 +116,35 @@ export default function PublicProjectDetailClient() {
   const [proofs, setProofs] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
 
+  // ADD THIS: Image preloading useEffect
+  useEffect(() => {
+    if (!project) return;
+
+    // Preload cover image
+    if (project.coverImage) {
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = project.coverImage;
+      document.head.appendChild(link);
+    }
+
+    // Preload first few proof images
+    const proofImages = proofs
+      .flatMap((p: any) => p.files || [])
+      .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
+      .slice(0, 3)
+      .map((f: any) => f.url);
+
+    proofImages.forEach((url: string) => {
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = url;
+      document.head.appendChild(link);
+    });
+  }, [project, proofs]);
+
   async function load() {
     if (!Number.isFinite(bidId)) {
       setErr('Invalid project id');
@@ -228,15 +257,17 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
-              <Image
-                src={project.coverImage}
-                alt={project.proposalTitle || 'cover'}
-                width={1600}
-                height={900}
-                sizes="(max-width: 768px) 100vw, 1024px"
-                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
-                priority
-              />
+ <Image
+  src={project.coverImage}
+  alt={project.proposalTitle || 'cover'}
+  width={1600}
+  height={900}
+  sizes="(max-width: 768px) 100vw, 1024px"
+  style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+  priority
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
             ) : (
               <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
             )}
@@ -281,13 +312,16 @@ export default function PublicProjectDetailClient() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
                         <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
-                          <Image
-                            src={u}
-                            alt={`image ${i + 1}`}
-                            fill
-                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                            style={{ objectFit: 'cover' }}
-                          />
+ <Image
+  src={u}
+  alt={`image ${i + 1}`}
+  fill
+  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+  style={{ objectFit: 'cover' }}
+  loading="lazy"
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
                         </div>
                       ))}
                     </div>
@@ -395,13 +429,16 @@ export default function PublicProjectDetailClient() {
                               >
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
-                                    <Image
-                                      src={url}
-                                      alt={f.name || `file ${idx + 1}`}
-                                      fill
-                                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                                      style={{ objectFit: 'cover' }}
-                                    />
+ <Image
+  src={url}
+  alt={f.name || `file ${idx + 1}`}
+  fill
+  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+  style={{ objectFit: 'cover' }}
+  loading="lazy"
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
                                   </div>
                                 ) : (
                                   <div className="h-24 flex items-center justify-center text-xs text-gray-500">
