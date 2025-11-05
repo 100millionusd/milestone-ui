@@ -739,12 +739,15 @@ if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
 // store raw for inspection and normalize
 setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
+console.log('Normalized payments:', normalizedPaymentsLocal);
 const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
 const finalPayments = dedupePayments(paymentsJoined ?? []);
+console.log('Final payments:', finalPayments);
 setPayments(finalPayments);
 
 // Derive milestones from BOTH proofs + payments so normal payouts mark “paid”
 const milestones = deriveMilestones(normalizedProofs, finalPayments);
+console.log('Derived milestones:', milestones);
 setMilestones(milestones);
           console.log('Derived milestones:', milestones); // Debug log
         }
