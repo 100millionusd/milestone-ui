@@ -673,6 +673,18 @@ export default function VendorOversightPage() {
         }
 
         const data = await response.json();
+
+        // 🔍 ADD DEBUGGING HERE - RIGHT AFTER GETTING THE DATA
+      console.log('=== VENDOR OVERSIGHT DEBUGGING ===');
+      console.log('Full API response:', data);
+      console.log('Role data:', data.role);
+      console.log('Bids data:', data.bids);
+      console.log('Proofs data:', data.proofs);
+      console.log('Payments data:', data.payments);
+      console.log('Payouts data:', data.payouts);
+      console.log('Milestones data:', data.milestones);
+      console.log('All keys in response:', Object.keys(data));
+      console.log('================================');
         
         if (!aborted) {
           
