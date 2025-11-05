@@ -26,7 +26,7 @@ type BidRow = {
 };
 
 type ProofRow = {
-  id: number | string;
+  id: number;
   bid_id?: number | string | null;
   milestone_index?: number | null;
   vendor_name?: string | null;
@@ -35,7 +35,6 @@ type ProofRow = {
   submitted_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-  completed?: boolean | null; // <— used in UI counts
 
   // NEW: used to join payments <-> proofs
   payment_tx_hash?: string | null;        // paymentTxHash
@@ -63,7 +62,7 @@ type PaymentRow = {
   tx_hash?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-  method?: 'safepay' | 'normal' | string;
+   method?: 'safepay' | 'normal' | string;
   // NEW (optional, used for robust joins / debugging)
   proof_id?: number | string | null;
   milestone_id?: number | string | null;
@@ -95,40 +94,31 @@ function downloadCSV(filename: string, rows: any[]) {
   URL.revokeObjectURL(url);
 }
 
-const toNum = (v: any) => {
-  if (typeof v === 'number') return v;
-  if (v == null) return NaN;
-  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : NaN;
-};
-
-const latestTime = (...vals: (string | null | undefined)[]) => {
-  let best = 0, out: string | null = null;
-  for (const v of vals) {
-    if (!v) continue;
-    const t = new Date(v).getTime();
-    if (t > best) { best = t; out = v; }
-  }
-  return out;
-};
-
 // ———————————————————————————————————————————
 // Updated Normalizers for your API structure
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => {
+    
+    // Handle different ID fields
     const id = r?.id ?? r?.bidId ?? r?.bid_id;
+    
+    // Handle different proposal ID fields  
     const proposal_id = r?.proposalId ?? r?.proposal_id ?? r?.proposal?.id;
-
+    
+    // Handle different vendor name fields
     let vendor_name = r?.vendorName ?? r?.vendor_name ?? r?.vendor;
     if (!vendor_name && r?.vendor_profile) {
       vendor_name = r.vendor_profile.vendor_name ?? r.vendor_profile.name ?? r.vendor_profile.vendor;
     }
-
-    const amount_usd = r?.priceUsd ?? r?.amount_usd ?? r?.amountUsd ?? r?.usd ??
-      (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null);
-
+    
+    // Handle different amount fields
+    const amount_usd = r?.priceUsd ?? r?.amount_usd ?? r?.amountUsd ?? r?.usd ?? 
+                      (r?.usdCents != null ? r.usdCents / 100 : r?.amount ?? null);
+    
+    // Handle different status fields
     const status = r?.status ?? r?.state ?? null;
-
+    
+    // Handle different date fields
     const created_at = r?.created_at ?? r?.createdAt ?? r?.created ?? r?.inserted_at;
     const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated ?? r?.modified_at;
 
@@ -146,45 +136,68 @@ function normalizeBids(rows: any[]): BidRow[] {
 
 function normalizeProofs(rows: any[]): ProofRow[] {
   return (rows || []).map((r: any, index) => {
-    const id = r?.id ?? r?.proof_id ?? r?.proofId ?? `proof-${r?.bid_id ?? 'x'}-${r?.milestone_index ?? index}`;
+    
+    // Handle different ID fields - use a combination of bid_id and milestone_index to ensure uniqueness
+    const id = r?.id ?? r?.proof_id ?? r?.proofId ?? `proof-${r.bid_id}-${r.milestone_index}-${index}`;
+    
+    // Handle different bid ID fields
     const bid_id = r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid;
-
-    // milestone index source order
-    let milestone_index: number | null = null;
+    
+    // Extract milestone number from name (e.g., "Milestone 3" -> 3)
+    let milestone_index = null;
     if (r?.name) {
-      const m = String(r.name).match(/Milestone\s+(\d+)/i);
-      if (m) milestone_index = parseInt(m[1], 10);
+      const match = r.name.match(/Milestone\s+(\d+)/);
+      if (match) {
+        milestone_index = parseInt(match[1]);
+      }
     }
-    if (milestone_index == null) {
-      milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone ?? null;
+    
+    // If no milestone from name, try other fields
+    if (!milestone_index) {
+      milestone_index = r?.milestone_index ?? r?.milestoneIndex ?? r?.milestone;
     }
-    if (milestone_index == null) milestone_index = index + 1;
-
+    
+    // Fallback to index if still no milestone index
+    if (!milestone_index) {
+      milestone_index = index + 1;
+    }
+    
+    // Handle different vendor name fields
     const vendor_name = r?.vendor_name ?? r?.vendorName ?? r?.vendor;
+    
+    // Handle different title fields
     const title = r?.title ?? r?.name ?? r?.proof_title ?? `Milestone ${milestone_index}`;
+    
+    // SIMPLIFIED: Handle status - trust the API first, then apply payment override
+    let status = r?.status ?? r?.state;
 
-    // derive status
-    let status = r?.status ?? r?.state ?? null;
+    // If no explicit status, use a simple fallback
     if (!status) {
-      if (r?.completed === true) status = 'completed';
-      else if (r?.proof && r?.submitted_at) status = 'submitted';
-      else if (r?.proof && !r?.submitted_at) status = 'open';
-      else status = 'pending';
+      if (r?.proof) {
+        status = 'submitted'; // Has proof content = submitted
+      } else {
+        status = 'pending'; // No proof content = pending
+      }
     }
-    if (status === 'submitted' && !r?.submitted_at && !r?.completionDate) status = 'open';
-    if (r?.paidAt || r?.paymentDate || r?.paymentTxHash || r?.payment_tx_hash) status = 'paid';
 
+    // If payment info exists, always mark as paid (this overrides everything)
+    if (r?.paidAt || r?.paymentDate || r?.paymentTxHash || r?.payment_tx_hash) {
+      status = 'paid';
+    }
+
+    // Handle different date fields - use completionDate for submitted_at
     const submitted_at = r?.completionDate ?? r?.submitted_at ?? r?.submittedAt ?? r?.created_at ?? r?.createdAt;
     const created_at = r?.created_at ?? r?.createdAt ?? r?.created;
     const updated_at = r?.updated_at ?? r?.updatedAt ?? r?.updated;
-
+    // capture tx hashes and payment time for join
     const payment_tx_hash = r?.paymentTxHash ?? r?.payment_tx_hash ?? null;
     const safe_payment_tx_hash = r?.safePaymentTxHash ?? r?.safe_payment_tx_hash ?? null;
     const safe_tx_hash = r?.safeTxHash ?? r?.safe_tx_hash ?? null;
     const paid_at = r?.paidAt ?? r?.paymentDate ?? null;
 
+
     return {
-      id,
+      id: Number(index + 1),
       bid_id: bid_id != null ? Number(bid_id) : null,
       milestone_index: Number(milestone_index),
       vendor_name,
@@ -193,7 +206,8 @@ function normalizeProofs(rows: any[]): ProofRow[] {
       submitted_at,
       created_at,
       updated_at,
-      completed: r?.completed ?? null,
+
+      // NEW
       payment_tx_hash,
       safe_payment_tx_hash,
       safe_tx_hash,
@@ -202,92 +216,20 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   });
 }
 
-// ---- helpers for robust extraction (must sit ABOVE normalizePayments) ----
-function toNumberLoose(v: any): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const m = v.match(/-?\d+/);
-    if (m) return Number(m[0]);
-  }
-  return null;
-}
-
-function tryParseJSON(val: any) {
-  if (typeof val !== 'string') return null;
-  const s = val.trim();
-  if (!s || (!s.startsWith('{') && !s.startsWith('['))) return null;
-  try { return JSON.parse(s); } catch { return null; }
-}
-
-// Depth-first scan for a number under any key that matches keyRegex.
-function deepFindNumber(obj: any, keyRegex: RegExp, maxDepth = 6): number | null {
-  const seen = new Set<any>();
-  const stack: Array<{v:any; d:number}> = [{ v: obj, d: 0 }];
-
-  while (stack.length) {
-    const { v, d } = stack.pop()!;
-    if (!v || typeof v !== 'object' || seen.has(v) || d > maxDepth) continue;
-    seen.add(v);
-
-    if (Array.isArray(v)) {
-      for (const it of v) stack.push({ v: it, d: d + 1 });
-      continue;
-    }
-
-    for (const [k, val] of Object.entries(v)) {
-      if (keyRegex.test(k)) {
-        const num = toNumberLoose(val);
-        if (num != null) return num;
-      }
-      if (val && typeof val === 'object') stack.push({ v: val, d: d + 1 });
-      if (typeof val === 'string') {
-        const parsed = tryParseJSON(val);
-        if (parsed) stack.push({ v: parsed, d: d + 1 });
-      }
-    }
-  }
-  return null;
-}
-
-// Scrape IDs from free text like "bid:123", "Milestone 2", "ms=2"
-function parseIdsFromText(...texts: Array<string | undefined | null>) {
-  let bidId: number | null = null;
-  let milestoneIndex: number | null = null;
-  for (const t of texts) {
-    if (!t) continue;
-    if (bidId == null) {
-      const m = t.match(/(?:^|[^a-z])(bid(?:[_\s-]?id)?)[\s:=-]*#?\s*(\d+)/i);
-      if (m) bidId = Number(m[2]);
-    }
-    if (milestoneIndex == null) {
-      const m = t.match(/(?:^|[^a-z])(ms|milestone|mil)[\s:=-]*#?\s*(\d+)/i);
-      if (m) milestoneIndex = Number(m[2] ?? m[1]);
-    }
-    if (bidId != null && milestoneIndex != null) break;
-  }
-  return { bidId, milestoneIndex };
-}
-
-// Shallow merge for object-likes
-function mergeObjects(...objs: any[]) {
-  return objs
-    .filter(o => o && typeof o === 'object' && !Array.isArray(o))
-    .reduce((acc, o) => Object.assign(acc, o), {} as any);
-}
-
+// SIMPLIFIED Payment Normalization
 function normalizePayments(rows: any[]): PaymentRow[] {
   return (rows || []).map((r: any, index) => {
-    // Use the actual API field names from your logs
-    const tx_hash = r?.transactionHash ?? r?.tx_hash ?? r?.txHash ?? null;
-    const amount_usd = r?.amount ?? r?.amount_usd ?? null;
-    const released_at = r?.date ?? r?.released_at ?? null;
-
+    // Use the actual API field names
+    const tx_hash = r?.transactionHash ?? r?.tx_hash;
+    const amount_usd = r?.amount ?? r?.amount_usd;
+    const released_at = r?.date ?? r?.released_at;
+    
     return {
       id: r?.id ?? `payment-${index + 1}`,
-      bid_id: null,               // Will be filled by linkPaymentsToProofs
-      milestone_index: null,      // Will be filled by linkPaymentsToProofs
+      bid_id: null, // Will be filled by linkPaymentsToProofs
+      milestone_index: null, // Will be filled by linkPaymentsToProofs
       amount_usd,
-      status: r?.success === false ? 'failed' : 'completed',
+      status: r?.success ? 'completed' : 'pending',
       released_at,
       tx_hash,
       method: 'normal',
@@ -311,12 +253,18 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
     if (g) g.push(p); else byBM.set(bm, [p]);
   }
 
+  const num = (v: any): number => {
+    if (typeof v === 'number') return v;
+    if (v == null) return NaN;
+    const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : NaN;
+  };
   const time = (p: PaymentRow) =>
     new Date(p.released_at || p.created_at || 0).getTime();
 
   const pickBest = (list: PaymentRow[]) =>
     list.slice().sort((a, b) => {
-      const aAmt = toNum(a.amount_usd), bAmt = toNum(b.amount_usd);
+      const aAmt = num(a.amount_usd), bAmt = num(b.amount_usd);
       const aHasAmt = Number.isFinite(aAmt) && aAmt > 0 ? 1 : 0;
       const bHasAmt = Number.isFinite(bAmt) && bAmt > 0 ? 1 : 0;
       if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount > 0
@@ -369,15 +317,12 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
   // hash -> proof
   const byHash = new Map<string, ProofRow>();
   for (const pr of proofs) {
-    const hs = [
-      pr.payment_tx_hash,
-      pr.safe_payment_tx_hash,
-      pr.safe_tx_hash,
-    ].filter(Boolean) as string[];
-    for (const h of hs) byHash.set(String(h).toLowerCase(), pr);
+    for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
+      if (h) byHash.set(String(h).toLowerCase(), pr);
+    }
   }
 
-  // bid+milestone -> proof (fallback)
+  // bid+milestone -> proof (fallback when a payment has no tx)
   const byBM = new Map<string, ProofRow>();
   for (const pr of proofs) {
     if (pr.bid_id != null && pr.milestone_index != null) {
@@ -386,6 +331,9 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     }
   }
 
+  const toNum = (v: any) =>
+    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
+
   return payments.map((p) => {
     const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
     let match = key ? byHash.get(key) : undefined;
@@ -393,30 +341,22 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     if (!match && p.bid_id != null && p.milestone_index != null) {
       match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
     }
-    if (!match) {
-      // still coerce status to completed if payment indicates success
-      return {
-        ...p,
-        status: (p.status && p.status !== 'pending') ? p.status : 'completed',
-      };
-    }
+    if (!match) return p;
 
     const anyMatch: any = match;
     const prAmt = toNum(anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount);
 
+    // status/time/ids
     const filled: PaymentRow = {
       ...p,
       bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
       milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
-      released_at: latestTime(
-        p.released_at,
-        anyMatch?.paidAt,
-        anyMatch?.paymentDate,
-        match.updated_at,
-        match.submitted_at,
-        match.created_at,
-      ),
-      status: 'completed',
+      released_at: p.released_at ?? (anyMatch?.paidAt ?? anyMatch?.paymentDate ?? match.updated_at ?? match.submitted_at ?? match.created_at ?? null),
+      status: (p.status && p.status !== 'pending')
+        ? p.status
+        : ((String(match.status ?? '').toLowerCase() === 'paid' || anyMatch?.paidAt || anyMatch?.paymentDate)
+            ? 'completed'
+            : (p.status ?? 'pending')),
     };
 
     // amount: only lift from proof if payment amount missing/unparseable
@@ -429,89 +369,55 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
   });
 }
 
-// Build milestones from bids.milestones, overlay proofs & payments
-function buildVendorMilestones(bidsRaw: any[], proofs: ProofRow[], payments: PaymentRow[]): MilestoneRow[] {
-  const byKey = new Map<string, MilestoneRow>();
-  const asNum = (v: any) => (v == null ? null : Number(v));
+// SIMPLIFIED Milestone Derivation
+function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): MilestoneRow[] {
+  const milestones: MilestoneRow[] = [];
+  const seen = new Set<string>();
 
-  // 1) Seed from bids[].milestones (1-based index by array order if missing)
-  for (const b of bidsRaw || []) {
-    const bidId = Number(b?.bidId ?? b?.id ?? b?.bid_id);
-    if (!Number.isFinite(bidId)) continue;
-    const msArr: any[] = Array.isArray(b?.milestones) ? b.milestones : [];
-    msArr.forEach((m, i) => {
-      const idx = asNum(m?.milestone_index ?? m?.index ?? m?.i) ?? (i + 1);
-      const key = `${bidId}-${idx}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          id: key,
-          bid_id: bidId,
-          milestone_index: Number(idx),
-          title: (m?.title ?? m?.name ?? null),
-          status: 'open',
-          last_update: null,
-        });
-      }
-    });
-  }
+  // Helper to convert string to time
+  const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
 
-  // 2) Overlay with proofs (status + title + last_update)
-  for (const pr of proofs || []) {
-    const bidId = asNum(pr?.bid_id);
-    const idx = asNum(pr?.milestone_index);
+  // First, create milestones from proofs
+  proofs.forEach(p => {
+    const key = `${p.bid_id}-${p.milestone_index}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      milestones.push({
+        id: key,
+        bid_id: Number(p.bid_id),
+        milestone_index: Number(p.milestone_index),
+        title: p.title,
+        status: p.status,
+        last_update: p.submitted_at || p.created_at,
+      });
+    }
+  });
+
+  // Then overlay payments: if we've paid, force status to 'paid'
+  const byKey = new Map(milestones.map(m => [m.id, m]));
+  
+  for (const pay of payments || []) {
+    const bidId = typeof pay.bid_id === 'number' ? pay.bid_id : Number(pay.bid_id);
+    const idx = typeof pay.milestone_index === 'number' ? pay.milestone_index : Number(pay.milestone_index);
     if (!Number.isFinite(bidId) || !Number.isFinite(idx)) continue;
 
     const key = `${bidId}-${idx}`;
-    const prev = byKey.get(key) ?? {
-      id: key, bid_id: Number(bidId), milestone_index: Number(idx), title: null, status: 'open', last_update: null,
-    };
-
-    const s = String((pr as any)?.status ?? '').toLowerCase();
-    const prPaid = s === 'paid' || !!(pr as any)?.paid_at || !!(pr as any)?.paidAt || !!(pr as any)?.paymentDate;
-    const prSubmitted = s === 'submitted';
-
-    const nextStatus: MilestoneRow['status'] =
-      prPaid ? 'paid' : (prSubmitted ? 'submitted' : prev.status);
-
-    const nextTitle =
-      prev.title ??
-      (prPaid ? (pr as any)?.title ?? (pr as any)?.name ?? null : null) ??
-      (pr as any)?.title ?? (pr as any)?.name ?? null;
-
-    const nextTime = latestTime(
-      prev.last_update,
-      (pr as any)?.paid_at,
-      (pr as any)?.paidAt,
-      (pr as any)?.paymentDate,
-      (pr as any)?.submitted_at,
-      (pr as any)?.completionDate,
-      (pr as any)?.updated_at,
-      (pr as any)?.created_at,
+    const prev = byKey.get(key);
+    const paidTs = Math.max(
+      toTime(pay.released_at),
+      toTime(pay.updated_at),
+      toTime(pay.created_at),
+      toTime(prev?.last_update)
     );
 
     byKey.set(key, {
-      ...prev,
-      status: nextStatus,
-      title: nextTitle,
-      last_update: nextTime,
+      id: key,
+      bid_id: Number(bidId),
+      milestone_index: Number(idx),
+      title: prev?.title ?? null,
+      status: 'paid',
+      last_update: paidTs ? new Date(paidTs).toISOString() : (prev?.last_update ?? null),
     });
-  }
-
-  // 3) Overlay with payments (force 'paid' + freshest time)
-  const paysByBM = new Map<string, PaymentRow[]>();
-  for (const p of payments || []) {
-    if (p?.bid_id == null || p?.milestone_index == null) continue;
-    const key = `${Number(p.bid_id)}-${Number(p.milestone_index)}`;
-    const g = paysByBM.get(key);
-    if (g) g.push(p); else paysByBM.set(key, [p]);
-  }
-
-  for (const [key, list] of paysByBM) {
-    const prev = byKey.get(key);
-    if (!prev) continue; // only flip milestones that actually exist in bids
-    let t = prev.last_update;
-    for (const p of list) t = latestTime(t, p.released_at, p.updated_at, p.created_at);
-    byKey.set(key, { ...prev, status: 'paid', last_update: t });
   }
 
   return Array.from(byKey.values())
@@ -568,6 +474,7 @@ function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone
 }
 
 // ———————————————————————————————————————————
+// Page Component
 export default function VendorOversightPage() {
   const [role, setRole] = useState<RoleInfo | null>(null);
   const [bids, setBids] = useState<BidRow[] | null>(null);
@@ -605,7 +512,7 @@ export default function VendorOversightPage() {
 
         const data = await response.json();
 
-        // 🔍 DEBUGGING
+        // 🔍 ADD DEBUGGING HERE - RIGHT AFTER GETTING THE DATA
         console.log('=== VENDOR OVERSIGHT DEBUGGING ===');
         console.log('Full API response:', data);
         console.log('Role data:', data.role);
@@ -616,17 +523,17 @@ export default function VendorOversightPage() {
         console.log('Milestones data:', data.milestones);
         console.log('All keys in response:', Object.keys(data));
         console.log('================================');
-
+        
         if (!aborted) {
           setRole(data.role || null);
-
+          
           const normalizedBids = normalizeBids(data.bids || []);
           setBids(normalizedBids);
-
+          
           const normalizedProofs = normalizeProofs(data.proofs || []);
           setProofs(normalizedProofs);
-
-          // ——— Payments (accept multiple shapes, flatten objects) ———
+          
+          // accept multiple backend shapes (wide net) — now handles object buckets + fallbacks
           let rawPaymentsAny: any =
             data.payments ??
             data.payouts ??
@@ -643,10 +550,12 @@ export default function VendorOversightPage() {
               : null) ??
             [];
 
+          // If payments came as an object (e.g. { safe:[], normal:[], eoa:[] }), flatten its arrays
           if (!Array.isArray(rawPaymentsAny) && rawPaymentsAny && typeof rawPaymentsAny === 'object') {
             rawPaymentsAny = Object.values(rawPaymentsAny).flatMap((v: any) => Array.isArray(v) ? v : []);
           }
 
+          // Extra keys sometimes used for direct/normal payouts
           if (Array.isArray(rawPaymentsAny) && rawPaymentsAny.length === 0) {
             const extras = [
               data.normal_payments, data.direct_payments, data.eoa_payments,
@@ -656,6 +565,7 @@ export default function VendorOversightPage() {
             if (extras.length) rawPaymentsAny = extras;
           }
 
+          // Final fallback: hit vendor payments endpoint if the aggregate didn't include them
           if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
             try {
               const r = await fetch(api('/vendor/payments'), { credentials: 'include', cache: 'no-store' });
@@ -663,20 +573,19 @@ export default function VendorOversightPage() {
             } catch {}
           }
 
+          // store raw for inspection and normalize
           setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
-
           const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
           console.log('Normalized payments:', normalizedPaymentsLocal);
-
           const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
           const finalPayments = dedupePayments(paymentsJoined ?? []);
           console.log('Final payments:', finalPayments);
           setPayments(finalPayments);
 
-          // ——— Milestones: seed from bids[].milestones, overlay proofs & payments ———
-          const ms = buildVendorMilestones(data.bids || [], normalizedProofs, finalPayments);
-          console.log('Derived milestones:', ms);
-          setMilestones(ms);
+          // Derive milestones from BOTH proofs + payments so normal payouts mark "paid"
+          const milestones = deriveMilestones(normalizedProofs, finalPayments);
+          console.log('Derived milestones:', milestones);
+          setMilestones(milestones);
         }
         
       } catch (e: any) {
@@ -750,7 +659,7 @@ export default function VendorOversightPage() {
     { 
       key: 'proofs', 
       label: 'Proofs', 
-      count: (proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)
+      count: (proofs?.filter(p => p.status === 'paid')?.length ?? 0)
     },
     { key: 'milestones', label: 'Milestones', count: milestones?.length ?? 0 },
     { key: 'payments', label: 'Payments', count: payments?.length ?? 0 },
@@ -770,7 +679,7 @@ export default function VendorOversightPage() {
           {tabs.map(t => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key as typeof tab)}
+              onClick={() => setTab(t.key)}
               className={`px-3 py-1.5 rounded-2xl border text-sm ${tab === t.key ? 'bg-black text-white border-black' : 'bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700'}`}
             >
               {t.label}{' '}{t.count != null ? <span className="ml-1 text-neutral-500">{t.count}</span> : null}
@@ -779,7 +688,7 @@ export default function VendorOversightPage() {
         </div>
       </div>
 
-      {/* Agent 2 — What’s New (compact, narrow) */}
+      {/* Agent 2 — What's New (compact, narrow) */}
       <section className="mb-6">
         <AgentDigestWidget />
       </section>
@@ -812,11 +721,11 @@ export default function VendorOversightPage() {
           <Card title="My Proofs" subtitle="Completed proofs">
             <div className="p-4 flex items-baseline gap-3">
               <div className="text-3xl font-semibold">
-                {(proofs?.filter(p => p.status === 'paid' || p.completed === true)?.length ?? 0)}
+                {(proofs?.filter(p => p.status === 'paid')?.length ?? 0)}
               </div>
             </div>
           </Card>
-          <Card title="Milestones" subtitle="Derived from submissions & payments">
+          <Card title="Milestones" subtitle="Derived from submissions">
             <div className="p-4 flex items-baseline gap-3">
               <div className="text-3xl font-semibold">{milestones?.length ?? 0}</div>
             </div>
@@ -910,8 +819,8 @@ export default function VendorOversightPage() {
                   .slice()
                   .sort((a, b) => (new Date(b.submitted_at || b.created_at || 0).getTime() - new Date(a.submitted_at || a.created_at || 0).getTime()))
                   .map(p => (
-                  <tr key={String(p.id)} className="border-b border-neutral-100 dark:border-neutral-800">
-                    <Td>#{String(p.id)}</Td>
+                  <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800">
+                    <Td>#{p.id}</Td>
                     <Td>{p.bid_id != null ? `#${p.bid_id}` : '—'}</Td>
                     <Td>{p.milestone_index ?? '—'}</Td>
                     <Td>
@@ -919,7 +828,6 @@ export default function VendorOversightPage() {
                         p.status === 'paid' ? 'success' :
                         p.status === 'approved' ? 'success' :
                         p.status === 'submitted' ? 'warning' :
-                        p.status === 'open' ? 'neutral' :
                         'neutral'
                       }>
                         {p.status ?? '—'}
@@ -1020,7 +928,7 @@ export default function VendorOversightPage() {
       {tab === 'milestones' && (
         <Card
           title={`Milestones (${filteredMilestones.length})`}
-          subtitle="Derived from bids, proofs & payments"
+          subtitle="Derived from your submitted proofs"
           right={
             <button
               onClick={() => downloadCSV(`my-milestones-${new Date().toISOString().slice(0,10)}.csv`, filteredMilestones)}
@@ -1053,7 +961,6 @@ export default function VendorOversightPage() {
                         m.status === 'paid' ? 'success' :
                         m.status === 'approved' ? 'success' :
                         m.status === 'submitted' ? 'warning' :
-                        m.status === 'open' ? 'neutral' :
                         'neutral'
                       }>
                         {m.status ?? '—'}
