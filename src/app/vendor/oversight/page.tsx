@@ -246,26 +246,67 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// FIXED: Create normal payments from proofs - SIMPLIFIED
-function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
+/// ENHANCED: Create normal payments from proofs - WITH MILESTONE AMOUNT CALCULATION
+function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
   
+  // Create a map of bids for quick lookup
+  const bidMap = new Map<number, BidRow>();
+  bids.forEach(bid => {
+    bidMap.set(bid.id, bid);
+  });
+
+  // Count milestones per bid to divide amount evenly
+  const milestonesPerBid = new Map<number, number>();
+  proofs.forEach(proof => {
+    if (proof.bid_id) {
+      const bidId = Number(proof.bid_id);
+      const current = milestonesPerBid.get(bidId) || 0;
+      milestonesPerBid.set(bidId, current + 1);
+    }
+  });
+
   proofs.forEach((proof, index) => {
     // If proof is paid but doesn't have a safe payment hash, it's a normal payment
     if (proof.status === 'paid' && !proof.safe_payment_tx_hash && !proof.safe_tx_hash) {
+      
+      let amount_usd = null;
+      if (proof.bid_id) {
+        const bidId = Number(proof.bid_id);
+        const bid = bidMap.get(bidId);
+        
+        if (bid && bid.amount_usd) {
+          const totalMilestones = milestonesPerBid.get(bidId) || 1;
+          const bidAmount = typeof bid.amount_usd === 'string' 
+            ? parseFloat(bid.amount_usd) 
+            : Number(bid.amount_usd);
+          
+          if (!isNaN(bidAmount)) {
+            // Divide bid amount by number of milestones
+            amount_usd = bidAmount / totalMilestones;
+            console.log(`Calculated milestone amount for proof ${proof.id}:`, {
+              bidAmount,
+              totalMilestones,
+              milestoneAmount: amount_usd
+            });
+          }
+        }
+      }
+
       console.log(`Creating COMPLETED normal payment for proof ${proof.id}`, {
         bid_id: proof.bid_id,
         milestone_index: proof.milestone_index,
         paid_at: proof.paid_at,
-        payment_tx_hash: proof.payment_tx_hash
+        payment_tx_hash: proof.payment_tx_hash,
+        amount: amount_usd
       });
       
       normalPayments.push({
         id: `normal-payment-${proof.id}-${index}`,
         bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
         milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
-        amount_usd: null, // We don't have amount in proof data, set to null
-        status: 'completed', // HARD-CODED as completed
+        amount_usd: amount_usd,
+        status: 'completed',
         released_at: proof.paid_at,
         tx_hash: proof.payment_tx_hash,
         method: 'normal',
@@ -556,8 +597,8 @@ export default function VendorOversightPage() {
           setProofs(normalizedProofs);
           
           // Create normal payments from proofs that are paid but don't have safe payments
-          const normalPaymentsFromProofs = createNormalPaymentsFromProofs(normalizedProofs);
-          console.log('Normal payments created from proofs:', normalPaymentsFromProofs);
+const normalPaymentsFromProofs = createNormalPaymentsFromProofs(normalizedProofs, normalizedBids);
+console.log('Normal payments from proofs:', normalPaymentsFromProofs);
 
           // Combine safe payments + normal payments
           const allPayments = [
