@@ -87,3 +87,36 @@ body {
 .absolute.opacity-100 {
   pointer-events: auto;
 }
+
+img {
+  loading: lazy;
+  background: #f3f4f6;
+  transition: opacity 0.3s ease-in-out;
+}
+
+img:not([loaded]) {
+  opacity: 0.7;
+}
+
+img[loaded] {
+  opacity: 1;
+}
+
+img[width][height] {
+  height: auto;
+}
+
+img[src*="ipfs"] {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

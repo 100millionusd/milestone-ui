@@ -5,6 +5,7 @@ import './globals.css';
 import Navigation from '@/components/Navigation';
 import { Web3AuthProvider } from '@/providers/Web3AuthProvider';
 import ClientBootstrap from './ClientBootstrap';
+import ImageEnhancer from '@/components/ImageEnhancer';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -23,6 +24,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ClientBootstrap>
           <Web3AuthProvider>
+            <ImageEnhancer />
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
               {/* nav kept exactly in place, just lifted onto its own stacking layer */}
               <div className="relative z-[9999] isolate pointer-events-auto">
