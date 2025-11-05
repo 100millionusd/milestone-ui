@@ -242,19 +242,32 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// FIXED: Create normal payments from proofs
+// FIXED: Create normal payments from proofs with better status detection
 function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
   
   proofs.forEach((proof, index) => {
     // If proof is paid but doesn't have a safe payment hash, it's a normal payment
     if (proof.status === 'paid' && !proof.safe_payment_tx_hash && !proof.safe_tx_hash) {
+      // Debug log to see what we're working with
+      console.log(`Creating normal payment for proof ${proof.id}:`, {
+        id: proof.id,
+        bid_id: proof.bid_id,
+        milestone_index: proof.milestone_index,
+        paid_at: proof.paid_at,
+        status: proof.status,
+        amount: proof.amount
+      });
+      
+      // ALWAYS set to completed if proof status is 'paid'
+      const paymentStatus = 'completed';
+      
       normalPayments.push({
         id: `normal-payment-${proof.id}-${index}`,
         bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
         milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
-        amount_usd: proof.amount || null, // Use the amount from proof if available
-        status: proof.paid_at ? 'completed' : 'pending', // FIXED: Only check paid_at
+        amount_usd: proof.amount || null,
+        status: paymentStatus, // Always completed for paid proofs
         released_at: proof.paid_at,
         tx_hash: proof.payment_tx_hash,
         method: 'normal',
@@ -264,6 +277,8 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
         milestone_id: null,
         __raw_index: index,
       });
+      
+      console.log(`Created normal payment with status: ${paymentStatus}`);
     }
   });
   
