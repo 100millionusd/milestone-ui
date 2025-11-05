@@ -242,7 +242,41 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// FIXED: Join payments to proofs - don't override completed status
+// FIXED: Create normal payments from proofs - SIMPLIFIED
+function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
+  const normalPayments: PaymentRow[] = [];
+  
+  proofs.forEach((proof, index) => {
+    // If proof is paid but doesn't have a safe payment hash, it's a normal payment
+    if (proof.status === 'paid' && !proof.safe_payment_tx_hash && !proof.safe_tx_hash) {
+      console.log(`Creating COMPLETED normal payment for proof ${proof.id}`, {
+        bid_id: proof.bid_id,
+        milestone_index: proof.milestone_index,
+        paid_at: proof.paid_at
+      });
+      
+      normalPayments.push({
+        id: `normal-payment-${proof.id}-${index}`,
+        bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
+        milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
+        amount_usd: proof.amount || null,
+        status: 'completed', // HARD-CODED as completed
+        released_at: proof.paid_at,
+        tx_hash: proof.payment_tx_hash,
+        method: 'normal',
+        created_at: proof.paid_at,
+        updated_at: proof.paid_at,
+        proof_id: proof.id,
+        milestone_id: null,
+        __raw_index: index,
+      });
+    }
+  });
+  
+  return normalPayments;
+}
+
+// SIMPLIFIED: Join payments to proofs - NO STATUS OVERRIDE
 function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
 
@@ -263,9 +297,6 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     }
   }
 
-  const toNum = (v: any) =>
-    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
-
   return payments.map((p) => {
     const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
     let match = key ? byHash.get(key) : undefined;
@@ -273,34 +304,17 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     if (!match && p.bid_id != null && p.milestone_index != null) {
       match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
     }
+    
+    // If no match, return payment as-is (don't change status)
     if (!match) return p;
 
-    const anyMatch: any = match;
-    const prAmt = toNum(anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount);
-
-    // FIXED: Don't override status if it's already completed
-    const filled: PaymentRow = {
+    // Only fill in missing bid_id and milestone_index, keep original status
+    return {
       ...p,
       bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
       milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
-      released_at: p.released_at ?? (anyMatch?.paidAt ?? anyMatch?.paymentDate ?? match.updated_at ?? match.submitted_at ?? match.created_at ?? null),
-      // Keep the original status if it's already completed
-      status: p.status === 'completed' ? p.status : (
-        (p.status && p.status !== 'pending')
-          ? p.status
-          : ((String(match.status ?? '').toLowerCase() === 'paid' || anyMatch?.paidAt || anyMatch?.paymentDate)
-              ? 'completed'
-              : (p.status ?? 'pending'))
-      ),
+      // DO NOT TOUCH THE STATUS - keep whatever was set in createNormalPaymentsFromProofs
     };
-
-    // amount: only lift from proof if payment amount missing/unparseable
-    const pAmt = toNum(p.amount_usd);
-    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
-      filled.amount_usd = prAmt;
-    }
-
-    return filled;
   });
 }
 
