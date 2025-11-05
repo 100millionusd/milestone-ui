@@ -299,157 +299,100 @@ function mergeObjects(...objs: any[]) {
 }
 
 function normalizePayments(rows: any[]): PaymentRow[] {
-  const toNumberLoose = (v: any): number | null => {
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (typeof v === 'string') {
-      const m = v.match(/-?\d+/);
-      if (m) return Number(m[0]);
-    }
-    return null;
-  };
-
-  const tryParseJSON = (val: any) => {
-    if (typeof val !== 'string') return null;
-    const s = val.trim();
-    if (!s || (!s.startsWith('{') && !s.startsWith('['))) return null;
-    try { return JSON.parse(s); } catch { return null; }
-  };
-
-  const mergeObjects = (...objs: any[]) =>
-    objs.filter(o => o && typeof o === 'object' && !Array.isArray(o))
-        .reduce((acc, o) => Object.assign(acc, o), {} as any);
-
-  const deepFind = (obj: any, keyRegex: RegExp, maxDepth = 6): any => {
-    const seen = new Set<any>();
-    const stack: Array<{ v: any; d: number }> = [{ v: obj, d: 0 }];
-    while (stack.length) {
-      const { v, d } = stack.pop()!;
-      if (!v || typeof v !== 'object' || seen.has(v) || d > maxDepth) continue;
-      seen.add(v);
-      if (Array.isArray(v)) { for (const it of v) stack.push({ v: it, d: d + 1 }); continue; }
-      for (const [k, val] of Object.entries(v)) {
-        if (keyRegex.test(k)) return val;
-        if (val && typeof val === 'object') stack.push({ v: val, d: d + 1 });
-        if (typeof val === 'string') {
-          const parsed = tryParseJSON(val);
-          if (parsed) stack.push({ v: parsed, d: d + 1 });
-        }
-      }
-    }
-    return null;
-  };
-
-  const idsFromText = (...texts: Array<string | undefined | null>) => {
-    let bidId: number | null = null;
-    let milestoneIndex: number | null = null;
-    for (const t of texts) {
-      if (!t) continue;
-      if (bidId == null) {
-        const m = t.match(/(?:^|[^a-z])(bid(?:[_\s-]?id)?)[\s:=-]*#?\s*(\d+)/i);
-        if (m) bidId = Number(m[2]);
-      }
-      if (milestoneIndex == null) {
-        const m = t.match(/(?:^|[^a-z])(ms|milestone|mil)[\s:=-]*#?\s*(\d+)/i);
-        if (m) milestoneIndex = Number(m[2] ?? m[1]);
-      }
-      if (bidId != null && milestoneIndex != null) break;
-    }
-    return { bidId, milestoneIndex };
-  };
-
   return (rows || []).map((r: any, index) => {
-    // Build merged “nested” bag (don’t let numeric milestone short-circuit object scans)
-    const nestedParsed = mergeObjects(
+    // parse/merge a few “bags” so we can deep-scan safely
+    const parsed = mergeObjects(
       tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
       tryParseJSON(r?.metadata), tryParseJSON(r?.meta), tryParseJSON(r?.data)
     );
     const nested = mergeObjects(
-      r?.context, r?.metadata, r?.meta, r?.details, r?.extra, nestedParsed,
+      r?.context, r?.metadata, r?.meta, r?.details, r?.extra, parsed,
       (typeof r?.milestone === 'object' ? r?.milestone : undefined)
     );
 
-    // Free-text fallback
-    const text = idsFromText(
-      r?.note, r?.notes, r?.description, r?.memo, r?.id,
-      typeof r?.metadata === 'string' ? r?.metadata : undefined,
-      typeof r?.meta === 'string' ? r?.meta : undefined
-    );
-
-    // ids (explicit → nested → deep → text)
+    // --- IDs ---
     const rawBid =
       r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
-      nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id ??
-      deepFind(r, /^(bid(_?id)?|^bid)$/i) ??
-      deepFind(nested, /^(bid(_?id)?|^bid)$/i);
-    const bid_id = rawBid != null ? toNumberLoose(rawBid) : text.bidId ?? null;
+      nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id;
+    const bid_id = rawBid != null ? toNumberLoose(rawBid) : null;
 
     const rawMs =
       r?.milestone_index ?? r?.milestoneIndex ?? (typeof r?.milestone === 'number' ? r?.milestone : undefined) ??
       r?.index ?? r?.i ??
-      nested?.milestone_index ?? nested?.milestoneIndex ?? (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ?? nested?.index ??
-      deepFind(r, /^(milestone(_?index)?|milestoneIndex|ms)$/i) ??
-      deepFind(nested, /^(milestone(_?index)?|milestoneIndex|ms)$/i);
-    const milestone_index = rawMs != null ? toNumberLoose(rawMs) : text.milestoneIndex ?? null;
+      nested?.milestone_index ?? nested?.milestoneIndex ?? (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ?? nested?.index;
+    const milestone_index = rawMs != null ? toNumberLoose(rawMs) : null;
 
-    // also carry optional proof_id / milestone_id if present (for future joins)
     const rawProofId =
-      r?.proof_id ?? r?.proofId ?? nested?.proof_id ?? nested?.proofId ??
-      deepFind(r, /^proof(_?id)?$/i) ?? deepFind(nested, /^proof(_?id)?$/i);
+      r?.proof_id ?? r?.proofId ?? nested?.proof_id ?? nested?.proofId;
     const rawMilestoneId =
-      r?.milestone_id ?? r?.milestoneId ?? nested?.milestone_id ?? nested?.milestoneId ??
-      deepFind(r, /^milestone(_?id)?$/i) ?? deepFind(nested, /^milestone(_?id)?$/i);
+      r?.milestone_id ?? r?.milestoneId ?? nested?.milestone_id ?? nested?.milestoneId;
 
-    // amount
+    // --- HASHES ---
+    const tx_hash =
+      r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
+      r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
+      r?.onchain_tx_id ?? r?.onchain_tx_hash ??
+      nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
+
+    // --- METHOD TAG ---
+    const method =
+      (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
+       r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
+        ? 'safepay'
+        : 'normal';
+
+    // --- AMOUNT (robust) ---
     let amount_usd =
       r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
-      nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount;
+      nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount ?? null;
+
     if (amount_usd == null) {
-      const cents = (r?.usd_cents ?? r?.usdCents ?? nested?.usd_cents ?? nested?.usdCents);
+      // last-resort: deep scan for keys like amount/value/usd/price
+      const deepAmt = deepFindNumber(mergeObjects(r, nested), /(amount(_?usd)?|value(_?usd)?|usd|price)/i, 6);
+      if (deepAmt != null) amount_usd = deepAmt;
+    } else {
+      const n = toNumberLoose(amount_usd);
+      amount_usd = n != null ? n : amount_usd;
+    }
+
+    // allow *_cents
+    if (amount_usd == null) {
+      const cents = r?.usd_cents ?? r?.usdCents ?? nested?.usd_cents ?? nested?.usdCents;
       if (cents != null) amount_usd = Number(cents) / 100;
     }
 
-    const status =
-      r?.status ?? r?.state ?? r?.payout_status ?? r?.release_status ??
-      ((r?.completed || r?.released || r?.paid_at) ? 'completed' : 'pending');
-
+    // --- TIME + STATUS (treat normal payouts as completed when paidAt/paymentDate/tx present) ---
     const released_at =
-      r?.released_at ?? r?.releasedAt ?? r?.paid_at ?? r?.created_at ?? r?.createdAt;
+      r?.released_at ?? r?.releasedAt ??
+      r?.paid_at ?? r?.paidAt ?? r?.paymentDate ??
+      nested?.paidAt ?? nested?.paymentDate ??
+      r?.created_at ?? r?.createdAt ?? null;
 
-  // --- HASHES ---
-const tx_hash =
-  r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
-  r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
-  r?.onchain_tx_id ?? r?.onchain_tx_hash ??
-  nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
+    const hasPaidFlag = !!(r?.completed || r?.released || r?.paid_at || r?.paidAt || r?.paymentDate ||
+                           nested?.paidAt || nested?.paymentDate);
+    const status =
+      r?.status ?? r?.state ?? (hasPaidFlag || !!tx_hash ? 'completed' : 'pending');
 
-// --- METHOD TAG (add this exact block) ---
-const method =
-  (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
-   r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
-    ? 'safepay'
-    : 'normal';
+    // --- ID ---
+    const id =
+      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
+      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
 
-// --- ID ---
-const id =
-  r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
-  r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
-
-return {
-  id: String(id),
-  bid_id: bid_id != null ? Number(bid_id) : null,
-  milestone_index: milestone_index != null ? Number(milestone_index) : null,
-  amount_usd,
-  status,
-  released_at,
-  tx_hash,
-  // keep this line so we actually return the tag
-  method,
-  created_at: r?.created_at ?? r?.createdAt ?? null,
-  updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-  proof_id: rawProofId ?? null,
-  milestone_id: rawMilestoneId ?? null,
-  __raw_index: index,
-};
+    return {
+      id: String(id),
+      bid_id: bid_id != null ? Number(bid_id) : null,
+      milestone_index: milestone_index != null ? Number(milestone_index) : null,
+      amount_usd,
+      status,
+      released_at,
+      tx_hash,
+      method,
+      created_at: r?.created_at ?? r?.createdAt ?? null,
+      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
+      proof_id: rawProofId ?? null,
+      milestone_id: rawMilestoneId ?? null,
+      __raw_index: index,
+    };
   });
 }
 
@@ -560,10 +503,11 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
   });
 }
 
-function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
+function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): MilestoneRow[] {
   const byKey = new Map<string, MilestoneRow>();
   const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
 
+  // 1) seed from proofs (unchanged behavior)
   for (const p of proofs || []) {
     const bidId = typeof p.bid_id === 'number' ? p.bid_id : Number(p.bid_id);
     const idx = typeof p.milestone_index === 'number' ? p.milestone_index : Number(p.milestone_index);
@@ -582,8 +526,27 @@ function deriveMilestonesFromProofs(proofs: ProofRow[]): MilestoneRow[] {
       status: p.status ?? prev?.status ?? null,
       last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null) : prev?.last_update ?? null,
     };
-
     byKey.set(key, row);
+  }
+
+  // 2) overlay payments: if we’ve paid (normal or safepay), force status to 'paid'
+  for (const pay of payments || []) {
+    const bidId = typeof pay.bid_id === 'number' ? pay.bid_id : Number(pay.bid_id);
+    const idx = typeof pay.milestone_index === 'number' ? pay.milestone_index : Number(pay.milestone_index);
+    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) continue;
+
+    const key = `${bidId}-${idx}`;
+    const prev = byKey.get(key);
+    const paidTs = Math.max(toTime(pay.released_at), toTime(pay.updated_at), toTime(pay.created_at), toTime(prev?.last_update));
+
+    byKey.set(key, {
+      id: key,
+      bid_id: Number(bidId),
+      milestone_index: Number(idx),
+      title: prev?.title ?? null,
+      status: 'paid',                          // <- make it paid if any payment exists
+      last_update: (paidTs ? new Date(paidTs).toISOString() : prev?.last_update ?? null),
+    });
   }
 
   return Array.from(byKey.values())
@@ -733,10 +696,11 @@ if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
 setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
-setPayments(dedupePayments(paymentsJoined));
+const finalPayments = dedupePayments(paymentsJoined ?? []);
+setPayments(finalPayments);
 
-// Derive milestones from proofs
-const milestones = deriveMilestonesFromProofs(normalizedProofs);
+// Derive milestones from BOTH proofs + payments so normal payouts mark “paid”
+const milestones = deriveMilestones(normalizedProofs, finalPayments);
 setMilestones(milestones);
           console.log('Derived milestones:', milestones); // Debug log
         }
