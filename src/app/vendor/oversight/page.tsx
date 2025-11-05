@@ -246,7 +246,7 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-/// ENHANCED: Create normal payments from proofs - WITH MILESTONE AMOUNT CALCULATION
+// FIXED: Create normal payments from proofs - COUNT ONLY PAID MILESTONES
 function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
   
@@ -256,13 +256,13 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): Pay
     bidMap.set(bid.id, bid);
   });
 
-  // Count milestones per bid to divide amount evenly
-  const milestonesPerBid = new Map<number, number>();
+  // Count ONLY PAID milestones per bid to divide amount evenly
+  const paidMilestonesPerBid = new Map<number, number>();
   proofs.forEach(proof => {
-    if (proof.bid_id) {
+    if (proof.bid_id && proof.status === 'paid') {
       const bidId = Number(proof.bid_id);
-      const current = milestonesPerBid.get(bidId) || 0;
-      milestonesPerBid.set(bidId, current + 1);
+      const current = paidMilestonesPerBid.get(bidId) || 0;
+      paidMilestonesPerBid.set(bidId, current + 1);
     }
   });
 
@@ -276,17 +276,17 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): Pay
         const bid = bidMap.get(bidId);
         
         if (bid && bid.amount_usd) {
-          const totalMilestones = milestonesPerBid.get(bidId) || 1;
+          const totalPaidMilestones = paidMilestonesPerBid.get(bidId) || 1;
           const bidAmount = typeof bid.amount_usd === 'string' 
             ? parseFloat(bid.amount_usd) 
             : Number(bid.amount_usd);
           
           if (!isNaN(bidAmount)) {
-            // Divide bid amount by number of milestones
-            amount_usd = bidAmount / totalMilestones;
+            // Divide bid amount by number of PAID milestones
+            amount_usd = bidAmount / totalPaidMilestones;
             console.log(`Calculated milestone amount for proof ${proof.id}:`, {
               bidAmount,
-              totalMilestones,
+              totalPaidMilestones,
               milestoneAmount: amount_usd
             });
           }
