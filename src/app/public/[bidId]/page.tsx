@@ -19,8 +19,17 @@ function usd(n: number) {
   }
 }
 
-// --- helpers that call your Next API (client-side)
+// Add cache at module level (outside components)
+const proofsCache = new Map();
+
 async function fetchProofsClient(proposalId: number) {
+  const cacheKey = `proofs-${proposalId}`;
+  
+  // Return cached data if available (except when force refresh needed)
+  if (proofsCache.has(cacheKey)) {
+    return proofsCache.get(cacheKey);
+  }
+  
   try {
     const r = await fetch(
       `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
@@ -31,7 +40,11 @@ async function fetchProofsClient(proposalId: number) {
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
-    return Array.isArray(list) ? list : [];
+    const result = Array.isArray(list) ? list : [];
+    
+    // Cache the result
+    proofsCache.set(cacheKey, result);
+    return result;
   } catch {
     return [];
   }
