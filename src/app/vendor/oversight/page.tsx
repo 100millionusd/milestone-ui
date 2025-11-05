@@ -533,8 +533,35 @@ export default function VendorOversightPage() {
           const normalizedProofs = normalizeProofs(data.proofs || []);
           setProofs(normalizedProofs);
           
+          // Fetch normal payments separately since /api/vendor/oversight only returns safe payments
+          let normalPayments: any[] = [];
+          try {
+            console.log('Fetching normal payments...');
+            const normalPaymentsResponse = await fetch(api('/vendor/payments'), {
+              credentials: 'include',
+              cache: 'no-store',
+            });
+            if (normalPaymentsResponse.ok) {
+              normalPayments = await normalPaymentsResponse.json();
+              console.log('Normal payments fetched:', normalPayments);
+            } else {
+              console.log('Normal payments endpoint failed:', normalPaymentsResponse.status);
+            }
+          } catch (e) {
+            console.error('Failed to fetch normal payments:', e);
+          }
+
+          // Combine safe payments + normal payments
+          const allPayments = [
+            ...(data.payments || []),
+            ...(normalPayments || [])
+          ];
+
+          console.log('Combined payments (safe + normal):', allPayments);
+
           // accept multiple backend shapes (wide net) — now handles object buckets + fallbacks
           let rawPaymentsAny: any =
+            allPayments ?? // Use combined payments first
             data.payments ??
             data.payouts ??
             data.releases ??
