@@ -242,47 +242,66 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// FIXED: Create normal payments from proofs with better status detection
-function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
-  const normalPayments: PaymentRow[] = [];
-  
-  proofs.forEach((proof, index) => {
-    // If proof is paid but doesn't have a safe payment hash, it's a normal payment
-    if (proof.status === 'paid' && !proof.safe_payment_tx_hash && !proof.safe_tx_hash) {
-      // Debug log to see what we're working with
-      console.log(`Creating normal payment for proof ${proof.id}:`, {
-        id: proof.id,
-        bid_id: proof.bid_id,
-        milestone_index: proof.milestone_index,
-        paid_at: proof.paid_at,
-        status: proof.status,
-        amount: proof.amount
-      });
-      
-      // ALWAYS set to completed if proof status is 'paid'
-      const paymentStatus = 'completed';
-      
-      normalPayments.push({
-        id: `normal-payment-${proof.id}-${index}`,
-        bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
-        milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
-        amount_usd: proof.amount || null,
-        status: paymentStatus, // Always completed for paid proofs
-        released_at: proof.paid_at,
-        tx_hash: proof.payment_tx_hash,
-        method: 'normal',
-        created_at: proof.paid_at,
-        updated_at: proof.paid_at,
-        proof_id: proof.id,
-        milestone_id: null,
-        __raw_index: index,
-      });
-      
-      console.log(`Created normal payment with status: ${paymentStatus}`);
+// FIXED: Join payments to proofs - don't override completed status
+function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
+  if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
+
+  // hash -> proof
+  const byHash = new Map<string, ProofRow>();
+  for (const pr of proofs) {
+    for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
+      if (h) byHash.set(String(h).toLowerCase(), pr);
     }
+  }
+
+  // bid+milestone -> proof (fallback when a payment has no tx)
+  const byBM = new Map<string, ProofRow>();
+  for (const pr of proofs) {
+    if (pr.bid_id != null && pr.milestone_index != null) {
+      const key = `${Number(pr.bid_id)}-${Number(pr.milestone_index)}`;
+      if (!byBM.has(key)) byBM.set(key, pr);
+    }
+  }
+
+  const toNum = (v: any) =>
+    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
+
+  return payments.map((p) => {
+    const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
+    let match = key ? byHash.get(key) : undefined;
+
+    if (!match && p.bid_id != null && p.milestone_index != null) {
+      match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
+    }
+    if (!match) return p;
+
+    const anyMatch: any = match;
+    const prAmt = toNum(anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount);
+
+    // FIXED: Don't override status if it's already completed
+    const filled: PaymentRow = {
+      ...p,
+      bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
+      milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
+      released_at: p.released_at ?? (anyMatch?.paidAt ?? anyMatch?.paymentDate ?? match.updated_at ?? match.submitted_at ?? match.created_at ?? null),
+      // Keep the original status if it's already completed
+      status: p.status === 'completed' ? p.status : (
+        (p.status && p.status !== 'pending')
+          ? p.status
+          : ((String(match.status ?? '').toLowerCase() === 'paid' || anyMatch?.paidAt || anyMatch?.paymentDate)
+              ? 'completed'
+              : (p.status ?? 'pending'))
+      ),
+    };
+
+    // amount: only lift from proof if payment amount missing/unparseable
+    const pAmt = toNum(p.amount_usd);
+    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
+      filled.amount_usd = prAmt;
+    }
+
+    return filled;
   });
-  
-  return normalPayments;
 }
 
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
