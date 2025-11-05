@@ -459,9 +459,9 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   // Group by Bid+Milestone
   const byBM = new Map<string, PaymentRow[]>();
   for (const p of arr) {
-    const key = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
-    const g = byBM.get(key);
-    if (g) g.push(p); else byBM.set(key, [p]);
+    const bm = `${p.bid_id ?? ''}-${p.milestone_index ?? ''}`;
+    const g = byBM.get(bm);
+    if (g) g.push(p); else byBM.set(bm, [p]);
   }
 
   const num = (v: any): number => {
@@ -470,22 +470,24 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
     const n = Number(String(v).replace(/[^0-9.-]/g, ''));
     return Number.isFinite(n) ? n : NaN;
   };
-  const time = (p: PaymentRow) => new Date(p.released_at || p.created_at || 0).getTime();
+  const time = (p: PaymentRow) =>
+    new Date(p.released_at || p.created_at || 0).getTime();
 
   const pickBest = (list: PaymentRow[]) =>
     list.slice().sort((a, b) => {
       const aAmt = num(a.amount_usd), bAmt = num(b.amount_usd);
-      const aHas = aAmt > 0 ? 1 : 0, bHas = bAmt > 0 ? 1 : 0;
-      if (aHas !== bHas) return bHas - aHas;   // prefer amount > 0
+      const aHasAmt = Number.isFinite(aAmt) && aAmt > 0 ? 1 : 0;
+      const bHasAmt = Number.isFinite(bAmt) && bAmt > 0 ? 1 : 0;
+      if (aHasAmt !== bHasAmt) return bHasAmt - aHasAmt;   // prefer amount > 0
       const aTx = a.tx_hash ? 1 : 0, bTx = b.tx_hash ? 1 : 0;
-      if (aTx !== bTx) return bTx - aTx;       // then prefer with tx
-      return time(b) - time(a);                // then newest
+      if (aTx !== bTx) return bTx - aTx;                   // then prefer with tx
+      return time(b) - time(a);                            // then newest
     })[0];
 
   const out: PaymentRow[] = [];
 
   for (const list of byBM.values()) {
-    // Split by tx ('' = no tx)
+    // Sub-group by tx ('' = no tx)
     const byTx = new Map<string, PaymentRow[]>();
     for (const p of list) {
       const k = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
@@ -493,7 +495,7 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       if (g) g.push(p); else byTx.set(k, [p]);
     }
 
-    // 1) Keep best per distinct tx (keep amounts as-is)
+    // 1) Keep one best per distinct tx
     let hasTxRows = false;
     for (const [k, g] of byTx) {
       if (k === '') continue;
@@ -501,26 +503,29 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
       hasTxRows = true;
     }
 
-    // 2) ALWAYS keep one best "normal/no-tx" row — DO NOT copy amount from tx rows
-    const noTxGroup = byTx.get('') || [];
-    const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
-    if (noTxNormal.length) {
-      out.push(pickBest(noTxNormal));
-    } else if (!hasTxRows && noTxGroup.length) {
-      // if there were zero tx rows at all, keep one no-tx (any)
-      out.push(pickBest(noTxGroup));
+    // 2) Keep ONE best "no-tx" row ONLY when there were NO tx rows
+    if (!hasTxRows) {
+      const noTxGroup = byTx.get('') || [];
+      if (noTxGroup.length) {
+        // prefer a non-safepay "normal" row if present
+        const noTxNormal = noTxGroup.filter(p => (p.method ?? 'normal') !== 'safepay');
+        out.push(pickBest(noTxNormal.length ? noTxNormal : noTxGroup));
+      }
     }
   }
 
   // Latest first
-  return out.sort((a, b) => time(b) - time(a));
+  return out.sort((a, b) =>
+    (new Date(b.released_at || b.created_at || 0).getTime() -
+     new Date(a.released_at || a.created_at || 0).getTime())
+  );
 }
 
-// Join payments to proofs by tx hash; fill bid/milestone/status/time/amount
+// Join payments to proofs by tx hash; fill ONLY ids/time (no amount/status overrides)
 function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
 
-  // Hash → proof
+  // Hash -> proof
   const byHash = new Map<string, ProofRow>();
   for (const pr of proofs) {
     for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
@@ -528,51 +533,30 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     }
   }
 
-  // Fallback: bid+milestone → proof (used when a payment has no tx)
+  // Fallback: bid+milestone -> proof (when payment has no tx)
   const byBM = new Map<string, ProofRow>();
   for (const pr of proofs) {
     if (pr.bid_id != null && pr.milestone_index != null) {
-      const key = `${Number(pr.bid_id)}-${Number(pr.milestone_index)}`;
-      if (!byBM.has(key)) byBM.set(key, pr);
+      byBM.set(`${Number(pr.bid_id)}-${Number(pr.milestone_index)}`, pr);
     }
   }
-
-  const toNum = (v: any) =>
-    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
 
   return payments.map((p) => {
     const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
     let match = key ? byHash.get(key) : undefined;
 
-    // Fallback if no tx: try bid+milestone
     if (!match && p.bid_id != null && p.milestone_index != null) {
       match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
     }
-    if (!match) return p; // nothing to enrich from
+    if (!match) return p;
 
-    // Fill from proof
-    const filled: PaymentRow = {
+    return {
       ...p,
       bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
       milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
-      released_at: p.released_at ?? match.paid_at ?? p.created_at ?? null,
-      status:
-        p.status && p.status !== 'pending'
-          ? p.status
-          : (match.status === 'paid' ? 'completed' : (p.status ?? 'pending')),
+      released_at: p.released_at ?? match.paid_at ?? match.updated_at ?? match.submitted_at ?? p.created_at ?? null,
+      // leave amount_usd and status as-is (on-chain source of truth)
     };
-
-    // Lift amount from proof if payment lacks a usable amount
-    const pAmt = toNum(p.amount_usd);
-    const anyMatch: any = match as any;
-    const prAmt = toNum(
-      anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount
-    );
-    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
-      filled.amount_usd = prAmt;
-    }
-
-    return filled;
   });
 }
 
@@ -749,9 +733,7 @@ if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
 setRawPayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const normalizedPaymentsLocal = normalizePayments(Array.isArray(rawPaymentsAny) ? rawPaymentsAny : []);
 const paymentsJoined = linkPaymentsToProofs(normalizedPaymentsLocal, normalizedProofs);
-const finalPayments = dedupePayments(paymentsJoined ?? []);
-setPayments(finalPayments);
-console.log('Final payments:', finalPayments);
+setPayments(dedupePayments(paymentsJoined));
 
 // Derive milestones from proofs
 const milestones = deriveMilestonesFromProofs(normalizedProofs);
