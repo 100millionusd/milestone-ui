@@ -300,7 +300,7 @@ function mergeObjects(...objs: any[]) {
 
 function normalizePayments(rows: any[]): PaymentRow[] {
   return (rows || []).map((r: any, index) => {
-    // parse/merge a few “bags” so we can deep-scan safely
+    // merge “bags” so we can scan safely (uses helpers you already defined above)
     const parsed = mergeObjects(
       tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
       tryParseJSON(r?.metadata), tryParseJSON(r?.meta), tryParseJSON(r?.data)
@@ -310,7 +310,7 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       (typeof r?.milestone === 'object' ? r?.milestone : undefined)
     );
 
-    // --- IDs ---
+    // --- ids ---
     const rawBid =
       r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
       nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id;
@@ -327,27 +327,26 @@ function normalizePayments(rows: any[]): PaymentRow[] {
     const rawMilestoneId =
       r?.milestone_id ?? r?.milestoneId ?? nested?.milestone_id ?? nested?.milestoneId;
 
-    // --- HASHES ---
+    // --- tx hash (EOA or anything we can render) ---
     const tx_hash =
       r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
       r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
       r?.onchain_tx_id ?? r?.onchain_tx_hash ??
       nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
 
-    // --- METHOD TAG ---
+    // --- tag method (normal vs safepay) ---
     const method =
       (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
        r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
         ? 'safepay'
         : 'normal';
 
-    // --- AMOUNT (robust) ---
+    // --- amount (robust) ---
     let amount_usd =
       r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
       nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount ?? null;
 
     if (amount_usd == null) {
-      // last-resort: deep scan for keys like amount/value/usd/price
       const deepAmt = deepFindNumber(mergeObjects(r, nested), /(amount(_?usd)?|value(_?usd)?|usd|price)/i, 6);
       if (deepAmt != null) amount_usd = deepAmt;
     } else {
@@ -355,25 +354,32 @@ function normalizePayments(rows: any[]): PaymentRow[] {
       amount_usd = n != null ? n : amount_usd;
     }
 
-    // allow *_cents
     if (amount_usd == null) {
       const cents = r?.usd_cents ?? r?.usdCents ?? nested?.usd_cents ?? nested?.usdCents;
       if (cents != null) amount_usd = Number(cents) / 100;
     }
 
-    // --- TIME + STATUS (treat normal payouts as completed when paidAt/paymentDate/tx present) ---
+    // --- time + status (treat normal payouts as completed if any clear paid signal) ---
     const released_at =
       r?.released_at ?? r?.releasedAt ??
       r?.paid_at ?? r?.paidAt ?? r?.paymentDate ??
       nested?.paidAt ?? nested?.paymentDate ??
       r?.created_at ?? r?.createdAt ?? null;
 
-    const hasPaidFlag = !!(r?.completed || r?.released || r?.paid_at || r?.paidAt || r?.paymentDate ||
-                           nested?.paidAt || nested?.paymentDate);
-    const status =
-      r?.status ?? r?.state ?? (hasPaidFlag || !!tx_hash ? 'completed' : 'pending');
+    const rawStatus = (r?.status ?? r?.state ?? r?.payout_status ?? r?.release_status) as string | undefined;
+    const paidSignal = !!(r?.completed || r?.released || r?.paid_at || r?.paidAt || r?.paymentDate || tx_hash);
 
-    // --- ID ---
+    let status: string | null;
+    if (rawStatus) {
+      const s = String(rawStatus).toLowerCase();
+      if (/(paid|completed|released|success|done)/.test(s)) status = 'completed';
+      else if (/(pending|queued|await|processing)/.test(s)) status = 'pending';
+      else status = rawStatus; // leave unknown text as-is
+    } else {
+      status = paidSignal ? 'completed' : 'pending';
+    }
+
+    // --- id ---
     const id =
       r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
       r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
@@ -465,24 +471,29 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
 }
 
 // Join payments to proofs by tx hash; fill ONLY ids/time (no amount/status overrides)
+// Join payments to proofs by tx hash; fill bid/milestone/status/time/amount
 function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
   if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
 
-  // Hash -> proof
+  // hash -> proof
   const byHash = new Map<string, ProofRow>();
   for (const pr of proofs) {
-    for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
+    for (const h of [pr.payment_tx_hash as any, (pr as any).safe_payment_tx_hash, (pr as any).safe_tx_hash]) {
       if (h) byHash.set(String(h).toLowerCase(), pr);
     }
   }
 
-  // Fallback: bid+milestone -> proof (when payment has no tx)
+  // bid+milestone -> proof (fallback when a payment has no tx)
   const byBM = new Map<string, ProofRow>();
   for (const pr of proofs) {
     if (pr.bid_id != null && pr.milestone_index != null) {
-      byBM.set(`${Number(pr.bid_id)}-${Number(pr.milestone_index)}`, pr);
+      const key = `${Number(pr.bid_id)}-${Number(pr.milestone_index)}`;
+      if (!byBM.has(key)) byBM.set(key, pr);
     }
   }
+
+  const toNum = (v: any) =>
+    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
 
   return payments.map((p) => {
     const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
@@ -493,13 +504,29 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
     }
     if (!match) return p;
 
-    return {
+    const anyMatch: any = match;
+    const prAmt = toNum(anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount);
+
+    // status/time/ids
+    const filled: PaymentRow = {
       ...p,
       bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
       milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
-      released_at: p.released_at ?? match.paid_at ?? match.updated_at ?? match.submitted_at ?? p.created_at ?? null,
-      // leave amount_usd and status as-is (on-chain source of truth)
+      released_at: p.released_at ?? (anyMatch?.paidAt ?? anyMatch?.paymentDate ?? match.updated_at ?? match.submitted_at ?? match.created_at ?? null),
+      status: (p.status && p.status !== 'pending')
+        ? p.status
+        : ((String(match.status ?? '').toLowerCase() === 'paid' || anyMatch?.paidAt || anyMatch?.paymentDate)
+            ? 'completed'
+            : (p.status ?? 'pending')),
     };
+
+    // amount: only lift from proof if payment amount missing/unparseable
+    const pAmt = toNum(p.amount_usd);
+    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
+      filled.amount_usd = prAmt;
+    }
+
+    return filled;
   });
 }
 
@@ -507,7 +534,7 @@ function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): Milestone
   const byKey = new Map<string, MilestoneRow>();
   const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
 
-  // 1) seed from proofs (unchanged behavior)
+  // seed from proofs
   for (const p of proofs || []) {
     const bidId = typeof p.bid_id === 'number' ? p.bid_id : Number(p.bid_id);
     const idx = typeof p.milestone_index === 'number' ? p.milestone_index : Number(p.milestone_index);
@@ -529,7 +556,7 @@ function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): Milestone
     byKey.set(key, row);
   }
 
-  // 2) overlay payments: if we’ve paid (normal or safepay), force status to 'paid'
+  // overlay from payments: if any payment exists (normal or safepay), mark 'paid'
   for (const pay of payments || []) {
     const bidId = typeof pay.bid_id === 'number' ? pay.bid_id : Number(pay.bid_id);
     const idx = typeof pay.milestone_index === 'number' ? pay.milestone_index : Number(pay.milestone_index);
@@ -537,15 +564,20 @@ function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): Milestone
 
     const key = `${bidId}-${idx}`;
     const prev = byKey.get(key);
-    const paidTs = Math.max(toTime(pay.released_at), toTime(pay.updated_at), toTime(pay.created_at), toTime(prev?.last_update));
+    const paidTs = Math.max(
+      toTime(pay.released_at),
+      toTime(pay.updated_at),
+      toTime(pay.created_at),
+      toTime(prev?.last_update)
+    );
 
     byKey.set(key, {
       id: key,
       bid_id: Number(bidId),
       milestone_index: Number(idx),
       title: prev?.title ?? null,
-      status: 'paid',                          // <- make it paid if any payment exists
-      last_update: (paidTs ? new Date(paidTs).toISOString() : prev?.last_update ?? null),
+      status: 'paid',
+      last_update: paidTs ? new Date(paidTs).toISOString() : (prev?.last_update ?? null),
     });
   }
 
