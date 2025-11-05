@@ -246,7 +246,7 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// FIXED: Create normal payments from proofs - COUNT ONLY PAID MILESTONES
+// FIXED: Create normal payments from proofs - COUNT ALL MILESTONES FOR THE BID
 function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
   
@@ -256,13 +256,15 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): Pay
     bidMap.set(bid.id, bid);
   });
 
-  // Count ONLY PAID milestones per bid to divide amount evenly
-  const paidMilestonesPerBid = new Map<number, number>();
+  // Count ALL milestones per bid (both paid and unpaid) to divide amount evenly
+  const milestoneSetsPerBid = new Map<number, Set<number>>();
   proofs.forEach(proof => {
-    if (proof.bid_id && proof.status === 'paid') {
+    if (proof.bid_id && proof.milestone_index !== null) {
       const bidId = Number(proof.bid_id);
-      const current = paidMilestonesPerBid.get(bidId) || 0;
-      paidMilestonesPerBid.set(bidId, current + 1);
+      if (!milestoneSetsPerBid.has(bidId)) {
+        milestoneSetsPerBid.set(bidId, new Set<number>());
+      }
+      milestoneSetsPerBid.get(bidId)!.add(proof.milestone_index);
     }
   });
 
@@ -276,17 +278,18 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[], bids: BidRow[]): Pay
         const bid = bidMap.get(bidId);
         
         if (bid && bid.amount_usd) {
-          const totalPaidMilestones = paidMilestonesPerBid.get(bidId) || 1;
+          const milestoneSet = milestoneSetsPerBid.get(bidId) || new Set<number>();
+          const totalMilestones = milestoneSet.size || 1;
           const bidAmount = typeof bid.amount_usd === 'string' 
             ? parseFloat(bid.amount_usd) 
             : Number(bid.amount_usd);
           
           if (!isNaN(bidAmount)) {
-            // Divide bid amount by number of PAID milestones
-            amount_usd = bidAmount / totalPaidMilestones;
+            // Divide bid amount by total number of milestones for this bid
+            amount_usd = bidAmount / totalMilestones;
             console.log(`Calculated milestone amount for proof ${proof.id}:`, {
               bidAmount,
-              totalPaidMilestones,
+              totalMilestones,
               milestoneAmount: amount_usd
             });
           }
