@@ -168,23 +168,19 @@ function normalizeProofs(rows: any[]): ProofRow[] {
     // Handle different title fields
     const title = r?.title ?? r?.name ?? r?.proof_title ?? `Milestone ${milestone_index}`;
     
-    // FIXED: Handle different status fields - prioritize explicit status
-    let status = r?.status ?? r?.state;
-    
-    // If no explicit status, derive from other fields
-    if (!status) {
-      if (r?.completed === true) status = 'completed';
-      else if (r?.proof && r?.submitted_at) status = 'submitted';
-      else if (r?.proof && !r?.submitted_at) status = 'open'; // Proof exists but not submitted
-      else status = 'pending'; // No proof content yet
-    }
-    
-    // Additional fix: If status is 'submitted' but no submission date, it should be 'open'
-    if (status === 'submitted' && !r?.submitted_at && !r?.completionDate) {
-      status = 'open';
-    }
+    // SIMPLIFIED: Handle status - trust the API first, then apply payment override
+let status = r?.status ?? r?.state;
 
-    // If payment info exists, treat as paid (covers direct/EOA payouts)
+// If no explicit status, use a simple fallback
+if (!status) {
+  if (r?.proof) {
+    status = 'submitted'; // Has proof content = submitted
+  } else {
+    status = 'pending'; // No proof content = pending
+  }
+}
+
+// If payment info exists, always mark as paid (this overrides everything)
 if (r?.paidAt || r?.paymentDate || r?.paymentTxHash || r?.payment_tx_hash) {
   status = 'paid';
 }
@@ -296,103 +292,24 @@ function mergeObjects(...objs: any[]) {
 
 function normalizePayments(rows: any[]): PaymentRow[] {
   return (rows || []).map((r: any, index) => {
-    // merge “bags” so we can scan safely (uses helpers you already defined above)
-    const parsed = mergeObjects(
-      tryParseJSON(r?.note), tryParseJSON(r?.notes), tryParseJSON(r?.description), tryParseJSON(r?.memo),
-      tryParseJSON(r?.metadata), tryParseJSON(r?.meta), tryParseJSON(r?.data)
-    );
-    const nested = mergeObjects(
-      r?.context, r?.metadata, r?.meta, r?.details, r?.extra, parsed,
-      (typeof r?.milestone === 'object' ? r?.milestone : undefined)
-    );
-
-    // --- ids ---
-    const rawBid =
-      r?.bid_id ?? r?.bidId ?? r?.bid?.id ?? r?.bid ??
-      nested?.bid_id ?? nested?.bidId ?? nested?.bid?.id;
-    const bid_id = rawBid != null ? toNumberLoose(rawBid) : null;
-
-    const rawMs =
-      r?.milestone_index ?? r?.milestoneIndex ?? (typeof r?.milestone === 'number' ? r?.milestone : undefined) ??
-      r?.index ?? r?.i ??
-      nested?.milestone_index ?? nested?.milestoneIndex ?? (typeof nested?.milestone === 'number' ? nested?.milestone : undefined) ?? nested?.index;
-    const milestone_index = rawMs != null ? toNumberLoose(rawMs) : null;
-
-    const rawProofId =
-      r?.proof_id ?? r?.proofId ?? nested?.proof_id ?? nested?.proofId;
-    const rawMilestoneId =
-      r?.milestone_id ?? r?.milestoneId ?? nested?.milestone_id ?? nested?.milestoneId;
-
-    // --- tx hash (EOA or anything we can render) ---
-    const tx_hash =
-      r?.tx_hash ?? r?.transaction_hash ?? r?.hash ??
-      r?.txHash ?? r?.transactionHash ?? r?.payment_hash ?? r?.paymentTxHash ??
-      r?.onchain_tx_id ?? r?.onchain_tx_hash ??
-      nested?.tx_hash ?? nested?.transaction_hash ?? nested?.paymentTxHash ?? null;
-
-    // --- tag method (normal vs safepay) ---
-    const method =
-      (r?.safe_payment_tx_hash || r?.safe_tx_hash || nested?.safe_payment_tx_hash || nested?.safe_tx_hash ||
-       r?.is_safe || nested?.is_safe || r?.safe === true || nested?.safe === true)
-        ? 'safepay'
-        : 'normal';
-
-    // --- amount (robust) ---
-    let amount_usd =
-      r?.amount_usd ?? r?.amountUsd ?? r?.valueUsd ?? r?.usd ?? r?.amount ??
-      nested?.amount_usd ?? nested?.amountUsd ?? nested?.valueUsd ?? nested?.usd ?? nested?.amount ?? null;
-
-    if (amount_usd == null) {
-      const deepAmt = deepFindNumber(mergeObjects(r, nested), /(amount(_?usd)?|value(_?usd)?|usd|price)/i, 6);
-      if (deepAmt != null) amount_usd = deepAmt;
-    } else {
-      const n = toNumberLoose(amount_usd);
-      amount_usd = n != null ? n : amount_usd;
-    }
-
-    if (amount_usd == null) {
-      const cents = r?.usd_cents ?? r?.usdCents ?? nested?.usd_cents ?? nested?.usdCents;
-      if (cents != null) amount_usd = Number(cents) / 100;
-    }
-
-    // --- time + status (treat normal payouts as completed if any clear paid signal) ---
-    const released_at =
-      r?.released_at ?? r?.releasedAt ??
-      r?.paid_at ?? r?.paidAt ?? r?.paymentDate ??
-      nested?.paidAt ?? nested?.paymentDate ??
-      r?.created_at ?? r?.createdAt ?? null;
-
-    const rawStatus = (r?.status ?? r?.state ?? r?.payout_status ?? r?.release_status) as string | undefined;
-    const paidSignal = !!(r?.completed || r?.released || r?.paid_at || r?.paidAt || r?.paymentDate || tx_hash);
-
-    let status: string | null;
-    if (rawStatus) {
-      const s = String(rawStatus).toLowerCase();
-      if (/(paid|completed|released|success|done)/.test(s)) status = 'completed';
-      else if (/(pending|queued|await|processing)/.test(s)) status = 'pending';
-      else status = rawStatus; // leave unknown text as-is
-    } else {
-      status = paidSignal ? 'completed' : 'pending';
-    }
-
-    // --- id ---
-    const id =
-      r?.id ?? r?.payment_id ?? r?.payout_id ?? r?.transfer_id ??
-      r?.hash ?? r?.tx_hash ?? `payment-${index + 1}`;
-
+    // Use the actual API field names
+    const tx_hash = r?.transactionHash ?? r?.tx_hash;
+    const amount_usd = r?.amount ?? r?.amount_usd;
+    const released_at = r?.date ?? r?.released_at;
+    
     return {
-      id: String(id),
-      bid_id: bid_id != null ? Number(bid_id) : null,
-      milestone_index: milestone_index != null ? Number(milestone_index) : null,
+      id: r?.id ?? `payment-${index + 1}`,
+      bid_id: null, // Will be filled by linkPaymentsToProofs
+      milestone_index: null, // Will be filled by linkPaymentsToProofs
       amount_usd,
-      status,
+      status: r?.success ? 'completed' : 'pending',
       released_at,
       tx_hash,
-      method,
-      created_at: r?.created_at ?? r?.createdAt ?? null,
-      updated_at: r?.updated_at ?? r?.updatedAt ?? null,
-      proof_id: rawProofId ?? null,
-      milestone_id: rawMilestoneId ?? null,
+      method: 'normal',
+      created_at: r?.date ?? null,
+      updated_at: r?.date ?? null,
+      proof_id: null,
+      milestone_id: null,
       __raw_index: index,
     };
   });
@@ -527,30 +444,27 @@ function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): Payme
 }
 
 function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): MilestoneRow[] {
-  const byKey = new Map<string, MilestoneRow>();
-  const toTime = (s?: string | null) => (s ? new Date(s).getTime() || 0 : 0);
+  const milestones: MilestoneRow[] = [];
+  const seen = new Set<string>();
 
-  // seed from proofs
-  for (const p of proofs || []) {
-    const bidId = typeof p.bid_id === 'number' ? p.bid_id : Number(p.bid_id);
-    const idx = typeof p.milestone_index === 'number' ? p.milestone_index : Number(p.milestone_index);
-    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) continue;
+  // First, create milestones from proofs
+  proofs.forEach(p => {
+    const key = `${p.bid_id}-${p.milestone_index}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      milestones.push({
+        id: key,
+        bid_id: Number(p.bid_id),
+        milestone_index: Number(p.milestone_index),
+        title: p.title,
+        status: p.status,
+        last_update: p.submitted_at || p.created_at,
+      });
+    }
+  });
 
-    const key = `${bidId}-${idx}`;
-    const prev = byKey.get(key);
-    const ts = Math.max(toTime(p.updated_at), toTime(p.submitted_at), toTime(p.created_at));
-    const prevTs = prev ? toTime(prev.last_update) : 0;
-
-    const row: MilestoneRow = {
-      id: key,
-      bid_id: Number(bidId),
-      milestone_index: Number(idx),
-      title: p.title ?? prev?.title ?? null,
-      status: p.status ?? prev?.status ?? null,
-      last_update: ts >= prevTs ? (p.updated_at ?? p.submitted_at ?? p.created_at ?? prev?.last_update ?? null) : prev?.last_update ?? null,
-    };
-    byKey.set(key, row);
-  }
+  return milestones;
+}
 
   // overlay from payments: if any payment exists (normal or safepay), mark 'paid'
   for (const pay of payments || []) {
