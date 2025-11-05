@@ -242,7 +242,6 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
-// CREATE NORMAL PAYMENTS FROM PROOFS
 // FIXED: Create normal payments from proofs
 function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
@@ -255,7 +254,7 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
         bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
         milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
         amount_usd: proof.amount || null, // Use the amount from proof if available
-        status: 'completed', // FIXED: Set to completed since proof is already paid
+        status: (proof.paid_at || proof.paymentDate) ? 'completed' : 'pending', // EXTRA SAFE: Check paid_at or paymentDate
         released_at: proof.paid_at,
         tx_hash: proof.payment_tx_hash,
         method: 'normal',
