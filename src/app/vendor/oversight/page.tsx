@@ -493,7 +493,6 @@ function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): Milestone
 
   return Array.from(byKey.values())
     .sort((a, b) => (a.bid_id - b.bid_id) || (a.milestone_index - b.milestone_index));
-}
 
 // ———————————————————————————————————————————
 // UI Components
