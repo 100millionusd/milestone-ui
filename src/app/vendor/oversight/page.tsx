@@ -5,6 +5,10 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import AgentDigestWidget from "@/components/AgentDigestWidget";
 
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+  (console as any).log = () => {};
+}
+
 // ———————————————————————————————————————————
 // API base
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
