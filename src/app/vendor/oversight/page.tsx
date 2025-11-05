@@ -386,65 +386,6 @@ function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   );
 }
 
-// Join payments to proofs by tx hash; fill bid/milestone/status/time/amount
-function linkPaymentsToProofs(payments: PaymentRow[], proofs: ProofRow[]): PaymentRow[] {
-  if (!Array.isArray(payments) || !Array.isArray(proofs)) return payments ?? [];
-
-  // hash -> proof
-  const byHash = new Map<string, ProofRow>();
-  for (const pr of proofs) {
-    for (const h of [pr.payment_tx_hash, pr.safe_payment_tx_hash, pr.safe_tx_hash]) {
-      if (h) byHash.set(String(h).toLowerCase(), pr);
-    }
-  }
-
-  // bid+milestone -> proof (fallback when a payment has no tx)
-  const byBM = new Map<string, ProofRow>();
-  for (const pr of proofs) {
-    if (pr.bid_id != null && pr.milestone_index != null) {
-      const key = `${Number(pr.bid_id)}-${Number(pr.milestone_index)}`;
-      if (!byBM.has(key)) byBM.set(key, pr);
-    }
-  }
-
-  const toNum = (v: any) =>
-    typeof v === 'number' ? v : (v != null ? Number(String(v).replace(/[^0-9.-]/g, '')) : NaN);
-
-  return payments.map((p) => {
-    const key = p.tx_hash ? String(p.tx_hash).toLowerCase() : '';
-    let match = key ? byHash.get(key) : undefined;
-
-    if (!match && p.bid_id != null && p.milestone_index != null) {
-      match = byBM.get(`${Number(p.bid_id)}-${Number(p.milestone_index)}`);
-    }
-    if (!match) return p;
-
-    const anyMatch: any = match;
-    const prAmt = toNum(anyMatch?.amount_usd ?? anyMatch?.amountUsd ?? anyMatch?.valueUsd ?? anyMatch?.usd ?? anyMatch?.amount);
-
-    // status/time/ids
-    const filled: PaymentRow = {
-      ...p,
-      bid_id: p.bid_id ?? (match.bid_id != null ? Number(match.bid_id) : null),
-      milestone_index: p.milestone_index ?? (match.milestone_index != null ? Number(match.milestone_index) : null),
-      released_at: p.released_at ?? (anyMatch?.paidAt ?? anyMatch?.paymentDate ?? match.updated_at ?? match.submitted_at ?? match.created_at ?? null),
-      status: (p.status && p.status !== 'pending')
-        ? p.status
-        : ((String(match.status ?? '').toLowerCase() === 'paid' || anyMatch?.paidAt || anyMatch?.paymentDate)
-            ? 'completed'
-            : (p.status ?? 'pending')),
-    };
-
-    // amount: only lift from proof if payment amount missing/unparseable
-    const pAmt = toNum(p.amount_usd);
-    if (!Number.isFinite(pAmt) && Number.isFinite(prAmt)) {
-      filled.amount_usd = prAmt;
-    }
-
-    return filled;
-  });
-}
-
 // SIMPLIFIED Milestone Derivation
 function deriveMilestones(proofs: ProofRow[], payments: PaymentRow[]): MilestoneRow[] {
   const milestones: MilestoneRow[] = [];
