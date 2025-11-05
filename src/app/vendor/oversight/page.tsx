@@ -242,6 +242,34 @@ function normalizePayments(rows: any[]): PaymentRow[] {
   });
 }
 
+// CREATE NORMAL PAYMENTS FROM PROOFS
+function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
+  const normalPayments: PaymentRow[] = [];
+  
+  proofs.forEach((proof, index) => {
+    // If proof is paid but doesn't have a safe payment hash, it's a normal payment
+    if (proof.status === 'paid' && !proof.safe_payment_tx_hash && !proof.safe_tx_hash) {
+      normalPayments.push({
+        id: `normal-payment-${proof.id}-${index}`,
+        bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
+        milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
+        amount_usd: null, // We don't have amount in proof data
+        status: 'completed',
+        released_at: proof.paid_at,
+        tx_hash: proof.payment_tx_hash,
+        method: 'normal',
+        created_at: proof.paid_at,
+        updated_at: proof.paid_at,
+        proof_id: proof.id,
+        milestone_id: null,
+        __raw_index: index,
+      });
+    }
+  });
+  
+  return normalPayments;
+}
+
 function dedupePayments(arr: PaymentRow[]): PaymentRow[] {
   if (!Array.isArray(arr)) return [];
 
@@ -533,28 +561,14 @@ export default function VendorOversightPage() {
           const normalizedProofs = normalizeProofs(data.proofs || []);
           setProofs(normalizedProofs);
           
-          // Fetch normal payments separately since /api/vendor/oversight only returns safe payments
-          let normalPayments: any[] = [];
-          try {
-            console.log('Fetching normal payments...');
-            const normalPaymentsResponse = await fetch(api('/vendor/payments'), {
-              credentials: 'include',
-              cache: 'no-store',
-            });
-            if (normalPaymentsResponse.ok) {
-              normalPayments = await normalPaymentsResponse.json();
-              console.log('Normal payments fetched:', normalPayments);
-            } else {
-              console.log('Normal payments endpoint failed:', normalPaymentsResponse.status);
-            }
-          } catch (e) {
-            console.error('Failed to fetch normal payments:', e);
-          }
+          // Create normal payments from proofs that are paid but don't have safe payments
+          const normalPaymentsFromProofs = createNormalPaymentsFromProofs(normalizedProofs);
+          console.log('Normal payments created from proofs:', normalPaymentsFromProofs);
 
           // Combine safe payments + normal payments
           const allPayments = [
             ...(data.payments || []),
-            ...(normalPayments || [])
+            ...normalPaymentsFromProofs
           ];
 
           console.log('Combined payments (safe + normal):', allPayments);
@@ -596,7 +610,10 @@ export default function VendorOversightPage() {
           if (!Array.isArray(rawPaymentsAny) || rawPaymentsAny.length === 0) {
             try {
               const r = await fetch(api('/vendor/payments'), { credentials: 'include', cache: 'no-store' });
-              if (r.ok) rawPaymentsAny = await r.json();
+              if (r.ok) {
+                const normalPaymentsFromAPI = await r.json();
+                rawPaymentsAny = [...rawPaymentsAny, ...normalPaymentsFromAPI];
+              }
             } catch {}
           }
 
