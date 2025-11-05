@@ -243,6 +243,7 @@ function normalizePayments(rows: any[]): PaymentRow[] {
 }
 
 // CREATE NORMAL PAYMENTS FROM PROOFS
+// FIXED: Create normal payments from proofs
 function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
   const normalPayments: PaymentRow[] = [];
   
@@ -253,8 +254,8 @@ function createNormalPaymentsFromProofs(proofs: ProofRow[]): PaymentRow[] {
         id: `normal-payment-${proof.id}-${index}`,
         bid_id: proof.bid_id != null ? Number(proof.bid_id) : null,
         milestone_index: proof.milestone_index != null ? Number(proof.milestone_index) : null,
-        amount_usd: null, // We don't have amount in proof data
-        status: 'completed',
+        amount_usd: proof.amount || null, // Use the amount from proof if available
+        status: 'completed', // FIXED: Set to completed since proof is already paid
         released_at: proof.paid_at,
         tx_hash: proof.payment_tx_hash,
         method: 'normal',
