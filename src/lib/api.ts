@@ -157,8 +157,6 @@ export type EntitySelector = {
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
-const proofsCache = new Map<string, { data: any; timestamp: number }>();
-
 // ---- Env-safe API base resolution ----
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
@@ -809,7 +807,7 @@ export async function getBids(proposalId?: number): Promise<Bid[]> {
   }
 }
 
-
+// Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
 // Admin Proofs-only: returns bids enriched with paymentPending / paymentTxHash
 export async function getProofBids(): Promise<any[]> {
   const rows = await apiFetch("/admin/proofs-bids");
@@ -1183,8 +1181,7 @@ export async function submitProof(input: {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    const result = toProof(p);
-    clearProofsCache(input.bidId);
+    return toProof(p);
   } catch (e: any) {
     // If the server doesn't support /proofs schema yet, fall back to legacy:
     const msg = String(e?.message || "").toLowerCase();
@@ -1194,7 +1191,6 @@ export async function submitProof(input: {
 
     // Legacy fallback
     await completeMilestone(payload.bidId, payload.milestoneIndex, legacyProof);
-    clearProofsCache(payload.bidId);
 
     // Synthesize a minimal proof object so the UI can continue deterministically.
     return {
@@ -1229,9 +1225,7 @@ export async function archiveProof(proofId: number): Promise<Proof> {
   const p = await apiFetch(`/proofs/${encodeURIComponent(String(proofId))}/archive`, {
     method: "POST",
   });
-  const result = toProof(p);
-  clearProofsCache();
-  return result;
+  return toProof(p);
 }
 
 /** Approve a proof (admin-only) */
@@ -1244,9 +1238,7 @@ export async function approveProof(proofId: number, note?: string): Promise<Proo
       body: JSON.stringify(note ? { note } : {}),
     }
   );
-  const result = toProof(p);
-  clearProofsCache();
-  return result;
+  return toProof(p);
 }
 
 export async function getProofs(bidId?: number | string): Promise<Proof[]> {
@@ -1256,82 +1248,13 @@ export async function getProofs(bidId?: number | string): Promise<Proof[]> {
     if (!Number.isFinite(id)) {
       throw new Error(`getProofs: invalid bidId "${bidId}"`);
     }
-    
-    const cacheKey = `proofs-${id}`;
-    
-    // ✅ CHECK CACHE FIRST
-    const isCacheValid = (entry: { data: any; timestamp: number }) => {
-      const ttl = 300000; // 5 minutes
-      return Date.now() - entry.timestamp < ttl;
-    };
-
-    if (proofsCache.has(cacheKey) && isCacheValid(proofsCache.get(cacheKey)!)) {
-      console.log('✅ getProofs CACHE HIT for bid:', id);
-      return proofsCache.get(cacheKey)!.data;
-    }
-
-    console.log('🚀 getProofs API CALL for bid:', id);
     const rows = await apiFetch(`/proofs?bidId=${encodeURIComponent(String(id))}`);
-    const result = (Array.isArray(rows) ? rows : []).map(toProof);
-    
-    // ✅ STORE IN CACHE
-    proofsCache.set(cacheKey, {
-      data: result,
-      timestamp: Date.now()
-    });
-    
-    return result;
+    return (Array.isArray(rows) ? rows : []).map(toProof);
   }
 
-  // No bidId → admin list (unchanged behavior, no caching for admin list)
+  // No bidId → admin list (unchanged behavior)
   const rows = await apiFetch(`/proofs`);
   return (Array.isArray(rows) ? rows : []).map(toProof);
-}
-
-/** Clear specific bid from proofs cache */
-export function clearProofsCache(bidId?: number | string) {
-  if (bidId) {
-    const cacheKey = `proofs-${bidId}`;
-    proofsCache.delete(cacheKey);
-    console.log('🗑️ Cleared proofs cache for bid:', bidId);
-  } else {
-    proofsCache.clear();
-    console.log('🗑️ Cleared ALL proofs cache');
-  }
-}
-
-/** Manually refresh proofs for a bid (clear cache + refetch) */
-export async function refreshProofs(bidId: number | string): Promise<Proof[]> {
-  clearProofsCache(bidId);
-  return getProofs(bidId);
-}
-
-/** Get cache stats for debugging */
-export function getProofsCacheStats() {
-  return {
-    size: proofsCache.size,
-    keys: Array.from(proofsCache.keys()),
-    entries: Array.from(proofsCache.entries()).map(([key, value]) => ({
-      key,
-      age: Date.now() - value.timestamp,
-      dataLength: Array.isArray(value.data) ? value.data.length : 'non-array'
-    }))
-  };
-}
-
-// Temporary debug function - call this in your components
-export function debugProofsCache() {
-  const stats = getProofsCacheStats();
-  console.log('🔍 Proofs Cache Debug:', stats);
-  
-  // Log to window for easy access
-  if (typeof window !== 'undefined') {
-    (window as any).proofsCache = {
-      stats: getProofsCacheStats,
-      clear: clearProofsCache,
-      refresh: refreshProofs
-    };
-  }
 }
 
 /* ==========================
