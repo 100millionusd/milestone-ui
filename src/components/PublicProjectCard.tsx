@@ -159,81 +159,81 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   // client-side GPS cache (EXIF fallback)
   const [gpsByUrl, setGpsByUrl] = useState<Record<string, { lat: number; lon: number }>>({});
 
-useEffect(() => {
-  // collect ALL image URLs from all proofs/files
-  const urls: string[] = [];
-  for (const pr of files || []) {
-    const fileList = Array.isArray(pr?.files) ? pr.files : [];
-    for (const f of fileList) {
-      const u = String(f?.url || '');
-      if (!u) continue;
-      if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
-      urls.push(u);
-    }
-  }
-
-  // only targets we haven't resolved yet (use current snapshot of gpsByUrl)
-  const unique = Array.from(new Set(urls)).filter((u) => !gpsByUrl[u]);
-  if (unique.length === 0) return;
-
-  let cancelled = false;
-
-  (async () => {
-    const exifr = (await import('exifr')).default as any;
-
-    const MAX_RANGE_BYTES = 524_287; // ~512 KB
-    const CONCURRENCY = 4;
-
-    async function fetchGpsViaRange(url: string) {
-      try {
-        const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
-        if (!r.ok) return null;
-        const cl = Number(r.headers.get('content-length') || '0');
-        if (r.status === 200 && cl > MAX_RANGE_BYTES) return null;
-        const buf = await r.arrayBuffer();
-        const g = await exifr.gps(buf).catch(() => null);
-        if (g?.latitude != null && g?.longitude != null) {
-          return { lat: Number(g.latitude), lon: Number(g.longitude) };
-        }
-        return null;
-      } catch {
-        return null;
+  useEffect(() => {
+    // collect ALL image URLs from all proofs/files
+    const urls: string[] = [];
+    for (const pr of files || []) {
+      const fileList = Array.isArray(pr?.files) ? pr.files : [];
+      for (const f of fileList) {
+        const u = String(f?.url || '');
+        if (!u) continue;
+        if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
+        urls.push(u);
       }
     }
 
-    const queue = [...unique];
-    const found: Record<string, { lat: number; lon: number }> = {};
+    // only targets we haven't resolved yet (use current snapshot of gpsByUrl)
+    const unique = Array.from(new Set(urls)).filter((u) => !gpsByUrl[u]);
+    if (unique.length === 0) return;
 
-    async function worker() {
-      while (!cancelled && queue.length) {
-        const url = queue.shift()!;
-        const gps = await fetchGpsViaRange(url);
-        if (cancelled) break;
-        if (gps) found[url] = gps; // don't set state here — batch at the end
-      }
-    }
+    let cancelled = false;
 
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    if (cancelled) return;
+    (async () => {
+      const exifr = (await import('exifr')).default as any;
 
-    const hasNew = Object.keys(found).length > 0;
-    if (hasNew) {
-      setGpsByUrl((m) => {
-        // respect any entries that may have been added concurrently
-        const next = { ...m };
-        for (const [u, gps] of Object.entries(found)) {
-          if (!next[u]) next[u] = gps;
+      const MAX_RANGE_BYTES = 524_287; // ~512 KB
+      const CONCURRENCY = 4;
+
+      async function fetchGpsViaRange(url: string) {
+        try {
+          const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
+          if (!r.ok) return null;
+          const cl = Number(r.headers.get('content-length') || '0');
+          if (r.status === 200 && cl > MAX_RANGE_BYTES) return null;
+          const buf = await r.arrayBuffer();
+          const g = await exifr.gps(buf).catch(() => null);
+          if (g?.latitude != null && g?.longitude != null) {
+            return { lat: Number(g.latitude), lon: Number(g.longitude) };
+          }
+          return null;
+        } catch {
+          return null;
         }
-        return next;
-      });
-    }
-  })();
+      }
 
-  return () => {
-    cancelled = true;
-  };
-  // 🔑 only re-run when the FILE LIST changes; do NOT depend on gpsByUrl
-}, [files]);
+      const queue = [...unique];
+      const found: Record<string, { lat: number; lon: number }> = {};
+
+      async function worker() {
+        while (!cancelled && queue.length) {
+          const url = queue.shift()!;
+          const gps = await fetchGpsViaRange(url);
+          if (cancelled) break;
+          if (gps) found[url] = gps; // don't set state here — batch at the end
+        }
+      }
+
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      if (cancelled) return;
+
+      const hasNew = Object.keys(found).length > 0;
+      if (hasNew) {
+        setGpsByUrl((m) => {
+          // respect any entries that may have been added concurrently
+          const next = { ...m };
+          for (const [u, gps] of Object.entries(found)) {
+            if (!next[u]) next[u] = gps;
+          }
+          return next;
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // 🔑 only re-run when the FILE LIST changes; do NOT depend on gpsByUrl
+  }, [files]);
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
@@ -317,8 +317,8 @@ useEffect(() => {
 
         const singleBidId = bidIds.length === 1 ? bidIds[0] : null;
 
-        setFiles((prev) =>
-          prev.map((p: any) => {
+        setFiles((prev) => {
+          const next = prev.map((p: any) => {
             const pid = Number(p?.proofId ?? p?.proof_id ?? p?.id);
             let hit = Number.isFinite(pid) ? byProofId.get(pid) : null;
             if (!hit) {
@@ -327,13 +327,18 @@ useEffect(() => {
               if (Number.isFinite(b) && Number.isFinite(mi)) hit = byBidMs.get(`${b}:${mi}`) || null;
             }
             if (!hit) return p;
+            const loc = hit.geoApprox ?? hit.geo_approx ?? null;
+            const taken = hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null;
+            if (p.location === loc && p.takenAt === taken) return p; // idempotent
             return {
               ...p,
-              location: hit.geoApprox ?? hit.geo_approx ?? null,
-              takenAt: hit.captureTime ?? hit.capture_time ?? p.takenAt ?? null,
+              location: loc,
+              takenAt: taken,
             };
-          })
-        );
+          });
+          const changed = next.some((p, i) => p !== prev[i]);
+          return changed ? next : prev;
+        });
       } catch {}
     })();
 
@@ -392,7 +397,7 @@ useEffect(() => {
   ];
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
-  const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
+  const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt));
   const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
@@ -405,7 +410,7 @@ useEffect(() => {
       if (
         s === 'submitted' &&
         !(p?.status || p?.proof_status || p?.proofStatus) &&
-        (p?.approved === true || p?.approvedAt || p?.approved_at || true)
+        (p?.approved === true || p?.approvedAt || p?.approved_at)
       ) {
         return 'approved';
       }
@@ -782,11 +787,11 @@ useEffect(() => {
                       <div className="mt-1 text-xs text-gray-500">
                         {b.days ? `${b.days} days` : null} {b.status ? `• ${b.status}` : null}
                       </div>
- {b.milestones?.length ? (
-  <div className="mt-2 text-xs text-gray-600">
-    {b.milestones.length} milestones • {b.milestones.filter(m => m.completed).length}/{b.milestones.length} completed
-  </div>
-) : null}
+                      {b.milestones?.length ? (
+                        <div className="mt-2 text-xs text-gray-600">
+                          {b.milestones.length} milestones • {b.milestones.filter((m) => m.completed).length}/{b.milestones.length} completed
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
