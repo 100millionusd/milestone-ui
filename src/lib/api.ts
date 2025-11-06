@@ -1651,6 +1651,7 @@ type FileInput =
   | { url: string; name?: string; mimetype?: string; contentType?: string }
   | { file: File; name?: string };
 
+// src/lib/api.ts
 export async function createBidFromTemplate(input: {
   templateId?: number;
   slug?: string;
@@ -1662,6 +1663,8 @@ export async function createBidFromTemplate(input: {
   docs?: any[];
   doc?: any;
   notes?: string;
+  description?: string; // allow top-level description
+  desc?: string;
   milestones?: Array<{
     name: string;
     amount: number;
@@ -1673,34 +1676,36 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  
+  // ---- input debug (don’t strip fields)
   console.log('🔍 API DEBUG - createBidFromTemplate input:', {
     templateId: input.templateId,
     slug: input.slug,
     proposalId: input.proposalId,
     vendorName: input.vendorName,
-    notes: input.notes, // Check if notes are received
+    walletAddress: input.walletAddress?.slice(0, 6) + '…',
+    preferredStablecoin: input.preferredStablecoin,
+    filesCount: Array.isArray(input.files) ? input.files.length : 0,
+    docsCount: Array.isArray(input.docs) ? input.docs.length : 0,
+    milestonesCount: Array.isArray(input.milestones) ? input.milestones.length : 0,
     notesLength: input.notes?.length || 0,
-    milestonesCount: input.milestones?.length || 0,
-    filesCount: input.files?.length || 0
   });
 
+  // mirror files -> docs and choose single doc (normal-bid parity)
   const files = Array.isArray(input.files) ? input.files : [];
-  const docs = Array.isArray(input.docs) ? input.docs : files;
-  
+  const docs = Array.isArray(input.docs) && input.docs.length ? input.docs : files;
+  const doc  = input.doc || docs[0] || null;
+
+  // milestones: mirror description into notes/desc for each milestone
   const milestones = Array.isArray(input.milestones)
     ? input.milestones.map((m) => {
         const text = m.description ?? m.notes ?? m.desc ?? '';
-        return { 
-          ...m, 
-          description: text, 
-          notes: text, 
-          desc: text 
-        };
+        return { ...m, description: text, notes: text, desc: text };
       })
     : [];
 
-  const doc = input.doc || files[0] || docs[0] || null;
+  // top-level notes/desc: mirror description → notes/desc
+  const notes = input.notes ?? input.description ?? input.desc ?? '';
+  const desc  = input.desc  ?? input.description ?? input.notes ?? '';
 
   const payload = {
     templateId: input.templateId,
@@ -1712,19 +1717,26 @@ export async function createBidFromTemplate(input: {
     milestones,
     doc,
     docs,
-    files: docs,
-    notes: input.notes, // Make sure notes are in payload
+    files: docs, // keep both keys for downstream readers
+    notes,
+    desc,
   };
 
+  // ---- real payload debug (now shows identifiers & counts, not just notes)
   console.log('🔍 API DEBUG - Payload to /bids/from-template:', {
-    notes: payload.notes,
-    notesLength: payload.notes?.length || 0
+    slug: payload.slug,
+    templateId: payload.templateId,
+    proposalId: payload.proposalId,
+    files: Array.isArray(payload.docs) ? payload.docs.length : 0,
+    hasDoc: !!payload.doc,
+    milestones: Array.isArray(payload.milestones) ? payload.milestones.length : 0,
+    notesLength: payload.notes?.length || 0,
+    descLength: payload.desc?.length || 0,
   });
 
   const result = await postJSON(`/bids/from-template`, payload);
-  
+
   console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
-  
   return result;
 }
 
