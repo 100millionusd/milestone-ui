@@ -152,13 +152,14 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
 
       {/* Single horizontal client UI */}
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <TemplateBidClient
-          slugOrId={t.slug || String(t.id)}
-          initialProposalId={proposalFromQS}
-          initialVendorName={preVendor}
-          initialWallet={preWallet}
-          startFromTemplateAction={startFromTemplate}
-        />
+<TemplateBidClient
+  slugOrId={t.slug || String(t.id)}
+  fixedProposalId={proposalFromQS}   // ← lock the proposal id from ?proposalId=...
+  hideProposalId                     // ← do not render a visible Proposal ID field
+  initialVendorName={preVendor}
+  initialWallet={preWallet}
+  startFromTemplateAction={startFromTemplate}
+/>
       </div>
     </main>
   );
