@@ -167,13 +167,12 @@ useEffect(() => {
     for (const f of fileList) {
       const u = String(f?.url || '');
       if (!u) continue;
-      // image extensions only
       if (!/\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i.test(u)) continue;
       urls.push(u);
     }
   }
 
-  // unique targets we haven't resolved yet
+  // only targets we haven't resolved yet (use current snapshot of gpsByUrl)
   const unique = Array.from(new Set(urls)).filter((u) => !gpsByUrl[u]);
   if (unique.length === 0) return;
 
@@ -183,15 +182,14 @@ useEffect(() => {
     const exifr = (await import('exifr')).default as any;
 
     const MAX_RANGE_BYTES = 524_287; // ~512 KB
-    const CONCURRENCY = 4;           // gentle; bump to 3 if needed
+    const CONCURRENCY = 4;
 
     async function fetchGpsViaRange(url: string) {
       try {
         const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
-        // If the server ignored Range and returns a big 200, don't download the body.
         if (!r.ok) return null;
         const cl = Number(r.headers.get('content-length') || '0');
-        if (r.status === 200 && cl > MAX_RANGE_BYTES) return null; // skip huge full fetches
+        if (r.status === 200 && cl > MAX_RANGE_BYTES) return null;
         const buf = await r.arrayBuffer();
         const g = await exifr.gps(buf).catch(() => null);
         if (g?.latitude != null && g?.longitude != null) {
@@ -204,27 +202,38 @@ useEffect(() => {
     }
 
     const queue = [...unique];
-    const workers: Promise<void>[] = [];
+    const found: Record<string, { lat: number; lon: number }> = {};
 
     async function worker() {
       while (!cancelled && queue.length) {
         const url = queue.shift()!;
         const gps = await fetchGpsViaRange(url);
         if (cancelled) break;
-        if (gps) {
-          setGpsByUrl((m) => (m[url] ? m : { ...m, [url]: gps }));
-        }
+        if (gps) found[url] = gps; // don't set state here — batch at the end
       }
     }
 
-    for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
-    await Promise.all(workers);
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (cancelled) return;
+
+    const hasNew = Object.keys(found).length > 0;
+    if (hasNew) {
+      setGpsByUrl((m) => {
+        // respect any entries that may have been added concurrently
+        const next = { ...m };
+        for (const [u, gps] of Object.entries(found)) {
+          if (!next[u]) next[u] = gps;
+        }
+        return next;
+      });
+    }
   })();
 
   return () => {
     cancelled = true;
   };
-}, [files, gpsByUrl]);
+  // 🔑 only re-run when the FILE LIST changes; do NOT depend on gpsByUrl
+}, [files]);
 
   // audit state
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
