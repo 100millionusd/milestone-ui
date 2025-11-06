@@ -9,7 +9,7 @@ import FileUploader from './FileUploader';
 
 type TemplateBidClientProps = {
   slugOrId: string;                 // slug or numeric id as string
-  initialProposalId?: number;       // auto-filled from ?proposalId or parent
+  initialProposalId?: number;       // may be 0/undefined if URL has no ?proposalId
   initialVendorName?: string;
   initialWallet?: string;
 };
@@ -25,27 +25,49 @@ function coerce(a: any) {
 export default function TemplateBidClient(props: TemplateBidClientProps) {
   const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '' } = props;
 
-  // Keep proposalId in state but HIDE the field; we submit it via a hidden input
   const [proposalId, setProposalId] = useState<number>(initialProposalId || 0);
   const [vendorName, setVendorName] = useState(initialVendorName);
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
 
-  // Try to auto-resolve from URL/referrer if parent didn't provide it
+  // ←––––––––––––––––––––––––– RESOLVE PROPOSAL ID ON MOUNT ––––––––––––––––––––––––→
   useEffect(() => {
-    if (proposalId) return;
-    try {
-      const pidFromUrl = Number(new URL(window.location.href).searchParams.get('proposalId') || 0);
-      if (pidFromUrl > 0) { setProposalId(pidFromUrl); return; }
-    } catch {}
-    try {
-      const ref = document.referrer;
-      if (ref) {
-        const pidFromRef = Number(new URL(ref).searchParams.get('proposalId') || 0);
-        if (pidFromRef > 0) { setProposalId(pidFromRef); return; }
-      }
-    } catch {}
-  }, [proposalId]);
+    if (proposalId > 0) return;
+
+    let cancelled = false;
+    const resolve = async () => {
+      // 1) URL query
+      try {
+        const fromUrl = Number(new URL(window.location.href).searchParams.get('proposalId') || 0);
+        if (!cancelled && fromUrl > 0) { setProposalId(fromUrl); return; }
+      } catch {}
+
+      // 2) Referrer (if navigated from /bids/new?proposalId=…)
+      try {
+        if (document.referrer) {
+          const fromRef = Number(new URL(document.referrer).searchParams.get('proposalId') || 0);
+          if (!cancelled && fromRef > 0) { setProposalId(fromRef); return; }
+        }
+      } catch {}
+
+      // 3) Template binding (server has the association)
+      try {
+        const tmpl = await getTemplate(slugOrId);
+        const pid = Number(
+          (tmpl as any)?.proposalId ??
+          (tmpl as any)?.proposal_id ??
+          (tmpl as any)?.proposal?.id ??
+          (tmpl as any)?.projectId ??
+          (tmpl as any)?.project_id ??
+          0
+        );
+        if (!cancelled && pid > 0) { setProposalId(pid); return; }
+      } catch {/* ignore */}
+    };
+
+    resolve();
+    return () => { cancelled = true; };
+  }, [proposalId, slugOrId]);
 
   // Agent2 modal + flow state
   const [open, setOpen] = useState(false);
@@ -83,13 +105,12 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     e.preventDefault();
     if (disableSubmit) return;
 
-    // Read ALL form data (including hidden inputs)
     const fd = new FormData(e.currentTarget);
 
-    // Try hidden input/state first
+    // Always read from hidden input first; fallback to state
     let proposalIdNum = Number(fd.get('proposalId') ?? proposalId ?? 0);
 
-    // If still missing, resolve from template on the client (no guesswork)
+    // Final safety: if still 0, resolve from template NOW (should rarely happen)
     if (!Number.isFinite(proposalIdNum) || proposalIdNum <= 0) {
       try {
         const tmpl = await getTemplate(slugOrId);
@@ -109,13 +130,12 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       return;
     }
 
-    // Get notes from form data - use both methods to be safe
+    // Vendor notes
     const vendorNotes = String(fd.get('notes') || '');
-    const notesElement = e.currentTarget.querySelector('textarea[name="notes"]') as HTMLTextAreaElement | null;
-    const directNotes = notesElement ? notesElement.value : '';
-    const finalNotes = vendorNotes || directNotes;
+    const notesEl = e.currentTarget.querySelector('textarea[name="notes"]') as HTMLTextAreaElement | null;
+    const finalNotes = vendorNotes || (notesEl?.value ?? '');
 
-    // milestonesJson (from TemplateRenovationHorizontal)
+    // Milestones
     let milestones: any[] = [];
     try {
       const raw = String(fd.get('milestonesJson') || '[]');
@@ -123,7 +143,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (Array.isArray(arr)) milestones = arr;
     } catch {}
 
-    // filesJson (from FileUploader)
+    // Files
     let files: Array<string | { url: string; name?: string }> = [];
     try {
       const raw = String(fd.get('filesJson') || '[]');
@@ -131,7 +151,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (Array.isArray(arr)) files = arr;
     } catch {}
 
-    // Show Agent2 modal immediately
+    // Show modal immediately
     setOpen(true);
     setStep('submitting');
     setMessage(null);
@@ -143,15 +163,20 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         ? { templateId: Number(slugOrId) }
         : { slug: slugOrId };
 
-      // 1) Create bid first
+      // Normalize attachments to {url,name} (harmless if already correct)
+      const cleanFiles = (Array.isArray(files) ? files : []).map((x: any) =>
+        typeof x === 'string' ? { url: x } : { url: x?.url ?? x?.href, ...(x?.name ? { name: x.name } : {}) }
+      ).filter(f => f.url);
+
+      // Create bid (proposalId guaranteed above)
       const res = await createBidFromTemplate({
         ...base,
-        proposalId: proposalIdNum, // ← resolved reliably
+        proposalId: proposalIdNum,
         vendorName,
         walletAddress,
         preferredStablecoin,
         milestones,
-        files,
+        files: cleanFiles,       // uploads unchanged; API mirrors files→docs and picks doc
         notes: finalNotes,
       });
 
@@ -159,14 +184,10 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       if (!bidId) throw new Error('Failed to create bid (no id)');
       setBidIdForModal(bidId);
 
-      // 2) Continue with Agent2 analysis
+      // Analyze
       setStep('analyzing');
       setMessage('Agent2 is analyzing your bid…');
-      try {
-        await analyzeBid(bidId);
-      } catch (analyzeError) {
-        console.warn('Agent2 analysis might be delayed:', analyzeError);
-      }
+      try { await analyzeBid(bidId); } catch {}
 
       const found = await pollAnalysis(bidId);
       if (found) {
@@ -178,7 +199,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
         setMessage('Analysis will appear shortly.');
       }
 
-      // Redirect to vendor bid page
+      // Redirect to vendor detail w/ Agent2 open
       setTimeout(() => {
         window.location.href = `/vendor/bids/${bidId}?flash=agent2`;
       }, 2000);
@@ -192,12 +213,12 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
+      {/* Hidden identifiers to ensure server actions/handlers always see them */}
+      <input type="hidden" name="id" value={slugOrId} />
+      <input type="hidden" name="proposalId" value={proposalId > 0 ? String(proposalId) : ''} />
+
       {/* Vendor basics — horizontal row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        {/* Hidden identifiers */}
-        <input type="hidden" name="id" value={slugOrId} />
-        <input type="hidden" name="proposalId" value={proposalId ? String(proposalId) : ''} />
-
         <label className="text-sm">
           <span className="block">Stablecoin</span>
           <select
