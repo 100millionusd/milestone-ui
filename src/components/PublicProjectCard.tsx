@@ -405,18 +405,18 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // ---------- FILES TAB RENDERER ----------
   function renderFilesTab() {
-    const uiStatus = (p: any) => {
-      const s = getProofStatus(p);
-      if (
-        s === 'submitted' &&
-        !(p?.status || p?.proof_status || p?.proofStatus) &&
-        (p?.approved === true || p?.approvedAt || p?.approved_at)
-      ) {
-        return 'approved';
-      }
-      if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
-      return s;
-    };
+const uiStatus = (p: any) => {
+  const s = getProofStatus(p);
+  if (
+    s === 'submitted' &&
+    !(p?.status || p?.proof_status || p?.proofStatus) &&
+    (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
+  ) {
+    return 'approved';
+  }
+  if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+  return s;
+};
 
     const proofsToShow = approvedOnly ? files.filter((p) => uiStatus(p) === 'approved') : files;
 
