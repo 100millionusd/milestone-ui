@@ -140,12 +140,12 @@ export default function ChangeRequestsPanel(props: Props) {
     load();
   }, [load, proposalId, idx]);
 
-  // Listen for external updates; ignore unrelated or immediate-echo events
+  // Listen for external updates; now ONLY reload on targeted events for this proposal
   useEffect(() => {
     const onAny = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
-      // If event targets a different proposal, ignore
-      if (Number.isFinite(pid) && pid !== proposalId) return;
+      // Require an explicit match; ignore global or different-proposal broadcasts
+      if (!Number.isFinite(pid) || pid !== proposalId) return;
       // Cool-down: ignore the immediate echo after our own load finishes
       if (Date.now() - lastLoadTs.current < 500) return;
       load();
