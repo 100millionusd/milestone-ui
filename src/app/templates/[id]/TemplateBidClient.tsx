@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Agent2ProgressModal from '@/components/Agent2ProgressModal';
-import { analyzeBid, createBidFromTemplate, getBid } from '@/lib/api';
+import { analyzeBid, createBidFromTemplate, getBid, getTemplate } from '@/lib/api';
 import TemplateRenovationHorizontal from '@/components/TemplateRenovationHorizontal';
 import FileUploader from './FileUploader';
 
@@ -31,7 +31,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
 
-  // Try to auto-resolve proposalId from URL or referrer if not provided by parent
+  // Try to auto-resolve from URL/referrer if parent didn't provide it
   useEffect(() => {
     if (proposalId) return;
     try {
@@ -86,10 +86,26 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     // Read ALL form data (including hidden proposalId)
     const fd = new FormData(e.currentTarget);
 
-    // Get proposalId from hidden input or state
-    const proposalIdNum = Number(fd.get('proposalId') ?? proposalId ?? 0);
+    // Try hidden input/state first
+    let proposalIdNum = Number(fd.get('proposalId') ?? proposalId ?? 0);
+
+    // If still missing, resolve from template on the client (no guesswork)
     if (!Number.isFinite(proposalIdNum) || proposalIdNum <= 0) {
-      alert('Missing proposalId. Open with ?proposalId=<id>.');
+      try {
+        const tmpl = await getTemplate(slugOrId);
+        proposalIdNum = Number(
+          (tmpl as any)?.proposalId ??
+          (tmpl as any)?.proposal_id ??
+          (tmpl as any)?.proposal?.id ??
+          (tmpl as any)?.projectId ??
+          (tmpl as any)?.project_id ??
+          0
+        );
+      } catch {}
+    }
+
+    if (!Number.isFinite(proposalIdNum) || proposalIdNum <= 0) {
+      alert('Missing proposalId. This template is not bound to a project.');
       return;
     }
 
@@ -130,7 +146,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
       // 1) Create bid first
       const res = await createBidFromTemplate({
         ...base,
-        proposalId: proposalIdNum, // ← use value from hidden input/state
+        proposalId: proposalIdNum, // ← resolved reliably
         vendorName,
         walletAddress,
         preferredStablecoin,
@@ -178,7 +194,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
       {/* Vendor basics — horizontal row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        {/* Hidden proposal id (fixed from URL, parent, or referrer) */}
+        {/* Hidden proposal id (fixed from URL/parent/referrer; server will also re-derive if needed) */}
         <input type="hidden" name="proposalId" value={proposalId ? String(proposalId) : ''} />
 
         <label className="text-sm">
