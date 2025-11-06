@@ -25,7 +25,7 @@ const PINATA_GATEWAY =
   (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY)
     ? `https://${String((process as any).env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//,'').replace(/\/+$/,'')}/ipfs`
     : ((typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY)
-        ? String((process as any).env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/,'')
+        ? String((process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/,'')
         : 'https://gateway.pinata.cloud/ipfs');
 
 function toUrl(f: CRResponseFile) {
@@ -186,9 +186,40 @@ export default function ChangeRequestsPanel(props: Props) {
     typeof forceMilestoneIndex !== 'number' &&
     allMilestones.length > 1;
 
-  // ---- helpers for drafts & submission ----
+  // -------------------- helpers --------------------
   const setDraft = useCallback((crId: number, patch: Partial<Draft>) => {
     setDrafts((prev) => ({ ...prev, [crId]: { message: '', files: [], ...prev[crId], ...patch } }));
+  }, []);
+
+  // Upload selected files to your existing Pinata-backed endpoint,
+  // return [{ name, cid, url }] suitable for the server's sanitizeFiles().
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (!files?.length) return [];
+    const fd = new FormData();
+    files.forEach((f) => fd.append('files', f));
+    const r = await fetch('/api/proofs/upload', {
+      method: 'POST',
+      body: fd,
+      credentials: 'include',
+      cache: 'no-store',
+    });
+    if (!r.ok) throw new Error(`Upload failed (HTTP ${r.status})`);
+    const data = await r.json().catch(() => ({}));
+
+    const arr: any[] = Array.isArray(data) ? data : (data.files ?? []);
+    return arr.map((x) => {
+      const cid =
+        x?.cid ||
+        x?.IpfsHash ||  // pinata pinFileToIPFS
+        x?.Hash ||      // alt pin endpoints
+        x?.hash ||
+        '';
+      const name = x?.name || x?.fileName || 'file';
+      const url =
+        (x?.url && String(x.url)) ||
+        (cid ? `${PINATA_GATEWAY}/${cid}` : '');
+      return { name, cid: cid || undefined, url };
+    }).filter((it: any) => it.url);
   }, []);
 
   const submitReply = useCallback(async (cr: ChangeRequestRow) => {
@@ -199,16 +230,19 @@ export default function ChangeRequestsPanel(props: Props) {
     }
     setDraft(cr.id, { sending: true, error: undefined });
     try {
-      const fd = new FormData();
-      fd.append('message', d.message ?? '');
-      (d.files || []).forEach((f) => fd.append('files', f));
+      const uploaded = await uploadFiles(d.files || []);
+      const body = {
+        // server expects 'comment' + 'files'
+        comment: d.message ?? '',
+        files: uploaded, // [{name,url,cid?}]
+      };
 
-      // Single endpoint: replies and moves proof back to pending review
-      const r = await fetch(`/api/proofs/change-requests/${cr.id}/reply`, {
+      const r = await fetch(`/api/proofs/change-requests/${cr.id}/respond`, {
         method: 'POST',
-        body: fd,
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         cache: 'no-store',
+        body: JSON.stringify(body),
       });
 
       if (!r.ok) {
@@ -231,8 +265,9 @@ export default function ChangeRequestsPanel(props: Props) {
     } finally {
       setDraft(cr.id, { sending: false });
     }
-  }, [drafts, load, proposalId, setDraft]);
+  }, [drafts, load, proposalId, setDraft, uploadFiles]);
 
+  // -------------------- render --------------------
   if (loading) return <div className="mt-4 text-sm text-gray-500">Loading change requests…</div>;
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
@@ -418,7 +453,7 @@ export default function ChangeRequestsPanel(props: Props) {
                       disabled={sending}
                       className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-60"
                     >
-                      {sending ? 'Sending…' : 'Send answer & resubmit'}
+                      {sending ? 'Sending…' : 'Send answer'}
                     </button>
                     <button
                       type="button"
