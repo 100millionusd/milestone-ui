@@ -128,6 +128,10 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
   const preVendor = String(profile?.vendorName || '');
   const preWallet = String(profile?.walletAddress || '');
   const proposalFromQS = toNumber(searchParams?.proposalId);
+const proposalFromTemplate =
+  Number((t as any)?.proposalId ?? (t as any)?.proposal_id ?? (t as any)?.proposal?.id ?? 0);
+const resolvedProposalId = proposalFromQS || proposalFromTemplate;
+
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -154,8 +158,7 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
       <div className="mx-auto max-w-7xl px-4 py-8">
 <TemplateBidClient
   slugOrId={t.slug || String(t.id)}
-  fixedProposalId={proposalFromQS}   // ← lock the proposal id from ?proposalId=...
-  hideProposalId                     // ← do not render a visible Proposal ID field
+  initialProposalId={resolvedProposalId}
   initialVendorName={preVendor}
   initialWallet={preWallet}
   startFromTemplateAction={startFromTemplate}
