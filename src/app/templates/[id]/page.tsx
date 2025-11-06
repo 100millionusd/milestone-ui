@@ -21,37 +21,78 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/**
- * ✅ Server action:
- * - Do NOT rely on form 'proposalId' being present
- * - Resolve proposalId from form → else from template(slug/id) → else fail gracefully
- * - Normalize files to {url,name}
- * - Send both files/docs and single doc (normal-bid parity)
- */
-async function startFromTemplate(
-  ctx: { slugOrId: string },               // we bind this at render-time below
-  formData: FormData
-) {
+/** Deep, defensive resolver that tries very hard to find a proposalId inside a template object */
+function deepFindProposalId(obj: any): number {
+  const seen = new Set<any>();
+  const q: any[] = [obj];
+
+  const idFromAny = (k: string, v: unknown): number => {
+    // Accept numbers or numeric strings
+    if (typeof v === 'number' && v > 0 && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+      // Extract from URLs like "...?proposalId=182"
+      const m = v.match(/(?:\?|&)(?:proposalId|proposal_id|projectId|project_id)=(\d+)/i);
+      if (m) return Number(m[1]);
+    }
+    // Nested objects with id field
+    if (v && typeof v === 'object' && 'id' in (v as any)) {
+      const id = Number((v as any).id);
+      if (Number.isFinite(id) && id > 0) return id;
+    }
+    return 0;
+  };
+
+  while (q.length) {
+    const cur = q.pop();
+    if (!cur || typeof cur !== 'object' || seen.has(cur)) continue;
+    seen.add(cur);
+
+    // direct keys we care about
+    for (const [k, v] of Object.entries(cur as Record<string, unknown>)) {
+      const lk = k.toLowerCase();
+      if (
+        lk === 'proposalid' || lk === 'proposal_id' ||
+        lk === 'projectid'  || lk === 'project_id' ||
+        lk === 'proposal'   || lk === 'project'
+      ) {
+        const found = idFromAny(k, v);
+        if (found) return found;
+      }
+      // also scan string values for ...?proposalId=123
+      if (typeof v === 'string') {
+        const found = idFromAny(k, v);
+        if (found) return found;
+      }
+      // continue traversal
+      if (v && typeof v === 'object') q.push(v);
+    }
+  }
+  return 0;
+}
+
+/** ✅ Server action: match NORMAL BID flow exactly (send only {url,name}) */
+async function startFromTemplate(formData: FormData) {
   'use server';
 
-  // slug / id from bound context (never rely on client adding a hidden input)
-  const slugOrId = String(ctx?.slugOrId || '');
-
-  // try proposalId from form first
+  const slugOrId = String(formData.get('id') || '');
+  // 1) try proposalId from form
   let proposalId = Number(formData.get('proposalId') || 0);
 
-  // if missing/invalid, resolve from template
+  // 2) if missing, derive from template server-side (no guessing from client)
   if (!Number.isFinite(proposalId) || proposalId <= 0) {
     try {
       const tmpl = await getTemplate(slugOrId);
-      proposalId = Number(
-        (tmpl as any)?.proposalId ??
-        (tmpl as any)?.proposal_id ??
-        (tmpl as any)?.proposal?.id ??
-        (tmpl as any)?.projectId ??
-        (tmpl as any)?.project_id ??
-        0
-      );
+      proposalId =
+        Number(
+          (tmpl as any)?.proposalId ??
+          (tmpl as any)?.proposal_id ??
+          (tmpl as any)?.proposal?.id ??
+          (tmpl as any)?.projectId ??
+          (tmpl as any)?.project_id ??
+          0
+        ) || deepFindProposalId(tmpl);
     } catch {
       // ignore; handled below
     }
@@ -66,7 +107,7 @@ async function startFromTemplate(
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
   const vendorNotes = String(formData.get('notes') || '');
 
-  // ---- Files: normalize to real HTTP URLs (only {url,name})
+  // ---- Files: normalize to real HTTP URLs ----
   const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 
   let docsClean: Array<{ url: string; name?: string }> = [];
@@ -152,7 +193,7 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
   const preVendor = String(profile?.vendorName || '');
   const preWallet = String(profile?.walletAddress || '');
 
-  // Resolve proposal id from URL or from the template itself
+  // Resolve proposal id from URL -> template fields -> deep scan of template
   const proposalFromQS = toNumber(searchParams?.proposalId);
   const proposalFromTemplate = Number(
     (t as any)?.proposalId ??
@@ -162,7 +203,8 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
     (t as any)?.project_id ??
     0
   );
-  const resolvedProposalId = proposalFromQS || proposalFromTemplate;
+  const proposalFromDeep = proposalFromQS ? 0 : deepFindProposalId(t);
+  const resolvedProposalId = proposalFromQS || proposalFromTemplate || proposalFromDeep;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -192,8 +234,8 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
           initialProposalId={resolvedProposalId}
           initialVendorName={preVendor}
           initialWallet={preWallet}
-          // Bind slug/id so the server action can always resolve template + proposalId
-          startFromTemplateAction={startFromTemplate.bind(null, { slugOrId: t.slug || String(t.id) })}
+          // You can ignore this on the client; leaving here is harmless
+          startFromTemplateAction={startFromTemplate}
         />
       </div>
     </main>
