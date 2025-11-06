@@ -21,20 +21,52 @@ function toNumber(v?: string | string[]) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** ✅ Server action: match NORMAL BID flow exactly (send only {url,name}) */
-async function startFromTemplate(formData: FormData) {
+/**
+ * ✅ Server action:
+ * - Do NOT rely on form 'proposalId' being present
+ * - Resolve proposalId from form → else from template(slug/id) → else fail gracefully
+ * - Normalize files to {url,name}
+ * - Send both files/docs and single doc (normal-bid parity)
+ */
+async function startFromTemplate(
+  ctx: { slugOrId: string },               // we bind this at render-time below
+  formData: FormData
+) {
   'use server';
 
-  const slugOrId = String(formData.get('id') || '');
-  const proposalId = Number(formData.get('proposalId') || 0);
+  // slug / id from bound context (never rely on client adding a hidden input)
+  const slugOrId = String(ctx?.slugOrId || '');
+
+  // try proposalId from form first
+  let proposalId = Number(formData.get('proposalId') || 0);
+
+  // if missing/invalid, resolve from template
+  if (!Number.isFinite(proposalId) || proposalId <= 0) {
+    try {
+      const tmpl = await getTemplate(slugOrId);
+      proposalId = Number(
+        (tmpl as any)?.proposalId ??
+        (tmpl as any)?.proposal_id ??
+        (tmpl as any)?.proposal?.id ??
+        (tmpl as any)?.projectId ??
+        (tmpl as any)?.project_id ??
+        0
+      );
+    } catch {
+      // ignore; handled below
+    }
+  }
+
+  if (!Number.isFinite(proposalId) || proposalId <= 0) {
+    redirect(`/templates/${encodeURIComponent(slugOrId)}?error=missing_proposal`);
+  }
+
   const vendorName = String(formData.get('vendorName') || '');
   const walletAddress = String(formData.get('walletAddress') || '');
   const preferredStablecoin = String(formData.get('preferredStablecoin') || 'USDT') as 'USDT' | 'USDC';
-  
-  // Get notes from the TemplateRenovationHorizontal component
-const vendorNotes = String(formData.get('notes') || '');
+  const vendorNotes = String(formData.get('notes') || '');
 
-  // ---- Files: normalize to real HTTP URLs ----
+  // ---- Files: normalize to real HTTP URLs (only {url,name})
   const GW = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
 
   let docsClean: Array<{ url: string; name?: string }> = [];
@@ -45,7 +77,6 @@ const vendorNotes = String(formData.get('notes') || '');
     const toHttp = (x: any) => {
       if (!x) return null;
 
-      // strings
       if (typeof x === 'string') {
         let u = x;
         if (u.startsWith('ipfs://')) u = `${GW}/${u.slice('ipfs://'.length)}`;
@@ -54,7 +85,6 @@ const vendorNotes = String(formData.get('notes') || '');
         return { url: u };
       }
 
-      // objects
       let u: string | null =
         (typeof x.url === 'string' && x.url) ||
         (typeof x.href === 'string' && x.href) ||
@@ -90,12 +120,6 @@ const vendorNotes = String(formData.get('notes') || '');
     ? { templateId: Number(slugOrId) }
     : { slug: slugOrId };
 
-  console.log('🔍 SERVER ACTION DEBUG - Calling createBidFromTemplate with notes:', {
-    notes: vendorNotes,
-    notesLength: vendorNotes.length
-  });
-
-  // 🚀 Create bid using normal-bid shape - MAKE SURE NOTES ARE PASSED
   const res = await createBidFromTemplate({
     ...base,
     proposalId,
@@ -106,7 +130,7 @@ const vendorNotes = String(formData.get('notes') || '');
     files: docsClean,
     docs: docsClean,
     doc,
-    notes: vendorNotes, // 🆕 This was missing!
+    notes: vendorNotes,
   });
 
   const bidId = Number((res as any)?.bidId);
@@ -127,11 +151,18 @@ export default async function TemplateDetailPage({ params, searchParams }: Props
 
   const preVendor = String(profile?.vendorName || '');
   const preWallet = String(profile?.walletAddress || '');
-  const proposalFromQS = toNumber(searchParams?.proposalId);
-const proposalFromTemplate =
-  Number((t as any)?.proposalId ?? (t as any)?.proposal_id ?? (t as any)?.proposal?.id ?? 0);
-const resolvedProposalId = proposalFromQS || proposalFromTemplate;
 
+  // Resolve proposal id from URL or from the template itself
+  const proposalFromQS = toNumber(searchParams?.proposalId);
+  const proposalFromTemplate = Number(
+    (t as any)?.proposalId ??
+    (t as any)?.proposal_id ??
+    (t as any)?.proposal?.id ??
+    (t as any)?.projectId ??
+    (t as any)?.project_id ??
+    0
+  );
+  const resolvedProposalId = proposalFromQS || proposalFromTemplate;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -156,13 +187,14 @@ const resolvedProposalId = proposalFromQS || proposalFromTemplate;
 
       {/* Single horizontal client UI */}
       <div className="mx-auto max-w-7xl px-4 py-8">
-<TemplateBidClient
-  slugOrId={t.slug || String(t.id)}
-  initialProposalId={resolvedProposalId}
-  initialVendorName={preVendor}
-  initialWallet={preWallet}
-  startFromTemplateAction={startFromTemplate}
-/>
+        <TemplateBidClient
+          slugOrId={t.slug || String(t.id)}
+          initialProposalId={resolvedProposalId}
+          initialVendorName={preVendor}
+          initialWallet={preWallet}
+          // Bind slug/id so the server action can always resolve template + proposalId
+          startFromTemplateAction={startFromTemplate.bind(null, { slugOrId: t.slug || String(t.id) })}
+        />
       </div>
     </main>
   );
