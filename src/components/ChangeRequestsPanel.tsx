@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 
 type CRResponseFile = { url?: string; cid?: string; name?: string };
 type CRResponse = {
@@ -57,102 +57,124 @@ export default function ChangeRequestsPanel(props: Props) {
 
   // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
+
   // Allow URL to set default milestone: ?ms=4 or ?milestone=4
-useEffect(() => {
-  if (typeof forceMilestoneIndex === 'number') return;
-  try {
-    const url = new URL(window.location.href);
-    const q = url.searchParams.get('ms') ?? url.searchParams.get('milestone');
-    const n = q ? Number(q) : NaN;
-    if (Number.isFinite(n) && n >= 0) {
-      setActiveMilestoneIndex(n);
-    }
-  } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+  useEffect(() => {
+    if (typeof forceMilestoneIndex === 'number') return;
+    try {
+      const url = new URL(window.location.href);
+      const q = url.searchParams.get('ms') ?? url.searchParams.get('milestone');
+      const n = q ? Number(q) : NaN;
+      if (Number.isFinite(n) && n >= 0) {
+        setActiveMilestoneIndex(n);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // FINAL index used everywhere
   const idx =
     typeof forceMilestoneIndex === 'number'
       ? forceMilestoneIndex
       : activeMilestoneIndex;
+
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  async function load() {
-  if (!Number.isFinite(proposalId)) return;
-  setLoading(true);
-  setErr(null);
-  try {
-    // Build URL and pass milestoneIndex ONLY when the parent forces it
-    const url = new URL('/api/proofs/change-requests', window.location.origin);
-    url.searchParams.set('proposalId', String(proposalId));
-    url.searchParams.set('include', 'responses');
-    url.searchParams.set('status', 'all');
-    if (typeof forceMilestoneIndex === 'number') {
-      url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
-    }
+  // Guards to prevent stampedes and event echo loops
+  const loadingRef = useRef(false);
+  const lastLoadTs = useRef(0);
 
-    const r = await fetch(url.toString(), {
-      credentials: 'include',
-      cache: 'no-store',
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const list: ChangeRequestRow[] = await r.json();
-    const safeList = Array.isArray(list) ? list : [];
+  const load = useCallback(async () => {
+    if (!Number.isFinite(proposalId)) return;
+    if (loadingRef.current) return; // dedupe overlapping triggers
 
-    setRows(safeList);
-
-    // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
-    if (typeof forceMilestoneIndex !== 'number') {
-      const present = new Set<number>(
-        safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
-      );
-
-      // if current idx has no rows, pivot to the highest existing milestone with rows
-      if (!present.has(idx) && present.size > 0) {
-        const latest = Math.max(...Array.from(present.values()));
-        setActiveMilestoneIndex(latest);
+    loadingRef.current = true;
+    setLoading(true);
+    setErr(null);
+    try {
+      // Build URL and pass milestoneIndex ONLY when the parent forces it
+      const url = new URL('/api/proofs/change-requests', window.location.origin);
+      url.searchParams.set('proposalId', String(proposalId));
+      url.searchParams.set('include', 'responses');
+      url.searchParams.set('status', 'all');
+      if (typeof forceMilestoneIndex === 'number') {
+        url.searchParams.set('milestoneIndex', String(forceMilestoneIndex));
       }
+
+      const r = await fetch(url.toString(), {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const list: ChangeRequestRow[] = await r.json();
+      const safeList = Array.isArray(list) ? list : [];
+
+      setRows(safeList);
+
+      // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
+      if (typeof forceMilestoneIndex !== 'number') {
+        const present = new Set<number>(
+          safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
+        );
+
+        // if current idx has no rows, pivot to the highest existing milestone with rows
+        if (!present.has(idx) && present.size > 0) {
+          const latest = Math.max(...Array.from(present.values()));
+          if (latest !== idx) setActiveMilestoneIndex(latest); // avoid no-op churn
+        }
+      }
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load change requests');
+      setRows([]);
+    } finally {
+      setLoading(false);
+      loadingRef.current = false;
+      lastLoadTs.current = Date.now();
     }
-  } catch (e: any) {
-    setErr(e?.message || 'Failed to load change requests');
-    setRows([]);
-  } finally {
-    setLoading(false);
-  }
-}
+  }, [proposalId, forceMilestoneIndex, idx]);
 
   // on mount & when proposal OR effective milestone index changes
-useEffect(() => { load(); }, [proposalId, idx]);
+  useEffect(() => {
+    load();
+  }, [load, proposalId, idx]);
 
-
- useEffect(() => {
-  const onAny = (ev: any) => {
-    const pid = Number(ev?.detail?.proposalId);
-    // reload when it's our proposal or when no proposalId is provided
-    if (!Number.isFinite(pid) || pid === proposalId) load();
-  };
-  window.addEventListener('proofs:updated', onAny);
-  window.addEventListener('proofs:changed', onAny);
-  window.addEventListener('milestones:updated', onAny); // NEW
-  return () => {
-    window.removeEventListener('proofs:updated', onAny);
-    window.removeEventListener('proofs:changed', onAny);
-    window.removeEventListener('milestones:updated', onAny);
-  };
-}, [proposalId, idx]);
+  // Listen for external updates; ignore unrelated or immediate-echo events
+  useEffect(() => {
+    const onAny = (ev: any) => {
+      const pid = Number(ev?.detail?.proposalId);
+      // If event targets a different proposal, ignore
+      if (Number.isFinite(pid) && pid !== proposalId) return;
+      // Cool-down: ignore the immediate echo after our own load finishes
+      if (Date.now() - lastLoadTs.current < 500) return;
+      load();
+    };
+    window.addEventListener('proofs:updated', onAny);
+    window.addEventListener('proofs:changed', onAny);
+    window.addEventListener('milestones:updated', onAny);
+    return () => {
+      window.removeEventListener('proofs:updated', onAny);
+      window.removeEventListener('proofs:changed', onAny);
+      window.removeEventListener('milestones:updated', onAny);
+    };
+  }, [proposalId, load]);
 
   // Narrow to the currently scoped milestone
-  const filteredRows = (rows || []).filter((cr) =>
-    (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx
+  const filteredRows = useMemo(
+    () =>
+      (rows || []).filter((cr) =>
+        (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx
+      ),
+    [rows, idx]
   );
 
   // Optional tabs only when NOT forced and not hidden
-  const allMilestones = Array.from(
-    new Set((rows || []).map(r => r.milestoneIndex))
-  ).sort((a, b) => a - b);
+  const allMilestones = useMemo(
+    () =>
+      Array.from(new Set((rows || []).map((r) => r.milestoneIndex))).sort((a, b) => a - b),
+    [rows]
+  );
 
   const showTabs =
     !hideMilestoneTabs &&
@@ -170,7 +192,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
     );
   }
 
-      return (
+  return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold">Change Request Thread</h4>
@@ -184,7 +206,7 @@ useEffect(() => { load(); }, [proposalId, idx]);
 
       {showTabs && (
         <div className="mb-3 flex flex-wrap gap-2">
-          {allMilestones.map(mi => (
+          {allMilestones.map((mi) => (
             <button
               key={mi}
               onClick={() => setActiveMilestoneIndex(mi)}
@@ -215,11 +237,13 @@ useEffect(() => { load(); }, [proposalId, idx]);
                     <span>{new Date(cr.createdAt).toLocaleString()}</span>
                   </div>
                   <div className="mt-1 text-sm">
-                    <span className={`px-2 py-0.5 rounded text-xs ${
-                      cr.status === 'open'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-green-100 text-green-800'
-                    }`}>
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs ${
+                        cr.status === 'open'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}
+                    >
                       {cr.status}
                     </span>
                   </div>
@@ -259,11 +283,19 @@ useEffect(() => { load(); }, [proposalId, idx]);
                             const href = toUrl(f);
                             const img = isImageHref(href);
                             return img ? (
-                              <a key={i} href={href} target="_blank" rel="noopener noreferrer"
-                                 className="group relative overflow-hidden rounded border">
+                              <a
+                                key={i}
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group relative overflow-hidden rounded border"
+                              >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={href} alt={f.name || 'image'}
-                                     className="h-24 w-full object-cover group-hover:scale-105 transition" />
+                                <img
+                                  src={href}
+                                  alt={f.name || 'image'}
+                                  className="h-24 w-full object-cover group-hover:scale-105 transition"
+                                />
                                 <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
                                   {f.name || href.split('/').pop()}
                                 </div>
@@ -271,7 +303,12 @@ useEffect(() => { load(); }, [proposalId, idx]);
                             ) : (
                               <div key={i} className="p-2 rounded border bg-gray-50 text-xs">
                                 <div className="truncate mb-1">{f.name || href.split('/').pop()}</div>
-                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                >
                                   Open
                                 </a>
                               </div>
