@@ -8,7 +8,6 @@ import * as api from '@/lib/api';
 import { API_BASE } from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
 import BidChatAgent from '@/components/BidChatAgent';
-import { useProofs } from '@/hooks/useProofs'; 
 
 /* ——— Template/Normal compatibility helpers ——— */
 const getMilestoneDescription = (m: any) => m?.notes ?? m?.desc ?? m?.description ?? '';
@@ -22,11 +21,8 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [bid, setBid] = useState<any>(null);
   const [proposal, setProposal] = useState<any>(null);
-  const [proofs, setProofs] = useState<any[]>([]); // ← KEEP THIS but we won't use it
+  const [proofs, setProofs] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
-
-  // ✅ ADD THIS: Cached proofs hook
-  const { proofs: cachedProofs, loading: proofsLoading, error: proofsError } = useProofs(bidId);
 
   // local action locks (approve/reject) by milestone index
   const [actedByIdx, setActedByIdx] = useState<Record<number, 'approved' | 'rejected'>>({});
@@ -43,20 +39,20 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   // latest proof_id per milestone (by max id — single source of truth)
   const latestIdByIdx = useMemo(() => {
     const ids: Record<number, number> = {};
-    for (const p of cachedProofs) { // ← CHANGE: proofs → cachedProofs
+    for (const p of proofs) {
       const idx = Number(p.milestoneIndex ?? p.milestone_index);
       const pid = Number(p.proofId ?? p.id ?? 0);
       if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
       if (!ids[idx] || pid > ids[idx]) ids[idx] = pid;
     }
     return ids;
-  }, [cachedProofs]); // ← CHANGE: proofs → cachedProofs
+  }, [proofs]);
 
   // fallback latest *status* per milestone (by max id)
   const fallbackLatestByIdx = useMemo(() => {
     const out: Record<number, string> = {};
     const ids: Record<number, number> = {};
-    for (const p of cachedProofs) { // ← CHANGE: proofs → cachedProofs
+    for (const p of proofs) {
       const idx = Number(p.milestoneIndex ?? p.milestone_index);
       const pid = Number(p.proofId ?? p.id ?? 0);
       if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
@@ -66,17 +62,17 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       }
     }
     return out;
-  }, [cachedProofs]); // ← CHANGE: proofs → cachedProofs
+  }, [proofs]);
 
   // only show the latest proof card per milestone in the UI
   const visibleProofs = useMemo(() => {
-    const keep = new Set<number>(Object.values(latestIdByIdx));
-    return cachedProofs.filter(p => { // ← CHANGE: proofs → cachedProofs
-      const id = Number(p.proofId ?? p.id);
-      const status = String(p.status || '').toLowerCase();
-      return keep.has(id) && status !== 'rejected';
-    });
-  }, [cachedProofs, latestIdByIdx]); // ← CHANGE: proofs → cachedProofs
+  const keep = new Set<number>(Object.values(latestIdByIdx));
+  return proofs.filter(p => {
+    const id = Number(p.proofId ?? p.id);
+    const status = String(p.status || '').toLowerCase();
+    return keep.has(id) && status !== 'rejected';
+  });
+}, [proofs, latestIdByIdx]);
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
@@ -97,14 +93,8 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         const p = await api.getProposal(b.proposalId);
         setProposal(p);
 
-        // ✅ KEEP AS BACKUP - COMMENT OUT ORIGINAL PROOFS FETCH
-        /*
         const pf = await api.getProofs(bidId); // admin-only
         setProofs(pf);
-        */
-        
-        // ✅ NEW: The useProofs hook automatically loads proofs via cache
-        
       } catch (e: any) {
         setErr(e?.message || 'Failed to load bid');
       } finally {
@@ -136,7 +126,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     if (!bidId) return;
     try {
       const next: Record<number, boolean> = {};
-      for (const p of cachedProofs) { // ← CHANGE: proofs → cachedProofs
+      for (const p of proofs) {
         const idx = Number(p.milestoneIndex ?? p.milestone_index);
         if (typeof window !== 'undefined' &&
             localStorage.getItem(`rej:${bidId}:${idx}`) === '1') {
@@ -145,23 +135,16 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
       }
       setLockByIdx(next);
     } catch { /* ignore */ }
-  }, [bidId, cachedProofs]); // ← CHANGE: proofs → cachedProofs
+  }, [bidId, proofs]);
 
   async function runProofAnalysis(proofId: number) {
     try {
       setBusyById((prev) => ({ ...prev, [proofId]: true }));
       const prompt = promptById[proofId] || '';
       const updated = await api.analyzeProof(proofId, prompt || undefined);
-      
-      // ✅ UPDATE: We can't directly update cached proofs, so we'll refresh
-      // For now, we'll keep the original behavior but note that this might need cache invalidation
       setProofs((prev) =>
         prev.map((p) => (Number(p.proofId ?? p.id) === proofId ? updated : p))
       );
-      
-      // ✅ TODO: Consider adding cache invalidation here for production
-      // This would require adding a refetch function to the useProofs hook
-      
     } catch (e: any) {
       alert(e?.message || 'Failed to run Agent 2 on proof');
     } finally {
@@ -170,38 +153,29 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   }
 
   // refresh latest status map AND the proofs list (no stale cache)
-  async function refreshLatest() {
-    if (!bidId) return;
-    try {
-      const [statusRes, proofsRes] = await Promise.all([
-        fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
-          credentials: 'include',
-          cache: 'no-store',
-        }),
-        // ✅ KEEP AS BACKUP - COMMENT OUT ORIGINAL PROOFS FETCH
-        /*
-        fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
-          credentials: 'include',
-          cache: 'no-store',
-        }),
-        */
-      ]);
+async function refreshLatest() {
+  if (!bidId) return;
+  try {
+    const [statusRes, proofsRes] = await Promise.all([
+      fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+      fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+    ]);
 
-      const statusJson = await statusRes.json();
-      // ✅ KEEP AS BACKUP
-      // const proofsJson = await proofsRes.json();
+    const statusJson = await statusRes.json();
+    const proofsJson = await proofsRes.json();
 
-      setProofStatusByIdx(statusJson?.byIndex || {});
-      // ✅ KEEP AS BACKUP - COMMENT OUT ORIGINAL PROOFS UPDATE
-      // setProofs(Array.isArray(proofsJson) ? proofsJson : []);
-      
-      // ✅ NEW: The cached proofs will automatically stay fresh due to TTL
-      // If you need immediate refresh, we can add a refetch function to useProofs later
-      
-    } catch {
-      /* ignore */
-    }
+    setProofStatusByIdx(statusJson?.byIndex || {});
+    setProofs(Array.isArray(proofsJson) ? proofsJson : []);
+  } catch {
+    /* ignore */
   }
+}
 
   // one-shot reject; disables button + persists lock + flips local status immediately
   async function onRejectOnce(idx: number) {
@@ -222,27 +196,23 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
 
     // 2) remove the latest rejected proof from local state immediately
-    setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-    
-    // ✅ UPDATE: We can't directly modify cached proofs, so we rely on cache TTL
-    // The proof will disappear on next load due to cache refresh
-    // For immediate update, we'd need to add cache invalidation
-    setProofs(prev => {
-      let latestId = 0;
-      for (const q of prev) {
-        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-        const pid  = Number(q.proofId ?? q.id ?? 0);
-        if (qIdx === idx && pid > latestId) latestId = pid;
-      }
-      // drop that row entirely
-      return prev.filter(q => {
-        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-        const pid  = Number(q.proofId ?? q.id ?? 0);
-        return !(qIdx === idx && pid === latestId);
-      });
-    });
+setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+setProofs(prev => {
+  let latestId = 0;
+  for (const q of prev) {
+    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+    const pid  = Number(q.proofId ?? q.id ?? 0);
+    if (qIdx === idx && pid > latestId) latestId = pid;
+  }
+  // drop that row entirely
+  return prev.filter(q => {
+    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+    const pid  = Number(q.proofId ?? q.id ?? 0);
+    return !(qIdx === idx && pid === latestId);
+  });
+});
 
-    // 3) refresh server truth (won't re-enable the button, local state already flipped)
+    // 3) refresh server truth (won’t re-enable the button, local state already flipped)
     refreshLatest(); // fire-and-forget
   }
 
@@ -306,30 +276,30 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </div>
         </div>
         {/* Attachments (bid.files || bid.docs) */}
-        {(() => {
-          const files =
-            (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
-          if (!files?.length) return null;
-          return (
-            <div className="mt-4">
-              <div className="text-sm text-gray-500 mb-1">Attachments</div>
-              <ul className="list-disc list-inside text-sm">
-                {files.map((f: any, i: number) => (
-                  <li key={i}>
-                    <a
-                      className="text-blue-600 hover:underline"
-                      href={f.url ?? f.href}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {f.name ?? f.filename ?? `File ${i + 1}`}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })()}
+{(() => {
+  const files =
+    (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
+  if (!files?.length) return null;
+  return (
+    <div className="mt-4">
+      <div className="text-sm text-gray-500 mb-1">Attachments</div>
+      <ul className="list-disc list-inside text-sm">
+        {files.map((f: any, i: number) => (
+          <li key={i}>
+            <a
+              className="text-blue-600 hover:underline"
+              href={f.url ?? f.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {f.name ?? f.filename ?? `File ${i + 1}`}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+})()}
 
         {/* Admin-only quick edits (non-milestone fields) */}
         {me.role === 'admin' && (
@@ -366,149 +336,135 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </Link>
         </div>
 
-        {/* ✅ ADD: Loading state for proofs */}
-        {proofsLoading && (
-          <div className="text-sm text-slate-500">Loading proofs...</div>
-        )}
+        {visibleProofs.length === 0 && (
+  <div className="text-sm text-slate-500">No proofs submitted yet.</div>
+)}
 
-        {/* ✅ UPDATE: Use cachedProofs instead of visibleProofs */}
-        {!proofsLoading && cachedProofs.length === 0 && (
-          <div className="text-sm text-slate-500">No proofs submitted yet.</div>
-        )}
+        {visibleProofs.map((p) => {
+          const id = Number(p.proofId ?? p.id);
+          const a = p.aiAnalysis ?? p.ai_analysis;
+          const idx = Number(p.milestoneIndex ?? p.milestone_index);
+          const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
+          const canReview = latestStatus === 'pending';
+          const rejectLocked =
+            !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
+          const isLatestCard = id === latestIdByIdx[idx];
 
-        {/* ✅ UPDATE: Use cachedProofs and filter for visible proofs */}
-        {!proofsLoading && cachedProofs
-          .filter(p => {
-            const id = Number(p.proofId ?? p.id);
-            const status = String(p.status || '').toLowerCase();
-            const keep = Object.values(latestIdByIdx).includes(id);
-            return keep && status !== 'rejected';
-          })
-          .map((p) => {
-            const id = Number(p.proofId ?? p.id);
-            const a = p.aiAnalysis ?? p.ai_analysis;
-            const idx = Number(p.milestoneIndex ?? p.milestone_index);
-            const latestStatus = proofStatusByIdx[idx] ?? fallbackLatestByIdx[idx] ?? p.status;
-            const canReview = latestStatus === 'pending';
-            const rejectLocked =
-              !!lockByIdx[idx] || actedByIdx[idx] === 'rejected' || latestStatus !== 'pending';
-            const isLatestCard = id === latestIdByIdx[idx];
+          return (
+            <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">
+                  {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
+                </div>
+                <span
+                  className={`text-xs rounded px-2 py-0.5 border ${
+                    latestStatus === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      : latestStatus === 'rejected'
+                      ? 'bg-rose-100 text-rose-800 border-rose-200'
+                      : 'bg-amber-100 text-amber-800 border-amber-200'
+                  }`}
+                >
+                  {latestStatus}
+                </span>
+              </div>
 
-            return (
-              <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">
-                    {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
-                  </div>
-                  <span
-                    className={`text-xs rounded px-2 py-0.5 border ${
-                      latestStatus === 'approved'
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                        : latestStatus === 'rejected'
-                        ? 'bg-rose-100 text-rose-800 border-rose-200'
-                        : 'bg-amber-100 text-amber-800 border-amber-200'
-                    }`}
+              {p.description && (
+                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
+              )}
+
+              {Array.isArray(p.files) && p.files.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {p.files.map((f: any, i: number) => (
+                    <li key={i} className="text-sm">
+                      <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
+                        {f.name || f.url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="mt-4 rounded-md bg-slate-50 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-semibold">Agent 2 Analysis</div>
+                  {/* Per-proof chat opens the same bid-level chat modal */}
+                  <button
+                    type="button"
+                    onClick={() => setChatOpen(true)}
+                    className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
+                    title="Ask Agent 2 about this bid/proof"
                   >
-                    {latestStatus}
-                  </span>
+                    Ask Agent 2 (Chat)
+                  </button>
                 </div>
 
-                {p.description && (
-                  <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
+                {/* Actions — only on latest card, when status is pending, and not locally locked */}
+                {(isLatestCard && canReview && !rejectLocked) ? (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      className="px-4 py-2 rounded bg-amber-500 text-white"
+                      onClick={async () => {
+                        await api.approveProof(bidId, idx);   // <-- use api.*
+                        setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' })); // instant flip
+                        await refreshLatest();
+                      }}
+                    >
+                      Approve Proof
+                    </button>
+
+                    <button
+                      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                      onClick={() => onRejectOnce(idx)}
+                      disabled={rejectLocked}
+                      aria-disabled={rejectLocked}
+                      title={rejectLocked ? 'Already rejected' : 'Reject'}
+                    >
+                      {rejectLocked ? 'Rejected' : 'Reject'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-slate-500">
+                    Latest proof is <span className="font-medium">{latestStatus}</span>.
+                  </div>
                 )}
 
-                {Array.isArray(p.files) && p.files.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {p.files.map((f: any, i: number) => (
-                      <li key={i} className="text-sm">
-                        <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
-                          {f.name || f.url}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+                {a ? (
+                  <AnalysisView a={a} />
+                ) : (
+                  <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
                 )}
 
-                <div className="mt-4 rounded-md bg-slate-50 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-semibold">Agent 2 Analysis</div>
-                    {/* Per-proof chat opens the same bid-level chat modal */}
+                <div className="mt-3">
+                  <textarea
+                    value={promptById[id] || ''}
+                    onChange={(e) => setPromptById((prev) => ({ ...prev, [id]: e.target.value }))}
+                    className="w-full p-2 rounded border"
+                    rows={3}
+                    placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => runProofAnalysis(id)}
+                      disabled={!!busyById[id]}
+                      className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
+                    >
+                      {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
+                    </button>
+                    {/* Secondary chat entry point beside the rerun button */}
                     <button
                       type="button"
                       onClick={() => setChatOpen(true)}
-                      className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
-                      title="Ask Agent 2 about this bid/proof"
+                      className="px-3 py-2 rounded-lg bg-blue-600 text-white"
                     >
                       Ask Agent 2 (Chat)
                     </button>
                   </div>
-
-                  {/* Actions — only on latest card, when status is pending, and not locally locked */}
-                  {(isLatestCard && canReview && !rejectLocked) ? (
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        className="px-4 py-2 rounded bg-amber-500 text-white"
-                        onClick={async () => {
-                          await api.approveProof(bidId, idx);   // <-- use api.*
-                          setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' })); // instant flip
-                          await refreshLatest();
-                        }}
-                      >
-                        Approve Proof
-                      </button>
-
-                      <button
-                        className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-                        onClick={() => onRejectOnce(idx)}
-                        disabled={rejectLocked}
-                        aria-disabled={rejectLocked}
-                        title={rejectLocked ? 'Already rejected' : 'Reject'}
-                      >
-                        {rejectLocked ? 'Rejected' : 'Reject'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-slate-500">
-                      Latest proof is <span className="font-medium">{latestStatus}</span>.
-                    </div>
-                  )}
-
-                  {a ? (
-                    <AnalysisView a={a} />
-                  ) : (
-                    <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
-                  )}
-
-                  <div className="mt-3">
-                    <textarea
-                      value={promptById[id] || ''}
-                      onChange={(e) => setPromptById((prev) => ({ ...prev, [id]: e.target.value }))}
-                      className="w-full p-2 rounded border"
-                      rows={3}
-                      placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
-                    />
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        onClick={() => runProofAnalysis(id)}
-                        disabled={!!busyById[id]}
-                        className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-                      >
-                        {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
-                      </button>
-                      {/* Secondary chat entry point beside the rerun button */}
-                      <button
-                        type="button"
-                        onClick={() => setChatOpen(true)}
-                        className="px-3 py-2 rounded-lg bg-blue-600 text-white"
-                      >
-                        Ask Agent 2 (Chat)
-                      </button>
-                    </div>
-                  </div>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
       </section>
 
       {/* One chat modal for the whole page */}
