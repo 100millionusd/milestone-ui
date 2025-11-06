@@ -83,7 +83,7 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     e.preventDefault();
     if (disableSubmit) return;
 
-    // Read ALL form data (including hidden proposalId)
+    // Read ALL form data (including hidden inputs)
     const fd = new FormData(e.currentTarget);
 
     // Try hidden input/state first
@@ -194,7 +194,8 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
       {/* Vendor basics — horizontal row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        {/* Hidden proposal id (fixed from URL/parent/referrer; server will also re-derive if needed) */}
+        {/* Hidden identifiers */}
+        <input type="hidden" name="id" value={slugOrId} />
         <input type="hidden" name="proposalId" value={proposalId ? String(proposalId) : ''} />
 
         <label className="text-sm">
