@@ -33,11 +33,31 @@ function parseChecklist(input: unknown): string[] {
     .filter(Boolean);
 }
 
+// Pull files back out of either filesJson or files; ensure {name,url,cid?}
+function normalizeCRFiles(row: any): Array<{ name: string; url: string; cid?: string }> {
+  const gateway = gatewayBase();
+  const raw = Array.isArray(row?.filesJson) ? row.filesJson
+    : (Array.isArray(row?.files) ? row.files : []);
+  const out: Array<{ name: string; url: string; cid?: string }> = [];
+  for (const f of raw as any[]) {
+    const name = (f?.name && String(f.name)) || 'file';
+    const cid  = (f?.cid && String(f.cid).trim()) || '';
+    let url    = (f?.url && String(f.url).trim()) || '';
+    if (!/^https?:\/\//i.test(url)) {
+      if (cid) url = `${gateway}/${cid}`;
+    }
+    if (!url && cid) url = `${gateway}/${cid}`;
+    if (url) out.push({ name, url, cid: cid || undefined });
+  }
+  return out;
+}
+
 /**
  * GET /api/proofs/change-requests?proposalId=NNN&include=responses&status=open|all
  * - Returns change requests.
- * - When include=responses, attaches vendor replies by slicing ProofFile.createdAt
- *   between this request and the next request for the same milestone.
+ * - include=responses attaches BOTH:
+ *   (A) vendor replies from proofChangeResponse (your /respond route)
+ *   (B) files added to the Proof between requests (windowed by createdAt)
  */
 export async function GET(req: Request) {
   try {
@@ -45,22 +65,24 @@ export async function GET(req: Request) {
     const proposalId = Number(searchParams.get('proposalId'));
     const includeResponses = (searchParams.get('include') || '').toLowerCase().includes('responses');
     const statusParam = (searchParams.get('status') || 'open').toLowerCase(); // 'open' | 'all' | 'resolved' etc.
+    const miParam = searchParams.get('milestoneIndex');
 
     if (!Number.isFinite(proposalId)) {
       return NextResponse.json({ error: 'bad_request', details: 'proposalId required' }, { status: 400 });
     }
 
-    // 1) Load requests (ASC by time so we can window replies between requests)
+    // 1) Load requests (ASC so we can window proof files)
     const whereReq: any = { proposalId };
     if (statusParam !== 'all') whereReq.status = statusParam;
+    if (miParam != null && miParam !== '') whereReq.milestoneIndex = Number(miParam);
 
-    const raw = await prisma.proofChangeRequest.findMany({
+    const rawReqs = await prisma.proofChangeRequest.findMany({
       where: whereReq,
       orderBy: [{ createdAt: 'asc' }],
     });
 
     // Normalize checklist so UI always gets string[]
-    const requests = raw.map((r: any) => ({
+    const requests = rawReqs.map((r: any) => ({
       ...r,
       checklist: parseChecklist((r as any).checklist),
     }));
@@ -69,7 +91,7 @@ export async function GET(req: Request) {
       return NextResponse.json(requests);
     }
 
-    // 2) For each milestone that has requests, load its Proof row + ALL files (ASC by time)
+    // 2) For each milestone that has requests, load its Proof + ALL files (ASC by time)
     const msSet = Array.from(
       new Set(
         requests
@@ -102,46 +124,78 @@ export async function GET(req: Request) {
       }
     }
 
-    // 3) Build responses per request by slicing ProofFile.createdAt between request[i] and next request[i+1] for the same milestone.
+    // 3) ALSO load all DB-stored vendor responses for these requests (your /respond route)
+    const reqIds = requests.map(r => r.id);
+    const dbResponses = await prisma.proofChangeResponse.findMany({
+      where: { requestId: { in: reqIds } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Group responses by requestId
+    const respByReq = new Map<number, any[]>();
+    for (const rr of dbResponses as any[]) {
+      const arr = respByReq.get(rr.requestId) || [];
+      arr.push(rr);
+      respByReq.set(rr.requestId, arr);
+    }
+
+    // 4) Build responses per request:
+    //    (A) DB replies (note := comment, files := filesJson/files)
+    //    (B) Windowed proof files between this request and the next request of same milestone
     const out = requests.map((r, idx) => {
       const mi = (typeof r.milestoneIndex === 'number') ? r.milestoneIndex : null;
-      if (mi === null) {
-        return { ...r, responses: [] as any[] };
+      const group: Array<{ id: number; createdAt: Date; note: string; files: Array<{ url?: string; cid?: string; name?: string }> }> = [];
+
+      // (A) DB replies
+      const stored = respByReq.get(r.id) || [];
+      const proofIdForMs = mi !== null ? (proofByMs.get(mi)?.id ?? -1) : -1;
+      for (const s of stored) {
+        const files = normalizeCRFiles(s);
+        group.push({
+          id: proofIdForMs,
+          createdAt: s.createdAt as unknown as Date,
+          note: (s.comment ?? '') as string, // map comment -> note so UI shows text
+          files,
+        });
       }
 
-      // find the "next" request for the same milestone (strictly later)
-      let nextTs: Date | null = null;
-      for (let j = idx + 1; j < requests.length; j++) {
-        const r2 = requests[j];
-        if (r2.milestoneIndex === mi) {
-          nextTs = r2.createdAt as unknown as Date;
-          break;
+      // (B) Windowed proof files (legacy path)
+      if (mi !== null) {
+        // find the "next" request for the same milestone (strictly later)
+        let nextTs: Date | null = null;
+        for (let j = idx + 1; j < requests.length; j++) {
+          const r2 = requests[j];
+          if (r2.milestoneIndex === mi) {
+            nextTs = r2.createdAt as unknown as Date;
+            break;
+          }
+        }
+        const proof = proofByMs.get(mi);
+        const files = proof?.files || [];
+        const startTs = r.createdAt as unknown as Date;
+        const endTs = nextTs;
+
+        const windowed = files.filter(f => {
+          const t = new Date(f.createdAt).getTime();
+          const afterStart = t >= new Date(startTs).getTime();
+          const beforeNext  = endTs ? t < new Date(endTs).getTime() : true;
+          return afterStart && beforeNext;
+        });
+
+        if (windowed.length) {
+          group.push({
+            id: proof?.id ?? -1,
+            createdAt: windowed[0].createdAt as unknown as Date,
+            note: proof?.note || '',
+            files: windowed.map(f => ({ url: f.url, cid: f.cid, name: f.name })),
+          });
         }
       }
 
-      const proof = proofByMs.get(mi);
-      const files = proof?.files || [];
+      // sort by createdAt just in case
+      group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-      const startTs = r.createdAt as unknown as Date;
-      const endTs = nextTs; // may be null (then slice until +∞)
-
-      // files added between this request and the next request are the replies to this request
-      const windowed = files.filter(f => {
-        const t = new Date(f.createdAt).getTime();
-        const afterStart = t >= new Date(startTs).getTime();
-        const beforeNext  = endTs ? t < new Date(endTs).getTime() : true;
-        return afterStart && beforeNext;
-      });
-
-      // Single response object per window (can be expanded to one-per-file if desired)
-      const responses = windowed.length ? [{
-        id: proof?.id ?? -1,
-        createdAt: windowed[0].createdAt,
-        note: proof?.note || '',
-        files: windowed.map(f => ({ url: f.url, cid: f.cid, name: f.name })),
-      }] : [];
-
-      return { ...r, responses };
+      return { ...r, responses: group };
     });
 
     return NextResponse.json(out);
