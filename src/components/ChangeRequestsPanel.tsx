@@ -47,6 +47,8 @@ type Props = {
   hideMilestoneTabs?: boolean;
 };
 
+type Draft = { message: string; files: File[]; sending?: boolean; error?: string };
+
 export default function ChangeRequestsPanel(props: Props) {
   const {
     proposalId,
@@ -81,6 +83,9 @@ export default function ChangeRequestsPanel(props: Props) {
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  // Draft replies per-CR
+  const [drafts, setDrafts] = useState<Record<number, Draft>>({});
 
   // Guards to prevent stampedes and event echo loops
   const loadingRef = useRef(false);
@@ -181,6 +186,53 @@ export default function ChangeRequestsPanel(props: Props) {
     typeof forceMilestoneIndex !== 'number' &&
     allMilestones.length > 1;
 
+  // ---- helpers for drafts & submission ----
+  const setDraft = useCallback((crId: number, patch: Partial<Draft>) => {
+    setDrafts((prev) => ({ ...prev, [crId]: { message: '', files: [], ...prev[crId], ...patch } }));
+  }, []);
+
+  const submitReply = useCallback(async (cr: ChangeRequestRow) => {
+    const d = drafts[cr.id] || { message: '', files: [] };
+    if (!d.message && (!d.files || d.files.length === 0)) {
+      setDraft(cr.id, { error: 'Write a message or attach at least one file.' });
+      return;
+    }
+    setDraft(cr.id, { sending: true, error: undefined });
+    try {
+      const fd = new FormData();
+      fd.append('message', d.message ?? '');
+      (d.files || []).forEach((f) => fd.append('files', f));
+
+      // Single endpoint: replies and moves proof back to pending review
+      const r = await fetch(`/api/proofs/change-requests/${cr.id}/reply`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        throw new Error(txt || `HTTP ${r.status}`);
+      }
+
+      // Clear draft and refresh list
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[cr.id];
+        return next;
+      });
+
+      await load();
+      // Notify listeners for this proposal
+      window.dispatchEvent(new CustomEvent('proofs:updated', { detail: { proposalId } }));
+    } catch (e: any) {
+      setDraft(cr.id, { error: e?.message || 'Failed to send reply' });
+    } finally {
+      setDraft(cr.id, { sending: false });
+    }
+  }, [drafts, load, proposalId, setDraft]);
+
   if (loading) return <div className="mt-4 text-sm text-gray-500">Loading change requests…</div>;
   if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
 
@@ -226,6 +278,9 @@ export default function ChangeRequestsPanel(props: Props) {
       <ol className="space-y-4">
         {filteredRows.map((cr) => {
           const responses = Array.isArray(cr.responses) ? cr.responses : [];
+          const draft = drafts[cr.id];
+          const sending = !!draft?.sending;
+
           return (
             <li key={cr.id} className="border rounded p-3 bg-white">
               {/* Admin request header */}
@@ -253,7 +308,7 @@ export default function ChangeRequestsPanel(props: Props) {
               {/* Admin request body */}
               {(cr.comment || (cr.checklist && cr.checklist.length)) && (
                 <div className="mt-2 p-2 rounded bg-slate-50 border text-sm">
-                  {cr.comment && <p className="mb-1">{cr.comment}</p>}
+                  {cr.comment && <p className="mb-1 whitespace-pre-wrap">{cr.comment}</p>}
                   {cr.checklist?.length ? (
                     <ul className="list-disc list-inside text-sm text-gray-700">
                       {cr.checklist.map((c, i) => <li key={i}>{c}</li>)}
@@ -323,6 +378,64 @@ export default function ChangeRequestsPanel(props: Props) {
                 </div>
               ) : (
                 <div className="mt-3 text-xs text-gray-500">No vendor reply yet.</div>
+              )}
+
+              {/* Reply form (only when CR is open) */}
+              {cr.status === 'open' && (
+                <div className="mt-4 p-3 border rounded bg-slate-50">
+                  <label className="block text-sm font-medium text-slate-700">Your answer</label>
+                  <textarea
+                    className="mt-1 w-full rounded border p-2 text-sm"
+                    rows={3}
+                    placeholder="Write your answer to the admin’s request…"
+                    value={draft?.message ?? ''}
+                    onChange={(e) => setDraft(cr.id, { message: e.target.value })}
+                    disabled={sending}
+                  />
+
+                  <div className="mt-2">
+                    <input
+                      type="file"
+                      multiple
+                      onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
+                      className="text-sm"
+                      disabled={sending}
+                    />
+                    {!!draft?.files?.length && (
+                      <div className="mt-1 text-xs text-gray-600">
+                        {draft.files.length} file(s) selected
+                      </div>
+                    )}
+                  </div>
+
+                  {!!draft?.error && (
+                    <div className="mt-2 text-xs text-rose-600">{draft.error}</div>
+                  )}
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => submitReply(cr)}
+                      disabled={sending}
+                      className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-60"
+                    >
+                      {sending ? 'Sending…' : 'Send answer & resubmit'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDrafts((prev) => {
+                          const n = { ...prev };
+                          delete n[cr.id];
+                          return n;
+                        })
+                      }
+                      disabled={sending}
+                      className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
               )}
             </li>
           );
