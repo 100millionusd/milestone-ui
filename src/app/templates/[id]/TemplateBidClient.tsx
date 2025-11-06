@@ -25,7 +25,7 @@ function coerce(a: any) {
 export default function TemplateBidClient(props: TemplateBidClientProps) {
   const { slugOrId, initialProposalId = 0, initialVendorName = '', initialWallet = '' } = props;
 
-  const [proposalId, setProposalId] = useState(initialProposalId || 0);
+  const [proposalId] = useState(initialProposalId || 0); // fixed from URL; hidden input will submit it
   const [vendorName, setVendorName] = useState(initialVendorName);
   const [walletAddress, setWalletAddress] = useState(initialWallet);
   const [preferredStablecoin, setPreferredStablecoin] = useState<'USDT' | 'USDC'>('USDT');
@@ -63,130 +63,110 @@ export default function TemplateBidClient(props: TemplateBidClientProps) {
   }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-  e.preventDefault();
-  if (disableSubmit) return;
+    e.preventDefault();
+    if (disableSubmit) return;
 
-  if (!Number.isFinite(proposalId) || proposalId <= 0) {
-    alert('Missing proposalId. Open with ?proposalId=<id> or fill the input.');
-    return;
-  }
+    // Read ALL form data including proposalId and notes
+    const fd = new FormData(e.currentTarget);
 
-  // Read ALL form data including notes
-  const fd = new FormData(e.currentTarget);
+    // Get proposalId from the hidden input (fallback to state)
+    const proposalIdNum = Number(fd.get('proposalId') ?? proposalId ?? 0);
+    if (!Number.isFinite(proposalIdNum) || proposalIdNum <= 0) {
+      alert('Missing proposalId. Open with ?proposalId=<id>.');
+      return;
+    }
 
-  // Get notes from form data - use both methods to be sure
-  const vendorNotes = String(fd.get('notes') || '');
-  
-  // Also try to get notes directly from textarea
-  const notesElement = e.currentTarget.querySelector('textarea[name="notes"]') as HTMLTextAreaElement;
-  const directNotes = notesElement ? notesElement.value : '';
+    // Get notes from form data - use both methods to be safe
+    const vendorNotes = String(fd.get('notes') || '');
+    const notesElement = e.currentTarget.querySelector('textarea[name="notes"]') as HTMLTextAreaElement | null;
+    const directNotes = notesElement ? notesElement.value : '';
+    const finalNotes = vendorNotes || directNotes;
 
-  const finalNotes = vendorNotes || directNotes;
+    // milestonesJson (from TemplateRenovationHorizontal)
+    let milestones: any[] = [];
+    try {
+      const raw = String(fd.get('milestonesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) milestones = arr;
+    } catch {}
 
-  console.log('🔍 CLIENT DEBUG - Notes captured:', {
-    fromFormData: vendorNotes,
-    fromElement: directNotes,
-    finalNotes
-  });
+    // filesJson (from FileUploader)
+    let files: Array<string | { url: string; name?: string }> = [];
+    try {
+      const raw = String(fd.get('filesJson') || '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) files = arr;
+    } catch {}
 
-  // milestonesJson (from TemplateRenovationHorizontal)
-  let milestones: any[] = [];
-  try {
-    const raw = String(fd.get('milestonesJson') || '[]');
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) milestones = arr;
-  } catch {}
+    // Show Agent2 modal immediately
+    setOpen(true);
+    setStep('submitting');
+    setMessage(null);
+    setAnalysis(null);
+    setBidIdForModal(undefined);
 
-  // filesJson (from FileUploader)
-  let files: Array<string | { url: string; name?: string }> = [];
-  try {
-    const raw = String(fd.get('filesJson') || '[]');
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) files = arr;
-  } catch {}
+    try {
+      const base = /^\d+$/.test(slugOrId)
+        ? { templateId: Number(slugOrId) }
+        : { slug: slugOrId };
 
-  // Show Agent2 modal immediately
-  setOpen(true);
-  setStep('submitting');
-  setMessage(null);
-  setAnalysis(null);
-  setBidIdForModal(undefined);
+      // 1) Create bid first
+      const res = await createBidFromTemplate({
+        ...base,
+        proposalId: proposalIdNum,  // ← use value read from hidden input
+        vendorName,
+        walletAddress,
+        preferredStablecoin,
+        milestones,
+        files,
+        notes: finalNotes,
+      });
 
-  try {
-    const base = /^\d+$/.test(slugOrId)
-      ? { templateId: Number(slugOrId) }
-      : { slug: slugOrId };
+      const bidId = Number(res?.bidId);
+      if (!bidId) throw new Error('Failed to create bid (no id)');
+      setBidIdForModal(bidId);
 
-    // 1) Create bid first
-    const res = await createBidFromTemplate({
-      ...base,
-      proposalId,
-      vendorName,
-      walletAddress,
-      preferredStablecoin,
-      milestones,
-      files,
-      notes: finalNotes, // Still try to send notes normally
-    });
-
-    console.log('🔍 CLIENT DEBUG - API response:', res);
-
-    const bidId = Number(res?.bidId);
-    if (!bidId) throw new Error('Failed to create bid (no id)');
-    setBidIdForModal(bidId);
-
-    // 🚀 TEMPORARY FIX: Force update notes after bid creation
-    if (finalNotes && finalNotes.trim()) {
+      // 2) Continue with Agent2 analysis
+      setStep('analyzing');
+      setMessage('Agent2 is analyzing your bid…');
       try {
-        console.log('🔍 TEMPORARY FIX - Updating notes for bid:', bidId);
-        await updateBidNotes(bidId, finalNotes);
-        console.log('✅ Notes updated successfully');
-      } catch (updateError) {
-        console.error('❌ Failed to update notes:', updateError);
+        await analyzeBid(bidId);
+      } catch (analyzeError) {
+        console.warn('Agent2 analysis might be delayed:', analyzeError);
       }
+
+      const found = await pollAnalysis(bidId);
+      if (found) {
+        setAnalysis(found);
+        setStep('done');
+        setMessage('Analysis complete.');
+      } else {
+        setStep('done');
+        setMessage('Analysis will appear shortly.');
+      }
+
+      // Redirect to vendor bid page
+      setTimeout(() => {
+        window.location.href = `/vendor/bids/${bidId}?flash=agent2`;
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('❌ CLIENT ERROR:', err);
+      setStep('error');
+      setMessage(err?.message || 'Failed to submit bid from template');
     }
-
-    // 2) Continue with Agent2 analysis
-    setStep('analyzing');
-    setMessage('Agent2 is analyzing your bid…');
-    try { 
-      await analyzeBid(bidId); 
-    } catch (analyzeError) {
-      console.warn('Agent2 analysis might be delayed:', analyzeError);
-    }
-
-    const found = await pollAnalysis(bidId);
-    if (found) {
-      setAnalysis(found);
-      setStep('done');
-      setMessage('Analysis complete.');
-    } else {
-      setStep('done');
-      setMessage('Analysis will appear shortly.');
-    }
-
-    // Redirect to vendor bid page
-    setTimeout(() => {
-      window.location.href = `/vendor/bids/${bidId}?flash=agent2`;
-    }, 2000);
-
-  } catch (err: any) {
-    console.error('❌ CLIENT ERROR:', err);
-    setStep('error');
-    setMessage(err?.message || 'Failed to submit bid from template');
   }
-}
 
   return (
     <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-white p-4 shadow-sm">
       {/* Vendor basics — horizontal row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
- {/* Hidden proposal id (fixed from URL) */}
-<input
-  type="hidden"
-  name="proposalId"
-  value={proposalId ? String(proposalId) : ''}
-/>
+        {/* Hidden proposal id (fixed from URL) */}
+        <input
+          type="hidden"
+          name="proposalId"
+          value={proposalId ? String(proposalId) : ''}
+        />
 
         <label className="text-sm">
           <span className="block">Stablecoin</span>
