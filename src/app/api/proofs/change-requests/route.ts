@@ -15,14 +15,29 @@ function gatewayBase(): string {
   return gw;
 }
 
+// Normalize checklist from many possible shapes (string[], JSON string, multiline string, bullets)
+function parseChecklist(input: unknown): string[] {
+  if (Array.isArray(input)) return input.map(String).filter(Boolean);
+  if (input == null) return [];
+  const s = String(input).trim();
+  // Allow JSON arrays too
+  try {
+    const j = JSON.parse(s);
+    if (Array.isArray(j)) return j.map(String).filter(Boolean);
+  } catch {}
+  // Split on newlines / bullets / semicolons; strip leading bullets/numbers
+  return s
+    .replace(/\r\n/g, '\n')
+    .split(/\n|;|•/g)
+    .map(v => v.replace(/^\s*[-*•]\s*/, '').replace(/^\s*\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
  * GET /api/proofs/change-requests?proposalId=NNN&include=responses&status=open|all
  * - Returns change requests.
  * - When include=responses, attaches vendor replies by slicing ProofFile.createdAt
  *   between this request and the next request for the same milestone.
- *
- * Why: vendors append files to the SAME Proof row; Proof.createdAt doesn't change,
- * so we must look at ProofFile.createdAt to build the conversation accurately.
  */
 export async function GET(req: Request) {
   try {
@@ -39,22 +54,31 @@ export async function GET(req: Request) {
     const whereReq: any = { proposalId };
     if (statusParam !== 'all') whereReq.status = statusParam;
 
-    const requests = await prisma.proofChangeRequest.findMany({
+    const raw = await prisma.proofChangeRequest.findMany({
       where: whereReq,
       orderBy: [{ createdAt: 'asc' }],
     });
 
+    // Normalize checklist so UI always gets string[]
+    const requests = raw.map((r: any) => ({
+      ...r,
+      checklist: parseChecklist((r as any).checklist),
+    }));
+
     if (!includeResponses || requests.length === 0) {
-      // If the UI only needs the list of requests
       return NextResponse.json(requests);
     }
 
     // 2) For each milestone that has requests, load its Proof row + ALL files (ASC by time)
-    const msSet = Array.from(new Set(requests
-      .map(r => (typeof r.milestoneIndex === 'number' ? r.milestoneIndex : null))
-      .filter((n): n is number => n !== null)));
+    const msSet = Array.from(
+      new Set(
+        requests
+          .map(r => (typeof r.milestoneIndex === 'number' ? r.milestoneIndex : null))
+          .filter((n): n is number => n !== null)
+      )
+    );
 
-    const proofByMs = new Map<number, { id: number; note: string | null; files: any[] }>();
+    const proofByMs = new Map<number, { id: number; note: string | null; files: Array<{ id: number; createdAt: Date; url?: string; cid?: string; name?: string }> }>();
 
     for (const mi of msSet) {
       const p = await prisma.proof.findFirst({
@@ -67,7 +91,7 @@ export async function GET(req: Request) {
           note: p.note || null,
           files: (p.files || []).map(f => ({
             id: f.id,
-            createdAt: f.createdAt,
+            createdAt: f.createdAt as unknown as Date,
             url: f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined),
             cid: f.cid || undefined,
             name: f.name || undefined,
@@ -78,8 +102,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 3) Build responses per request by slicing ProofFile.createdAt between request[i] and next request[i+1]
-    //    for the same milestone.
+    // 3) Build responses per request by slicing ProofFile.createdAt between request[i] and next request[i+1] for the same milestone.
     const out = requests.map((r, idx) => {
       const mi = (typeof r.milestoneIndex === 'number') ? r.milestoneIndex : null;
       if (mi === null) {
@@ -91,7 +114,7 @@ export async function GET(req: Request) {
       for (let j = idx + 1; j < requests.length; j++) {
         const r2 = requests[j];
         if (r2.milestoneIndex === mi) {
-          nextTs = r2.createdAt;
+          nextTs = r2.createdAt as unknown as Date;
           break;
         }
       }
@@ -99,7 +122,7 @@ export async function GET(req: Request) {
       const proof = proofByMs.get(mi);
       const files = proof?.files || [];
 
-      const startTs = r.createdAt;
+      const startTs = r.createdAt as unknown as Date;
       const endTs = nextTs; // may be null (then slice until +∞)
 
       // files added between this request and the next request are the replies to this request
@@ -110,13 +133,11 @@ export async function GET(req: Request) {
         return afterStart && beforeNext;
       });
 
-      // Build a single "response" object for this request, containing all files added in the window.
-      // (If you want one response per file, map windowed -> many items.)
+      // Single response object per window (can be expanded to one-per-file if desired)
       const responses = windowed.length ? [{
-        // set createdAt = first file in the window
         id: proof?.id ?? -1,
         createdAt: windowed[0].createdAt,
-        note: proof?.note || '', // schema doesn't keep per-reply notes; we surface the latest note if present
+        note: proof?.note || '',
         files: windowed.map(f => ({ url: f.url, cid: f.cid, name: f.name })),
       }] : [];
 
@@ -135,14 +156,13 @@ export async function POST(req: Request) {
     const proposalId = Number(body.proposalId);
     const milestoneIndex = Number(body.milestoneIndex);
     const comment = typeof body.comment === 'string' ? body.comment : null;
-    const checklist =
-      Array.isArray(body.checklist) ? body.checklist
-      : (typeof body.checklist === 'string' && body.checklist.trim()
-          ? body.checklist.split(',').map((s: string) => s.trim()).filter(Boolean)
-          : []);
+    const checklist = parseChecklist(body.checklist);
 
     if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
-      return NextResponse.json({ error: 'bad_request', details: 'proposalId & milestoneIndex (>=0) required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'bad_request', details: 'proposalId & milestoneIndex (>=0) required' },
+        { status: 400 }
+      );
     }
 
     const row = await prisma.proofChangeRequest.create({
