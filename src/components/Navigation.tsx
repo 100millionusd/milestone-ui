@@ -1,8 +1,7 @@
 // src/components/Navigation.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { getAuthRoleOnce } from '@/lib/api';
@@ -16,6 +15,36 @@ type NavItem =
       roles?: Array<Role>;
       children: { href: string; label: string }[];
     };
+
+/** ------------ auth role singleflight + tiny cache (prevents loops / bursts) ------------ */
+type AuthInfo = { role?: string; address?: string; vendorStatus?: string | null };
+const ROLE_TTL_MS = 10_000; // keep fresh for 10s to avoid hammering on remounts
+
+let __roleInflight: Promise<AuthInfo> | null = null;
+let __roleCache: { at: number; data: AuthInfo } | null = null;
+
+async function getAuthRoleOnceCached(): Promise<AuthInfo> {
+  const now = Date.now();
+  if (__roleCache && now - __roleCache.at < ROLE_TTL_MS) return __roleCache.data;
+  if (__roleInflight) return __roleInflight;
+
+  __roleInflight = (async () => {
+    const info = (await getAuthRoleOnce()) || {};
+    const data: AuthInfo = {
+      role: (info as any)?.role,
+      address: (info as any)?.address,
+      vendorStatus: (info as any)?.vendorStatus ?? null,
+    };
+    __roleCache = { at: Date.now(), data };
+    return data;
+  })()
+    .finally(() => {
+      __roleInflight = null;
+    });
+
+  return __roleInflight;
+}
+/** -------------------------------------------------------------------------------------- */
 
 export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -32,24 +61,32 @@ export default function Navigation() {
   const [serverRole, setServerRole] = useState<Role | null>(null);
   const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
 
+  // mount-only role load, deduped & cached; also ignores updates after unmount
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const info = await getAuthRoleOnce();
-        const backendRole = (info?.role || '').toLowerCase();
-        const mappedRole: Role = backendRole === 'admin' ? 'admin' : info?.address ? 'vendor' : 'guest';
-        if (alive) {
-          setServerRole(mappedRole);
-          setVendorStatus(((info as any)?.vendorStatus ?? 'pending').toLowerCase() as any);
-        }
+        const info = await getAuthRoleOnceCached();
+        if (!alive) return;
+
+        const backendRole = String(info?.role || '').toLowerCase();
+        const mappedRole: Role =
+          backendRole === 'admin' ? 'admin' : info?.address ? 'vendor' : 'guest';
+
+        const vs = String(info?.vendorStatus ?? 'pending').toLowerCase() as
+          | 'approved'
+          | 'pending'
+          | 'rejected';
+
+        setServerRole(mappedRole);
+        setVendorStatus(vs);
       } catch {
-        if (alive) {
-          setServerRole('guest');
-          setVendorStatus(null);
-        }
+        if (!alive) return;
+        setServerRole('guest');
+        setVendorStatus(null);
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -123,18 +160,12 @@ export default function Navigation() {
 
     // If we're on a project page, use a more direct approach
     if (pathname.startsWith('/projects/')) {
-      // Prevent default to handle navigation manually
       if (e) e.preventDefault();
-      
-      // Use a more direct navigation approach for project pages
-      window.location.href = href;
+      window.location.href = href; // full reload keeps heavy views clean
       return;
     }
 
-    // For non-project pages, use normal navigation
-    if (e) {
-      e.preventDefault();
-    }
+    if (e) e.preventDefault();
     router.push(href);
   };
 
@@ -143,7 +174,7 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <div 
+          <div
             onClick={() => handleNavigation('/')}
             className="flex items-center space-x-2 cursor-pointer"
           >
