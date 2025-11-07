@@ -133,6 +133,13 @@ function uniqByMilestone(list: any[]): any[] {
   return out;
 }
 
+// ---------- NEW: tx helpers for explorer links ----------
+const txUrl = (tx: string) => {
+  const base = (process.env.NEXT_PUBLIC_TX_EXPLORER_BASE || 'https://basescan.org/tx/').replace(/\/+$/, '/') ;
+  return tx?.startsWith('http') ? tx : base + tx;
+};
+const shortTx = (tx: string) => (tx?.length > 12 ? `${tx.slice(0, 8)}…${tx.slice(-6)}` : tx);
+
 // ---------- types ----------
 type Props = {
   /** When rendered on project page, pass this project’s bid ids to filter by bidId */
@@ -452,6 +459,16 @@ function ProofCard(props: ProofCardProps) {
   const m = msArr?.[Number(proof.milestoneIndex) || 0] || null;
   const milestoneLabel = (m?.name && String(m.name).trim()) || `Milestone ${Number(proof.milestoneIndex) + 1}`;
 
+  // ---------- NEW: derive tx from milestone (EOA first, then Safe) ----------
+  const tx =
+    m?.paymentTxHash ||      // normal EOA payment (overlayed by backend)
+    m?.safePaymentTxHash ||  // Safe payment
+    m?.txHash ||
+    m?.paidTxHash ||
+    m?.payment_tx_hash ||
+    m?.chainTx ||
+    null;
+
   async function onRun() {
     setErr(null);
     if (!canAnalyze) return;
@@ -642,6 +659,33 @@ async function handleApprove() {
           <p className="text-sm text-gray-600 mb-2">
             Vendor: <span className="font-medium">{proof.vendorName || '—'}</span> &middot; Bid #{proof.bidId} &middot; {milestoneLabel}
           </p>
+
+          {/* --- NEW: Payment status with TX link (EOA or Safe) --- */}
+          <div className="mt-1 text-sm">
+            {m?.paid ? (
+              <span className="inline-flex items-center gap-1 text-green-700">
+                <span>Paid ✅</span>
+                {tx && (
+                  <>
+                    <span>• Tx:</span>
+                    <a
+                      href={txUrl(tx)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                    >
+                      {shortTx(tx)}
+                    </a>
+                  </>
+                )}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-slate-700">
+                <span>Unpaid</span>
+              </span>
+            )}
+          </div>
+          {/* --- /NEW --- */}
         </div>
         <div className="flex items-center gap-2">
           {isArchived && (
