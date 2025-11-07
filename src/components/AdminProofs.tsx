@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
-  // approveProof, // replaced by direct API call below
   rejectProof,
   analyzeProof,
   chatProof,
@@ -14,11 +13,13 @@ import {
   archiveMilestone,
   unarchiveMilestone,
   type Proof,
-  API_BASE, // added for JSON-only backend call
+  API_BASE,
 } from '@/lib/api';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 
-// === broadcast milestone updates (top-level so ProofCard can use it)
+/* ============================
+   Broadcast helpers (payments)
+============================ */
 function notifyMsChange(bidId: number, milestoneIndex: number) {
   try {
     window.dispatchEvent(new CustomEvent('milestones:updated', { detail: { bidId, milestoneIndex } }));
@@ -28,8 +29,9 @@ function notifyMsChange(bidId: number, milestoneIndex: number) {
   } catch {}
 }
 
-
-// ---------- Gateway + helpers ----------
+/* ============================
+   IPFS gateway + helpers
+============================ */
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
@@ -39,46 +41,32 @@ const PINATA_GATEWAY =
 
 function isImg(s?: string) {
   if (!s) return false;
-  // treat “…jpg?filename=foo.jpg” and “…png#anchor” as images too
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
-// Build a safe https URL for any combination of {url, cid},
-// and collapse any accidental /ipfs/ipfs/ duplication.
+// Build a safe https URL for any combination of {url, cid}
 function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, ''); // e.g. https://<host>/ipfs
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
   if (!file) return '';
 
   const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
   const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
 
-  // If there is no usable url but we have a CID → use gateway + CID
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) {
-    return `${GW}/${rawCid}`;
-  }
-
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
   if (!rawUrl) return '';
 
   let u = rawUrl;
 
-  // 1) Handle a bare CID (optionally with query, e.g. "?filename=...").
+  // bare CID (optionally with query)
   const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) {
-    return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
-  }
+  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
 
-  // 2) Strip ipfs:// scheme and ALL leading "ipfs/" segments (1 or more), plus leading slashes.
+  // ipfs://, leading slashes, repeated ipfs/ segments
   u = u.replace(/^ipfs:\/\//i, '');
   u = u.replace(/^\/+/, '');
-  u = u.replace(/^(?:ipfs\/)+/i, ''); // <-- remove ipfs/ ipfs/ ... at the start
+  u = u.replace(/^(?:ipfs\/)+/i, '');
 
-  // 3) If it’s not http(s) after stripping, prefix our gateway.
-  if (!/^https?:\/\//i.test(u)) {
-    u = `${GW}/${u}`;
-  }
-
-  // 4) Collapse ANY repeated "/ipfs/ipfs/" that may still exist anywhere in the URL.
-  //    e.g. https://host/ipfs/ipfs/Qm... → https://host/ipfs/Qm...
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
   u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
 
   return u;
@@ -87,27 +75,26 @@ function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string 
 function toMilestones(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
-    try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; } catch {}
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch {}
   }
   return [];
 }
 
-// Let other views (project Admin tab) react immediately (e.g., show "Release Payment")
-function emitMilestonesUpdated(detail: any) {
-  try {
-    window.dispatchEvent(new CustomEvent('milestones:updated', { detail }));
-  } catch {}
-}
-
-// ---------- Archive helpers (server-backed, milestone-level) ----------
+/* ============================
+   Archive helpers (server)
+============================ */
 type AdminView = 'active' | 'archived';
 type ArchiveInfo = { archived: boolean; archivedAt?: string | null; archiveReason?: string | null };
+
 const msKey = (bidId: number, idx: number) => `${bidId}:${idx}`;
 
 function proofKey(row: any): string {
   const pid = Number.isFinite(row?.proposalId) ? Number(row.proposalId) : -1;
   const bid = Number.isFinite(row?.bidId) ? Number(row.bidId) : -1;
-  const ms  = Number.isFinite(row?.milestoneIndex) ? Number(row.milestoneIndex) : -1;
+  const ms = Number.isFinite(row?.milestoneIndex) ? Number(row.milestoneIndex) : -1;
   const rid = Number.isFinite(row?.proofId ?? row?.id) ? Number(row.proofId ?? row.id) : -1;
   return `${pid}:${bid}:${ms}:${rid}`;
 }
@@ -115,9 +102,9 @@ function proofKey(row: any): string {
 // Robust milestone key (falls back to row key if bidId/milestoneIndex are missing)
 function msKeyFromProof(p: any): string {
   const bidId = Number((p as any)?.bidId);
-  const idx   = Number((p as any)?.milestoneIndex);
+  const idx = Number((p as any)?.milestoneIndex);
   if (Number.isFinite(bidId) && Number.isFinite(idx)) return msKey(bidId, idx);
-  return `row:${proofKey(p)}`; // fallback to keep identity stable
+  return `row:${proofKey(p)}`;
 }
 
 // Dedupe a list to one row per milestone
@@ -133,23 +120,63 @@ function uniqByMilestone(list: any[]): any[] {
   return out;
 }
 
-// ---------- NEW: tx helpers for explorer links ----------
-const txUrl = (tx: string) => {
-  const base = (process.env.NEXT_PUBLIC_TX_EXPLORER_BASE || 'https://basescan.org/tx/').replace(/\/+$/, '/') ;
-  return tx?.startsWith('http') ? tx : base + tx;
+/* =========================================
+   EXPLORERS: chain-aware tx link builders
+========================================= */
+const CHAIN_EXPLORERS: Record<number, string> = {
+  8453: 'https://basescan.org/tx/',              // Base mainnet
+  84532: 'https://sepolia.basescan.org/tx/',     // Base Sepolia (if used)
+  11155111: 'https://sepolia.etherscan.io/tx/',  // Ethereum Sepolia
+  1: 'https://etherscan.io/tx/',                 // Ethereum mainnet (fallback)
 };
+
+function txUrlByChain(tx: string, chainId?: number) {
+  const base =
+    CHAIN_EXPLORERS[Number(chainId || 0)] ||
+    (process.env.NEXT_PUBLIC_TX_EXPLORER_BASE || 'https://etherscan.io/tx/');
+  const prefix = base.replace(/\/+$/, '/');
+  return tx?.startsWith('http') ? tx : prefix + tx;
+}
+
 const shortTx = (tx: string) => (tx?.length > 12 ? `${tx.slice(0, 8)}…${tx.slice(-6)}` : tx);
 
-// ---------- types ----------
+// Prefer EOA, then Safe; read from proof OR milestone; include common aliases.
+function pickTx(proof: any, m: any) {
+  const cand =
+    proof?.paymentTxHash ||
+    proof?.safePaymentTxHash ||
+    proof?.txHash ||
+    proof?.lastTxHash ||
+    proof?.payment_tx_hash ||
+    proof?.chainTx ||
+    m?.paymentTxHash ||
+    m?.safePaymentTxHash ||
+    m?.txHash ||
+    m?.paidTxHash ||
+    m?.payment_tx_hash ||
+    m?.chainTx ||
+    null;
+  return typeof cand === 'string' && cand.trim() ? cand.trim() : null;
+}
+
+function pickChainId(proof: any, m: any) {
+  return (
+    Number(proof?.paymentChainId) ||
+    Number(proof?.safePaymentChainId) ||
+    Number(m?.paymentChainId) ||
+    Number(m?.safePaymentChainId) ||
+    Number(process.env.NEXT_PUBLIC_DEFAULT_CHAIN_ID || 11155111) // default: Sepolia
+  );
+}
+
+/* ============================
+   Component
+============================ */
 type Props = {
-  /** When rendered on project page, pass this project’s bid ids to filter by bidId */
-  bidIds?: number[];
-  /** Also pass proposalId to enable "Request Changes" API calls */
-  proposalId?: number;
-  /** Optional: pass bids so we can show milestone names */
-  bids?: any[];
-  /** Optional: parent refresher (e.g., to refresh Files tab) */
-  onRefresh?: () => void;
+  bidIds?: number[];     // When rendered on project page, pass this project’s bid ids to filter by bidId
+  proposalId?: number;   // Also pass proposalId to enable "Request Changes" API calls
+  bids?: any[];          // Optional: pass bids so we can show milestone names
+  onRefresh?: () => void;// Optional: parent refresher (e.g., to refresh Files tab)
 };
 
 export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefresh }: Props) {
@@ -157,7 +184,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // “Request Changes” UI state (inline composer)
+  // “Request Changes” UI state
   const [crOpenFor, setCrOpenFor] = useState<number | null>(null);
   const [crComment, setCrComment] = useState('');
   const [crChecklist, setCrChecklist] = useState('');
@@ -167,55 +194,55 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
 
   async function loadProofs() {
-  try {
-    setLoading(true);
-    setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-    // 1) Determine the correct bidId (robust)
-    const cleanBidIds = Array.isArray(bidIds)
-      ? Array.from(new Set(bidIds.map(Number).filter(Number.isFinite)))
-      : [];
+      // 1) Determine the correct bidId (robust)
+      const cleanBidIds = Array.isArray(bidIds)
+        ? Array.from(new Set(bidIds.map(Number).filter(Number.isFinite)))
+        : [];
 
-    const inferredBidIds = Array.isArray(bids)
-      ? Array.from(
-          new Set(
-            (bids as any[])
-              .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
-              .filter(Number.isFinite)
+      const inferredBidIds = Array.isArray(bids)
+        ? Array.from(
+            new Set(
+              (bids as any[])
+                .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
+                .filter(Number.isFinite)
+            )
           )
-        )
-      : [];
+        : [];
 
-    const useBidId = cleanBidIds[0] ?? inferredBidIds[0];
+      const useBidId = cleanBidIds[0] ?? inferredBidIds[0];
 
-    // 2) Build upstream URL (Railway Express). Server resolves proposalId→bidId if needed.
-    const params = new URLSearchParams();
-    if (Number.isFinite(useBidId)) {
-      params.set('bidId', String(useBidId));
-    } else if (Number.isFinite(proposalId as number)) {
-      params.set('proposalId', String(Number(proposalId)));
+      // 2) Build upstream URL (Railway Express). Server resolves proposalId→bidId if needed.
+      const params = new URLSearchParams();
+      if (Number.isFinite(useBidId)) {
+        params.set('bidId', String(useBidId));
+      } else if (Number.isFinite(proposalId as number)) {
+        params.set('proposalId', String(Number(proposalId)));
+      }
+
+      const url = `${API_BASE}/proofs${params.toString() ? `?${params}` : ''}`;
+
+      // 3) Fetch directly from JSON API
+      const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
+        throw new Error(msg);
+      }
+      const list = await res.json();
+      const arr = Array.isArray(list) ? list : [];
+
+      setProofs(arr);
+      await hydrateArchiveStatuses(arr);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load proofs');
+    } finally {
+      setLoading(false);
     }
-
-    const url = `${API_BASE}/proofs${params.toString() ? `?${params}` : ''}`;
-
-    // 3) Fetch directly from JSON API (avoid Next route / Prisma)
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
-      throw new Error(msg);
-    }
-    const list = await res.json();
-    const arr = Array.isArray(list) ? list : [];
-
-    setProofs(arr);
-    await hydrateArchiveStatuses(arr);
-  } catch (err: any) {
-    setError(err?.message || 'Failed to load proofs');
-  } finally {
-    setLoading(false);
   }
-}
 
   async function hydrateArchiveStatuses(currentProofs: any[]) {
     const next: Record<string, ArchiveInfo> = { ...archMap };
@@ -251,11 +278,10 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     }
   }
 
- useEffect(() => {
-  // Always load proofs on mount and when inputs change.
-  loadProofs();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [JSON.stringify(bidIds), proposalId, JSON.stringify(bids)]);
+  useEffect(() => {
+    loadProofs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(bidIds), proposalId, JSON.stringify(bids)]);
 
   const refreshAll = async () => {
     await loadProofs();
@@ -291,52 +317,38 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     return { p, k, isArchived };
   });
 
-  // View derivation (Active vs Archived) using the same snapshot
+  // View derivation
   const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
-  // Archive togglers (server-backed, milestone-level)
+  // Archive togglers
   async function archiveMs(bidId: number, idx: number, reason?: string) {
     const key = msKey(bidId, idx);
-    console.log(`Archiving milestone: ${key}`); // Debug log
-
     await archiveMilestone(bidId, idx, reason);
     setArchMap(prev => ({
       ...prev,
-      [key]: {
-        archived: true,
-        archivedAt: new Date().toISOString(),
-        archiveReason: reason ?? null,
-      },
+      [key]: { archived: true, archivedAt: new Date().toISOString(), archiveReason: reason ?? null },
     }));
   }
 
   async function unarchiveMs(bidId: number, idx: number) {
     const key = msKey(bidId, idx);
-    console.log(`Unarchiving milestone: ${key}`); // Debug log
-
     await unarchiveMilestone(bidId, idx);
     setArchMap(prev => ({
       ...prev,
-      [key]: {
-        archived: false,
-        archivedAt: null,
-        archiveReason: null,
-      },
+      [key]: { archived: false, archivedAt: null, archiveReason: null },
     }));
   }
 
-  // Unarchive all (server; de-duped by milestone)
   const unarchiveAll = async () => {
     for (const p of uniqByMilestone(proofs)) {
       const bidId = Number(p.bidId);
-      const idx   = Number(p.milestoneIndex);
+      const idx = Number(p.milestoneIndex);
       if (Number.isFinite(bidId) && Number.isFinite(idx)) {
         try { await unarchiveMs(bidId, idx); } catch {}
       }
     }
   };
 
-  // Derived archived count (server-backed) using the same snapshot
   const archivedCount = rows.reduce((n, r) => n + (r.isArchived ? 1 : 0), 0);
 
   if (loading) return <div className="p-6">Loading proofs…</div>;
@@ -379,7 +391,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
 
       {visibleRows.map(({ p, k, isArchived }) => {
         const bidId = Number(p.bidId);
-        const idx   = Number(p.milestoneIndex);
+        const idx = Number(p.milestoneIndex);
         return (
           <ProofCard
             key={k}
@@ -410,8 +422,11 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       )}
     </div>
   );
-} 
+}
 
+/* ============================
+   Proof Card
+============================ */
 type ProofCardProps = {
   proof: Proof;
   bids?: any[];
@@ -459,15 +474,10 @@ function ProofCard(props: ProofCardProps) {
   const m = msArr?.[Number(proof.milestoneIndex) || 0] || null;
   const milestoneLabel = (m?.name && String(m.name).trim()) || `Milestone ${Number(proof.milestoneIndex) + 1}`;
 
-  // ---------- NEW: derive tx from milestone (EOA first, then Safe) ----------
-  const tx =
-    m?.paymentTxHash ||      // normal EOA payment (overlayed by backend)
-    m?.safePaymentTxHash ||  // Safe payment
-    m?.txHash ||
-    m?.paidTxHash ||
-    m?.payment_tx_hash ||
-    m?.chainTx ||
-    null;
+  // ---------- derive tx + chainId (proof or milestone) ----------
+  const tx = pickTx(proof, m);
+  const chainId = pickChainId(proof, m);
+  const isPaid = (m?.paid ?? (proof as any)?.paid) === true;
 
   async function onRun() {
     setErr(null);
@@ -529,71 +539,70 @@ function ProofCard(props: ProofCardProps) {
     if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
   }
 
-// APPROVE — always approve the proof AND complete the milestone (keeps /projects/[id] in sync)
-// APPROVE — approve proof (if available) + complete milestone, then notify listeners + refresh UI immediately
-async function handleApprove() {
-  setErr(null);
-  setBusyApprove(true);
-  try {
-    const hasProofId = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
-    const hasMs = Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex);
+  // APPROVE — approve proof (if available) + complete milestone, then notify + refresh
+  async function handleApprove() {
+    setErr(null);
+    setBusyApprove(true);
+    try {
+      const hasProofId = typeof proof.proofId === 'number' && !Number.isNaN(proof.proofId);
+      const hasMs = Number.isFinite(proof.bidId) && Number.isFinite(proof.milestoneIndex);
 
-    if (!hasProofId && !hasMs) {
-      throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
-    }
+      if (!hasProofId && !hasMs) {
+        throw new Error('Cannot approve: missing proofId and bid/milestone fallback.');
+      }
 
-    // 1) Approve the proof via JSON API (tolerate legacy backend)
-    if (hasProofId) {
-      try {
-        const r = await fetch(`${API_BASE}/proofs/${proof.proofId}/approve`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-          cache: 'no-store',
-        });
-        const ct = r.headers.get('content-type') || '';
-        if (!r.ok) {
-          if (ct.includes('application/json')) {
-            const j = await r.json().catch(() => ({}));
-            throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
-          } else {
-            const txt = await r.text().catch(() => '');
-            throw new Error(/<!doctype html|<html[\s>]/i.test(txt) ? 'Unexpected HTML from server.' : `HTTP ${r.status}`);
+      // 1) Approve the proof via JSON API (tolerate legacy backend)
+      if (hasProofId) {
+        try {
+          const r = await fetch(`${API_BASE}/proofs/${proof.proofId}/approve`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+          });
+          const ct = r.headers.get('content-type') || '';
+          if (!r.ok) {
+            if (ct.includes('application/json')) {
+              const j = await r.json().catch(() => ({}));
+              throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
+            } else {
+              const txt = await r.text().catch(() => '');
+              throw new Error(/<!doctype html|<html[\s>]/i.test(txt) ? 'Unexpected HTML from server.' : `HTTP ${r.status}`);
+            }
           }
+          if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
+        } catch (e: any) {
+          const msg = String(e?.message || '');
+          const mayFallback = /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
+          if (!mayFallback || !hasMs) throw new Error(msg || 'Approve failed');
         }
-        if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
-      } catch (e: any) {
-        const msg = String(e?.message || '');
-        const mayFallback = /\b(404|400)\b/.test(msg) || /not\s*found/i.test(msg) || /Unexpected HTML/i.test(msg);
-        if (!mayFallback || !hasMs) throw new Error(msg || 'Approve failed');
       }
-    }
 
-    // 2) ALWAYS complete the milestone (keeps /projects/[id] in sync for pay buttons)
-    if (hasMs) {
-      try {
-        await adminCompleteMilestone(Number(proof.bidId), Number(proof.milestoneIndex), 'Approved by admin');
-      } catch (e: any) {
-        // ok if already completed/approved
-        console.warn('[approve] milestone completion note:', e?.message || e);
+      // 2) ALWAYS complete the milestone (keeps /projects/[id] in sync)
+      if (hasMs) {
+        try {
+          await adminCompleteMilestone(Number(proof.bidId), Number(proof.milestoneIndex), 'Approved by admin');
+        } catch (e: any) {
+          // ok if already completed/approved
+          console.warn('[approve] milestone completion note:', e?.message || e);
+        }
       }
+
+      // 3) notify other views
+      notifyMsChange(Number(proof.bidId), Number(proof.milestoneIndex));
+
+      // 4) refresh
+      onRefresh?.();
+      router.refresh();
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      setErr(/<!doctype html|<html[\s>]/i.test(msg) ? 'Approve failed (server returned HTML).' : msg || 'Approve failed');
+    } finally {
+      setBusyApprove(false);
     }
-
-    // 3) notify other views (project admin tab, payments list, etc.)
-    notifyMsChange(Number(proof.bidId), Number(proof.milestoneIndex));
-
-    // 4) refresh this page route so "Release Payment" appears immediately
-    onRefresh?.();
-    router.refresh();
-  } catch (e: any) {
-    const msg = String(e?.message || '');
-    setErr(/<!doctype html|<html[\s>]/i.test(msg) ? 'Approve failed (server returned HTML).' : msg || 'Approve failed');
-  } finally {
-    setBusyApprove(false);
   }
-}
 
-  // REJECT — the legacy route that already worked for you
+  // REJECT — legacy route
   async function handleReject() {
     setErr(null);
     setBusyReject(true);
@@ -660,16 +669,16 @@ async function handleApprove() {
             Vendor: <span className="font-medium">{proof.vendorName || '—'}</span> &middot; Bid #{proof.bidId} &middot; {milestoneLabel}
           </p>
 
-          {/* --- NEW: Payment status with TX link (EOA or Safe) --- */}
+          {/* Payment status with TX link (EOA or Safe; chain-aware) */}
           <div className="mt-1 text-sm">
-            {m?.paid ? (
+            {isPaid ? (
               <span className="inline-flex items-center gap-1 text-green-700">
                 <span>Paid ✅</span>
                 {tx && (
                   <>
                     <span>• Tx:</span>
                     <a
-                      href={txUrl(tx)}
+                      href={txUrlByChain(tx, chainId)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline"
@@ -685,7 +694,6 @@ async function handleApprove() {
               </span>
             )}
           </div>
-          {/* --- /NEW --- */}
         </div>
         <div className="flex items-center gap-2">
           {isArchived && (
