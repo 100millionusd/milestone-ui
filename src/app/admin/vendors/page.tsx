@@ -18,6 +18,15 @@ type VendorLite = {
   bidsCount?: number;
   lastBidAt?: string | null;
   archived?: boolean;
+
+  // NEW: contact + address (must match API keys from server)
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  telegramChatId?: string | null;  // server sends this top-level
+  whatsapp?: string | null;
+  address?: string | null;
+  addressText?: string | null;     // server may send this
 };
 
 type VendorBid = {
@@ -399,6 +408,8 @@ export default function AdminVendorsPage() {
                 <th className="py-2 px-3">Status</th>
                 <th className="py-2 px-3">KYC</th>
                 <th className="py-2 px-3">Bids</th>
+                <th className="py-2 px-3">Contact</th>  
+                <th className="py-2 px-3">Address</th>   
                 <th className="py-2 px-3">Total Awarded</th>
                 <th className="py-2 px-3">Last Bid</th>
                 <th className="py-2 px-3 w-64">Actions</th>
@@ -406,13 +417,13 @@ export default function AdminVendorsPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">Loading vendors…</td></tr>
+                <tr><td colSpan={10} className="py-6 px-3 text-slate-500">Loading vendors…</td></tr>
               )}
               {err && !loading && (
-                <tr><td colSpan={8} className="py-6 px-3 text-rose-700">{err}</td></tr>
+                <tr><td colSpan={10} className="py-6 px-3 text-rose-700">{err}</td></tr>
               )}
               {!loading && !err && data.items.length === 0 && (
-                <tr><td colSpan={8} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
+                <tr><td colSpan={10} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
               )}
               {!loading && !err && data.items.map((v, idx) => {
                 const rowKey = (v?.id || v?.walletAddress || `row-${idx}`) as string;
@@ -439,6 +450,23 @@ export default function AdminVendorsPage() {
                       <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
                       <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
                       <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+{/* Contact */}
+<td className="py-2 px-3 text-xs leading-tight">
+  <div>{v.email || '—'}</div>
+  <div>{v.phone || '—'}</div>
+  <div>{v.telegramChatId ? `tg:${v.telegramChatId}` : '—'}</div>
+  <div>{v.whatsapp || '—'}</div>
+</td>
+
+{/* Address */}
+<td className="py-2 px-3 text-xs break-words">
+  {v.addressText || v.address || '—'}
+</td>
+
+<td className="py-2 px-3">
+  <div className="flex flex-wrap items-center gap-2">
+    {/* …your existing Actions buttons unchanged… */}
                       <td className="py-2 px-3">
                         <div className="flex flex-wrap items-center gap-2">
                           {/* Bids */}
@@ -517,7 +545,7 @@ export default function AdminVendorsPage() {
 
                     {open && (
                       <tr key={`${rowKey}-details`} className="bg-slate-50 border-b">
-                        <td colSpan={8} className="px-3 py-3">
+                        <td colSpan={10} className="px-3 py-3">
                           <VendorBidsPanel
                             state={bidsState}
                             busyId={mutatingBidId}
