@@ -466,7 +466,6 @@ export default function AdminVendorsPage() {
 
 <td className="py-2 px-3">
   <div className="flex flex-wrap items-center gap-2">
-    {/* …your existing Actions buttons unchanged… */}
                       <td className="py-2 px-3">
                         <div className="flex flex-wrap items-center gap-2">
                           {/* Bids */}
