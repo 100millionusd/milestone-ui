@@ -444,13 +444,13 @@ export default function AdminVendorsPage() {
                           </span>
                         )}
                       </td>
-                      <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
-                      <td className="py-2 px-3"><StatusChip value={isApproved ? 'approved' : v.status} /></td>
-                      <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
-                      <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
-                      <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
-                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
-                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+<td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
+<td className="py-2 px-3"><StatusChip value={isApproved ? 'approved' : v.status} /></td>
+<td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
+<td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
+<td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+<td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+
 {/* Contact */}
 <td className="py-2 px-3 text-xs leading-tight">
   <div>{v.email || '—'}</div>
@@ -464,82 +464,81 @@ export default function AdminVendorsPage() {
   {v.addressText || v.address || '—'}
 </td>
 
+{/* Actions */}
 <td className="py-2 px-3">
   <div className="flex flex-wrap items-center gap-2">
-                      <td className="py-2 px-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {/* Bids */}
-                          <button
-                            onClick={() => toggleOpen(rowKey, v.walletAddress)}
-                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
-                          >
-                            {open ? 'Hide' : 'Info-Bids'}
-                          </button>
+    {/* Bids */}
+    <button
+      onClick={() => toggleOpen(rowKey, v.walletAddress)}
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
+    >
+      {open ? 'Hide' : 'Info-Bids'}
+    </button>
 
-                          {/* Approvals */}
-                          {!isApproved ? (
-                            <>
-                              <button
-                                onClick={() => approveVendor(v.walletAddress)}
-                                disabled={!v.walletAddress || busy}
-                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Approve vendor"
-                              >
-                                {busy ? 'Working…' : 'Approve'}
-                              </button>
+    {/* Approvals */}
+    {!isApproved ? (
+      <>
+        <button
+          onClick={() => approveVendor(v.walletAddress)}
+          disabled={!v.walletAddress || busy}
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Approve vendor"
+        >
+          {busy ? 'Working…' : 'Approve'}
+        </button>
 
-                              {vStatus !== 'rejected' && (
-                                <button
-                                  onClick={() => rejectVendor(v.walletAddress)}
-                                  disabled={!v.walletAddress || busy}
-                                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Reject vendor"
-                                >
-                                  {busy ? 'Working…' : 'Reject'}
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            <span
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-                              title="Vendor is approved"
-                            >
-                              Approved
-                            </span>
-                          )}
+        {vStatus !== 'rejected' && (
+          <button
+            onClick={() => rejectVendor(v.walletAddress)}
+            disabled={!v.walletAddress || busy}
+            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Reject vendor"
+          >
+            {busy ? 'Working…' : 'Reject'}
+          </button>
+        )}
+      </>
+    ) : (
+      <span
+        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
+        title="Vendor is approved"
+      >
+        Approved
+      </span>
+    )}
 
-                          {/* Archive / Unarchive */}
-                          {!v.archived ? (
-                            <button
-                              onClick={() => archiveVendor(v.walletAddress)}
-                              disabled={!v.walletAddress || busy}
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Archive vendor (soft hide)"
-                            >
-                              {busy ? 'Archiving…' : 'Archive'}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => unarchiveVendor(v.walletAddress)}
-                              disabled={!v.walletAddress || busy}
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Unarchive vendor"
-                            >
-                              {busy ? 'Working…' : 'Unarchive'}
-                            </button>
-                          )}
+    {/* Archive / Unarchive */}
+    {!v.archived ? (
+      <button
+        onClick={() => archiveVendor(v.walletAddress)}
+        disabled={!v.walletAddress || busy}
+        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Archive vendor (soft hide)"
+      >
+        {busy ? 'Archiving…' : 'Archive'}
+      </button>
+    ) : (
+      <button
+        onClick={() => unarchiveVendor(v.walletAddress)}
+        disabled={!v.walletAddress || busy}
+        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Unarchive vendor"
+      >
+        {busy ? 'Working…' : 'Unarchive'}
+      </button>
+    )}
 
-                          {/* Delete */}
-                          <button
-                            onClick={() => deleteVendor(v.walletAddress)}
-                            disabled={!v.walletAddress || busy}
-                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Delete vendor profile (bids remain)"
-                          >
-                            {busy ? 'Deleting…' : 'Delete'}
-                          </button>
-                        </div>
-                      </td>
+    {/* Delete */}
+    <button
+      onClick={() => deleteVendor(v.walletAddress)}
+      disabled={!v.walletAddress || busy}
+      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      title="Delete vendor profile (bids remain)"
+    >
+      {busy ? 'Deleting…' : 'Delete'}
+    </button>
+  </div>
+</td>
                     </tr>
 
                     {open && (
