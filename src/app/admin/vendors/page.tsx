@@ -72,6 +72,14 @@ function telegramLink(username?: string | null, chatId?: string | null) {
   return null;
 }
 
+/** aliases used by the JSX below */
+const toMailto = (email: string) => mailtoLink(email, 'Vendor contact');
+const toTelegramLink = (username?: string | null, chatId?: string | null) =>
+  telegramLink(username, chatId);
+const toWhatsAppLink = (phone?: string | null) =>
+  whatsappLink(phone, 'Hi — message from LithiumX admin');
+
+
 export default function AdminVendorsPage() {
   const sp = useSearchParams();
   const router = useRouter();
