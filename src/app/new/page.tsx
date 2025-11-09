@@ -3,7 +3,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createProposal, uploadFileToIPFS, getAuthRoleOnce } from "@/lib/api";
+import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getVendorProfile } from "@/lib/api";
+
 
 // ✅ Guard: only allow submit when the clicked button opts in
 const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
@@ -19,6 +20,7 @@ export default function NewProposalPage() {
   const [loading, setLoading] = useState(false);
   const [wallet, setWallet] = useState<string | null>(null);
   const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
+  const [profile, setProfile] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     orgName: '',
@@ -41,6 +43,22 @@ export default function NewProposalPage() {
       if (j?.address) setWallet(j.address);
     } catch { /* ignore */ }
   })();
+}, []);
+
+// Load vendor profile (to read telegram_username / telegram_chat_id)
+useEffect(() => {
+  let alive = true;
+  (async () => {
+    try {
+      const p = await getVendorProfile();      // GET /vendor/profile
+      if (!alive) return;
+      setProfile(p || null);
+    } catch {
+      if (!alive) return;
+      setProfile(null);
+    }
+  })();
+  return () => { alive = false; };
 }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -203,24 +221,39 @@ export default function NewProposalPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Telegram</label>
-            {wallet ? (
-              <a
-                href={`https://t.me/${bot}?start=link_${encodeURIComponent(wallet)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
-              >
-                Connect Telegram
-              </a>
-            ) : (
-              <div className="text-sm text-gray-500">
-                Connect wallet to enable Telegram linking.
-              </div>
-            )}
-            <p className="text-xs text-gray-500 mt-1">
-              Opens Telegram to link this wallet to your account.
-            </p>
+<label className="block text-sm font-medium mb-1">Telegram</label>
+<div className="flex items-center gap-3">
+  {/* Status + username */}
+  {(profile?.telegram_username || profile?.telegramUsername || profile?.telegram_chat_id) ? (
+    <span className="text-emerald-600 text-sm">
+      Connected
+      {profile?.telegram_username || profile?.telegramUsername
+        ? ` (@${profile.telegram_username ?? profile.telegramUsername})`
+        : ''}
+    </span>
+  ) : (
+    <span className="text-slate-500 text-sm">Not connected</span>
+  )}
+
+  {/* Deep-link to connect */}
+  {wallet ? (
+    <a
+      href={`https://t.me/${bot}?start=link_${(wallet || '').toLowerCase()}`}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
+    >
+      {(profile?.telegram_username || profile?.telegramUsername) ? 'Re-link' : 'Connect Telegram'}
+    </a>
+  ) : (
+    <div className="text-sm text-gray-500">
+      Connect wallet to enable Telegram linking.
+    </div>
+  )}
+</div>
+<p className="text-xs text-gray-500 mt-1">
+  Opens Telegram to link this wallet to your account.
+</p>
           </div>
         </div>
 
