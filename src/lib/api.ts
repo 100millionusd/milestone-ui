@@ -927,6 +927,23 @@ export async function getVendorProfile(): Promise<any> {
   return await apiFetch('/vendor/profile');
 }
 
+// Get the current vendor profile (includes telegram_username / telegram_chat_id)
+export async function getVendorProfile(): Promise<any> {
+  const API_BASE =
+    (process.env.NEXT_PUBLIC_API_BASE as string) ||
+    'https://milestone-api-production.up.railway.app';
+
+  const res = await fetch(`${API_BASE}/vendor/profile`, {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${typeof window !== 'undefined' ? (localStorage.getItem('lx_jwt') || '') : ''}`,
+    },
+  });
+  if (!res.ok) throw new Error(`GET /vendor/profile HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function getVendorBids(): Promise<Bid[]> {
   try {
     const rows = await apiFetch("/vendor/bids");
