@@ -496,45 +496,45 @@ export default function AdminVendorsPage() {
   {/* Email */}
   <div>
     {v.email ? (
-      <a
-        href={toMailto(v.email)!}
-        className="underline underline-offset-2"
-        title="Email vendor"
-      >
-        {v.email}
-      </a>
+<a
+  href={toMailto(v.email)!}
+  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
+  title="Email vendor"
+>
+  {v.email}
+</a>
     ) : '—'}
   </div>
 
   {/* Telegram (prefers @username, falls back to chat id) */}
   <div>
     {(v.telegramUsername || v.telegramChatId) ? (
-      <a
-        href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
-        className="underline underline-offset-2"
-        title="Open in Telegram"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {v.telegramUsername
-          ? `@${String(v.telegramUsername).replace(/^@/, '')}`
-          : `tg:${v.telegramChatId}`}
-      </a>
+ <a
+  href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
+  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
+  title="Open in Telegram"
+  target="_blank"
+  rel="noreferrer"
+>
+  {v.telegramUsername
+    ? `@${String(v.telegramUsername).replace(/^@/, '')}`
+    : `tg:${v.telegramChatId}`}
+</a>
     ) : '—'}
   </div>
 
 {/* WhatsApp (uses v.whatsapp or falls back to v.phone) */}
 <div>
   {(v.whatsapp || v.phone) ? (
-    <a
-      href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
-      className="underline underline-offset-2"
-      title="Open WhatsApp chat"
-      target="_blank"
-      rel="noreferrer"
-    >
-      {v.whatsapp || v.phone}
-    </a>
+ <a
+  href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
+  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
+  title="Open WhatsApp chat"
+  target="_blank"
+  rel="noreferrer"
+>
+  {v.whatsapp || v.phone}
+</a>
   ) : '—'}
 </div>
 
