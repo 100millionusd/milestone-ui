@@ -24,6 +24,7 @@ type VendorLite = {
   phone?: string | null;
   website?: string | null;
   telegramChatId?: string | null;  // server sends this top-level
+  telegramUsername?: string | null;
   whatsapp?: string | null;
   address?: string | null;
   addressText?: string | null;     // server may send this
@@ -444,30 +445,40 @@ export default function AdminVendorsPage() {
                           </span>
                         )}
                       </td>
+{/* Wallet */}
 <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
-<td className="py-2 px-3"><StatusChip value={isApproved ? 'approved' : v.status} /></td>
-<td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
-<td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
-<td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
-<td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
 
-{/* Contact */}
+{/* Status */}
+<td className="py-2 px-3"><StatusChip value={isApproved ? 'approved' : v.status} /></td>
+
+{/* KYC */}
+<td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
+
+{/* Bids */}
+<td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
+
+{/* Contact — now BEFORE totals/last bid */}
 <td className="py-2 px-3 text-xs leading-tight">
   <div>{v.email || '—'}</div>
   <div>{v.phone || '—'}</div>
-  <div>{v.telegramChatId ? `tg:${v.telegramChatId}` : '—'}</div>
+  <div>{v.telegramUsername ? `@${v.telegramUsername}` : (v.telegramChatId ? `tg:${v.telegramChatId}` : '—')}</div>
   <div>{v.whatsapp || '—'}</div>
 </td>
 
-{/* Address */}
+{/* Address — now BEFORE totals/last bid */}
 <td className="py-2 px-3 text-xs break-words">
   {v.addressText || v.address || '—'}
 </td>
 
+{/* Total Awarded */}
+<td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+
+{/* Last Bid */}
+<td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+
 {/* Actions */}
 <td className="py-2 px-3">
   <div className="flex flex-wrap items-center gap-2">
-    {/* Bids */}
     <button
       onClick={() => toggleOpen(rowKey, v.walletAddress)}
       className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
@@ -475,7 +486,6 @@ export default function AdminVendorsPage() {
       {open ? 'Hide' : 'Info-Bids'}
     </button>
 
-    {/* Approvals */}
     {!isApproved ? (
       <>
         <button
@@ -507,7 +517,6 @@ export default function AdminVendorsPage() {
       </span>
     )}
 
-    {/* Archive / Unarchive */}
     {!v.archived ? (
       <button
         onClick={() => archiveVendor(v.walletAddress)}
@@ -528,7 +537,6 @@ export default function AdminVendorsPage() {
       </button>
     )}
 
-    {/* Delete */}
     <button
       onClick={() => deleteVendor(v.walletAddress)}
       disabled={!v.walletAddress || busy}
