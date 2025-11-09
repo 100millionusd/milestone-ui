@@ -46,6 +46,32 @@ type Paged<T> = {
   total: number;
 };
 
+/** Contact deep links */
+function mailtoLink(email: string, subject?: string) {
+  const s = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  return `mailto:${email}${s}`;
+}
+
+function normalizePhoneToDigits(phone?: string | null) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/[^\d]/g, '');
+  return digits || null;
+}
+
+function whatsappLink(phone?: string | null, text?: string) {
+  const digits = normalizePhoneToDigits(phone);
+  if (!digits) return null;
+  // wa.me wants digits-only, no plus
+  const t = text ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${digits}${t}`;
+}
+
+function telegramLink(username?: string | null, chatId?: string | null) {
+  if (username) return `https://t.me/${String(username).replace(/^@/, '')}`;
+  if (chatId)   return `tg://user?id=${String(chatId)}`; // works with Telegram app
+  return null;
+}
+
 export default function AdminVendorsPage() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -457,12 +483,55 @@ export default function AdminVendorsPage() {
 {/* Bids */}
 <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
 
-{/* Contact — now BEFORE totals/last bid */}
+{/* Contact — clickable deep links */}
 <td className="py-2 px-3 text-xs leading-tight">
-  <div>{v.email || '—'}</div>
+  {/* Email */}
+  <div>
+    {v.email ? (
+      <a
+        href={toMailto(v.email)!}
+        className="underline underline-offset-2"
+        title="Email vendor"
+      >
+        {v.email}
+      </a>
+    ) : '—'}
+  </div>
+
+  {/* Telegram (prefers @username, falls back to chat id) */}
+  <div>
+    {(v.telegramUsername || v.telegramChatId) ? (
+      <a
+        href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
+        className="underline underline-offset-2"
+        title="Open in Telegram"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {v.telegramUsername
+          ? `@${String(v.telegramUsername).replace(/^@/, '')}`
+          : `tg:${v.telegramChatId}`}
+      </a>
+    ) : '—'}
+  </div>
+
+  {/* WhatsApp */}
+  <div>
+    {v.whatsapp ? (
+      <a
+        href={toWhatsAppLink(v.whatsapp) || '#'}
+        className="underline underline-offset-2"
+        title="Open WhatsApp chat"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {v.whatsapp}
+      </a>
+    ) : '—'}
+  </div>
+
+  {/* (Optional) Plain phone */}
   <div>{v.phone || '—'}</div>
-  <div>{v.telegramUsername ? `@${v.telegramUsername}` : (v.telegramChatId ? `tg:${v.telegramChatId}` : '—')}</div>
-  <div>{v.whatsapp || '—'}</div>
 </td>
 
 {/* Address — now BEFORE totals/last bid */}
