@@ -523,20 +523,20 @@ export default function AdminVendorsPage() {
     ) : '—'}
   </div>
 
-  {/* WhatsApp */}
-  <div>
-    {v.whatsapp ? (
-      <a
-        href={toWhatsAppLink(v.whatsapp) || '#'}
-        className="underline underline-offset-2"
-        title="Open WhatsApp chat"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {v.whatsapp}
-      </a>
-    ) : '—'}
-  </div>
+{/* WhatsApp (uses v.whatsapp or falls back to v.phone) */}
+<div>
+  {(v.whatsapp || v.phone) ? (
+    <a
+      href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
+      className="underline underline-offset-2"
+      title="Open WhatsApp chat"
+      target="_blank"
+      rel="noreferrer"
+    >
+      {v.whatsapp || v.phone}
+    </a>
+  ) : '—'}
+</div>
 
   {/* (Optional) Plain phone */}
   <div>{v.phone || '—'}</div>
