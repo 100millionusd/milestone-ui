@@ -138,7 +138,20 @@ export default function AdminVendorsPage() {
   }, [approvedCache]);
   // Local status overrides so UI state doesn't flap when list refetches
 const [localStatus, setLocalStatus] = useState<Record<string, VendorLite['status']>>({});
+// HYDRATE overrides on first load
+useEffect(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lx_vendor_status_overrides') || '{}');
+    if (saved && typeof saved === 'object') setLocalStatus(saved);
+  } catch {}
+}, []);
 
+// PERSIST overrides whenever they change
+useEffect(() => {
+  try {
+    localStorage.setItem('lx_vendor_status_overrides', JSON.stringify(localStatus));
+  } catch {}
+}, [localStatus]);
 
   // sync URL
   useEffect(() => {
@@ -193,6 +206,28 @@ setApprovedCache(prev => {
     const k = keyOf(v.walletAddress);
     if (s !== 'approved') delete next[k];
   }
+  return next;
+});
+
+// Merge server truth into local overrides; persist
+setLocalStatus(prev => {
+  let saved: Record<string, VendorLite['status']> = {};
+  try {
+    saved = JSON.parse(localStorage.getItem('lx_vendor_status_overrides') || '{}') || {};
+  } catch {}
+
+  const next = { ...saved, ...prev };
+  for (const v of items) {
+    const s = String(v?.status || '').trim().toLowerCase();
+    const k = keyOf(v.walletAddress);
+    // If server has a definitive status, let it win
+    if (s === 'approved' || s === 'rejected') {
+      next[k] = s as VendorLite['status'];
+    }
+  }
+
+  // Ensure it’s saved even if prev was empty this run
+  try { localStorage.setItem('lx_vendor_status_overrides', JSON.stringify(next)); } catch {}
   return next;
 });
 
