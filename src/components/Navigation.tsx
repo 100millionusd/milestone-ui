@@ -260,12 +260,14 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                   {address ? (
                     <>
-                      <div
-                        onClick={() => handleNavigation('/vendor/profile')}
-                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
-                      >
-                        Vendor Profile
-                      </div>
+ <div
+  onClick={() => handleNavigation('/vendor/profile')}
+  className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
+  title="Profile"
+  aria-label="Profile"
+>
+  Profile
+</div>
 
                       <button
                         onClick={handleLogout}
@@ -338,12 +340,14 @@ export default function Navigation() {
 
               {address ? (
                 <>
-                  <div
-                    onClick={() => handleNavigation('/vendor/profile')}
-                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
-                  >
-                    Vendor Profile
-                  </div>
+ <div
+  onClick={() => handleNavigation('/vendor/profile')}
+  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
+  title="Profile"
+  aria-label="Profile"
+>
+  Profile
+</div>
                   <button
                     onClick={() => {
                       setIsMobileMenuOpen(false);
