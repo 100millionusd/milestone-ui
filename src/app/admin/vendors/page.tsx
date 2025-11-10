@@ -149,32 +149,45 @@ export default function AdminVendorsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, status, kyc, page, includeArchived]);
 
-  const fetchList = async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const url = new URL(`${API_BASE}/admin/vendors`);
-      if (q) url.searchParams.set('search', q);
-      if (status !== 'all') url.searchParams.set('status', status);
-      if (kyc !== 'all') url.searchParams.set('kyc', kyc);
-      if (includeArchived) url.searchParams.set('includeArchived', 'true');
-      url.searchParams.set('page', String(page));
-      url.searchParams.set('limit', String(pageSize));
-      const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-      const total = typeof json?.total === 'number' ? json.total : items.length;
-      const pg = typeof json?.page === 'number' ? json.page : page;
-      const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
-      setData({ items, total, page: pg, pageSize: ps });
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load vendors');
-      setData({ items: [], page: 1, pageSize, total: 0 });
-    } finally {
-      setLoading(false);
+  try {
+  const url = new URL(`${API_BASE}/admin/vendors`);
+  if (q) url.searchParams.set('search', q);
+  if (status !== 'all') url.searchParams.set('status', status);
+  if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+  if (includeArchived) url.searchParams.set('includeArchived', 'true');
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('limit', String(pageSize));
+
+  const res = await fetch(url.toString(), {
+    credentials: 'include',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json();
+  const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
+  const total = typeof json?.total === 'number' ? json.total : items.length;
+  const pg = typeof json?.page === 'number' ? json.page : page;
+  const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+
+  setData({ items, total, page: pg, pageSize: ps });
+
+  // 🔧 Clear optimistic "approved" flags for anything not approved on the server
+  setApprovedCache(prev => {
+    const next = { ...prev };
+    for (const v of items) {
+      const s = String(v?.status || '').toLowerCase();
+      if (s !== 'approved') delete next[v.walletAddress];
     }
-  };
+    return next;
+  });
+
+} catch (e: any) {
+  setErr(e?.message || 'Failed to load vendors');
+  setData({ items: [], page: 1, pageSize, total: 0 });
+} finally {
+  setLoading(false);
+}
 
   useEffect(() => {
     if (role !== 'admin' || !hasJwt) return;
@@ -465,8 +478,12 @@ export default function AdminVendorsPage() {
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
-                const vStatus = (v?.status ?? '').toString().toLowerCase();
-                const isApproved = vStatus === 'approved' || !!approvedCache[v.walletAddress];
+const vStatus = (v?.status ?? '').toString().toLowerCase();
+const isServerApproved = vStatus === 'approved';
+const isOptimisticApproved = !!approvedCache[v.walletAddress];
+const isApprovedVisual = isServerApproved || isOptimisticApproved; // for chip + gating
+const isRejected = vStatus === 'rejected';
+
 
                 return (
                   <>
@@ -483,7 +500,7 @@ export default function AdminVendorsPage() {
 <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
 
 {/* Status */}
-<td className="py-2 px-3"><StatusChip value={isApproved ? 'approved' : v.status} /></td>
+<td className="py-2 px-3"><StatusChip value={isApprovedVisual ? 'approved' : v.status} /></td>
 
 {/* KYC */}
 <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
@@ -563,28 +580,28 @@ export default function AdminVendorsPage() {
       {open ? 'Hide' : 'Info-Bids'}
     </button>
 
-    {!isApproved ? (
+    {!isApprovedVisual ? (
       <>
-        <button
-          onClick={() => approveVendor(v.walletAddress)}
-          disabled={!v.walletAddress || busy}
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Approve vendor"
-        >
-          {busy ? 'Working…' : 'Approve'}
-        </button>
-
  <button
-  onClick={() => { if (vStatus !== 'rejected') rejectVendor(v.walletAddress); }}
-  disabled={!v.walletAddress || busy || vStatus === 'rejected'}
+  onClick={() => approveVendor(v.walletAddress)}
+  disabled={!v.walletAddress || busy}
+  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+  title="Approve vendor"
+>
+  {busy ? 'Working…' : 'Approve'}
+</button>
+
+<button
+  onClick={() => { if (!isRejected) rejectVendor(v.walletAddress); }}
+  disabled={!v.walletAddress || busy || isRejected}
   className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-    vStatus === 'rejected'
+    isRejected
       ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
       : 'bg-rose-600 text-white hover:bg-rose-700'
   } disabled:opacity-50 disabled:cursor-not-allowed`}
-  title={vStatus === 'rejected' ? 'Vendor is rejected' : 'Reject vendor'}
+  title={isRejected ? 'Vendor is rejected' : 'Reject vendor'}
 >
-  {vStatus === 'rejected' ? 'Rejected' : (busy ? 'Working…' : 'Reject')}
+  {isRejected ? 'Rejected' : (busy ? 'Working…' : 'Reject')}
 </button>
       </>
     ) : (
