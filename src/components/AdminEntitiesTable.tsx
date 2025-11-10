@@ -98,7 +98,7 @@ function normalizeRow(r: any): ProposerAgg {
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
     entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
-    address: r.address ?? null,
+    address: r.address ?? r.addr_display ?? null,
     city: r.city ?? null,
     country: r.country ?? null,
     contactEmail,
@@ -110,7 +110,7 @@ function normalizeRow(r: any): ProposerAgg {
     telegramUsername,
     telegramChatId,
 
-    wallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet ?? null,
+    wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
     approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
     pendingCount: Number(r.pendingCount ?? r.pending_count ?? 0),
@@ -231,22 +231,24 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       try {
         setLoading(true);
 
-        // Try to ask the server for archived as well; fall back if unsupported.
-        let server: any[] = [];
-        try {
-          server = await (listProposers as unknown as (p?: any) => Promise<any[]>)({
-            includeArchived: true,
-          });
-        } catch {
-          server = await listProposers();
-        }
+ // Try server; handle both array and {items: []} shape
+let resp: any;
+try {
+  resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
+    includeArchived: true,
+  });
+} catch {
+  resp = await listProposers();
+}
 
-        let data: ProposerAgg[] = (Array.isArray(server) ? server : []).map(normalizeRow);
+const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+let data: ProposerAgg[] = arr.map(normalizeRow);
 
-        if (!data.length) {
-          const proposals = await listProposals({ includeArchived: true });
-          data = aggregateFromProposals(proposals);
-        }
+// Fallback to proposals aggregation if nothing came back
+if (!data.length) {
+  const proposals = await listProposals({ includeArchived: true });
+  data = aggregateFromProposals(proposals);
+}
 
         if (alive) setRows(data);
       } catch (e: any) {
