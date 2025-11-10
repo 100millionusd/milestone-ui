@@ -19,15 +19,14 @@ type VendorLite = {
   lastBidAt?: string | null;
   archived?: boolean;
 
-  // NEW: contact + address (must match API keys from server)
   email?: string | null;
   phone?: string | null;
   website?: string | null;
-  telegramChatId?: string | null;  // server sends this top-level
+  telegramChatId?: string | null;
   telegramUsername?: string | null;
   whatsapp?: string | null;
   address?: string | null;
-  addressText?: string | null;     // server may send this
+  addressText?: string | null;
 };
 
 type VendorBid = {
@@ -39,46 +38,32 @@ type VendorBid = {
   createdAt: string;
 };
 
-type Paged<T> = {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-};
+type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
 
 /** Contact deep links */
 function mailtoLink(email: string, subject?: string) {
   const s = subject ? `?subject=${encodeURIComponent(subject)}` : '';
   return `mailto:${email}${s}`;
 }
-
 function normalizePhoneToDigits(phone?: string | null) {
   if (!phone) return null;
   const digits = String(phone).replace(/[^\d]/g, '');
   return digits || null;
 }
-
 function whatsappLink(phone?: string | null, text?: string) {
   const digits = normalizePhoneToDigits(phone);
   if (!digits) return null;
-  // wa.me wants digits-only, no plus
   const t = text ? `?text=${encodeURIComponent(text)}` : '';
   return `https://wa.me/${digits}${t}`;
 }
-
 function telegramLink(username?: string | null, chatId?: string | null) {
   if (username) return `https://t.me/${String(username).replace(/^@/, '')}`;
-  if (chatId)   return `tg://user?id=${String(chatId)}`; // works with Telegram app
+  if (chatId) return `tg://user?id=${String(chatId)}`;
   return null;
 }
-
-/** aliases used by the JSX below */
 const toMailto = (email: string) => mailtoLink(email, 'Vendor contact');
-const toTelegramLink = (username?: string | null, chatId?: string | null) =>
-  telegramLink(username, chatId);
-const toWhatsAppLink = (phone?: string | null) =>
-  whatsappLink(phone, 'Hi — message from LithiumX admin');
-
+const toTelegramLink = (username?: string | null, chatId?: string | null) => telegramLink(username, chatId);
+const toWhatsAppLink = (phone?: string | null) => whatsappLink(phone, 'Hi — message from LithiumX admin');
 
 export default function AdminVendorsPage() {
   const keyOf = (w?: string | null) => String(w || '').toLowerCase();
@@ -117,41 +102,11 @@ export default function AdminVendorsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<Paged<VendorLite>>({ items: [], page: 1, pageSize: 25, total: 0 });
 
-  // expanded rows: per-vendor bids cache
+  // expanded rows & busy
   const [rowsOpen, setRowsOpen] = useState<Record<string, boolean>>({});
   const [bidsByVendor, setBidsByVendor] = useState<Record<string, { loading: boolean; error: string | null; bids: VendorBid[] }>>({});
-  const [mutating, setMutating] = useState<string | null>(null); // wallet being changed
-  const [mutatingBidId, setMutatingBidId] = useState<string | null>(null); // bid-level busy state
-
-  // ✅ OPTIMISTIC: local approved cache (persists to localStorage)
-  const [approvedCache, setApprovedCache] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('lx_approved_cache') || '{}');
-      if (saved && typeof saved === 'object') setApprovedCache(saved);
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem('lx_approved_cache', JSON.stringify(approvedCache));
-    } catch {}
-  }, [approvedCache]);
-  // Local status overrides so UI state doesn't flap when list refetches
-const [localStatus, setLocalStatus] = useState<Record<string, VendorLite['status']>>({});
-// HYDRATE overrides on first load
-useEffect(() => {
-  try {
-    const saved = JSON.parse(localStorage.getItem('lx_vendor_status_overrides') || '{}');
-    if (saved && typeof saved === 'object') setLocalStatus(saved);
-  } catch {}
-}, []);
-
-// PERSIST overrides whenever they change
-useEffect(() => {
-  try {
-    localStorage.setItem('lx_vendor_status_overrides', JSON.stringify(localStatus));
-  } catch {}
-}, [localStatus]);
+  const [mutating, setMutating] = useState<string | null>(null);
+  const [mutatingBidId, setMutatingBidId] = useState<string | null>(null);
 
   // sync URL
   useEffect(() => {
@@ -166,79 +121,48 @@ useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, status, kyc, page, includeArchived]);
 
+  // fetch list (server-truth)
   const fetchList = async () => {
-  setLoading(true);
-  setErr(null);
-  try {
-    const url = new URL(`${API_BASE}/admin/vendors`);
-    if (q) url.searchParams.set('search', q);
-    if (status !== 'all') url.searchParams.set('status', status);
-    if (kyc !== 'all') url.searchParams.set('kyc', kyc);
-    if (includeArchived) url.searchParams.set('includeArchived', 'true');
-    url.searchParams.set('page', String(page));
-    url.searchParams.set('limit', String(pageSize));
+    setLoading(true);
+    setErr(null);
+    try {
+      const url = new URL(`${API_BASE}/admin/vendors`);
+      if (q) url.searchParams.set('search', q);
+      if (status !== 'all') url.searchParams.set('status', status);
+      if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+      if (includeArchived) url.searchParams.set('includeArchived', 'true');
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('limit', String(pageSize));
 
-    const res = await fetch(url.toString(), {
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(url.toString(), {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const json = await res.json();
+      const json = await res.json();
+      const items: VendorLite[] =
+        Array.isArray(json?.items) ? json.items :
+        Array.isArray(json) ? json : [];
 
-    const items: VendorLite[] =
-      Array.isArray(json?.items) ? json.items :
-      Array.isArray(json) ? json : [];
+      const total = typeof json?.total === 'number' ? json.total : items.length;
+      const pg = typeof json?.page === 'number' ? json.page : page;
+      const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
 
-    const total = typeof json?.total === 'number' ? json.total : items.length;
-    const pg = typeof json?.page === 'number' ? json.page : page;
-    const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
-
-    setData({ items, total, page: pg, pageSize: ps });
-
-setApprovedCache(prev => {
-  const next = { ...prev };
-  for (const v of items) {
-    const s = String(v?.status || '').trim().toLowerCase();
-    const k = keyOf(v.walletAddress);
-    if (s !== 'approved') delete next[k];
-  }
-  return next;
-});
-
-// Merge server truth into local overrides; persist
-setLocalStatus(prev => {
-  let saved: Record<string, VendorLite['status']> = {};
-  try {
-    saved = JSON.parse(localStorage.getItem('lx_vendor_status_overrides') || '{}') || {};
-  } catch {}
-
-  const next = { ...saved, ...prev };
-  for (const v of items) {
-    const s = String(v?.status || '').trim().toLowerCase();
-    const k = keyOf(v.walletAddress);
-    // If server has a definitive status, let it win
-    if (s === 'approved' || s === 'rejected') {
-      next[k] = s as VendorLite['status'];
+      setData({ items, total, page: pg, pageSize: ps });
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to load vendors');
+      setData({ items: [], page: 1, pageSize, total: 0 });
+    } finally {
+      setLoading(false);
     }
-  }
-
-  // Ensure it’s saved even if prev was empty this run
-  try { localStorage.setItem('lx_vendor_status_overrides', JSON.stringify(next)); } catch {}
-  return next;
-});
-
-
-  } catch (e: any) {
-    setErr(e?.message || 'Failed to load vendors');
-    setData({ items: [], page: 1, pageSize, total: 0 });
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   useEffect(() => {
     if (role !== 'admin' || !hasJwt) return;
@@ -246,9 +170,12 @@ setLocalStatus(prev => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, hasJwt, q, status, kyc, page, pageSize, includeArchived]);
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil((data.total || 0) / pageSize)), [data.total, pageSize]);
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil((data.total || 0) / pageSize)),
+    [data.total, pageSize]
+  );
 
-  // --- Admin actions (existing) ---
+  // Admin actions — server only, then refetch
   const archiveVendor = async (wallet?: string) => {
     if (!wallet) return;
     if (!confirm('Archive this vendor?')) return;
@@ -257,6 +184,7 @@ setLocalStatus(prev => {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/archive`, {
         method: 'POST',
         credentials: 'include',
+        cache: 'no-store',
         headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -275,6 +203,7 @@ setLocalStatus(prev => {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, {
         method: 'POST',
         credentials: 'include',
+        cache: 'no-store',
         headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -294,6 +223,7 @@ setLocalStatus(prev => {
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}`, {
         method: 'DELETE',
         credentials: 'include',
+        cache: 'no-store',
         headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -305,44 +235,19 @@ setLocalStatus(prev => {
     }
   };
 
-  // --- ✅ OPTIMISTIC: Approve / Reject vendor ---
   const approveVendor = async (wallet?: string) => {
     if (!wallet) return;
     try {
       setMutating(keyOf(wallet));
-
-      // optimistic lock to Approved + persist
- setApprovedCache(prev => ({ ...prev, [keyOf(wallet)]: true }));
-setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
-      setData(prev => ({
-        ...prev,
- items: prev.items.map(x =>
-  keyOf(x.walletAddress) === keyOf(wallet) ? { ...x, status: 'approved' } : x
-),
-      }));
-
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-        },
+        cache: 'no-store',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      await fetchList(); // reconcile with server
+      await fetchList();
     } catch (e: any) {
-      // rollback optimistic state if request failed
-      setApprovedCache(prev => {
-        const copy = { ...prev }; delete copy[keyOf(wallet!)]; return copy;
-      });
-      setData(prev => ({
-        ...prev,
-        items: prev.items.map(x =>
-          x.walletAddress === wallet ? { ...x, status: 'pending' } : x
-        ),
-      }));
       alert(e?.message || 'Failed to approve vendor');
     } finally {
       setMutating(null);
@@ -354,31 +259,14 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
     if (!confirm('Reject this vendor?')) return;
     try {
       setMutating(keyOf(wallet));
-
- // optimistic: clear Approved flag + mark rejected
-setApprovedCache(prev => { const c = { ...prev }; delete c[keyOf(wallet)]; return c; });
-
-setData(prev => ({
-  ...prev,
-  items: prev.items.map(x =>
-    keyOf(x.walletAddress) === keyOf(wallet) ? { ...x, status: 'rejected' } : x
-  ),
-}));
-
-setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
-
-
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
-        },
+        cache: 'no-store',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      await fetchList(); // reconcile with server
+      await fetchList();
     } catch (e: any) {
       alert(e?.message || 'Failed to reject vendor');
     } finally {
@@ -386,13 +274,17 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
     }
   };
 
-  // --- Bids loader per vendor (uses /admin/bids?vendorWallet=...) ---
+  // Bids loader per vendor
   async function loadBidsForWallet(wallet?: string): Promise<VendorBid[]> {
     const w = (wallet || '').toLowerCase();
     if (!w) return [];
     const url = new URL(`${API_BASE}/admin/bids`);
     url.searchParams.set('vendorWallet', w);
-    const res = await fetch(url.toString(), { credentials: 'include', headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` } });
+    const res = await fetch(url.toString(), {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` },
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const arr = Array.isArray(json?.items) ? json.items : [];
@@ -406,17 +298,13 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
     }));
   }
 
-  // refresh the expanded vendor row after archive/delete
   async function refreshVendorRow(rowKey: string, wallet?: string) {
     setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: true, error: null, bids: [] } }));
     try {
       const bids = await loadBidsForWallet(wallet);
       setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: null, bids } }));
     } catch (e: any) {
-      setBidsByVendor(prev => ({
-        ...prev,
-        [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] },
-      }));
+      setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: false, error: e?.message || 'Failed to load bids', bids: [] } }));
     }
   }
 
@@ -424,7 +312,6 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
     setRowsOpen(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
     const opening = !rowsOpen[rowKey];
     if (!opening) return;
-
     if (!bidsByVendor[rowKey]) {
       setBidsByVendor(prev => ({ ...prev, [rowKey]: { loading: true, error: null, bids: [] } }));
       try {
@@ -512,8 +399,8 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
                 <th className="py-2 px-3">Status</th>
                 <th className="py-2 px-3">KYC</th>
                 <th className="py-2 px-3">Bids</th>
-                <th className="py-2 px-3">Contact</th>  
-                <th className="py-2 px-3">Address</th>   
+                <th className="py-2 px-3">Contact</th>
+                <th className="py-2 px-3">Address</th>
                 <th className="py-2 px-3">Total Awarded</th>
                 <th className="py-2 px-3">Last Bid</th>
                 <th className="py-2 px-3 w-64">Actions</th>
@@ -534,16 +421,12 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === keyOf(v.walletAddress);
-// ---- ROW FLAGS (authoritative) ----
-// Prefer local override using a normalized wallet key
-const wKey = keyOf(v.walletAddress);
-const effectiveStatus = String(localStatus[wKey] ?? v.status ?? '')
-  .trim()
-  .toLowerCase();
 
-const isApprovedVisual = effectiveStatus === 'approved';
-const isRejectedVisual = effectiveStatus === 'rejected';
-const isRejected = isRejectedVisual; // alias for any leftover refs
+                // ---- ROW FLAGS (server-truth only) ----
+                const effectiveStatus = String(v.status ?? '').trim().toLowerCase();
+                const isApprovedVisual = effectiveStatus === 'approved';
+                const isRejectedVisual = effectiveStatus === 'rejected';
+                // ---------------------------------------
 
                 return (
                   <>
@@ -551,178 +434,161 @@ const isRejected = isRejectedVisual; // alias for any leftover refs
                       <td className="py-2 px-3 font-medium">
                         {v.vendorName || '—'}
                         {v.archived && (
-                          <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">
-                            Archived
-                          </span>
+                          <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">Archived</span>
                         )}
                       </td>
-{/* Wallet */}
-<td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
 
-{/* Status */}
-<td className="py-2 px-3">
-  <StatusChip value={isRejectedVisual ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
-</td>
+                      {/* Wallet */}
+                      <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
 
-{/* KYC */}
-<td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
+                      {/* Status */}
+                      <td className="py-2 px-3">
+                        <StatusChip value={isRejectedVisual ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
+                      </td>
 
-{/* Bids */}
-<td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
+                      {/* KYC */}
+                      <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
 
-{/* Contact — clickable deep links */}
-<td className="py-2 px-3 text-xs leading-tight">
-  {/* Email */}
-  <div>
-    {v.email ? (
-<a
-  href={toMailto(v.email)!}
-  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
-  title="Email vendor"
->
-  {v.email}
-</a>
-    ) : '—'}
-  </div>
+                      {/* Bids */}
+                      <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
 
-  {/* Telegram (prefers @username, falls back to chat id) */}
-  <div>
-    {(v.telegramUsername || v.telegramChatId) ? (
- <a
-  href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
-  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
-  title="Open in Telegram"
-  target="_blank"
-  rel="noreferrer"
->
-  {v.telegramUsername
-    ? `@${String(v.telegramUsername).replace(/^@/, '')}`
-    : `tg:${v.telegramChatId}`}
-</a>
-    ) : '—'}
-  </div>
+                      {/* Contact */}
+                      <td className="py-2 px-3 text-xs leading-tight">
+                        <div>
+                          {v.email ? (
+                            <a href={toMailto(v.email)!} className="underline underline-offset-2 text-sky-600 hover:text-sky-700" title="Email vendor">
+                              {v.email}
+                            </a>
+                          ) : '—'}
+                        </div>
+                        <div>
+                          {(v.telegramUsername || v.telegramChatId) ? (
+                            <a
+                              href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
+                              className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
+                              title="Open in Telegram"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {v.telegramUsername ? `@${String(v.telegramUsername).replace(/^@/, '')}` : `tg:${v.telegramChatId}`}
+                            </a>
+                          ) : '—'}
+                        </div>
+                        <div>
+                          {(v.whatsapp || v.phone) ? (
+                            <a
+                              href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
+                              className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
+                              title="Open WhatsApp chat"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {v.whatsapp || v.phone}
+                            </a>
+                          ) : '—'}
+                        </div>
+                        <div>{v.phone || '—'}</div>
+                      </td>
 
-{/* WhatsApp (uses v.whatsapp or falls back to v.phone) */}
-<div>
-  {(v.whatsapp || v.phone) ? (
- <a
-  href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
-  className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
-  title="Open WhatsApp chat"
-  target="_blank"
-  rel="noreferrer"
->
-  {v.whatsapp || v.phone}
-</a>
-  ) : '—'}
-</div>
+                      {/* Address */}
+                      <td className="py-2 px-3 text-xs break-words">
+                        {v.addressText || v.address || '—'}
+                      </td>
 
-  {/* (Optional) Plain phone */}
-  <div>{v.phone || '—'}</div>
-</td>
+                      {/* Total Awarded */}
+                      <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
 
-{/* Address — now BEFORE totals/last bid */}
-<td className="py-2 px-3 text-xs break-words">
-  {v.addressText || v.address || '—'}
-</td>
+                      {/* Last Bid */}
+                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
 
-{/* Total Awarded */}
-<td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+                      {/* Actions */}
+                      <td className="py-2 px-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => toggleOpen(rowKey, v.walletAddress)}
+                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
+                          >
+                            {open ? 'Hide' : 'Info-Bids'}
+                          </button>
 
-{/* Last Bid */}
-<td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+                          {isApprovedVisual ? (
+                            <span
+                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
+                              title="Vendor is approved"
+                            >
+                              Approved
+                            </span>
+                          ) : isRejectedVisual ? (
+                            <>
+                              <button
+                                disabled
+                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
+                                title="Vendor is rejected"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                disabled
+                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
+                                title="Vendor is rejected"
+                                data-testid="reject-btn"
+                              >
+                                Rejected
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => approveVendor(v.walletAddress)}
+                                disabled={!v.walletAddress || busy}
+                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Approve vendor"
+                              >
+                                {busy ? 'Working…' : 'Approve'}
+                              </button>
 
-{/* Actions */}
-<td className="py-2 px-3">
-  <div className="flex flex-wrap items-center gap-2">
-    <button
-      onClick={() => toggleOpen(rowKey, v.walletAddress)}
-      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
-    >
-      {open ? 'Hide' : 'Info-Bids'}
-    </button>
+                              <button
+                                onClick={() => rejectVendor(v.walletAddress)}
+                                disabled={!v.walletAddress || busy}
+                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Reject vendor"
+                                data-testid="reject-btn"
+                              >
+                                {busy ? 'Working…' : 'Reject'}
+                              </button>
+                            </>
+                          )}
 
-    {isApprovedVisual ? (
-      // ── APPROVED: show badge only
-      <span
-        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-        title="Vendor is approved"
-      >
-        Approved
-      </span>
-    ) : isRejectedVisual ? (
-      // ── REJECTED: show both buttons but disabled/grey
-      <>
-        <button
-          disabled
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
-          title="Vendor is rejected"
-        >
-          Approve
-        </button>
-        <button
-          disabled
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
-          title="Vendor is rejected"
-          data-testid="reject-btn"
-        >
-          Rejected
-        </button>
-      </>
-    ) : (
-      // ── PENDING/OTHER: normal active buttons
-      <>
-        <button
-          onClick={() => approveVendor(v.walletAddress)}
-          disabled={!v.walletAddress || busy}
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Approve vendor"
-        >
-          {busy ? 'Working…' : 'Approve'}
-        </button>
+                          {!v.archived ? (
+                            <button
+                              onClick={() => archiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || busy}
+                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Archive vendor (soft hide)"
+                            >
+                              {busy ? 'Archiving…' : 'Archive'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => unarchiveVendor(v.walletAddress)}
+                              disabled={!v.walletAddress || busy}
+                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Unarchive vendor"
+                            >
+                              {busy ? 'Working…' : 'Unarchive'}
+                            </button>
+                          )}
 
-        <button
-          onClick={() => rejectVendor(v.walletAddress)}
-          disabled={!v.walletAddress || busy}
-          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Reject vendor"
-          data-testid="reject-btn"
-        >
-          {busy ? 'Working…' : 'Reject'}
-        </button>
-      </>
-    )}
-
-    {!v.archived ? (
-      <button
-        onClick={() => archiveVendor(v.walletAddress)}
-        disabled={!v.walletAddress || busy}
-        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        title="Archive vendor (soft hide)"
-      >
-        {busy ? 'Archiving…' : 'Archive'}
-      </button>
-    ) : (
-      <button
-        onClick={() => unarchiveVendor(v.walletAddress)}
-        disabled={!v.walletAddress || busy}
-        className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        title="Unarchive vendor"
-      >
-        {busy ? 'Working…' : 'Unarchive'}
-      </button>
-    )}
-
-    <button
-      onClick={() => deleteVendor(v.walletAddress)}
-      disabled={!v.walletAddress || busy}
-      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      title="Delete vendor profile (bids remain)"
-    >
-      {busy ? 'Deleting…' : 'Delete'}
-    </button>
-  </div>
-</td>
+                          <button
+                            onClick={() => deleteVendor(v.walletAddress)}
+                            disabled={!v.walletAddress || busy}
+                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete vendor profile (bids remain)"
+                          >
+                            {busy ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
 
                     {open && (
