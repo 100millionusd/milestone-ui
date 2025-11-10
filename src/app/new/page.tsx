@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getVendorProfile } from "@/lib/api";
+import Link from 'next/link';
 
 
 // ✅ Guard: only allow submit when the clicked button opts in
@@ -15,12 +16,38 @@ const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => 
   }
 };
 
+// Is the user's profile “complete” enough to allow proposal submit?
+// Require a name AND at least one contact (email OR phone/WhatsApp OR Telegram)
+const isProfileReady = (p: any) => {
+  if (!p) return false;
+
+  const hasName =
+    (typeof p.vendor_name === 'string' && p.vendor_name.trim() !== '') ||
+    (typeof p.vendorName === 'string' && p.vendorName.trim() !== '');
+
+  const hasEmail =
+    typeof p.email === 'string' && p.email.trim() !== '';
+
+  const hasPhone =
+    (typeof p.phone === 'string' && p.phone.trim() !== '') ||
+    (typeof p.whatsapp === 'string' && p.whatsapp.trim() !== '');
+
+  const hasTelegram =
+    (typeof p.telegram_username === 'string' && p.telegram_username.trim() !== '') ||
+    (typeof p.telegramUsername === 'string' && p.telegramUsername.trim() !== '') ||
+    (typeof p.telegram_chat_id === 'string' && p.telegram_chat_id.trim() !== '') ||
+    (typeof p.telegramChatId === 'string' && p.telegramChatId.trim() !== '');
+
+  return hasName && (hasEmail || hasPhone || hasTelegram);
+};
+
 export default function NewProposalPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [wallet, setWallet] = useState<string | null>(null);
   const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
   const [profile, setProfile] = useState<any>(null);
+  const profileReady = isProfileReady(profile);
 
   const [formData, setFormData] = useState({
     orgName: '',
@@ -64,6 +91,12 @@ useEffect(() => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    // Block submit until profile is complete
+if (!profileReady) {
+  alert('Please complete your profile first (email, phone/WhatsApp, or Telegram).');
+  setLoading(false);
+  return;
+}
 
     try {
       // Upload files to IPFS if any
@@ -117,6 +150,22 @@ useEffect(() => {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Proposal</h1>
+      {!profileReady && (
+  <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
+    <div className="font-medium mb-1">Complete your profile first</div>
+ <div className="text-sm">
+  Add your name and at least one contact method (email, phone/WhatsApp, or Telegram) to your profile.
+</div>
+    <div className="mt-3">
+      <Link
+        href="/vendor/profile"
+        className="inline-flex items-center px-3 py-2 rounded-lg border border-sky-600 text-sky-700 hover:bg-sky-50"
+      >
+        Open Profile
+      </Link>
+    </div>
+  </div>
+)}
 
       <form
         onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
@@ -223,17 +272,17 @@ useEffect(() => {
           <div>
 <label className="block text-sm font-medium mb-1">Telegram</label>
 <div className="flex items-center gap-3">
-  {/* Status + username */}
-  {(profile?.telegram_username || profile?.telegramUsername || profile?.telegram_chat_id) ? (
-    <span className="text-emerald-600 text-sm">
-      Connected
-      {profile?.telegram_username || profile?.telegramUsername
-        ? ` (@${profile.telegram_username ?? profile.telegramUsername})`
-        : ''}
-    </span>
-  ) : (
-    <span className="text-slate-500 text-sm">Not connected</span>
-  )}
+{/* Status + username (safer) */}
+{(profile?.telegram_username || profile?.telegramUsername || profile?.telegram_chat_id || profile?.telegramChatId) ? (
+  <span className="text-emerald-600 text-sm">
+    Connected
+    {(profile?.telegram_username || profile?.telegramUsername)
+      ? ` (@${String(profile.telegram_username ?? profile.telegramUsername).replace(/^@/, '')})`
+      : ''}
+  </span>
+) : (
+  <span className="text-slate-500 text-sm">Not connected</span>
+)}
 
   {/* Deep-link to connect */}
   {wallet ? (
@@ -274,7 +323,8 @@ useEffect(() => {
           <button
             type="submit"
             data-allow-submit="true"
-            disabled={loading}
+            disabled={loading || !profileReady}
+            title={!profileReady ? 'Complete your profile first' : undefined}
             className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
           >
             {loading ? 'Creating...' : 'Create Proposal'}
