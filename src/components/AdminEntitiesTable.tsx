@@ -38,6 +38,8 @@ export type ProposerAgg = {
   approvedCount: number;
   pendingCount: number;
   rejectedCount: number;
+  /** Count of archived proposals for this entity */
+  archivedCount?: number;
   totalBudgetUSD: number;
   lastActivity: string | null;
   archived?: boolean;
@@ -95,6 +97,24 @@ function normalizeRow(r: any): ProposerAgg {
     r.owner_telegram_chat_id ??
     null;
 
+  // Status counts can come grouped; prefer statusCounts/ status_counts if present
+  const sc = r.statusCounts || r.status_counts || {};
+  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
+  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? 0);
+  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? 0);
+  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? 0);
+
+  const proposalsCount = Number(
+    r.proposalsCount ??
+      r.proposals_count ??
+      sc.total ??
+      approvedCount + pendingCount + rejectedCount + archivedCount
+  );
+
+  // If backend doesn't explicitly flag archived entity, infer it:
+  // entity is archived when it has only archived proposals (no active approved/pending/rejected)
+  const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
+
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
     entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
@@ -111,10 +131,11 @@ function normalizeRow(r: any): ProposerAgg {
     telegramChatId,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
-    proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
-    approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
-    pendingCount: Number(r.pendingCount ?? r.pending_count ?? 0),
-    rejectedCount: Number(r.rejectedCount ?? r.rejected_count ?? 0),
+    proposalsCount,
+    approvedCount,
+    pendingCount,
+    rejectedCount,
+    archivedCount,
     totalBudgetUSD: Number(
       r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
     ),
@@ -126,7 +147,7 @@ function normalizeRow(r: any): ProposerAgg {
       r.createdAt ??
       r.created_at ??
       null,
-    archived: !!(r.archived ?? r.is_archived ?? false),
+    archived: !!(r.archived ?? r.is_archived ?? inferredArchived),
   };
 }
 
@@ -152,6 +173,7 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
         approvedCount: 0,
         pendingCount: 0,
         rejectedCount: 0,
+        archivedCount: 0,
         totalBudgetUSD: 0,
         lastActivity: null,
         archived: false,
@@ -160,14 +182,19 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     row.proposalsCount += 1;
     row.totalBudgetUSD += Number(p.amountUSD) || 0;
 
-    const st = p.status || 'pending';
+    const st = (p.status || 'pending').toLowerCase();
     if (st === 'approved') row.approvedCount += 1;
     else if (st === 'rejected') row.rejectedCount += 1;
+    else if (st === 'archived') row.archivedCount = (row.archivedCount || 0) + 1;
     else row.pendingCount += 1;
 
     const prev = row.lastActivity ? new Date(row.lastActivity).getTime() : 0;
     const cand = new Date(p.updatedAt || p.createdAt).getTime();
     if (cand > prev) row.lastActivity = p.updatedAt || p.createdAt;
+
+    // infer archived if all proposals for this entity are archived
+    const active = row.approvedCount + row.pendingCount + row.rejectedCount;
+    row.archived = !!(row.archived || (row.archivedCount || 0) > 0 && active === 0);
 
     byKey.set(key, row);
   }
