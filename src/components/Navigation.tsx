@@ -108,7 +108,7 @@ export default function Navigation() {
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-      { href: '/new', label: 'Submit Proposal' },
+      { href: '/new', label: 'Submit Proposal', roles: ['guest'] },
       {
         label: 'Admin',
         roles: ['admin'],
