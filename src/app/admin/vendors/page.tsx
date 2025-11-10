@@ -149,45 +149,56 @@ export default function AdminVendorsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, status, kyc, page, includeArchived]);
 
+  const fetchList = async () => {
+  setLoading(true);
+  setErr(null);
   try {
-  const url = new URL(`${API_BASE}/admin/vendors`);
-  if (q) url.searchParams.set('search', q);
-  if (status !== 'all') url.searchParams.set('status', status);
-  if (kyc !== 'all') url.searchParams.set('kyc', kyc);
-  if (includeArchived) url.searchParams.set('includeArchived', 'true');
-  url.searchParams.set('page', String(page));
-  url.searchParams.set('limit', String(pageSize));
+    const url = new URL(`${API_BASE}/admin/vendors`);
+    if (q) url.searchParams.set('search', q);
+    if (status !== 'all') url.searchParams.set('status', status);
+    if (kyc !== 'all') url.searchParams.set('kyc', kyc);
+    if (includeArchived) url.searchParams.set('includeArchived', 'true');
+    url.searchParams.set('page', String(page));
+    url.searchParams.set('limit', String(pageSize));
 
-  const res = await fetch(url.toString(), {
-    credentials: 'include',
-    headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}` }
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(url.toString(), {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('lx_jwt') || ''}`,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const json = await res.json();
-  const items = Array.isArray(json?.items) ? json.items : Array.isArray(json) ? json : [];
-  const total = typeof json?.total === 'number' ? json.total : items.length;
-  const pg = typeof json?.page === 'number' ? json.page : page;
-  const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
+    const json = await res.json();
 
-  setData({ items, total, page: pg, pageSize: ps });
+    const items: VendorLite[] =
+      Array.isArray(json?.items) ? json.items :
+      Array.isArray(json) ? json : [];
 
-  // 🔧 Clear optimistic "approved" flags for anything not approved on the server
-  setApprovedCache(prev => {
-    const next = { ...prev };
-    for (const v of items) {
-      const s = String(v?.status || '').toLowerCase();
-      if (s !== 'approved') delete next[v.walletAddress];
-    }
-    return next;
-  });
+    const total = typeof json?.total === 'number' ? json.total : items.length;
+    const pg = typeof json?.page === 'number' ? json.page : page;
+    const ps = typeof json?.pageSize === 'number' ? json.pageSize : pageSize;
 
-} catch (e: any) {
-  setErr(e?.message || 'Failed to load vendors');
-  setData({ items: [], page: 1, pageSize, total: 0 });
-} finally {
-  setLoading(false);
-}
+    setData({ items, total, page: pg, pageSize: ps });
+
+    // Reconcile optimistic "approved" cache with server truth
+    setApprovedCache(prev => {
+      const next = { ...prev };
+      for (const v of items) {
+        const s = String(v?.status || '').toLowerCase();
+        if (s !== 'approved') delete next[v.walletAddress];
+      }
+      return next;
+    });
+
+  } catch (e: any) {
+    setErr(e?.message || 'Failed to load vendors');
+    setData({ items: [], page: 1, pageSize, total: 0 });
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     if (role !== 'admin' || !hasJwt) return;
