@@ -491,8 +491,9 @@ for (const v of items) {
 const vStatus = (v?.status ?? '').toString().trim().toLowerCase();
 const isServerApproved = vStatus === 'approved';
 const isOptimisticApproved = !!approvedCache[v.walletAddress];
-const isApprovedVisual = isServerApproved || isOptimisticApproved; // for chip + gating
-const isRejected = vStatus === 'rejected';
+const isApprovedVisual = isServerApproved || isOptimisticApproved;
+// used by the Actions block you pasted
+const isRejectedVisual = vStatus === 'rejected';
 
                 return (
                   <>
