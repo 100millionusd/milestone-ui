@@ -12,7 +12,6 @@ import {
   adminUnarchiveEntity as unarchiveEntity,
   adminDeleteEntity as deleteEntity,
 } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
 
 /* ---------- Types ---------- */
 
@@ -240,8 +239,6 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [loading, setLoading] = useState(initial.length === 0);
   const [error, setError] = useState<string | null>(null);
 
-  const { toast } = useToast();
-
   // UI state
   const [q, setQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('entity');
@@ -374,21 +371,12 @@ if (!data.length) {
     try {
       if (nextArchived) await archiveEntity(payload);
       else await unarchiveEntity(payload);
-      toast({
-        title: nextArchived ? 'Archived' : 'Unarchived',
-        description:
-          r.entity ?? r.contactEmail ?? r.wallet ?? 'Entity updated',
-      });
     } catch (e: any) {
       // revert on error
       setRows((prev) =>
         prev.map((x) => (keyOf(x) === k ? { ...x, archived: !nextArchived } : x))
       );
-      toast({
-        title: 'Failed to update archive state',
-        description: e?.message || 'Unknown error',
-        variant: 'destructive',
-      });
+      alert(e?.message || 'Failed to update archive state');
     } finally {
       setBusy((b) => ({ ...b, [k]: false }));
     }
@@ -405,17 +393,9 @@ if (!data.length) {
     setRows((p) => p.filter((x) => keyOf(x) !== k));
     try {
       await deleteEntity(payload, 'hard');
-      toast({
-        title: 'Deleted',
-        description: r.entity ?? r.contactEmail ?? r.wallet ?? 'Entity removed',
-      });
     } catch (e: any) {
       setRows(prev); // revert
-      toast({
-      title: 'Failed to delete entity',
-      description: e?.message || 'Unknown error',
-      variant: 'destructive',
-    });
+      alert(e?.message || 'Failed to delete entity');
     } finally {
       setBusy((b) => ({ ...b, [k]: false }));
     }
