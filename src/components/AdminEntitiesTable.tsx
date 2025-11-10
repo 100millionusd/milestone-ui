@@ -484,7 +484,7 @@ if (!data.length) {
                         )}
                       </Td>
 
- {/* Contact (deep links) */}
+{/* Contact (deep links) */}
 <Td>
   {/* Email */}
   <div>
@@ -499,39 +499,42 @@ if (!data.length) {
     ) : '—'}
   </div>
 
-  {/* Telegram: prefer @username, fallback to chat id */}
+  {/* Telegram: prefer @owner username, fallback to owner chat id */}
   <div>
-    {(r.telegramUsername || r.telegramChatId) ? (
+    {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
       <a
-        href={toTelegramLink(r.telegramUsername, r.telegramChatId) || '#'}
+        href={toTelegramLink(
+          r.ownerTelegramUsername ?? r.telegramUsername,
+          r.ownerTelegramChatId ?? r.telegramChatId
+        ) || '#'}
         className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
         title="Open in Telegram"
         target="_blank"
         rel="noreferrer"
       >
-        {r.telegramUsername
-          ? `@${String(r.telegramUsername).replace(/^@/, '')}`
-          : `tg:${r.telegramChatId}`}
+        {(r.ownerTelegramUsername ?? r.telegramUsername)
+          ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/,'')}`
+          : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
       </a>
     ) : '—'}
   </div>
 
-  {/* WhatsApp: reuse the single phone field */}
+  {/* WhatsApp: prefer ownerPhone */}
   <div>
-    {r.whatsapp || r.phone ? (
+    {r.ownerPhone || r.whatsapp || r.phone ? (
       <a
-        href={toWhatsAppLink(r.whatsapp || r.phone) || '#'}
+        href={toWhatsAppLink(r.ownerPhone ?? r.whatsapp ?? r.phone) || '#'}
         className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
         title="Open WhatsApp"
         target="_blank"
         rel="noreferrer"
       >
-        {r.whatsapp || r.phone}
+        {r.ownerPhone ?? r.whatsapp ?? r.phone}
       </a>
     ) : '—'}
   </div>
 
-  {/* Address (unchanged) */}
+  {/* Address */}
   {r.address && (
     <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
       {r.address}
