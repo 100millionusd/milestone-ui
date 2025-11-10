@@ -488,12 +488,16 @@ for (const v of items) {
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
+// ---- ROW FLAGS (authoritative) ----
 const vStatus = (v?.status ?? '').toString().trim().toLowerCase();
 const isServerApproved = vStatus === 'approved';
 const isOptimisticApproved = !!approvedCache[v.walletAddress];
 const isApprovedVisual = isServerApproved || isOptimisticApproved;
-// used by the Actions block you pasted
+
+// we use BOTH names so any leftover refs won't crash
 const isRejectedVisual = vStatus === 'rejected';
+const isRejected = isRejectedVisual;
+// -----------------------------------
 
                 return (
                   <>
