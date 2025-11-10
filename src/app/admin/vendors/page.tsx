@@ -218,7 +218,7 @@ setApprovedCache(prev => {
     if (!wallet) return;
     if (!confirm('Archive this vendor?')) return;
     try {
-      setMutating(wallet);
+      setMutating(keyOf(wallet));
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/archive`, {
         method: 'POST',
         credentials: 'include',
@@ -236,7 +236,7 @@ setApprovedCache(prev => {
   const unarchiveVendor = async (wallet?: string) => {
     if (!wallet) return;
     try {
-      setMutating(wallet);
+      setMutating(keyOf(wallet));
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/unarchive`, {
         method: 'POST',
         credentials: 'include',
@@ -255,7 +255,7 @@ setApprovedCache(prev => {
     if (!wallet) return;
     if (!confirm('PERMANENTLY delete this vendor profile? Bids remain.')) return;
     try {
-      setMutating(wallet);
+      setMutating(keyOf(wallet));
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}`, {
         method: 'DELETE',
         credentials: 'include',
@@ -274,16 +274,16 @@ setApprovedCache(prev => {
   const approveVendor = async (wallet?: string) => {
     if (!wallet) return;
     try {
-      setMutating(wallet);
+      setMutating(keyOf(wallet));
 
       // optimistic lock to Approved + persist
  setApprovedCache(prev => ({ ...prev, [keyOf(wallet)]: true }));
 setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
       setData(prev => ({
         ...prev,
-        items: prev.items.map(x =>
-          x.walletAddress === wallet ? { ...x, status: 'approved' } : x
-        ),
+ items: prev.items.map(x =>
+  keyOf(x.walletAddress) === keyOf(wallet) ? { ...x, status: 'approved' } : x
+),
       }));
 
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/approve`, {
@@ -300,7 +300,7 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
     } catch (e: any) {
       // rollback optimistic state if request failed
       setApprovedCache(prev => {
-        const copy = { ...prev }; delete copy[wallet!]; return copy;
+        const copy = { ...prev }; delete copy[keyOf(wallet!)]; return copy;
       });
       setData(prev => ({
         ...prev,
@@ -318,7 +318,7 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
     if (!wallet) return;
     if (!confirm('Reject this vendor?')) return;
     try {
-      setMutating(wallet);
+      setMutating(keyOf(wallet));
 
  // optimistic: clear Approved flag + mark rejected
 setApprovedCache(prev => { const c = { ...prev }; delete c[keyOf(wallet)]; return c; });
@@ -498,7 +498,7 @@ setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
                 const rowKey = (v?.id || v?.walletAddress || `row-${idx}`) as string;
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
-                const busy = mutating === v.walletAddress;
+                const busy = mutating === keyOf(v.walletAddress);
 // ---- ROW FLAGS (authoritative) ----
 // Prefer local override using a normalized wallet key
 const wKey = keyOf(v.walletAddress);
