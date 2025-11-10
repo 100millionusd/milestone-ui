@@ -574,16 +574,18 @@ export default function AdminVendorsPage() {
           {busy ? 'Working…' : 'Approve'}
         </button>
 
-        {vStatus !== 'rejected' && (
-          <button
-            onClick={() => rejectVendor(v.walletAddress)}
-            disabled={!v.walletAddress || busy}
-            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Reject vendor"
-          >
-            {busy ? 'Working…' : 'Reject'}
-          </button>
-        )}
+ <button
+  onClick={() => { if (vStatus !== 'rejected') rejectVendor(v.walletAddress); }}
+  disabled={!v.walletAddress || busy || vStatus === 'rejected'}
+  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+    vStatus === 'rejected'
+      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+      : 'bg-rose-600 text-white hover:bg-rose-700'
+  } disabled:opacity-50 disabled:cursor-not-allowed`}
+  title={vStatus === 'rejected' ? 'Vendor is rejected' : 'Reject vendor'}
+>
+  {vStatus === 'rejected' ? 'Rejected' : (busy ? 'Working…' : 'Reject')}
+</button>
       </>
     ) : (
       <span
