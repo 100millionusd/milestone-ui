@@ -591,37 +591,55 @@ const isRejected = vStatus === 'rejected';
       {open ? 'Hide' : 'Info-Bids'}
     </button>
 
-    {!isApprovedVisual ? (
-      <>
- <button
-  onClick={() => approveVendor(v.walletAddress)}
-  disabled={!v.walletAddress || busy}
-  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-  title="Approve vendor"
->
-  {busy ? 'Working…' : 'Approve'}
-</button>
-
-<button
-  onClick={() => { if (!isRejected) rejectVendor(v.walletAddress); }}
-  disabled={!v.walletAddress || busy || isRejected}
-  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-    isRejected
-      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-      : 'bg-rose-600 text-white hover:bg-rose-700'
-  } disabled:opacity-50 disabled:cursor-not-allowed`}
-  title={isRejected ? 'Vendor is rejected' : 'Reject vendor'}
->
-  {isRejected ? 'Rejected' : (busy ? 'Working…' : 'Reject')}
-</button>
-      </>
-    ) : (
+    {isApprovedVisual ? (
+      // ── APPROVED: show badge only
       <span
         className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
         title="Vendor is approved"
       >
         Approved
       </span>
+    ) : isRejectedVisual ? (
+      // ── REJECTED: show both buttons but disabled/grey
+      <>
+        <button
+          disabled
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
+          title="Vendor is rejected"
+        >
+          Approve
+        </button>
+        <button
+          disabled
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
+          title="Vendor is rejected"
+          data-testid="reject-btn"
+        >
+          Rejected
+        </button>
+      </>
+    ) : (
+      // ── PENDING/OTHER: normal active buttons
+      <>
+        <button
+          onClick={() => approveVendor(v.walletAddress)}
+          disabled={!v.walletAddress || busy}
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Approve vendor"
+        >
+          {busy ? 'Working…' : 'Approve'}
+        </button>
+
+        <button
+          onClick={() => rejectVendor(v.walletAddress)}
+          disabled={!v.walletAddress || busy}
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Reject vendor"
+          data-testid="reject-btn"
+        >
+          {busy ? 'Working…' : 'Reject'}
+        </button>
+      </>
     )}
 
     {!v.archived ? (
