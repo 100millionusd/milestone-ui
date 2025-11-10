@@ -543,10 +543,21 @@ if (!data.length) {
 </Td>
 
 
-                      {/* Wallet */}
-                      <Td className="font-mono text-xs text-slate-700">
-                        {r.wallet ? `${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}` : '—'}
-                      </Td>
+ {/* Wallet — full + copy */}
+<Td className="font-mono text-xs text-slate-800 break-all">
+  <div className="flex items-center gap-2">
+    <span className="select-all">{r.wallet || '—'}</span>
+    {r.wallet && (
+      <button
+        onClick={() => navigator.clipboard.writeText(r.wallet!)}
+        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+        title="Copy wallet address"
+      >
+        Copy
+      </button>
+    )}
+  </div>
+</Td>
 
                       {/* Counts */}
                       <Td className="text-right">{r.proposalsCount ?? 0}</Td>
