@@ -353,11 +353,15 @@ if (!data.length) {
     return `/admin/proposals?${sp.toString()}`;
   }
 
-  // Payload for backend (id if present, otherwise the triple)
-  function toIdOrKey(r: ProposerAgg) {
-    if (r.id != null) return { id: r.id };
-    return { entity: r.entity, contactEmail: r.contactEmail, wallet: r.wallet };
-  }
+  // Payload for backend (id if present, otherwise the normalized triple)
+function toIdOrKey(r: ProposerAgg) {
+  if (r.id != null) return { id: r.id };
+  return {
+    org_name: r.entity ?? null,
+    contact: r.contactEmail ?? null,     // <- backend expects `contact`
+    owner_wallet: r.wallet ?? null,      // <- backend expects `owner_wallet`
+  };
+}
 
   async function onArchive(r: ProposerAgg, nextArchived: boolean) {
     const k = keyOf(r);
