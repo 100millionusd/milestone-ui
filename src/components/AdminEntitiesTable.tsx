@@ -365,7 +365,7 @@ if (!data.length) {
     const prev = rows;
     setRows((p) => p.filter((x) => keyOf(x) !== k));
     try {
-      await deleteEntity(payload);
+      await deleteEntity(payload, 'hard');
     } catch (e: any) {
       setRows(prev); // revert
       alert(e?.message || 'Failed to delete entity');

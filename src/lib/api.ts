@@ -1183,28 +1183,56 @@ export async function listProposers(): Promise<ProposerSummary[]> {
   }
 }
 
+/** Shapes we might receive from callers */
+type EntitySelector = {
+  entity?: string | null;
+  contactEmail?: string | null;
+  wallet?: string | null;
+
+  // legacy aliases we normalize below:
+  orgName?: string | null;
+  ownerEmail?: string | null;
+  ownerWallet?: string | null;
+  contact?: string | null;
+};
+
+/** Normalize to { entity, contactEmail, wallet } that the server expects */
+function normalizeSelector(sel: EntitySelector) {
+  return {
+    entity: sel.entity ?? sel.orgName ?? null,
+    contactEmail: sel.contactEmail ?? sel.ownerEmail ?? sel.contact ?? null,
+    wallet: sel.wallet ?? sel.ownerWallet ?? null,
+  };
+}
+
 /** Admin — entity actions */
 export async function adminArchiveEntity(sel: EntitySelector) {
-  // POST /admin/entities/archive  { orgName?, contactEmail?, ownerWallet? }
   return apiFetch("/admin/entities/archive", {
     method: "POST",
-    body: JSON.stringify(sel),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(normalizeSelector(sel)),
   });
 }
 
-export async function adminUnarchiveEntity(sel: EntitySelector) {
-  // POST /admin/entities/unarchive  { orgName?, contactEmail?, ownerWallet? }
+export async function adminUnarchiveEntity(
+  sel: EntitySelector,
+  toStatus: "pending" | "approved" | "rejected" = "pending"
+) {
   return apiFetch("/admin/entities/unarchive", {
     method: "POST",
-    body: JSON.stringify(sel),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...normalizeSelector(sel), toStatus }),
   });
 }
 
-export async function adminDeleteEntity(sel: EntitySelector) {
-  // DELETE /admin/entities  { orgName?, contactEmail?, ownerWallet? }
-  return apiFetch("/admin/entities", {
+export async function adminDeleteEntity(
+  sel: EntitySelector,
+  mode: "hard" | "soft" = "hard"
+) {
+  return apiFetch(`/admin/entities?mode=${mode}`, {
     method: "DELETE",
-    body: JSON.stringify(sel),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(normalizeSelector(sel)),
   });
 }
 
