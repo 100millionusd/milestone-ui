@@ -10,8 +10,18 @@ export type ProposerAgg = {
   address: string | null;
   city: string | null;
   country: string | null;
+
   contactEmail: string | null;
   ownerEmail: string | null;
+
+  /** phone also used for WhatsApp */
+  phone?: string | null;
+  whatsapp?: string | null;
+
+  /** Telegram */
+  telegramUsername?: string | null;
+  telegramChatId?: string | null;
+
   wallet: string | null;
   proposalsCount: number;
   approvedCount: number;
@@ -26,20 +36,54 @@ type Props = { initial?: ProposerAgg[] };
 /* ---------------- helpers ---------------- */
 
 function normalizeRow(r: any): ProposerAgg {
+  const contactEmail =
+    r.primaryEmail ??
+    r.primary_email ??
+    r.contactEmail ??
+    r.contact_email ??
+    r.ownerEmail ??
+    r.owner_email ??
+    null;
+
+  const ownerEmail = r.ownerEmail ?? r.owner_email ?? null;
+
+  // Phone / WhatsApp (reuse one field if backend doesn’t separate)
+  const phone =
+    r.phone ??
+    r.ownerPhone ??
+    r.owner_phone ??
+    r.whatsapp ??
+    null;
+
+  // Telegram username / chat id
+  const telegramUsername =
+    r.telegramUsername ??
+    r.telegram_username ??
+    r.ownerTelegramUsername ??
+    r.owner_telegram_username ??
+    null;
+
+  const telegramChatId =
+    r.telegramChatId ??
+    r.telegram_chat_id ??
+    r.ownerTelegramChatId ??
+    r.owner_telegram_chat_id ??
+    null;
+
   return {
     entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
     address: r.address ?? null,
     city: r.city ?? null,
     country: r.country ?? null,
-    contactEmail:
-      r.primaryEmail ??
-      r.primary_email ??
-      r.contactEmail ??
-      r.contact_email ??
-      r.ownerEmail ??
-      r.owner_email ??
-      null,
-    ownerEmail: r.ownerEmail ?? r.owner_email ?? null,
+    contactEmail,
+    ownerEmail,
+
+    phone,
+    whatsapp: phone, // reuse phone for WhatsApp
+
+    telegramUsername,
+    telegramChatId,
+
     wallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet ?? null,
     proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
     approvedCount: Number(r.approvedCount ?? r.approved_count ?? 0),
@@ -100,6 +144,28 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
   }
 
   return Array.from(byKey.values());
+}
+
+/** Contact deep links */
+function toMailto(email: string, subject?: string) {
+  const s = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  return `mailto:${email}${s}`;
+}
+function onlyDigits(s?: string | null) {
+  if (!s) return null;
+  const d = String(s).replace(/[^\d]/g, '');
+  return d || null;
+}
+function toWhatsAppLink(phone?: string | null, text?: string) {
+  const d = onlyDigits(phone);
+  if (!d) return null;
+  const q = text ? `?text=${encodeURIComponent(text)}` : '';
+  return `https://wa.me/${d}${q}`;
+}
+function toTelegramLink(username?: string | null, chatId?: string | null) {
+  if (username) return `https://t.me/${String(username).replace(/^@/, '')}`;
+  if (chatId)   return `tg://user?id=${String(chatId)}`;
+  return null;
 }
 
 /* ---------------- component ---------------- */
@@ -252,32 +318,54 @@ export default function AdminProposersClient({ initial = [] }: Props) {
                     )}
                   </Td>
 
-                  {/* Contact (contactEmail and/or ownerEmail) */}
-                  <Td>
-                    <div className="text-slate-700 space-y-0.5">
-                      {r.contactEmail ? (
-                        <Link
-                          href={`/admin/proposals?contactEmail=${encodeURIComponent(r.contactEmail)}`}
-                          className="hover:underline hover:text-cyan-700"
-                          title="Filter by primary contact"
-                        >
-                          {r.contactEmail}
-                        </Link>
-                      ) : null}
-                      {r.ownerEmail && r.ownerEmail !== r.contactEmail ? (
-                        <div>
-                          <Link
-                            href={`/admin/proposals?ownerEmail=${encodeURIComponent(r.ownerEmail)}`}
-                            className="hover:underline hover:text-cyan-700"
-                            title="Filter by owner email"
-                          >
-                            {r.ownerEmail}
-                          </Link>
-                        </div>
-                      ) : null}
-                      {!r.contactEmail && !r.ownerEmail ? '—' : null}
-                    </div>
-                  </Td>
+ {/* Contact — clickable deep links (Email / Telegram / WhatsApp) */}
+<Td>
+  {/* Email */}
+  <div>
+    {r.contactEmail || r.ownerEmail ? (
+      <a
+        href={toMailto(r.contactEmail || r.ownerEmail!)}
+        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+        title="Email"
+      >
+        {r.contactEmail || r.ownerEmail}
+      </a>
+    ) : '—'}
+  </div>
+
+  {/* Telegram: prefer @username, fallback to chat id */}
+  <div>
+    {(r.telegramUsername || r.telegramChatId) ? (
+      <a
+        href={toTelegramLink(r.telegramUsername, r.telegramChatId) || '#'}
+        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+        title="Open in Telegram"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {r.telegramUsername
+          ? `@${String(r.telegramUsername).replace(/^@/, '')}`
+          : `tg:${r.telegramChatId}`}
+      </a>
+    ) : '—'}
+  </div>
+
+  {/* WhatsApp: reuse the single phone field */}
+  <div>
+    {r.whatsapp || r.phone ? (
+      <a
+        href={toWhatsAppLink(r.whatsapp || r.phone) || '#'}
+        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+        title="Open WhatsApp"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {r.whatsapp || r.phone}
+      </a>
+    ) : '—'}
+  </div>
+</Td>
+
 
                   {/* Wallet (clickable, truncated) */}
                   <Td className="font-mono text-xs text-slate-700">
