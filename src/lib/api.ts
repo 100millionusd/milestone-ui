@@ -1102,7 +1102,7 @@ export async function rejectVendor(walletAddress: string) {
 /** ✅ Admin — list all proposers/entities (handles {items:[]}) */
 export async function listProposers(): Promise<ProposerSummary[]> {
   try {
-    const res = await apiFetch("/admin/proposers?includeArchived=true");
+    const res = await apiFetch("/admin/entities?includeArchived=true");
     const rows: any[] = Array.isArray(res?.items)
       ? res.items
       : (Array.isArray(res) ? res : []);
