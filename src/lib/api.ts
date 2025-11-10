@@ -1,5 +1,45 @@
 // src/lib/api.ts
 
+
+export interface ProposerSummary {
+  orgName: string;
+
+  // location
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+
+  // contacts (emails)
+  primaryEmail?: string | null;   // e.g. contactEmail
+  ownerEmail?: string | null;
+
+  // wallet
+  ownerWallet?: string | null;
+
+  // NEW: phones (we reuse one field for WhatsApp)
+  phone?: string | null;
+  whatsapp?: string | null;       // alias of phone
+
+  // NEW: Telegram (either username or chat id may be present)
+  telegramUsername?: string | null;
+  telegramChatId?: string | null;
+
+  // Also keep owner-prefixed variants (your server uses these names)
+  ownerPhone?: string | null;
+  ownerTelegramUsername?: string | null;
+  ownerTelegramChatId?: string | null;
+
+  // counts
+  proposalsCount: number;
+  approvedCount: number;
+  pendingCount: number;
+  rejectedCount: number;
+
+  // money + recency
+  totalBudgetUSD: number;
+  lastActivityAt?: string | null;
+}
+
 // ---- Types ----
 export interface Proposal {
   proposalId: number;
@@ -1059,49 +1099,86 @@ export async function rejectVendor(walletAddress: string) {
   });
 }
 
-/** ✅ NEW: Admin — list all proposers/entities (server should expose GET /admin/proposers) */
+/** ✅ Admin — list all proposers/entities (handles {items:[]}) */
 export async function listProposers(): Promise<ProposerSummary[]> {
   try {
-    const rows = await apiFetch("/admin/proposers");
+    const res = await apiFetch("/admin/proposers?includeArchived=true");
+    const rows: any[] = Array.isArray(res?.items)
+      ? res.items
+      : (Array.isArray(res) ? res : []);
 
-    // Defensive mapping for snake_case / alt keys from server
-    return (Array.isArray(rows) ? rows : []).map((r: any): ProposerSummary => ({
-      orgName: r.orgName ?? r.org_name ?? r.organization ?? "",
+    return rows.map((r: any): ProposerSummary => {
+      const phone =
+        r.ownerPhone ?? r.owner_phone ?? r.phone ?? null;
 
-      // address fields: accept either structured or one-line display from server
-      address: r.address ?? r.addr_display ?? null,
-      city: r.city ?? null,
-      country: r.country ?? null,
+      const tgUser =
+        r.ownerTelegramUsername ??
+        r.owner_telegram_username ??
+        r.telegramUsername ??
+        r.telegram_username ??
+        null;
 
-      primaryEmail:
-        r.primaryEmail ??
-        r.primary_email ??
-        r.contactEmail ??
-        r.contact_email ??
-        null,
-      ownerEmail:  r.ownerEmail  ?? r.owner_email  ?? null,
+      const tgChat =
+        r.ownerTelegramChatId ??
+        r.owner_telegram_chat_id ??
+        r.telegramChatId ??
+        r.telegram_chat_id ??
+        null;
 
-      // 👇 add wallet_address fallback here
-      ownerWallet: r.ownerWallet ?? r.owner_wallet ?? r.wallet_address ?? null,
+      return {
+        orgName: r.orgName ?? r.org_name ?? r.organization ?? "",
 
-      proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
-      approvedCount:  Number(r.approvedCount  ?? r.approved_count  ?? 0),
-      pendingCount:   Number(r.pendingCount   ?? r.pending_count   ?? 0),
-      rejectedCount:  Number(r.rejectedCount  ?? r.rejected_count  ?? 0),
+        // address fields
+        address: r.address ?? r.addr_display ?? null,
+        city: r.city ?? null,
+        country: r.country ?? null,
 
-      totalBudgetUSD: Number(
-        r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
-      ),
+        // emails
+        primaryEmail:
+          r.primaryEmail ??
+          r.primary_email ??
+          r.contactEmail ??
+          r.contact_email ??
+          null,
+        ownerEmail: r.ownerEmail ?? r.owner_email ?? null,
 
-      lastActivityAt:
-        r.lastActivityAt ??
-        r.last_activity_at ??
-        r.updatedAt ??
-        r.updated_at ??
-        null,
-    }));
+        // wallet (your route returns walletAddress)
+        ownerWallet:
+          r.ownerWallet ?? r.owner_wallet ?? r.walletAddress ?? r.wallet_address ?? null,
+
+        // phones/whatsapp
+        phone,
+        whatsapp: phone,
+        ownerPhone: phone,
+
+        // telegram (flat + owner-prefixed)
+        telegramUsername: tgUser,
+        telegramChatId: tgChat,
+        ownerTelegramUsername: tgUser,
+        ownerTelegramChatId: tgChat,
+
+        // counts
+        proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
+        approvedCount:  Number(r.approvedCount  ?? r.approved_count  ?? 0),
+        pendingCount:   Number(r.pendingCount   ?? r.pending_count   ?? 0),
+        rejectedCount:  Number(r.rejectedCount  ?? r.rejected_count  ?? 0),
+
+        totalBudgetUSD: Number(
+          r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
+        ),
+        lastActivityAt:
+          r.lastActivityAt ??
+          r.last_activity_at ??
+          r.lastProposalAt ??
+          r.last_proposal_at ??
+          r.updatedAt ??
+          r.updated_at ??
+          null,
+      };
+    });
   } catch (e) {
-    if (isAuthError(e)) return [];
+    // If 401/403 → [] (same behavior you already use elsewhere)
+    if ((e as any)?.message?.toString?.().match(/\b(401|403)\b/)) return [];
     throw e;
   }
 }
