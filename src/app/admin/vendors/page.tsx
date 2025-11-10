@@ -184,11 +184,10 @@ export default function AdminVendorsPage() {
 
     // Reconcile optimistic "approved" cache with server truth
     setApprovedCache(prev => {
-      const next = { ...prev };
-      for (const v of items) {
-        const s = String(v?.status || '').toLowerCase();
-        if (s !== 'approved') delete next[v.walletAddress];
-      }
+for (const v of items) {
+  const s = String(v?.status || '').trim().toLowerCase();
+  if (s !== 'approved') delete next[v.walletAddress];
+}
       return next;
     });
 
@@ -489,12 +488,11 @@ export default function AdminVendorsPage() {
                 const open = !!rowsOpen[rowKey];
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
-const vStatus = (v?.status ?? '').toString().toLowerCase();
+const vStatus = (v?.status ?? '').toString().trim().toLowerCase();
 const isServerApproved = vStatus === 'approved';
 const isOptimisticApproved = !!approvedCache[v.walletAddress];
 const isApprovedVisual = isServerApproved || isOptimisticApproved; // for chip + gating
 const isRejected = vStatus === 'rejected';
-
 
                 return (
                   <>
@@ -511,7 +509,9 @@ const isRejected = vStatus === 'rejected';
 <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
 
 {/* Status */}
-<td className="py-2 px-3"><StatusChip value={isApprovedVisual ? 'approved' : v.status} /></td>
+<td className="py-2 px-3">
+  <StatusChip value={isRejected ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
+</td>
 
 {/* KYC */}
 <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
