@@ -81,6 +81,7 @@ const toWhatsAppLink = (phone?: string | null) =>
 
 
 export default function AdminVendorsPage() {
+  const keyOf = (w?: string | null) => String(w || '').toLowerCase();
   const sp = useSearchParams();
   const router = useRouter();
   const hasJwt = typeof window !== 'undefined' && !!localStorage.getItem('lx_jwt');
@@ -135,6 +136,9 @@ export default function AdminVendorsPage() {
       localStorage.setItem('lx_approved_cache', JSON.stringify(approvedCache));
     } catch {}
   }, [approvedCache]);
+  // Local status overrides so UI state doesn't flap when list refetches
+const [localStatus, setLocalStatus] = useState<Record<string, VendorLite['status']>>({});
+
 
   // sync URL
   useEffect(() => {
@@ -182,14 +186,16 @@ export default function AdminVendorsPage() {
 
     setData({ items, total, page: pg, pageSize: ps });
 
-    // Reconcile optimistic "approved" cache with server truth
-    setApprovedCache(prev => {
-for (const v of items) {
-  const s = String(v?.status || '').trim().toLowerCase();
-  if (s !== 'approved') delete next[v.walletAddress];
-}
-      return next;
-    });
+setApprovedCache(prev => {
+  const next = { ...prev };
+  for (const v of items) {
+    const s = String(v?.status || '').trim().toLowerCase();
+    const k = keyOf(v.walletAddress);
+    if (s !== 'approved') delete next[k];
+  }
+  return next;
+});
+
 
   } catch (e: any) {
     setErr(e?.message || 'Failed to load vendors');
@@ -271,7 +277,8 @@ for (const v of items) {
       setMutating(wallet);
 
       // optimistic lock to Approved + persist
-      setApprovedCache(prev => ({ ...prev, [wallet]: true }));
+ setApprovedCache(prev => ({ ...prev, [keyOf(wallet)]: true }));
+setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'approved' }));
       setData(prev => ({
         ...prev,
         items: prev.items.map(x =>
@@ -313,14 +320,18 @@ for (const v of items) {
     try {
       setMutating(wallet);
 
-      // optimistic: clear Approved flag + mark rejected
-      setApprovedCache(prev => { const c = { ...prev }; delete c[wallet]; return c; });
-      setData(prev => ({
-        ...prev,
-        items: prev.items.map(x =>
-          x.walletAddress === wallet ? { ...x, status: 'rejected' } : x
-        ),
-      }));
+ // optimistic: clear Approved flag + mark rejected
+setApprovedCache(prev => { const c = { ...prev }; delete c[keyOf(wallet)]; return c; });
+
+setData(prev => ({
+  ...prev,
+  items: prev.items.map(x =>
+    keyOf(x.walletAddress) === keyOf(wallet) ? { ...x, status: 'rejected' } : x
+  ),
+}));
+
+setLocalStatus(prev => ({ ...prev, [keyOf(wallet)]: 'rejected' }));
+
 
       const res = await fetch(`${API_BASE}/admin/vendors/${encodeURIComponent(wallet)}/reject`, {
         method: 'POST',
@@ -489,15 +500,15 @@ for (const v of items) {
                 const bidsState = bidsByVendor[rowKey];
                 const busy = mutating === v.walletAddress;
 // ---- ROW FLAGS (authoritative) ----
-const vStatus = (v?.status ?? '').toString().trim().toLowerCase();
-const isServerApproved = vStatus === 'approved';
-const isOptimisticApproved = !!approvedCache[v.walletAddress];
-const isApprovedVisual = isServerApproved || isOptimisticApproved;
+// Prefer local override using a normalized wallet key
+const wKey = keyOf(v.walletAddress);
+const effectiveStatus = String(localStatus[wKey] ?? v.status ?? '')
+  .trim()
+  .toLowerCase();
 
-// we use BOTH names so any leftover refs won't crash
-const isRejectedVisual = vStatus === 'rejected';
-const isRejected = isRejectedVisual;
-// -----------------------------------
+const isApprovedVisual = effectiveStatus === 'approved';
+const isRejectedVisual = effectiveStatus === 'rejected';
+const isRejected = isRejectedVisual; // alias for any leftover refs
 
                 return (
                   <>
@@ -515,7 +526,7 @@ const isRejected = isRejectedVisual;
 
 {/* Status */}
 <td className="py-2 px-3">
-  <StatusChip value={isRejected ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
+  <StatusChip value={isRejectedVisual ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
 </td>
 
 {/* KYC */}
