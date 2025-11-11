@@ -493,6 +493,7 @@ function toIdOrKey(r: ProposerAgg) {
                 {pageRows.map((r, i) => {
                   const k = keyOf(r);
                   const isBusy = !!busy[k];
+                  const email = (r as any).email || r.contactEmail || r.ownerEmail || null;
                   return (
                     <tr
                       key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
