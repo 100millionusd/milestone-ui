@@ -73,6 +73,20 @@ const pickNonEmpty = (...vals: any[]) => {
   return null;
 };
 
+// Guess an email from any key that contains "email" or "contact" and has an "@"
+const guessEmail = (obj: any): string | null => {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const k of Object.keys(obj)) {
+    if (!/email|contact/i.test(k)) continue;
+    const v = (obj as any)[k];
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (s && s.includes('@')) return s;
+    }
+  }
+  return null;
+};
+
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
   const contactEmail = pickNonEmpty(
@@ -87,7 +101,7 @@ function normalizeRow(r: any): ProposerAgg {
   );
 
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
-  const email = contactEmail || ownerEmail || null;
+  const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
   // Phone / WhatsApp
   const phone =
@@ -512,7 +526,7 @@ function toIdOrKey(r: ProposerAgg) {
                 {pageRows.map((r, i) => {
                   const k = keyOf(r);
                   const isBusy = !!busy[k];
-                   const email = (r as any).email ?? r.contactEmail ?? r.ownerEmail ?? null;
+                   const email = r.email ?? r.contactEmail ?? r.ownerEmail ?? guessEmail(r as any) ?? null;
                   return (
                     <tr
                       key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
