@@ -62,18 +62,29 @@ type Props = { initial?: ProposerAgg[] };
 
 /* ---------- Helpers ---------- */
 
-function normalizeRow(r: any): ProposerAgg {
-  const contactEmail =
-    r.email ??                       // ← capture `email` from backend
-    r.primaryEmail ??
-    r.primary_email ??
-    r.contactEmail ??
-    r.contact_email ??
-    r.ownerEmail ??
-    r.owner_email ??
-    null;
+const pickNonEmpty = (...vals: any[]) => {
+  for (const v of vals) {
+    if (v !== undefined && v !== null) {
+      const s = String(v).trim();
+      if (s) return s;
+    }
+  }
+  return null;
+};
 
-  const ownerEmail = r.ownerEmail ?? r.owner_email ?? null;
+function normalizeRow(r: any): ProposerAgg {
+  const contactEmail = pickNonEmpty(
+    r.email,
+    r.primaryEmail,
+    r.primary_email,
+    r.contactEmail,
+    r.contact_email,
+    r.ownerEmail,
+    r.owner_email,
+    r.contact              // ← some backends send `contact`
+  );
+
+  const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
 
   // Phone / WhatsApp (same single field reused if backend doesn’t separate)
   const phone =
@@ -118,7 +129,7 @@ function normalizeRow(r: any): ProposerAgg {
 
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
-    entity: (r.orgName ?? r.entity ?? r.organization ?? '') || null,
+    entity: pickNonEmpty(r.entityName, r.orgName, r.entity, r.organization) || null,
     address: r.address ?? r.addr_display ?? null,
     city: r.city ?? null,
     country: r.country ?? null,
