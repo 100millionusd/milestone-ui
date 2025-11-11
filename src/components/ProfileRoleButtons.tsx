@@ -57,14 +57,13 @@ export default function ProfileRoleButtons({
         {busy === 'vendor' ? 'Saving…' : 'Save as Vendor (Submit a Bid)'}
       </button>
 
-      <button
-        type="button"
-        onClick={onSaveProposer}
-        disabled={busy !== null}
-        className="inline-flex items-center justify-center rounded-xl border border-gray-300 px-5 py-3 font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
-      >
-        {busy === 'proposer' ? 'Saving…' : 'Save as Entity (Submit a Proposal)'}
-      </button>
+ <button
+  onClick={onSaveProposer}
+  disabled={busy !== null}
+  className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-3 text-white font-semibold hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:opacity-60"
+>
+  {busy==='proposer' ? 'Saving…' : 'Save as Entity (Submit a Proposal)'}
+</button>
     </div>
   );
 }
