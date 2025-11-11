@@ -149,7 +149,7 @@ export type DigestResponse = {
 
 export interface AuthInfo {
   address?: string;
-  role: "admin" | "vendor" | "guest";
+  role: "admin" | "vendor" | "proposer" | "guest";
   vendorStatus?: "pending" | "approved" | "rejected";
 }
 
@@ -508,10 +508,15 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
     const r = await apiFetch(`/auth/role${q}`);
-    const serverRole = String(r?.role || '').toLowerCase();
-    const mapped: AuthInfo["role"] =
-      serverRole === 'admin' ? 'admin' :
-      r?.address ? 'vendor' : 'guest';
+    const serverRole = String(r?.role || "").toLowerCase();
+
+    let mapped: AuthInfo["role"];
+    if (serverRole === "admin" || serverRole === "vendor" || serverRole === "proposer") {
+      mapped = serverRole as AuthInfo["role"];
+    } else {
+      // fallback: if address present but unknown role → vendor; otherwise guest
+      mapped = r?.address ? "vendor" : "guest";
+    }
 
     return {
       address: r?.address ?? undefined,
@@ -590,11 +595,16 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
  *  3) Call loginWithSignature(address, signature)
  * Returns `{ role }` and stores `token` to localStorage (lx_jwt) for Bearer fallback.
  */
+/**
+ * Exchange a signed nonce for a JWT cookie (and token).
+ * Now role-aware: pass 'vendor' | 'proposer'. Defaults to 'vendor'.
+ */
 export async function loginWithSignature(
   address: string,
-  signature: string
+  signature: string,
+  role: 'vendor' | 'proposer' = 'vendor'
 ): Promise<{ role: AuthInfo["role"]; token: string | null }> {
-  const res = await apiFetch("/auth/login", {
+  const res = await apiFetch(`/auth/login?role=${role}`, {
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
@@ -603,10 +613,13 @@ export async function loginWithSignature(
   if (token) setJwt(token); // keep localStorage fallback in sync
 
   return {
-    role: (res?.role as AuthInfo["role"]) || "vendor",
+    role: (res?.role as AuthInfo["role"]) || (role as AuthInfo["role"]),
     token,
   };
 }
+
+export const loginVendor   = (addr: string, sig: string) => loginWithSignature(addr, sig, 'vendor');
+export const loginProposer = (addr: string, sig: string) => loginWithSignature(addr, sig, 'proposer');
 
 /* ==========================
    🆕 Agent Digest (dashboard)
