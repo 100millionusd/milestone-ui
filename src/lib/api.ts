@@ -503,6 +503,8 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
   });
 }
 
+// ---- Auth ----
+
 export async function saveProfile(data: {
   displayName?: string; email?: string; phone?: string; website?: string;
   address?: string; city?: string; country?: string;
@@ -526,7 +528,6 @@ export async function chooseRole(role: 'vendor' | 'proposer') {
   return r;
 }
 
-// ---- Auth ----
 export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
