@@ -8,7 +8,7 @@ type Busy = 'vendor' | 'proposer' | null;
 
 export default function ProfileRoleButtons({
   profile,
-  nextAfterVendor = '/vendor',
+  nextAfterVendor = '/vendor/profile',
   nextAfterProposer = '/new',
 }: {
   profile: any;
