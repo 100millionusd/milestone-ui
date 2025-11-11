@@ -64,6 +64,7 @@ type Props = { initial?: ProposerAgg[] };
 
 function normalizeRow(r: any): ProposerAgg {
   const contactEmail =
+    r.email ??                       // ← capture `email` from backend
     r.primaryEmail ??
     r.primary_email ??
     r.contactEmail ??
@@ -296,11 +297,12 @@ if (!data.length) {
     const n = q.trim().toLowerCase();
     if (!n) return base;
     return base.filter((r) => {
-      const hay = [
+       const hay = [
         r.entity,
         r.address,
         r.city,
         r.country,
+        (r as any).email,   // ← include raw email if present
         r.contactEmail,
         r.ownerEmail,
         r.wallet,
@@ -518,18 +520,18 @@ function toIdOrKey(r: ProposerAgg) {
 
 {/* Contact (deep links) */}
 <Td>
-  {/* Email */}
-  <div>
-    {r.contactEmail || r.ownerEmail ? (
-      <a
-        href={toMailto(r.contactEmail || r.ownerEmail!)}
-        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-        title="Email"
-      >
-        {r.contactEmail || r.ownerEmail}
-      </a>
-    ) : '—'}
-  </div>
+ {/* Email */}
+<div>
+  {email ? (
+    <a
+      href={toMailto(email, 'Proposal contact')}
+      className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+      title="Email"
+    >
+      {email}
+    </a>
+  ) : '—'}
+</div>
 
   {/* Telegram: prefer @owner username, fallback to owner chat id */}
   <div>
