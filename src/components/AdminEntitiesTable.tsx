@@ -172,13 +172,15 @@ function normalizeRow(r: any): ProposerAgg {
       r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
     ),
     lastActivity:
-      r.lastActivityAt ??
-      r.last_activity_at ??
-      r.updatedAt ??
-      r.updated_at ??
-      r.createdAt ??
-      r.created_at ??
-      null,
+  r.lastActivityAt ??
+  r.last_activity_at ??
+  r.lastProposalAt ??
+  r.updatedAt ??
+  r.updated_at ??
+  r.createdAt ??
+  r.created_at ??
+  null,
+
     archived: !!(r.archived ?? r.is_archived ?? inferredArchived),
   };
 }
