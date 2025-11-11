@@ -87,31 +87,6 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// Pick an email for an entity from proposals by wallet or org, preferring newest
-const pickEmailFromProposals = (ps: Proposal[], entity?: string | null, wallet?: string | null): string | null => {
-  if (!ps || !ps.length) return null;
-  const norm = (s?: string | null) => (s ? String(s).trim() : '');
-  const e = norm(entity);
-  const w = norm(wallet).toLowerCase();
-
-  const cand = ps.filter(p =>
-    (w && norm(p.ownerWallet).toLowerCase() === w) ||
-    (e && norm(p.orgName) === e)
-  );
-
-  cand.sort((a, b) => {
-    const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
-    const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
-    return tb - ta;
-  });
-
-  for (const p of cand) {
-    const email = pickNonEmpty(p.contact, p.ownerEmail);
-    if (email) return email;
-  }
-  return null;
-};
-
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
   const contactEmail = pickNonEmpty(
@@ -327,23 +302,6 @@ try {
 
 const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
 let data: ProposerAgg[] = arr.map(normalizeRow);
-
-// If any row lacks an email, patch it from proposals (server-agnostic)
-if (data.some(r => !(r.email || r.contactEmail || r.ownerEmail))) {
-  const proposals = await listProposals({ includeArchived: true });
-  data = data.map(r => {
-    const patched = r.email || r.contactEmail || r.ownerEmail
-      || pickEmailFromProposals(proposals, r.entity, r.wallet)
-      || guessEmail(r as any)
-      || null;
-
-    return {
-      ...r,
-      email: r.email ?? patched,
-      contactEmail: r.contactEmail ?? patched,
-    };
-  });
-}
 
 // Fallback to proposals aggregation if nothing came back
 if (!data.length) {
