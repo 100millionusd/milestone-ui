@@ -129,7 +129,7 @@ export default function VendorProfilePage() {
       // ✅ Safari-safe: uses api.ts helper so Bearer is sent if cookie is blocked
       await postJSON('/vendor/profile', payload);
 
-      router.push('/'); // or router.back();
+      router.push('/vendor/profile'); // or router.back();
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
@@ -283,7 +283,7 @@ export default function VendorProfilePage() {
         </p>
         <ProfileRoleButtons
           profile={profileForRole}
-          nextAfterVendor="/vendor"
+          nextAfterVendor="/vendor/profile"
           nextAfterProposer="/new"
         />
       </div>
