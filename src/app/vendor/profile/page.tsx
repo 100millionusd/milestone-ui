@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getVendorProfile, postJSON } from '@/lib/api'; // ✅ Safari-safe helpers
+import ProfileRoleButtons from '@/components/ProfileRoleButtons'; // ⬅️ ADD THIS IMPORT
 
 type Address = {
   line1: string;
@@ -138,9 +139,18 @@ export default function VendorProfilePage() {
 
   if (loading) return <main className="max-w-3xl mx-auto p-6">Loading…</main>;
 
+  // ⬇️ Build the object passed to the role buttons
+  const profileForRole = {
+    vendorName: p.vendorName,
+    email: p.email,
+    phone: p.phone,
+    website: normalizeWebsite(p.website || ''),
+    address: p.address,
+  };
+
   return (
     <main className="max-w-3xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Vendor Profile</h1>
+      <h1 className="text-2xl font-semibold">Profile</h1>
       {err && <div className="text-rose-700">{err}</div>}
 
       <form onSubmit={onSave} className="space-y-4">
@@ -241,7 +251,10 @@ export default function VendorProfilePage() {
               className="border rounded px-3 py-2 w-full"
               value={p.address.postalCode}
               onChange={(e) =>
-                setP({ ...p, address: { ...p.address, postalCode: e.target.value } })
+                setP({
+                  ...p,
+                  address: { ...p.address, postalCode: e.target.value },
+                })
               }
             />
           </label>
@@ -273,6 +286,19 @@ export default function VendorProfilePage() {
           </button>
         </div>
       </form>
+
+      {/* ⬇️ ADD THIS: role selection buttons under the form */}
+      <div className="pt-4 border-t">
+        <h2 className="text-lg font-semibold mb-2">Choose how you want to continue</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          Save your profile and continue either as a Vendor (submit bids) or as an Entity (submit proposals).
+        </p>
+        <ProfileRoleButtons
+          profile={profileForRole}
+          nextAfterVendor="/vendor"
+          nextAfterProposer="/new"
+        />
+      </div>
     </main>
   );
 }
