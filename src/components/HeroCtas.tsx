@@ -5,60 +5,54 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { loginAs } from '@/lib/auth';
 
-type Props = { className?: string };
-
-export default function HeroCtas({ className = '' }: Props) {
+export default function HeroCtas({ className = '' }: { className?: string }) {
   const router = useRouter();
-  const [loading, setLoading] = React.useState<'vendor' | 'proposer' | null>(null);
+  const [busy, setBusy] = React.useState<'vendor' | 'proposer' | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
   const onBid = async () => {
-    setErr(null); setLoading('vendor');
+    setErr(null); setBusy('vendor');
     try {
-      await loginAs('vendor');
-      router.push('/vendor');           // adjust if your vendor start page differs
+      await loginAs('vendor');          // ← role intent
+      router.push('/vendor');           // ← change if your vendor start route differs
     } catch (e: any) {
       setErr(e?.message || 'Login failed');
-    } finally {
-      setLoading(null);
-    }
+    } finally { setBusy(null); }
   };
 
   const onProposal = async () => {
-    setErr(null); setLoading('proposer');
+    setErr(null); setBusy('proposer');
     try {
-      await loginAs('proposer');
-      router.push('/proposals/new');    // adjust if your proposer start page differs
+      await loginAs('proposer');        // ← role intent
+      router.push('/proposals/new');    // ← change if your proposer start route differs
     } catch (e: any) {
       setErr(e?.message || 'Login failed');
-    } finally {
-      setLoading(null);
-    }
+    } finally { setBusy(null); }
   };
 
   return (
     <div className={className}>
-      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+      <div className="flex flex-col sm:flex-row gap-4 justify-center">
+        {/* LEFT button: was “Browse Projects” → now Submit a Bid */}
         <button
           onClick={onBid}
-          disabled={loading !== null}
-          className="inline-flex items-center justify-center px-5 py-3 rounded-md bg-cyan-500 hover:bg-cyan-400 text-white font-semibold disabled:opacity-60"
+          disabled={!!busy}
+          className="px-6 py-3 rounded-md bg-cyan-500 hover:bg-cyan-400 text-white font-semibold disabled:opacity-60"
         >
-          {loading === 'vendor' ? 'Connecting…' : 'Submit a Bid'}
+          {busy === 'vendor' ? 'Connecting…' : 'Submit a Bid'}
         </button>
 
+        {/* RIGHT button: Submit Proposal */}
         <button
           onClick={onProposal}
-          disabled={loading !== null}
-          className="inline-flex items-center justify-center px-5 py-3 rounded-md bg-white/10 hover:bg-white/20 text-white font-semibold border border-white/30 disabled:opacity-60"
+          disabled={!!busy}
+          className="px-6 py-3 rounded-md border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold disabled:opacity-60"
         >
-          {loading === 'proposer' ? 'Connecting…' : 'Submit Proposal'}
+          {busy === 'proposer' ? 'Connecting…' : 'Submit Proposal'}
         </button>
       </div>
 
-      {err && (
-        <p className="mt-3 text-sm text-red-300 text-center">{err}</p>
-      )}
+      {err && <p className="mt-3 text-sm text-red-300 text-center">{err}</p>}
     </div>
   );
 }
