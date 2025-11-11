@@ -503,6 +503,29 @@ export async function postJSON<T = any>(path: string, data: any, options: Reques
   });
 }
 
+export async function saveProfile(data: {
+  displayName?: string; email?: string; phone?: string; website?: string;
+  address?: string; city?: string; country?: string;
+  telegramChatId?: string; whatsapp?: string;
+}) {
+  return apiFetch(`/profile`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function chooseRole(role: 'vendor' | 'proposer') {
+  const r = await apiFetch(`/profile/choose-role?role=${encodeURIComponent(role)}`, {
+    method: 'POST',
+    body: JSON.stringify({ role }),
+  });
+  if (r?.token) {
+    // keep localStorage Bearer fallback in sync
+    const token = String(r.token);
+    try { localStorage.setItem('lx_jwt', token); } catch {}
+  }
+  // refresh local role cache if you use one
+  try { clearAuthRoleCache?.(); } catch {}
+  return r;
+}
+
 // ---- Auth ----
 export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo> {
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
