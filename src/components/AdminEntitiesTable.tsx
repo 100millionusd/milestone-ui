@@ -24,6 +24,7 @@ export type ProposerAgg = {
 
   contactEmail: string | null;
   ownerEmail: string | null;
+  email?: string | null; 
 
   /** phone also used for WhatsApp */
   phone?: string | null;
@@ -73,28 +74,30 @@ const pickNonEmpty = (...vals: any[]) => {
 };
 
 function normalizeRow(r: any): ProposerAgg {
+  // prefer any non-empty value for email
   const contactEmail = pickNonEmpty(
-    r.email,
+    r.email,                 // backend alias
     r.primaryEmail,
     r.primary_email,
     r.contactEmail,
     r.contact_email,
     r.ownerEmail,
     r.owner_email,
-    r.contact              // ← some backends send `contact`
+    r.contact                // some backends send `contact`
   );
 
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
+  const email = contactEmail || ownerEmail || null;
 
-  // Phone / WhatsApp (same single field reused if backend doesn’t separate)
+  // Phone / WhatsApp
   const phone =
     r.phone ??
     r.ownerPhone ??
     r.owner_phone ??
-    r.whatsapp ?? // if backend sent whatsapp directly, prefer it
+    r.whatsapp ??
     null;
 
-  // Telegram username / chat id: accept multiple key shapes
+  // Telegram
   const telegramUsername =
     r.telegramUsername ??
     r.telegram_username ??
@@ -109,36 +112,39 @@ function normalizeRow(r: any): ProposerAgg {
     r.owner_telegram_chat_id ??
     null;
 
-  // Status counts can come grouped; prefer statusCounts/ status_counts if present
+  // Status counts
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? 0);
+  const pendingCount  = Number(r.pendingCount  ?? r.pending_count  ?? sc.pending  ?? 0);
   const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? 0);
   const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? 0);
 
   const proposalsCount = Number(
     r.proposalsCount ??
-      r.proposals_count ??
-      sc.total ??
-      approvedCount + pendingCount + rejectedCount + archivedCount
+    r.proposals_count ??
+    sc.total ??
+    approvedCount + pendingCount + rejectedCount + archivedCount
   );
 
-  // If backend doesn't explicitly flag archived entity, infer it:
-  // entity is archived when it has only archived proposals (no active approved/pending/rejected)
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
-    entity: pickNonEmpty(r.entityName, r.orgName, r.entity, r.organization) || null,
-    address: r.address ?? r.addr_display ?? null,
-    city: r.city ?? null,
-    country: r.country ?? null,
+
+    // include entity_name from backend
+    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
+
+    // store email on the row in addition to contactEmail/ownerEmail
+    email,
     contactEmail,
     ownerEmail,
 
-    phone,
-    whatsapp: phone, // reuse phone for WhatsApp
+    address: r.address ?? r.addr_display ?? null,
+    city: r.city ?? null,
+    country: r.country ?? null,
 
+    phone,
+    whatsapp: phone,
     telegramUsername,
     telegramChatId,
 
@@ -506,7 +512,7 @@ function toIdOrKey(r: ProposerAgg) {
                 {pageRows.map((r, i) => {
                   const k = keyOf(r);
                   const isBusy = !!busy[k];
-                  const email = (r as any).email || r.contactEmail || r.ownerEmail || null;
+                   const email = (r as any).email ?? r.contactEmail ?? r.ownerEmail ?? null;
                   return (
                     <tr
                       key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
