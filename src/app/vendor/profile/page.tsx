@@ -153,7 +153,7 @@ export default function VendorProfilePage() {
       <h1 className="text-2xl font-semibold">Profile</h1>
       {err && <div className="text-rose-700">{err}</div>}
 
-      <form onSubmit={onSave} className="space-y-4">
+      <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Company / Vendor Name</div>
@@ -273,18 +273,6 @@ export default function VendorProfilePage() {
           </label>
         </div>
 
-        <div className="flex gap-2">
-          <button disabled={saving} className="px-4 py-2 rounded bg-slate-900 text-white">
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="px-4 py-2 rounded border"
-          >
-            Cancel
-          </button>
-        </div>
       </form>
 
       {/* ⬇️ ADD THIS: role selection buttons under the form */}
