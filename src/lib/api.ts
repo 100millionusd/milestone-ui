@@ -1916,6 +1916,28 @@ export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } |
   });
 }
 
+// ── PROPOSER / ENTITY PROFILE 
+export function getProposerProfile() {
+  return apiFetch('/proposer/profile', { method: 'GET' });
+}
+
+export function saveProposerProfile(profile: any) {
+  return apiFetch('/proposer/profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+}
+
+// Switch the preferred role stored in the JWT cookie (no implicit vendor seeding)
+export function switchRole(role: 'vendor' | 'proposer') {
+  return apiFetch('/auth/switch-role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+}
+
 // Save an ENTITY/PROPOSER profile (separate table/route)
 export async function saveProposerProfile(profile: any): Promise<{ ok: boolean }> {
   return apiFetch(`/proposer/profile`, {
