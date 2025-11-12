@@ -35,27 +35,13 @@ export default function ProfileRoleButtons({
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Persist vendor profile (only used for the vendor path)
-  async function saveVendorProfile() {
-    await postJSON('/vendor/profile', profile);
-  }
-
-  // ✅ NEW: persist proposer/entity profile to the correct endpoint
-  async function saveProposerProfile() {
-    await postJSON('/proposer/profile', profile);
-  }
-
-  async function switchRole(role: 'vendor' | 'proposer') {
-    await postJSON('/auth/switch-role', { role });
-  }
-
-   const handleVendor = async () => {
+  const handleVendor = async () => {
     if (saving !== 'idle') return;
     setErr(null);
     setSaving('vendor');
     try {
-      await saveVendorProfile(profile);     // ✅ save vendor profile
-      await switchRole('vendor');           // ✅ switch role
+      await saveVendorProfile(profile);     // ⬅️ use imported helper
+      await switchRole('vendor');           // ⬅️ use imported helper
       setOk(true);
       setTimeout(() => router.push(nextAfterVendor), 800);
     } catch (e: any) {
@@ -70,8 +56,8 @@ export default function ProfileRoleButtons({
     setErr(null);
     setSaving('proposer');
     try {
-      await saveProposerProfile(profile);   // ✅ save proposer profile (entity)
-      await switchRole('proposer');         // ✅ switch role (no vendor seeding)
+      await saveProposerProfile(profile);   // ⬅️ use imported helper
+      await switchRole('proposer');         // ⬅️ use imported helper
       router.push(`${nextAfterProposer}?flash=proposer-profile-saved`);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as proposer');
