@@ -160,11 +160,6 @@ export interface VendorSummary {
   bidsCount: number;
   lastBidAt?: string | null;
   totalAwardedUSD: number;
-}
-
-/** ✅ NEW: Admin proposer/entity rollup row */
-export interface ProposerSummary {
-  orgName: string;
 
   // location
   address?: string | null;
