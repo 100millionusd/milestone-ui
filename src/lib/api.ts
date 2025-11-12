@@ -1932,6 +1932,10 @@ export async function switchRole(role: 'vendor' | 'proposer') {
   });
 }
 
+export async function getProposerProfile() {
+  return apiFetch(`/proposer/profile`, { method: 'GET' });
+}
+
 export default {
   // auth
   getAuthRole,
@@ -2039,4 +2043,5 @@ export default {
   saveVendorProfile,
   saveProposerProfile,
   switchRole,
+  getProposerProfile,
 };
