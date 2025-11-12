@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getVendorProfile } from "@/lib/api";
+import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getProposerProfile, getVendorProfile } from "@/lib/api";
 import Link from 'next/link';
 
 
@@ -72,12 +72,29 @@ export default function NewProposalPage() {
   })();
 }, []);
 
-// Load vendor profile (to read telegram_username / telegram_chat_id)
+// Load proposer profile (fallback to vendor for older accounts)
 useEffect(() => {
   let alive = true;
   (async () => {
     try {
-      const p = await getVendorProfile();      // GET /vendor/profile
+      // primary: proposer (entity) profile
+      let p: any = await getProposerProfile();
+
+      // optional fallback: if proposer profile missing/empty, try vendor profile
+      const looksEmpty =
+        !p ||
+        (
+          (p.vendorName ?? p.vendor_name ?? '').trim() === '' &&
+          (p.email ?? '').trim() === '' &&
+          (p.phone ?? '').trim() === '' &&
+          !p.whatsapp &&
+          !p.telegram_chat_id && !p.telegramChatId
+        );
+
+      if (looksEmpty) {
+        try { p = await getVendorProfile(); } catch {}
+      }
+
       if (!alive) return;
       setProfile(p || null);
     } catch {
