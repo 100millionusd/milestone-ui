@@ -1,69 +1,92 @@
+// src/components/ProfileRoleButtons.tsx
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveProfile, chooseRole } from '@/lib/api';
+import { postJSON } from '@/lib/api';
 
-type Busy = 'vendor' | 'proposer' | null;
+type Address = {
+  line1?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+};
+
+type ProfileMin = {
+  vendorName?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: Address | string; // server ignores wallet field; takes it from JWT
+};
 
 export default function ProfileRoleButtons({
   profile,
-  nextAfterVendor = '/vendor/profile',
+  nextAfterVendor = '/vendor/dashboard',
   nextAfterProposer = '/new',
 }: {
-  profile: any;
+  profile: ProfileMin;
   nextAfterVendor?: string;
   nextAfterProposer?: string;
 }) {
-  const [busy, setBusy] = useState<Busy>(null);
   const router = useRouter();
+  const [busy, setBusy] = useState<'vendor' | 'proposer' | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  async function onSaveVendor() {
+  async function continueAsVendor() {
+    setErr(null);
+    setBusy('vendor');
     try {
-      setBusy('vendor');
-      await saveProfile(profile);        // save generic profile fields first
-      await chooseRole('vendor');        // seed vendor (pending) + set JWT roles
-      alert('Saved as Vendor. Waiting for admin approval.');
-      router.push(nextAfterVendor);
+      // 1) Save profile (server uses wallet from JWT)
+      await postJSON('/vendor/profile', profile);
+      // 2) Switch session role to vendor
+      await postJSON('/auth/switch-role', { role: 'vendor' });
+      // 3) Land on vendor dashboard
+      router.replace(nextAfterVendor);
     } catch (e: any) {
-      alert(`Vendor save failed: ${e?.message || e}`);
+      setErr(e?.message || 'Failed to continue as vendor');
     } finally {
       setBusy(null);
     }
   }
 
-  async function onSaveProposer() {
+  async function continueAsProposer() {
+    setErr(null);
+    setBusy('proposer');
     try {
-      setBusy('proposer');
-      await saveProfile(profile);        // save generic profile fields first
-      await chooseRole('proposer');      // mark as entity/proposer + set JWT roles
-      alert('Saved as Entity. You can now submit a proposal.');
-      router.push(nextAfterProposer);
+      // If you also save an "entity profile", do it here. Otherwise just switch.
+      await postJSON('/auth/switch-role', { role: 'proposer' });
+      router.replace(nextAfterProposer);
     } catch (e: any) {
-      alert(`Entity save failed: ${e?.message || e}`);
+      setErr(e?.message || 'Failed to continue as proposer');
     } finally {
       setBusy(null);
     }
   }
 
   return (
-    <div className="mt-6 flex flex-col sm:flex-row gap-3">
-      <button
-        type="button"
-        onClick={onSaveVendor}
-        disabled={busy !== null}
-        className="inline-flex items-center justify-center rounded-xl bg-cyan-600 px-5 py-3 text-white font-semibold hover:bg-cyan-700 disabled:opacity-60"
-      >
-        {busy === 'vendor' ? 'Saving…' : 'Save as Vendor (Submit a Bid)'}
-      </button>
+    <div className="space-y-3">
+      {err && <div className="text-rose-700">{err}</div>}
 
- <button
-  onClick={onSaveProposer}
-  disabled={busy !== null}
-  className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-3 text-white font-semibold hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:opacity-60"
->
-  {busy==='proposer' ? 'Saving…' : 'Save as Entity (Submit a Proposal)'}
-</button>
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={continueAsVendor}
+          disabled={busy !== null}
+          className="px-4 py-2 rounded-xl bg-blue-600 text-white disabled:opacity-60"
+        >
+          {busy === 'vendor' ? 'Saving…' : 'Continue as Vendor (Submit a Bid)'}
+        </button>
+
+        <button
+          type="button"
+          onClick={continueAsProposer}
+          disabled={busy !== null}
+          className="px-4 py-2 rounded-xl border"
+        >
+          {busy === 'proposer' ? 'Switching…' : 'Continue as Entity (Submit Proposal)'}
+        </button>
+      </div>
     </div>
   );
 }
