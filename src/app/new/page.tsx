@@ -72,29 +72,24 @@ export default function NewProposalPage() {
   })();
 }, []);
 
-// Load proposer profile (fallback to vendor for older accounts)
+// Load proposer profile (fallback to vendor if empty)
 useEffect(() => {
   let alive = true;
   (async () => {
     try {
-      // primary: proposer (entity) profile
       let p: any = await getProposerProfile();
-
-      // optional fallback: if proposer profile missing/empty, try vendor profile
       const looksEmpty =
         !p ||
         (
-          (p.vendorName ?? p.vendor_name ?? '').trim() === '' &&
-          (p.email ?? '').trim() === '' &&
-          (p.phone ?? '').trim() === '' &&
+          (String(p.vendorName ?? p.vendor_name ?? '').trim() === '') &&
+          (String(p.email ?? '').trim() === '') &&
+          (String(p.phone ?? '').trim() === '') &&
           !p.whatsapp &&
           !p.telegram_chat_id && !p.telegramChatId
         );
-
       if (looksEmpty) {
         try { p = await getVendorProfile(); } catch {}
       }
-
       if (!alive) return;
       setProfile(p || null);
     } catch {

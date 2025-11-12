@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { postJSON } from '@/lib/api';
+import { saveVendorProfile, saveProposerProfile, switchRole } from '@/lib/api';
 
 type Address = {
   line1?: string | null;
@@ -49,15 +49,15 @@ export default function ProfileRoleButtons({
     await postJSON('/auth/switch-role', { role });
   }
 
-  const handleVendor = async () => {
+   const handleVendor = async () => {
     if (saving !== 'idle') return;
     setErr(null);
     setSaving('vendor');
     try {
-      await saveVendorProfile();
-      await switchRole('vendor');
+      await saveVendorProfile(profile);     // ✅ save vendor profile
+      await switchRole('vendor');           // ✅ switch role
       setOk(true);
-      setTimeout(() => router.push(nextAfterVendor), 1000);
+      setTimeout(() => router.push(nextAfterVendor), 800);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as vendor');
     } finally {
@@ -65,29 +65,20 @@ export default function ProfileRoleButtons({
     }
   };
 
-// src/components/ProfileRoleButtons.tsx
-// ...imports & component setup unchanged...
-
-// REPLACE ONLY this function:
-const handleProposer = async () => {
-  if (saving !== 'idle') return;
-  setErr(null);
-  setSaving('proposer');
-  try {
-    // ✅ Save Entity profile (NOT /vendor/profile)
-    await postJSON('/proposer/profile', profile);
-
-    // ✅ Switch role to proposer (no vendor seeding)
-    await postJSON('/auth/switch-role', { role: 'proposer' });
-
-    // Go to proposal creation
-    router.push(nextAfterProposer);
-  } catch (e: any) {
-    setErr(e?.message || 'Failed to continue as proposer');
-  } finally {
-    setSaving('idle');
-  }
-};
+  const handleProposer = async () => {
+    if (saving !== 'idle') return;
+    setErr(null);
+    setSaving('proposer');
+    try {
+      await saveProposerProfile(profile);   // ✅ save proposer profile (entity)
+      await switchRole('proposer');         // ✅ switch role (no vendor seeding)
+      router.push(`${nextAfterProposer}?flash=proposer-profile-saved`);
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to continue as proposer');
+    } finally {
+      setSaving('idle');
+    }
+  };
 
   return (
     <div className="space-y-3">
