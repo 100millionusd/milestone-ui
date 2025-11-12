@@ -1911,6 +1911,32 @@ export function buildMilestonesFromSelection(
   return out;
 }
 
+// === Role/Profile helpers (Entity vs Vendor) ================================
+
+// Save a VENDOR profile explicitly
+export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } | any> {
+  return apiFetch(`/vendor/profile`, {
+    method: 'POST',
+    body: JSON.stringify(profile),
+  });
+}
+
+// Save an ENTITY/PROPOSER profile (separate table/route)
+export async function saveProposerProfile(profile: any): Promise<{ ok: boolean }> {
+  return apiFetch(`/proposer/profile`, {
+    method: 'POST',
+    body: JSON.stringify(profile),
+  });
+}
+
+// Switch the *preferred* role stored in the JWT cookie (no implicit vendor seeding)
+export async function switchRole(role: 'vendor' | 'proposer') {
+  return apiFetch(`/auth/switch-role`, {
+    method: 'POST',
+    body: JSON.stringify({ role }),
+  });
+}
+
 export default {
   // auth
   getAuthRole,
@@ -2014,4 +2040,8 @@ export default {
   createBidFromTemplate,
   splitIntoPhases,
   buildMilestonesFromSelection,
+
+  saveVendorProfile,
+  saveProposerProfile,
+  switchRole,
 };
