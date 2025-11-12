@@ -46,6 +46,18 @@ export default function VendorDashboard() {
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
+  // FLASH: read once from ?flash=...
+const [flash, setFlash] = useState<string | null>(null);
+useEffect(() => {
+  const u = new URL(window.location.href);
+  const f = u.searchParams.get('flash');
+  if (f) {
+    setFlash(f);
+    u.searchParams.delete('flash');
+    window.history.replaceState({}, '', u.toString());
+  }
+}, []);
+
   // Track archiving state per-bid to disable button and show "Archiving…"
   const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
   // Slide-over control for SendFunds (UI only)
@@ -260,6 +272,12 @@ export default function VendorDashboard() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+
+      {flash === 'vendor-profile-saved' && (
+  <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2">
+    Profile saved. An admin will review and approve your vendor account.
+  </div>
+)}
 
         {/* Overview */}
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">

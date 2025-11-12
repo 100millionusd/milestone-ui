@@ -129,7 +129,7 @@ export default function VendorProfilePage() {
       // ✅ Safari-safe: uses api.ts helper so Bearer is sent if cookie is blocked
       await postJSON('/vendor/profile', payload);
 
-      router.push('/vendor/profile'); // or router.back();
+    router.push('/vendor/dashboard?flash=vendor-profile-saved');
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
@@ -281,11 +281,11 @@ export default function VendorProfilePage() {
         <p className="text-sm text-slate-600 mb-3">
           Save your profile and continue either as a Vendor (submit bids) or as an Entity (submit proposals).
         </p>
-        <ProfileRoleButtons
-          profile={profileForRole}
-          nextAfterVendor="/vendor/profile"
-          nextAfterProposer="/new"
-        />
+ <ProfileRoleButtons
+  profile={profileForRole}
+  nextAfterVendor="/vendor/dashboard?flash=vendor-profile-saved"
+  nextAfterProposer="/new"
+/>
       </div>
     </main>
   );

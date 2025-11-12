@@ -8,16 +8,17 @@ import { postJSON } from '@/lib/api';
 type Address = {
   line1?: string | null;
   city?: string | null;
+  state?: string | null;
   postalCode?: string | null;
   country?: string | null;
 };
 
-type ProfileMin = {
+type Profile = {
   vendorName?: string;
   email?: string;
   phone?: string;
   website?: string;
-  address?: Address | string; // server ignores wallet field; takes it from JWT
+  address?: Address | string | null;
 };
 
 export default function ProfileRoleButtons({
@@ -25,66 +26,84 @@ export default function ProfileRoleButtons({
   nextAfterVendor = '/vendor/dashboard',
   nextAfterProposer = '/new',
 }: {
-  profile: ProfileMin;
+  profile: Profile;
   nextAfterVendor?: string;
   nextAfterProposer?: string;
 }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<'vendor' | 'proposer' | null>(null);
+  const [saving, setSaving] = useState<'idle' | 'vendor' | 'proposer'>('idle');
+  const [ok, setOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function continueAsVendor() {
+  async function saveProfile() {
+    // Persist the profile before switching roles
+    await postJSON('/vendor/profile', profile);
+  }
+
+  async function switchRole(role: 'vendor' | 'proposer') {
+    await postJSON('/auth/switch-role', { role });
+  }
+
+  const handleVendor = async () => {
+    if (saving !== 'idle') return;
     setErr(null);
-    setBusy('vendor');
+    setSaving('vendor');
     try {
-      // 1) Save profile (server uses wallet from JWT)
-      await postJSON('/vendor/profile', profile);
-      // 2) Switch session role to vendor
-      await postJSON('/auth/switch-role', { role: 'vendor' });
-      // 3) Land on vendor dashboard
-      router.replace(nextAfterVendor);
+      await saveProfile();
+      await switchRole('vendor');
+      setOk(true);
+      // brief pause so the user sees the confirmation
+      setTimeout(() => router.push(nextAfterVendor), 1000);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as vendor');
     } finally {
-      setBusy(null);
+      setSaving('idle');
     }
-  }
+  };
 
-  async function continueAsProposer() {
+  const handleProposer = async () => {
+    if (saving !== 'idle') return;
     setErr(null);
-    setBusy('proposer');
+    setSaving('proposer');
     try {
-      // If you also save an "entity profile", do it here. Otherwise just switch.
-      await postJSON('/auth/switch-role', { role: 'proposer' });
-      router.replace(nextAfterProposer);
+      await saveProfile();
+      await switchRole('proposer');
+      router.push(nextAfterProposer);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as proposer');
     } finally {
-      setBusy(null);
+      setSaving('idle');
     }
-  }
+  };
 
   return (
     <div className="space-y-3">
-      {err && <div className="text-rose-700">{err}</div>}
+      {ok && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2">
+          Profile saved. An admin will review and approve your vendor account.
+        </div>
+      )}
+      {err && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">{err}</div>
+      )}
 
       <div className="flex flex-wrap gap-3">
+        {/* Vendor CTA */}
         <button
-          type="button"
-          onClick={continueAsVendor}
-          disabled={busy !== null}
-          className="px-4 py-2 rounded-xl bg-blue-600 text-white disabled:opacity-60"
+          onClick={handleVendor}
+          disabled={saving !== 'idle'}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
         >
-          {busy === 'vendor' ? 'Saving…' : 'Continue as Vendor (Submit a Bid)'}
+          Continue as Vendor (Submit a Bid)
         </button>
 
+        {/* Proposer CTA — PURPLE */}
         <button
-          type="button"
-          onClick={continueAsProposer}
-          disabled={busy !== null}
-          className="px-4 py-2 rounded-xl border"
+          onClick={handleProposer}
+          disabled={saving !== 'idle'}
+          className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
         >
-          {busy === 'proposer' ? 'Switching…' : 'Continue as Entity (Submit Proposal)'}
+          Continue as Entity (Submit Proposal)
         </button>
       </div>
     </div>
