@@ -35,9 +35,14 @@ export default function ProfileRoleButtons({
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function saveProfile() {
-    // Persist the profile before switching roles
+  // Persist vendor profile (only used for the vendor path)
+  async function saveVendorProfile() {
     await postJSON('/vendor/profile', profile);
+  }
+
+  // ✅ NEW: persist proposer/entity profile to the correct endpoint
+  async function saveProposerProfile() {
+    await postJSON('/proposer/profile', profile);
   }
 
   async function switchRole(role: 'vendor' | 'proposer') {
@@ -49,10 +54,9 @@ export default function ProfileRoleButtons({
     setErr(null);
     setSaving('vendor');
     try {
-      await saveProfile();
+      await saveVendorProfile();
       await switchRole('vendor');
       setOk(true);
-      // brief pause so the user sees the confirmation
       setTimeout(() => router.push(nextAfterVendor), 1000);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as vendor');
@@ -66,7 +70,7 @@ export default function ProfileRoleButtons({
     setErr(null);
     setSaving('proposer');
     try {
-      await saveProfile();
+      await saveProposerProfile();   // ✅ save as ENTITY (not vendor)
       await switchRole('proposer');
       router.push(nextAfterProposer);
     } catch (e: any) {
@@ -88,7 +92,6 @@ export default function ProfileRoleButtons({
       )}
 
       <div className="flex flex-wrap gap-3">
-        {/* Vendor CTA */}
         <button
           onClick={handleVendor}
           disabled={saving !== 'idle'}
@@ -97,7 +100,6 @@ export default function ProfileRoleButtons({
           Continue as Vendor (Submit a Bid)
         </button>
 
-        {/* Proposer CTA — PURPLE */}
         <button
           onClick={handleProposer}
           disabled={saving !== 'idle'}
