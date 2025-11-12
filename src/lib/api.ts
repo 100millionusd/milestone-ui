@@ -1924,16 +1924,19 @@ export async function saveProposerProfile(profile: any): Promise<{ ok: boolean }
   });
 }
 
+// Read the ENTITY/PROPOSER profile
+export async function getProposerProfile(): Promise<any> {
+  return apiFetch(`/proposer/profile`, {
+    method: 'GET',
+  });
+}
+
 // Switch the *preferred* role stored in the JWT cookie (no implicit vendor seeding)
 export async function switchRole(role: 'vendor' | 'proposer') {
   return apiFetch(`/auth/switch-role`, {
     method: 'POST',
     body: JSON.stringify({ role }),
   });
-}
-
-export async function getProposerProfile() {
-  return apiFetch(`/proposer/profile`, { method: 'GET' });
 }
 
 export default {
