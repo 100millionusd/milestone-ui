@@ -65,20 +65,29 @@ export default function ProfileRoleButtons({
     }
   };
 
-  const handleProposer = async () => {
-    if (saving !== 'idle') return;
-    setErr(null);
-    setSaving('proposer');
-    try {
-      await saveProposerProfile();   // ✅ save as ENTITY (not vendor)
-      await switchRole('proposer');
-      router.push(nextAfterProposer);
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to continue as proposer');
-    } finally {
-      setSaving('idle');
-    }
-  };
+// src/components/ProfileRoleButtons.tsx
+// ...imports & component setup unchanged...
+
+// REPLACE ONLY this function:
+const handleProposer = async () => {
+  if (saving !== 'idle') return;
+  setErr(null);
+  setSaving('proposer');
+  try {
+    // ✅ Save Entity profile (NOT /vendor/profile)
+    await postJSON('/proposer/profile', profile);
+
+    // ✅ Switch role to proposer (no vendor seeding)
+    await postJSON('/auth/switch-role', { role: 'proposer' });
+
+    // Go to proposal creation
+    router.push(nextAfterProposer);
+  } catch (e: any) {
+    setErr(e?.message || 'Failed to continue as proposer');
+  } finally {
+    setSaving('idle');
+  }
+};
 
   return (
     <div className="space-y-3">
