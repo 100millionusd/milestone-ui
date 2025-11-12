@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getProposerProfile, getVendorProfile } from "@/lib/api";
+import { createProposal, uploadFileToIPFS, getAuthRoleOnce, getProposerProfile } from "@/lib/api";
 import Link from 'next/link';
 
 
@@ -48,6 +48,18 @@ export default function NewProposalPage() {
   const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
   const [profile, setProfile] = useState<any>(null);
   const profileReady = isProfileReady(profile);
+  const [flash, setFlash] = useState<string | null>(null);
+
+useEffect(() => {
+  const u = new URL(window.location.href);
+  const f = u.searchParams.get('flash');
+  if (f) {
+    setFlash(f);
+    u.searchParams.delete('flash');
+    window.history.replaceState({}, '', u.toString());
+  }
+}, []);
+
 
   const [formData, setFormData] = useState({
     orgName: '',
@@ -77,23 +89,13 @@ useEffect(() => {
   let alive = true;
   (async () => {
     try {
-      let p: any = await getProposerProfile();
-      const looksEmpty =
-        !p ||
-        (
-          (String(p.vendorName ?? p.vendor_name ?? '').trim() === '') &&
-          (String(p.email ?? '').trim() === '') &&
-          (String(p.phone ?? '').trim() === '') &&
-          !p.whatsapp &&
-          !p.telegram_chat_id && !p.telegramChatId
-        );
-      if (looksEmpty) {
-        try { p = await getVendorProfile(); } catch {}
-      }
+      const p = await getProposerProfile();
       if (!alive) return;
       setProfile(p || null);
-    } catch {
+      console.log('[new] proposer profile →', p);
+    } catch (e) {
       if (!alive) return;
+      console.warn('[new] proposer profile error', e);
       setProfile(null);
     }
   })();
@@ -162,6 +164,11 @@ if (!profileReady) {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Proposal</h1>
+      {flash === 'proposer-profile-saved' && (
+  <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-700">
+    Profile saved. You can submit your proposal now.
+  </div>
+)}
       {!profileReady && (
   <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
     <div className="font-medium mb-1">Complete your profile first</div>
@@ -170,7 +177,7 @@ if (!profileReady) {
 </div>
     <div className="mt-3">
       <Link
-        href="/vendor/profile"
+        href="/proposer/profile"
         className="inline-flex items-center px-3 py-2 rounded-lg border border-sky-600 text-sky-700 hover:bg-sky-50"
       >
         Open Profile
@@ -179,10 +186,14 @@ if (!profileReady) {
   </div>
 )}
 
-      <form
-        onSubmit={(e) => { allowOnlyExplicitSubmit(e); handleSubmit(e); }} // ✅ guard + handler
-        className="space-y-6"
-      >
+ <form
+  onSubmit={(e) => {
+    allowOnlyExplicitSubmit(e);
+    if (e.defaultPrevented) return;
+    handleSubmit(e);
+  }}
+  className="space-y-6"
+>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Organization Name *</label>
