@@ -1924,10 +1924,11 @@ export async function saveProposerProfile(profile: any): Promise<{ ok: boolean }
   });
 }
 
-// Read the ENTITY/PROPOSER profile
+// GET the ENTITY/PROPOSER profile
 export async function getProposerProfile(): Promise<any> {
   return apiFetch(`/proposer/profile`, {
-    method: 'GET',
+    // keep no-store to avoid stale reads after saving
+    cache: 'no-store' as any
   });
 }
 
