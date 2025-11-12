@@ -40,8 +40,8 @@ export default function ProfileRoleButtons({
     setErr(null);
     setSaving('vendor');
     try {
-      await saveVendorProfile(profile);     // ⬅️ use imported helper
-      await switchRole('vendor');           // ⬅️ use imported helper
+      await saveVendorProfile(profile);
+      await switchRole('vendor');
       setOk(true);
       setTimeout(() => router.push(nextAfterVendor), 800);
     } catch (e: any) {
@@ -56,8 +56,8 @@ export default function ProfileRoleButtons({
     setErr(null);
     setSaving('proposer');
     try {
-      await saveProposerProfile(profile);   // ⬅️ use imported helper
-      await switchRole('proposer');         // ⬅️ use imported helper
+      await saveProposerProfile(profile);
+      await switchRole('proposer');
       router.push(`${nextAfterProposer}?flash=proposer-profile-saved`);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as proposer');
@@ -79,6 +79,7 @@ export default function ProfileRoleButtons({
 
       <div className="flex flex-wrap gap-3">
         <button
+          type="button"                    // ← added
           onClick={handleVendor}
           disabled={saving !== 'idle'}
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
@@ -87,6 +88,7 @@ export default function ProfileRoleButtons({
         </button>
 
         <button
+          type="button"                    // ← added
           onClick={handleProposer}
           disabled={saving !== 'idle'}
           className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
