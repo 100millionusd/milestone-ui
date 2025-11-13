@@ -18,6 +18,12 @@ export default function ProposerProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [debug, setDebug] = useState<string[]>([]);
+
+  const addDebug = (message: string) => {
+    console.log(`🔍 DEBUG: ${message}`);
+    setDebug(prev => [...prev, `${new Date().toISOString()}: ${message}`]);
+  };
 
   const [form, setForm] = useState<{
     vendorName: string;
@@ -39,26 +45,33 @@ export default function ProposerProfilePage() {
     (async () => {
       try {
         setLoading(true);
+        addDebug('Starting to load profile...');
+        
         const p = await getProposerProfile();
-        console.log('🔄 Profile data from API:', p);
+        addDebug(`Received profile data: ${JSON.stringify(p)}`);
         
-        if (!alive) return;
+        if (!alive) {
+          addDebug('Component unmounted, skipping state update');
+          return;
+        }
         
-        if (p) {
-          // Parse address from addressText if needed
+        if (p && typeof p === 'object') {
+          addDebug('Profile data exists, parsing...');
+          
           let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
           
+          // Handle address data
           if (p.address && typeof p.address === 'object') {
-            // Use the address object if it exists
+            addDebug('Using address object from response');
             address = {
               line1: p.address.line1 || '',
               city: p.address.city || '',
               state: p.address.state || '',
-              postalCode: p.address.postalCode || '',
+              postalCode: p.address.postalCode || p.address.postal_code || '',
               country: p.address.country || '',
             };
           } else if (p.addressText) {
-            // Parse address from addressText string
+            addDebug('Parsing address from addressText');
             const parts = p.addressText.split(', ');
             if (parts.length >= 3) {
               address = {
@@ -66,24 +79,34 @@ export default function ProposerProfilePage() {
                 city: parts[1] || '',
                 postalCode: parts[2] || '',
                 country: parts[3] || '',
-                state: '', // Not in addressText
+                state: '',
               };
             }
           }
 
-          setForm({
-            vendorName: p.vendorName || '', // Use vendorName directly
+          const newForm = {
+            vendorName: p.vendorName || p.vendor_name || '',
             email: p.email || '',
             phone: p.phone || '',
             website: p.website || '',
             address,
-          });
+          };
+
+          addDebug(`Setting form with: ${JSON.stringify(newForm)}`);
+          setForm(newForm);
+          addDebug('Form state updated successfully');
+        } else {
+          addDebug('No profile data found or invalid format');
         }
       } catch (error: any) {
         if (!alive) return;
+        addDebug(`Error loading profile: ${error.message}`);
         console.error('Failed to load profile:', error);
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+          addDebug('Loading completed');
+        }
       }
     })();
     return () => { alive = false; };
@@ -100,31 +123,39 @@ export default function ProposerProfilePage() {
 
     setSaving(true); 
     setErr(null);
+    addDebug('Starting save process...');
     
     try {
-      console.log('💾 Saving profile:', form);
+      addDebug(`Form data to save: ${JSON.stringify(form)}`);
       
-      // Prepare data exactly as backend expects
+      // Prepare data for API
       const profileData = {
-        vendorName: form.vendorName,
-        email: form.email,
-        phone: form.phone,
-        website: form.website,
-        address: form.address, // Send as object
+        vendorName: form.vendorName.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        website: form.website.trim(),
+        address: form.address,
       };
+
+      addDebug(`Sending to API: ${JSON.stringify(profileData)}`);
       
       const result = await saveProposerProfile(profileData);
-      console.log('✅ Profile save result:', result);
+      addDebug(`Save API response: ${JSON.stringify(result)}`);
       
+      addDebug('Setting role to proposer...');
       await chooseRole('proposer');
-      console.log('✅ Role set to proposer');
+      addDebug('Role set successfully');
       
+      addDebug('Redirecting to /new...');
       router.push('/new?flash=proposer-profile-saved');
+      
     } catch (e: any) {
-      console.error('❌ Save error:', e);
-      setErr(e?.message || 'Failed to save entity profile');
+      const errorMsg = e?.message || 'Failed to save entity profile';
+      addDebug(`Save error: ${errorMsg}`);
+      setErr(errorMsg);
     } finally {
       setSaving(false);
+      addDebug('Save process completed');
     }
   };
 
@@ -149,6 +180,18 @@ export default function ProposerProfilePage() {
           {err}
         </div>
       )}
+
+      {/* Debug panel - you can remove this later */}
+      <details className="bg-slate-100 p-4 rounded-lg">
+        <summary className="cursor-pointer font-mono text-sm">Debug Info</summary>
+        <div className="mt-2 max-h-40 overflow-y-auto">
+          {debug.map((msg, i) => (
+            <div key={i} className="text-xs font-mono border-b border-slate-200 py-1">
+              {msg}
+            </div>
+          ))}
+        </div>
+      </details>
 
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>
