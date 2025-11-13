@@ -1,18 +1,16 @@
 'use client';
 
+// FORCE dynamic, avoid any accidental static output
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-/** HARD URL for clarity (no %3CAPI%3E), with Bearer fallback. */
+// Hard API to bypass any env/%3CAPI%3E confusion
 const API = 'https://milestone-api-production.up.railway.app';
 
-type Address = {
-  line1?: string;
-  city?: string;
-  state?: string;
-  postalCode?: string;
-  country?: string;
-};
+type Address = { line1?: string; city?: string; state?: string; postalCode?: string; country?: string; };
 type Profile = {
   vendorName?: string;
   email?: string;
@@ -20,9 +18,6 @@ type Profile = {
   website?: string;
   address?: Address | string | null;
   addressText?: string | null;
-  telegram_username?: string | null;
-  telegram_chat_id?: string | null;
-  whatsapp?: string | null;
 };
 
 function getToken(): string {
@@ -43,10 +38,7 @@ async function api(path: string, init: RequestInit = {}) {
     mode: 'cors',
     redirect: 'follow',
   });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`HTTP ${r.status} ${txt.slice(0, 200)}`);
-  }
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${await r.text().catch(()=>'')}`);
   const ct = r.headers.get('content-type') || '';
   return ct.includes('application/json') ? r.json() : null;
 }
@@ -54,26 +46,22 @@ async function api(path: string, init: RequestInit = {}) {
 function parseAddress(raw: Profile['address'], addressText?: string | null): Address {
   if (raw && typeof raw === 'object') {
     return {
-      line1: raw.line1 || '',
-      city: raw.city || '',
-      state: (raw as any).state || '',
-      postalCode: raw.postalCode || '',
-      country: raw.country || '',
+      line1: raw.line1 || '', city: raw.city || '', state: (raw as any).state || '',
+      postalCode: raw.postalCode || '', country: raw.country || '',
     };
   }
   const text = (typeof raw === 'string' && raw.trim()) ? raw : (addressText || '');
   if (!text) return { line1:'', city:'', state:'', postalCode:'', country:'' };
   const parts = text.split(',').map(s => s.trim()).filter(Boolean);
-  const [line1 = '', city = '', third = '', fourth = ''] = parts;
+  const [line1 = '', city = '', p3 = '', p4 = ''] = parts;
   let postalCode = '', country = '';
   if (parts.length >= 4) {
-    const thirdDigits = /\d/.test(third);
-    const fourthDigits = /\d/.test(fourth);
-    if (thirdDigits && !fourthDigits) { postalCode = third; country = fourth; }
-    else if (fourthDigits && !thirdDigits) { postalCode = fourth; country = third; }
-    else { postalCode = third; country = fourth; }
+    const d3 = /\d/.test(p3), d4 = /\d/.test(p4);
+    if (d3 && !d4) { postalCode = p3; country = p4; }
+    else if (d4 && !d3) { postalCode = p4; country = p3; }
+    else { postalCode = p3; country = p4; }
   } else if (parts.length === 3) {
-    country = third;
+    country = p3;
   }
   return { line1, city, state:'', postalCode, country };
 }
@@ -81,16 +69,9 @@ function parseAddress(raw: Profile['address'], addressText?: string | null): Add
 export default function ProposerProfilePage() {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
-  const [debug, setDebug] = useState<any>(null);
 
-  // The data we’ll use to seed defaultValue’s
-  const [seed, setSeed] = useState<{
-    vendorName: string;
-    email: string;
-    phone: string;
-    website: string;
-    address: Address;
-  }>({
+  // seed values for defaultValue
+  const [seed, setSeed] = useState({
     vendorName: '',
     email: '',
     phone: '',
@@ -98,23 +79,30 @@ export default function ProposerProfilePage() {
     address: { line1:'', city:'', state:'', postalCode:'', country:'' },
   });
 
-  // Force-remount key for the <form> so defaultValue is re-applied
+  // force remount key so defaultValue re-applies after fetch
   const [viewKey, setViewKey] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
 
-  // Fetch (browser) and remount once. This avoids any hydration/controlled glitches.
+  // MARK: prove this page actually mounted
   useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('%c[PROPOSER_PAGE] mounted (client)', 'color:#7c3aed;font-weight:bold');
+    (window as any).__proposer_page_mounted = true;
+  }, []);
+
+  // Fetch in browser, then remount form so defaultValue shows
+  useEffect(() => {
+    let alive = true;
     (async () => {
       try {
         const role = await api('/auth/role');
         const p: Profile = await api('/proposer/profile');
+        // eslint-disable-next-line no-console
+        console.log('[PROPOSER_PAGE] role:', role);
+        // eslint-disable-next-line no-console
+        console.log('[PROPOSER_PAGE] profile:', p);
 
-        setDebug({
-          tokenPreview: getToken() ? getToken().slice(0, 30) + '…' : '(none)',
-          role,
-          profile: p,
-        });
-
+        if (!alive) return;
         const addr = parseAddress(p?.address, p?.addressText);
         setSeed({
           vendorName: p?.vendorName || '',
@@ -123,13 +111,12 @@ export default function ProposerProfilePage() {
           website: p?.website || '',
           address: addr,
         });
-
-        // Remount the form so all defaultValue’s are applied with fetched data
-        setViewKey(k => k + 1);
-      } catch (e) {
-        setErr((e as Error).message || 'Load failed');
+        setViewKey(k => k + 1); // remount
+      } catch (e: any) {
+        setErr(e?.message || 'Load failed');
       }
     })();
+    return () => { alive = false; };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -138,10 +125,7 @@ export default function ProposerProfilePage() {
     const fd = new FormData(formRef.current!);
 
     const vendorName = String(fd.get('vendorName') || '').trim();
-    if (!vendorName) {
-      setErr('Organization name is required');
-      return;
-    }
+    if (!vendorName) { setErr('Organization name is required'); return; }
 
     const payload = {
       vendorName,
@@ -158,22 +142,10 @@ export default function ProposerProfilePage() {
     };
 
     try {
-      // Save profile
-      await api('/proposer/profile', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      await api('/proposer/profile', { method: 'POST', body: JSON.stringify(payload) });
+      const cr = await api('/profile/choose-role?role=proposer', { method: 'POST', body: JSON.stringify({ role:'proposer' }) });
+      if (cr?.token) { try { localStorage.setItem('lx_jwt', String(cr.token)); } catch {} }
 
-      // Ensure role = proposer and refresh Bearer fallback
-      const cr = await api('/profile/choose-role?role=proposer', {
-        method: 'POST',
-        body: JSON.stringify({ role: 'proposer' }),
-      });
-      if (cr?.token) {
-        try { localStorage.setItem('lx_jwt', String(cr.token)); } catch {}
-      }
-
-      // Read back and remount again (so displayed values are the saved ones)
       const reread: Profile = await api('/proposer/profile');
       const addr = parseAddress(reread?.address, reread?.addressText);
       setSeed({
@@ -186,8 +158,8 @@ export default function ProposerProfilePage() {
       setViewKey(k => k + 1);
 
       router.replace('/new?flash=proposer-profile-saved');
-    } catch (e) {
-      setErr((e as Error).message || 'Save failed');
+    } catch (e: any) {
+      setErr(e?.message || 'Save failed');
     }
   }
 
@@ -202,56 +174,36 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
-      <details className="rounded-lg border border-slate-200 p-3">
-        <summary className="cursor-pointer text-sm text-slate-600">Debug</summary>
-        <pre className="text-xs whitespace-pre-wrap break-all mt-2">
-{JSON.stringify(debug, null, 2)}
-        </pre>
-      </details>
-
-      {/* REMOUNT THIS WHOLE FORM WHEN viewKey CHANGES */}
-      <form ref={formRef} key={`proposer-form-${viewKey}`} className="space-y-4" onSubmit={onSubmit} data-proposer-form>
+      {/* THIS ATTRIBUTE MUST EXIST */}
+      <form
+        ref={formRef}
+        key={`proposer-form-${viewKey}`}
+        data-proposer-form
+        className="space-y-4"
+        onSubmit={onSubmit}
+      >
         <label className="block">
           <span className="text-sm font-medium">Organization / Entity Name *</span>
-          <input
-            name="vendorName"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            defaultValue={seed.vendorName}
-            placeholder="Your organization name"
-          />
+          <input name="vendorName" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                 defaultValue={seed.vendorName} />
         </label>
 
         <label className="block">
           <span className="text-sm font-medium">Email</span>
-          <input
-            type="email"
-            name="email"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            defaultValue={seed.email}
-            placeholder="contact@example.com"
-          />
+          <input type="email" name="email" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                 defaultValue={seed.email} />
         </label>
 
         <label className="block">
           <span className="text-sm font-medium">Phone</span>
-          <input
-            type="tel"
-            name="phone"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            defaultValue={seed.phone}
-            placeholder="+1 (555) 123-4567"
-          />
+          <input type="tel" name="phone" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                 defaultValue={seed.phone} />
         </label>
 
         <label className="block">
           <span className="text-sm font-medium">Website</span>
-          <input
-            type="url"
-            name="website"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            defaultValue={seed.website}
-            placeholder="https://example.com"
-          />
+          <input type="url" name="website" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                 defaultValue={seed.website} />
         </label>
 
         <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-slate-200 rounded-lg p-4">
@@ -259,55 +211,38 @@ export default function ProposerProfilePage() {
 
           <label className="block md:col-span-2">
             <span className="text-sm">Address Line 1</span>
-            <input
-              name="line1"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              defaultValue={seed.address.line1}
-            />
+            <input name="line1" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                   defaultValue={seed.address.line1} />
           </label>
 
           <label className="block">
             <span className="text-sm">City</span>
-            <input
-              name="city"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              defaultValue={seed.address.city}
-            />
+            <input name="city" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                   defaultValue={seed.address.city} />
           </label>
 
           <label className="block">
             <span className="text-sm">State/Province</span>
-            <input
-              name="state"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              defaultValue={seed.address.state}
-            />
+            <input name="state" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                   defaultValue={seed.address.state} />
           </label>
 
           <label className="block">
             <span className="text-sm">Postal Code</span>
-            <input
-              name="postalCode"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              defaultValue={seed.address.postalCode}
-            />
+            <input name="postalCode" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                   defaultValue={seed.address.postalCode} />
           </label>
 
           <label className="block md:col-span-2">
             <span className="text-sm">Country</span>
-            <input
-              name="country"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              defaultValue={seed.address.country}
-            />
+            <input name="country" className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+                   defaultValue={seed.address.country} />
           </label>
         </fieldset>
 
         <div className="flex gap-3 pt-4">
-          <button
-            type="submit"
-            className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-medium"
-          >
+          <button type="submit"
+                  className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-medium">
             Save Entity Profile
           </button>
         </div>
