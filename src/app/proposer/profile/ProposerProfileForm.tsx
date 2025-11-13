@@ -69,55 +69,50 @@ export default function ProposerProfileForm({ initial }: { initial: Initial }) {
     address: parseAddress(initial?.address, initial?.addressText),
   }));
 
-// Load current ENTITY profile
+// Refetch on mount (client) to populate after hydration even if SSR had no auth
 useEffect(() => {
   let alive = true;
   (async () => {
     try {
       setLoading(true);
-      console.log('[LOAD] Starting profile load...');
-      const profile = await getProposerProfile();
-      console.log('[LOAD] getProposerProfile returned:', profile);
+      console.log('[PROFILE] refetch on mount…');
+      const p = await getProposerProfile();
+      console.log('[PROFILE] refetched:', p);
       if (!alive) return;
 
-      if (profile && Object.keys(profile).length > 0) {
-        console.log('[LOAD] Profile data found, parsing...');
-        let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
+      // same parsing logic you already use
+      let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
 
-        if (profile.address && typeof profile.address === 'object') {
+      if (p?.address && typeof p.address === 'object') {
+        address = {
+          line1: p.address.line1 || '',
+          city: p.address.city || '',
+          state: p.address.state || '',
+          postalCode: p.address.postalCode || '',
+          country: p.address.country || '',
+        };
+      } else if (p?.addressText) {
+        const parts = String(p.addressText).split(', ');
+        if (parts.length >= 3) {
           address = {
-            line1: profile.address.line1 || '',
-            city: profile.address.city || '',
-            state: profile.address.state || '',
-            postalCode: profile.address.postalCode || '',
-            country: profile.address.country || '',
+            line1: parts[0] || '',
+            city: parts[1] || '',
+            postalCode: parts[2] || '',
+            country: parts[3] || '',
+            state: '',
           };
-        } else if (profile.addressText) {
-          const parts = profile.addressText.split(', ');
-          if (parts.length >= 3) {
-            address = {
-              line1: parts[0] || '',
-              city: parts[1] || '',
-              postalCode: parts[2] || '',
-              country: parts[3] || '',
-              state: '',
-            };
-          }
         }
-
-        setForm({
-          vendorName: profile.vendorName || '',
-          email: profile.email || '',
-          phone: profile.phone || '',
-          website: profile.website || '',
-          address,
-        });
-        console.log('[LOAD] Form populated successfully');
-      } else {
-        console.log('[LOAD] No profile data found');
       }
-    } catch (error: any) {
-      console.error('[LOAD] Error:', error);
+
+      setForm({
+        vendorName: p?.vendorName || '',
+        email: p?.email || '',
+        phone: p?.phone || '',
+        website: p?.website || '',
+        address,
+      });
+    } catch (e) {
+      console.warn('[PROFILE] refetch failed:', e);
     } finally {
       if (alive) setLoading(false);
     }
