@@ -58,18 +58,38 @@ export default function ProposerProfilePage() {
         if (!alive) return;
         
         if (p) {
+          // Handle address - it might come as an object OR we need to parse addressText
+          let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
+          
+          if (p.address && typeof p.address === 'object') {
+            // Address is already an object
+            address = {
+              line1: p.address.line1 || '',
+              city: p.address.city || '',
+              state: p.address.state || '',
+              postalCode: p.address.postalCode || '',
+              country: p.address.country || '',
+            };
+          } else if (p.addressText) {
+            // Parse addressText if address object is not available
+            const parts = p.addressText.split(', ');
+            if (parts.length >= 3) {
+              address = {
+                line1: parts[0] || '',
+                city: parts[1] || '',
+                postalCode: parts[2] || '',
+                country: parts[3] || '',
+                state: '', // Not in addressText
+              };
+            }
+          }
+
           setForm({
             vendorName: p.vendorName || p.vendor_name || '',
             email: p.email || '',
             phone: p.phone || '',
             website: p.website || '',
-            address: {
-              line1: p.address?.line1 || '',
-              city: p.address?.city || '',
-              state: p.address?.state || '',
-              postalCode: p.address?.postalCode || '',
-              country: p.address?.country || '',
-            },
+            address,
           });
         }
       } catch (error: any) {
@@ -98,14 +118,14 @@ export default function ProposerProfilePage() {
     try {
       console.log('Saving profile:', form);
       
-      // Prepare the data in the exact structure the backend expects
+      // Prepare the data in the structure the backend expects
       const profileData = {
         vendorName: form.vendorName,
         email: form.email,
         phone: form.phone,
         website: form.website,
         address: form.address,
-        // Include any additional fields the backend might expect
+        // Include other fields the backend might expect
       };
       
       await saveProposerProfile(profileData);
