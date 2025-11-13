@@ -69,6 +69,63 @@ export default function ProposerProfileForm({ initial }: { initial: Initial }) {
     address: parseAddress(initial?.address, initial?.addressText),
   }));
 
+// Load current ENTITY profile
+useEffect(() => {
+  let alive = true;
+  (async () => {
+    try {
+      setLoading(true);
+      console.log('[LOAD] Starting profile load...');
+      const profile = await getProposerProfile();
+      console.log('[LOAD] getProposerProfile returned:', profile);
+      if (!alive) return;
+
+      if (profile && Object.keys(profile).length > 0) {
+        console.log('[LOAD] Profile data found, parsing...');
+        let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
+
+        if (profile.address && typeof profile.address === 'object') {
+          address = {
+            line1: profile.address.line1 || '',
+            city: profile.address.city || '',
+            state: profile.address.state || '',
+            postalCode: profile.address.postalCode || '',
+            country: profile.address.country || '',
+          };
+        } else if (profile.addressText) {
+          const parts = profile.addressText.split(', ');
+          if (parts.length >= 3) {
+            address = {
+              line1: parts[0] || '',
+              city: parts[1] || '',
+              postalCode: parts[2] || '',
+              country: parts[3] || '',
+              state: '',
+            };
+          }
+        }
+
+        setForm({
+          vendorName: profile.vendorName || '',
+          email: profile.email || '',
+          phone: profile.phone || '',
+          website: profile.website || '',
+          address,
+        });
+        console.log('[LOAD] Form populated successfully');
+      } else {
+        console.log('[LOAD] No profile data found');
+      }
+    } catch (error: any) {
+      console.error('[LOAD] Error:', error);
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+  return () => { alive = false; };
+}, []);
+
+
   // Guard against double re-init in React strict mode
   useEffect(() => {
     if (inited.current) return;
