@@ -13,19 +13,6 @@ type Address = {
   country?: string;
 };
 
-type ProposerProfile = {
-  vendorName?: string;
-  vendor_name?: string;
-  email?: string;
-  phone?: string;
-  website?: string;
-  address?: Address;
-  addressText?: string;
-  telegram_chat_id?: string | null;
-  telegram_username?: string | null;
-  whatsapp?: string | null;
-};
-
 export default function ProposerProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -52,17 +39,17 @@ export default function ProposerProfilePage() {
     (async () => {
       try {
         setLoading(true);
-        const p: ProposerProfile = await getProposerProfile();
-        console.log('Profile data from API:', p); // DEBUG
+        const p = await getProposerProfile();
+        console.log('🔄 Profile data from API:', p);
         
         if (!alive) return;
         
         if (p) {
-          // Handle address - it might come as an object OR we need to parse addressText
+          // Parse address from addressText if needed
           let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
           
           if (p.address && typeof p.address === 'object') {
-            // Address is already an object
+            // Use the address object if it exists
             address = {
               line1: p.address.line1 || '',
               city: p.address.city || '',
@@ -71,7 +58,7 @@ export default function ProposerProfilePage() {
               country: p.address.country || '',
             };
           } else if (p.addressText) {
-            // Parse addressText if address object is not available
+            // Parse address from addressText string
             const parts = p.addressText.split(', ');
             if (parts.length >= 3) {
               address = {
@@ -85,7 +72,7 @@ export default function ProposerProfilePage() {
           }
 
           setForm({
-            vendorName: p.vendorName || p.vendor_name || '',
+            vendorName: p.vendorName || '', // Use vendorName directly
             email: p.email || '',
             phone: p.phone || '',
             website: p.website || '',
@@ -95,7 +82,6 @@ export default function ProposerProfilePage() {
       } catch (error: any) {
         if (!alive) return;
         console.error('Failed to load profile:', error);
-        // Don't show error for initial load - it might be first time
       } finally {
         if (alive) setLoading(false);
       }
@@ -116,27 +102,26 @@ export default function ProposerProfilePage() {
     setErr(null);
     
     try {
-      console.log('Saving profile:', form);
+      console.log('💾 Saving profile:', form);
       
-      // Prepare the data in the structure the backend expects
+      // Prepare data exactly as backend expects
       const profileData = {
         vendorName: form.vendorName,
         email: form.email,
         phone: form.phone,
         website: form.website,
-        address: form.address,
-        // Include other fields the backend might expect
+        address: form.address, // Send as object
       };
       
-      await saveProposerProfile(profileData);
-      console.log('Profile saved successfully');
+      const result = await saveProposerProfile(profileData);
+      console.log('✅ Profile save result:', result);
       
       await chooseRole('proposer');
-      console.log('Role set to proposer');
+      console.log('✅ Role set to proposer');
       
       router.push('/new?flash=proposer-profile-saved');
     } catch (e: any) {
-      console.error('Save error:', e);
+      console.error('❌ Save error:', e);
       setErr(e?.message || 'Failed to save entity profile');
     } finally {
       setSaving(false);
