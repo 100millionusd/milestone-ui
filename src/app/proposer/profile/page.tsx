@@ -46,10 +46,12 @@ export default function ProposerProfilePage() {
         
         if (!alive) return;
         
-        if (p) {
+        if (p && typeof p === 'object') {
           let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
           
+          // Handle address data - it might come as addressText string
           if (p.address && typeof p.address === 'object') {
+            // Use address object if available
             address = {
               line1: p.address.line1 || '',
               city: p.address.city || '',
@@ -58,6 +60,8 @@ export default function ProposerProfilePage() {
               country: p.address.country || '',
             };
           } else if (p.addressText) {
+            // Parse address from addressText string
+            console.log('📝 Parsing address from addressText:', p.addressText);
             const parts = p.addressText.split(', ');
             if (parts.length >= 3) {
               address = {
@@ -65,21 +69,25 @@ export default function ProposerProfilePage() {
                 city: parts[1] || '',
                 postalCode: parts[2] || '',
                 country: parts[3] || '',
-                state: '',
+                state: '', // Not in addressText
               };
             }
+          } else {
+            console.log('❌ No address data found in response');
           }
 
-          setForm({
+          const newForm = {
             vendorName: p.vendorName || '',
             email: p.email || '',
             phone: p.phone || '',
             website: p.website || '',
             address,
-          });
-          console.log('✅ Form populated with loaded data');
+          };
+
+          console.log('✅ Setting form with parsed data:', newForm);
+          setForm(newForm);
         } else {
-          console.log('❌ No profile data found');
+          console.log('❌ No profile data found or invalid format');
         }
       } catch (error: any) {
         if (!alive) return;
@@ -105,12 +113,13 @@ export default function ProposerProfilePage() {
     try {
       console.log('💾 Saving profile:', form);
       
+      // Prepare data for API - make sure to send address as an object
       const profileData = {
         vendorName: form.vendorName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         website: form.website.trim(),
-        address: form.address,
+        address: form.address, // Send as object
       };
 
       console.log('🚀 Sending to API:', profileData);
