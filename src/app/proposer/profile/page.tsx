@@ -43,16 +43,18 @@ export default function ProposerProfilePage() {
     address: { line1: '', city: '', state: '', postalCode: '', country: '' },
   });
 
-  // CLIENT REFRESH ON MOUNT (fixes "empty after refresh")
+  // 🔑 SINGLE client refetch on mount (fixes "empty after refresh")
   useEffect(() => {
     if (mounted.current) return;
     mounted.current = true;
+
     (async () => {
       try {
         setLoading(true);
-        syncJwtCookieFromLocalStorage(); // make sure cookie exists on first paint
+        syncJwtCookieFromLocalStorage();
+        console.log('[PROFILE] mount refetch…');
         const p = await getProposerProfile();
-        console.log('[PROFILE] mount refetch:', p);
+        console.log('[PROFILE] refetched:', p);
         setForm({
           vendorName: p?.vendorName || '',
           email: p?.email || '',
@@ -67,6 +69,25 @@ export default function ProposerProfilePage() {
       }
     })();
   }, []);
+
+  // Expose a quick debugger in DevTools
+  useEffect(() => {
+    (window as any).__PROPOSER_DEBUG__ = {
+      form,
+      token: localStorage.getItem('lx_jwt'),
+      poke: async () => {
+        const p = await getProposerProfile();
+        console.log('[poke] /proposer/profile ->', p);
+        setForm({
+          vendorName: p?.vendorName || '',
+          email: p?.email || '',
+          phone: p?.phone || '',
+          website: p?.website || '',
+          address: parseAddress(p?.address, p?.addressText),
+        });
+      },
+    };
+  }, [form]);
 
   async function onSave() {
     if (saving) return;
