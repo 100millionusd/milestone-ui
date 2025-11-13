@@ -526,15 +526,16 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   const q = opts?.address ? `?address=${encodeURIComponent(opts.address)}` : "";
   try {
     const r = await apiFetch(`/auth/role${q}`);
-    const serverRole = String(r?.role || "").toLowerCase();
+    // AFTER
+const serverRole = String(r?.role || "").toLowerCase();
 
-    let mapped: AuthInfo["role"];
-    if (serverRole === "admin" || serverRole === "vendor" || serverRole === "proposer") {
-      mapped = serverRole as AuthInfo["role"];
-    } else {
-      // fallback: if address present but unknown role → vendor; otherwise guest
-      mapped = r?.address ? "vendor" : "guest";
-    }
+let mapped: AuthInfo["role"];
+if (serverRole === "admin" || serverRole === "vendor" || serverRole === "proposer") {
+  mapped = serverRole as AuthInfo["role"];
+} else {
+  // Unknown on server → be a guest until the user explicitly chooses a role
+  mapped = "guest";
+}
 
     return {
       address: r?.address ?? undefined,
@@ -617,10 +618,11 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
  * Exchange a signed nonce for a JWT cookie (and token).
  * Now role-aware: pass 'vendor' | 'proposer'. Defaults to 'vendor'.
  */
+// AFTER
 export async function loginWithSignature(
   address: string,
   signature: string,
-  role: 'vendor' | 'proposer' = 'vendor'
+  role: 'vendor' | 'proposer' = 'proposer'
 ): Promise<{ role: AuthInfo["role"]; token: string | null }> {
   const res = await apiFetch(`/auth/login?role=${role}`, {
     method: "POST",
