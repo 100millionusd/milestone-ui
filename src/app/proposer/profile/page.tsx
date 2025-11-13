@@ -85,6 +85,7 @@ export default function ProposerProfilePage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [debug, setDebug] = useState<any>(null);
+  const [viewKey, setViewKey] = useState(0); // 👈 force-remount key
 
   const [form, setForm] = useState<{
     vendorName: string;
@@ -100,7 +101,7 @@ export default function ProposerProfilePage() {
     address: { line1:'', city:'', state:'', postalCode:'', country:'' },
   });
 
-  // 🔁 Always refetch on mount in the browser (uses Bearer from localStorage)
+  // Always refetch in the browser; then force-remount inputs once with viewKey
   useEffect(() => {
     if (mounted.current) return;
     mounted.current = true;
@@ -124,6 +125,9 @@ export default function ProposerProfilePage() {
           website: profile?.website || '',
           address: parseAddress(profile?.address, profile?.addressText),
         });
+
+        // 👇 This guarantees inputs remount with the freshly loaded values
+        setViewKey(k => k + 1);
       } catch (e) {
         setErr((e as Error).message || 'Load failed');
       }
@@ -139,7 +143,6 @@ export default function ProposerProfilePage() {
     setSaving(true);
     setErr(null);
     try {
-      // 1) Save profile (absolute call; no api.ts involved)
       await api('/proposer/profile', {
         method: 'POST',
         body: JSON.stringify({
@@ -151,7 +154,6 @@ export default function ProposerProfilePage() {
         }),
       });
 
-      // 2) Choose role = proposer (issue token if needed)
       const cr = await api('/profile/choose-role?role=proposer', {
         method: 'POST',
         body: JSON.stringify({ role: 'proposer' }),
@@ -160,7 +162,6 @@ export default function ProposerProfilePage() {
         try { localStorage.setItem('lx_jwt', String(cr.token)); } catch {}
       }
 
-      // 3) Read back once so UI is definitely in sync
       const reread: Profile = await api('/proposer/profile');
       setForm({
         vendorName: reread?.vendorName || '',
@@ -169,8 +170,8 @@ export default function ProposerProfilePage() {
         website: reread?.website || '',
         address: parseAddress(reread?.address, reread?.addressText),
       });
+      setViewKey(k => k + 1); // 👈 remount again after save
 
-      // 4) continue flow
       router.replace('/new?flash=proposer-profile-saved');
     } catch (e) {
       setErr((e as Error).message || 'Save failed');
@@ -180,7 +181,7 @@ export default function ProposerProfilePage() {
   }
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-4">
+    <div className="max-w-xl mx-auto p-6 space-y-4" key={`wrap-${viewKey}`}>
       <h1 className="text-2xl font-bold">Entity Profile</h1>
       <p className="text-slate-600">Complete your organization profile to submit proposals.</p>
 
@@ -190,7 +191,7 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
-      {/* Inline debug so you SEE what the page fetched after hard refresh */}
+      {/* Debug shows exactly what we fetched */}
       <details className="rounded-lg border border-slate-200 p-3">
         <summary className="cursor-pointer text-sm text-slate-600">Debug</summary>
         <pre className="text-xs whitespace-pre-wrap break-all mt-2">
@@ -198,106 +199,109 @@ export default function ProposerProfilePage() {
         </pre>
       </details>
 
-      <label className="block">
-        <span className="text-sm font-medium">Organization / Entity Name *</span>
-        <input
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-          value={form.vendorName}
-          onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
-          placeholder="Your organization name"
-        />
-      </label>
-
-      <label className="block">
-        <span className="text-sm font-medium">Email</span>
-        <input
-          type="email"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          placeholder="contact@example.com"
-        />
-      </label>
-
-      <label className="block">
-        <span className="text-sm font-medium">Phone</span>
-        <input
-          type="tel"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-          placeholder="+1 (555) 123-4567"
-        />
-      </label>
-
-      <label className="block">
-        <span className="text-sm font-medium">Website</span>
-        <input
-          type="url"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-          value={form.website}
-          onChange={(e) => setForm({ ...form, website: e.target.value })}
-          placeholder="https://example.com"
-        />
-      </label>
-
-      <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-slate-200 rounded-lg p-4">
-        <legend className="text-sm font-medium px-2">Address</legend>
-
-        <label className="block md:col-span-2">
-          <span className="text-sm">Address Line 1</span>
+      {/* 👇 Force-remount the input subtree when viewKey changes */}
+      <div key={`form-${viewKey}`}>
+        <label className="block">
+          <span className="text-sm font-medium">Organization / Entity Name *</span>
           <input
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.address.line1}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, line1: e.target.value } })}
+            value={form.vendorName ?? ''}
+            onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+            placeholder="Your organization name"
           />
         </label>
 
         <label className="block">
-          <span className="text-sm">City</span>
+          <span className="text-sm font-medium">Email</span>
           <input
+            type="email"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.address.city}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, city: e.target.value } })}
+            value={form.email ?? ''}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="contact@example.com"
           />
         </label>
 
         <label className="block">
-          <span className="text-sm">State/Province</span>
+          <span className="text-sm font-medium">Phone</span>
           <input
+            type="tel"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.address.state}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, state: e.target.value } })}
+            value={form.phone ?? ''}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            placeholder="+1 (555) 123-4567"
           />
         </label>
 
         <label className="block">
-          <span className="text-sm">Postal Code</span>
+          <span className="text-sm font-medium">Website</span>
           <input
+            type="url"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.address.postalCode}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, postalCode: e.target.value } })}
+            value={form.website ?? ''}
+            onChange={(e) => setForm({ ...form, website: e.target.value })}
+            placeholder="https://example.com"
           />
         </label>
 
-        <label className="block md:col-span-2">
-          <span className="text-sm">Country</span>
-          <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.address.country}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, country: e.target.value } })}
-          />
-        </label>
-      </fieldset>
+        <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-slate-200 rounded-lg p-4">
+          <legend className="text-sm font-medium px-2">Address</legend>
 
-      <div className="flex gap-3 pt-4">
-        <button
-          onClick={onSave}
-          disabled={saving}
-          className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium"
-        >
-          {saving ? 'Saving…' : 'Save Entity Profile'}
-        </button>
+          <label className="block md:col-span-2">
+            <span className="text-sm">Address Line 1</span>
+            <input
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+              value={form.address?.line1 ?? ''}
+              onChange={(e) => setForm({ ...form, address: { ...form.address, line1: e.target.value } })}
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm">City</span>
+            <input
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+              value={form.address?.city ?? ''}
+              onChange={(e) => setForm({ ...form, address: { ...form.address, city: e.target.value } })}
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm">State/Province</span>
+            <input
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+              value={form.address?.state ?? ''}
+              onChange={(e) => setForm({ ...form, address: { ...form.address, state: e.target.value } })}
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm">Postal Code</span>
+            <input
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+              value={form.address?.postalCode ?? ''}
+              onChange={(e) => setForm({ ...form, address: { ...form.address, postalCode: e.target.value } })}
+            />
+          </label>
+
+          <label className="block md:col-span-2">
+            <span className="text-sm">Country</span>
+            <input
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+              value={form.address?.country ?? ''}
+              onChange={(e) => setForm({ ...form, address: { ...form.address, country: e.target.value } })}
+            />
+          </label>
+        </fieldset>
+
+        <div className="flex gap-3 pt-4">
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium"
+          >
+            {saving ? 'Saving…' : 'Save Entity Profile'}
+          </button>
+        </div>
       </div>
     </div>
   );
