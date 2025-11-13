@@ -1905,32 +1905,16 @@ export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } |
   });
 }
 
+// ── PROPOSER / ENTITY PROFILE
 export function getProposerProfile() {
-  console.log('🔄 GET PROPOSER PROFILE - Fetching...');
-  return apiFetch('/proposer/profile', { method: 'GET' })
-    .then(response => {
-      console.log('📥 GET PROPOSER PROFILE - Response:', response);
-      return response;
-    })
-    .catch(error => {
-      console.error('❌ GET PROPOSER PROFILE - Error:', error);
-      throw error;
-    });
+  return apiFetch('/proposer/profile', { method: 'GET' });
 }
 
 export function saveProposerProfile(profile: any) {
-  console.log('🚀 SAVE PROPOSER PROFILE - Sending:', profile);
-  
   return apiFetch('/proposer/profile', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
-  }).then(response => {
-    console.log('✅ SAVE PROPOSER PROFILE - Success:', response);
-    return response;
-  }).catch(error => {
-    console.error('❌ SAVE PROPOSER PROFILE - Error:', error);
-    throw error;
   });
 }
 
@@ -1947,7 +1931,6 @@ export function switchRole(role: 'vendor' | 'proposer') {
     return r;
   });
 }
-
 
 export default {
   // auth
