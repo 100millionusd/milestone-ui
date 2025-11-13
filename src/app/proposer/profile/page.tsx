@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getProposerProfile, saveProposerProfile, chooseRole } from '@/lib/api'; // Added chooseRole import
+import { getProposerProfile, saveProposerProfile, chooseRole } from '@/lib/api';
 
 type Address = { 
   line1?: string; 
@@ -11,21 +11,12 @@ type Address = {
   state?: string; 
   postalCode?: string; 
   country?: string;
-  postal_code?: string; // For backward compatibility
-};
-
-type ProposerProfile = {
-  vendorName?: string;
-  vendor_name?: string;
-  email?: string;
-  phone?: string;
-  website?: string;
-  address?: Address;
 };
 
 export default function ProposerProfilePage() {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true); // Separate loading state for initial load
+  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const [form, setForm] = useState<{
@@ -47,33 +38,40 @@ export default function ProposerProfilePage() {
     let alive = true;
     (async () => {
       try {
-        const p: ProposerProfile = await getProposerProfile();
+        setLoading(true);
+        const p = await getProposerProfile();
+        console.log('Profile data from API:', p); // DEBUG
+        
         if (!alive) return;
         
-        setForm({
-          vendorName: String(p?.vendorName ?? p?.vendor_name ?? ''),
-          email: String(p?.email ?? ''),
-          phone: String(p?.phone ?? ''),
-          website: String(p?.website ?? ''),
-          address: {
-            line1: String(p?.address?.line1 ?? ''),
-            city: String(p?.address?.city ?? ''),
-            state: String(p?.address?.state ?? ''),
-            postalCode: String(p?.address?.postalCode ?? p?.address?.postal_code ?? ''),
-            country: String(p?.address?.country ?? ''),
-          },
-        });
-      } catch (error) {
+        if (p) {
+          setForm({
+            vendorName: p.vendorName || p.vendor_name || '',
+            email: p.email || '',
+            phone: p.phone || '',
+            website: p.website || '',
+            address: {
+              line1: p.address?.line1 || '',
+              city: p.address?.city || '',
+              state: p.address?.state || '',
+              postalCode: p.address?.postalCode || p.address?.postal_code || '',
+              country: p.address?.country || '',
+            },
+          });
+        }
+      } catch (error: any) {
         if (!alive) return;
         console.error('Failed to load profile:', error);
-        // keep empty form
+        // Don't show error to user for initial load - it might be their first time
+      } finally {
+        if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
   }, []);
 
   const save = async () => {
-    if (busy) return;
+    if (saving) return;
     
     // Basic validation
     if (!form.vendorName.trim()) {
@@ -81,21 +79,36 @@ export default function ProposerProfilePage() {
       return;
     }
 
-    setBusy(true); 
+    setSaving(true); 
     setErr(null);
     
     try {
+      console.log('Saving profile:', form); // DEBUG
       await saveProposerProfile(form);
-      await chooseRole('proposer');
+      console.log('Profile saved successfully'); // DEBUG
       
-      // Use replace instead of push to avoid going back to this page
-      router.replace('/new?flash=proposer-profile-saved');
+      await chooseRole('proposer');
+      console.log('Role set to proposer'); // DEBUG
+      
+      router.push('/new?flash=proposer-profile-saved');
     } catch (e: any) {
+      console.error('Save error:', e); // DEBUG
       setErr(e?.message || 'Failed to save entity profile');
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="max-w-xl mx-auto p-6">
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+          <span className="ml-3">Loading profile...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-4">
@@ -108,6 +121,7 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
+      {/* Rest of your form JSX remains the same */}
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>
         <input 
@@ -203,10 +217,10 @@ export default function ProposerProfilePage() {
       <div className="flex gap-3 pt-4">
         <button
           onClick={save}
-          disabled={busy}
+          disabled={saving}
           className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium"
         >
-          {busy ? 'Saving…' : 'Save Entity Profile'}
+          {saving ? 'Saving…' : 'Save Entity Profile'}
         </button>
         <button 
           onClick={() => router.back()} 
