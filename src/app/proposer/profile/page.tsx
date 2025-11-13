@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getProposerProfile, saveProposerProfile, chooseRole } from '@/lib/api';
+import { saveProposerProfile, chooseRole, getProposerProfile } from '@/lib/api';
 
 type Address = { 
   line1?: string; 
@@ -39,101 +39,89 @@ export default function ProposerProfilePage() {
     (async () => {
       try {
         setLoading(true);
-        console.log('🔄 START: Loading profile from API...');
+        console.log('[LOAD] Starting profile load...');
         
-        const p = await getProposerProfile();
-        console.log('📥 RAW API RESPONSE:', p);
-        console.log('📥 API RESPONSE TYPE:', typeof p);
-        console.log('📥 IS RESPONSE TRUTHY:', !!p);
+        const profile = await getProposerProfile();
+        console.log('[LOAD] getProposerProfile returned:', profile);
         
-        if (!alive) {
-          console.log('❌ Component unmounted, skipping update');
-          return;
-        }
+        if (!alive) return;
         
-        if (p && typeof p === 'object') {
-          console.log('✅ Profile data exists, parsing...');
-          console.log('📝 Available keys:', Object.keys(p));
+        if (profile && Object.keys(profile).length > 0) {
+          console.log('[LOAD] Profile data found, parsing...');
           
           let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
           
-          // Check what address data we have
-          console.log('🏠 Address data in response:');
-          console.log('   - p.address:', p.address);
-          console.log('   - p.addressText:', p.addressText);
-          console.log('   - typeof p.address:', typeof p.address);
-          console.log('   - typeof p.addressText:', typeof p.addressText);
-          
-          if (p.address && typeof p.address === 'object') {
-            console.log('📍 Using address object from response');
+          if (profile.address && typeof profile.address === 'object') {
             address = {
-              line1: p.address.line1 || '',
-              city: p.address.city || '',
-              state: p.address.state || '',
-              postalCode: p.address.postalCode || '',
-              country: p.address.country || '',
+              line1: profile.address.line1 || '',
+              city: profile.address.city || '',
+              state: profile.address.state || '',
+              postalCode: profile.address.postalCode || '',
+              country: profile.address.country || '',
             };
-          } else if (p.addressText && typeof p.addressText === 'string') {
-            console.log('📍 Parsing address from addressText:', p.addressText);
-            const parts = p.addressText.split(', ');
-            console.log('📍 Split address parts:', parts);
-            
+          } else if (profile.addressText) {
+            const parts = profile.addressText.split(', ');
             if (parts.length >= 3) {
               address = {
                 line1: parts[0] || '',
                 city: parts[1] || '',
                 postalCode: parts[2] || '',
                 country: parts[3] || '',
-                state: '', // Not in addressText
-              };
-            } else {
-              console.log('❌ Unexpected addressText format');
-              // If format is unexpected, put the whole thing in line1
-              address = {
-                line1: p.addressText,
-                city: '',
                 state: '',
-                postalCode: '',
-                country: '',
               };
             }
-          } else {
-            console.log('❌ No address data found');
           }
 
-          const newForm = {
-            vendorName: p.vendorName || p.vendor_name || '',
-            email: p.email || '',
-            phone: p.phone || '',
-            website: p.website || '',
+          setForm({
+            vendorName: profile.vendorName || '',
+            email: profile.email || '',
+            phone: profile.phone || '',
+            website: profile.website || '',
             address,
-          };
-
-          console.log('✅ FINAL FORM DATA TO SET:', newForm);
-          setForm(newForm);
-          console.log('✅ Form state updated');
+          });
+          console.log('[LOAD] Form populated successfully');
         } else {
-          console.log('❌ No profile data found or invalid format');
-          console.log('❌ p value:', p);
-          console.log('❌ p type:', typeof p);
+          console.log('[LOAD] No profile data found');
         }
       } catch (error: any) {
-        if (!alive) return;
-        console.error('❌ ERROR loading profile:', error);
-        console.error('❌ Error message:', error.message);
-        console.error('❌ Error stack:', error.stack);
+        console.error('[LOAD] Error:', error);
       } finally {
-        if (alive) {
-          setLoading(false);
-          console.log('🔄 Loading completed');
-        }
+        if (alive) setLoading(false);
       }
     })();
-    return () => { 
-      console.log('🔄 Cleanup: component unmounting');
-      alive = false; 
-    };
+    return () => { alive = false; };
   }, []);
+
+  // The exact flow you specified: save → chooseRole → get
+  const onContinueAsEntity = async (formValues: any) => {
+    console.log('[BTN] Starting save→chooseRole→get flow...');
+    console.log('[BTN] Form values:', formValues);
+    
+    try {
+      // 1) Save the profile
+      console.log('[BTN] Step 1: Saving profile...');
+      await saveProposerProfile(formValues);
+      console.log('[BTN] ✅ Profile saved');
+      
+      // 2) Set role to proposer
+      console.log('[BTN] Step 2: Setting role to proposer...');
+      await chooseRole('proposer');
+      console.log('[BTN] ✅ Role set to proposer');
+      
+      // 3) Read back the profile to confirm
+      console.log('[BTN] Step 3: Reading back profile...');
+      const profile = await getProposerProfile();
+      console.log('[BTN] ✅ Reloaded profile:', profile);
+      
+      // Redirect after successful flow
+      console.log('[BTN] Redirecting to /new...');
+      router.replace('/new?flash=proposer-profile-saved');
+      
+    } catch (e: any) {
+      console.error('[BTN] ❌ Error in flow:', e);
+      setErr(e?.message || 'Failed to save entity profile');
+    }
+  };
 
   const save = async () => {
     if (saving) return;
@@ -147,9 +135,6 @@ export default function ProposerProfilePage() {
     setErr(null);
     
     try {
-      console.log('💾 START: Saving profile process...');
-      console.log('💾 Current form data:', form);
-      
       const profileData = {
         vendorName: form.vendorName.trim(),
         email: form.email.trim(),
@@ -158,31 +143,16 @@ export default function ProposerProfilePage() {
         address: form.address,
       };
 
-      console.log('🚀 Sending to API:', profileData);
-      const result = await saveProposerProfile(profileData);
-      console.log('✅ Save API response:', result);
+      // Use the exact flow you specified
+      await onContinueAsEntity(profileData);
       
-      console.log('🔄 Setting role to proposer...');
-      await chooseRole('proposer');
-      console.log('✅ Role set to proposer');
-      
-      console.log('🔄 Redirecting to /new...');
-      router.push('/new?flash=proposer-profile-saved');
     } catch (e: any) {
-      console.error('❌ SAVE ERROR:', e);
-      console.error('❌ Error message:', e.message);
-      console.error('❌ Error stack:', e.stack);
+      console.error('Save error:', e);
       setErr(e?.message || 'Failed to save entity profile');
     } finally {
       setSaving(false);
-      console.log('💾 Save process completed');
     }
   };
-
-  // Add a debug effect to log form changes
-  useEffect(() => {
-    console.log('📊 FORM STATE UPDATED:', form);
-  }, [form]);
 
   if (loading) {
     return (
@@ -206,16 +176,13 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
-      {/* Debug panel */}
-      <details className="bg-slate-100 p-4 rounded-lg">
-        <summary className="cursor-pointer font-mono text-sm">Debug Info</summary>
-        <div className="mt-2">
-          <div className="text-xs font-mono">Form State:</div>
-          <pre className="text-xs bg-white p-2 rounded border max-h-40 overflow-y-auto">
-            {JSON.stringify(form, null, 2)}
-          </pre>
-        </div>
-      </details>
+      {/* Debug info */}
+      <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+        <h3 className="font-bold text-blue-800">Current Form State</h3>
+        <p className="text-sm text-blue-700">vendorName: "{form.vendorName}"</p>
+        <p className="text-sm text-blue-700">email: "{form.email}"</p>
+        <p className="text-sm text-blue-700">phone: "{form.phone}"</p>
+      </div>
 
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>

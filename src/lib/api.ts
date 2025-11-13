@@ -414,9 +414,9 @@ const fullPath = basePath;
     headers['Content-Type'] = 'application/json';
   }
 
-  const init: RequestInit = {
+const init: RequestInit = {
   ...options,
-  cache: isBrowser ? 'no-store' : (options.cache ?? 'force-cache'),
+  cache: 'no-store',           // force no-store on SSR and browser
   mode: 'cors',
   redirect: 'follow',
   credentials: 'include',
@@ -1918,19 +1918,15 @@ export function saveProposerProfile(profile: any) {
   });
 }
 
+// REPLACE the whole function with this:
 export function switchRole(role: 'vendor' | 'proposer') {
-  return apiFetch('/auth/switch-role', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role }),
-  }).then((r: any) => {
-    if (r?.token) {
-      try { localStorage.setItem('lx_jwt', String(r.token)); } catch {}
-    }
-    try { clearAuthRoleCache(); } catch {}
-    return r;
-  });
+  // Route exists and is already implemented above:
+  return chooseRole(role);
 }
+
+// (optional convenience)
+export const chooseRoleProposer = () => chooseRole('proposer');
+
 
 export default {
   // auth
