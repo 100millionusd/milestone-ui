@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveVendorProfile, saveProposerProfile, switchRole } from '@/lib/api';
+import { saveVendorProfile, saveProposerProfile, chooseRole } from '@/lib/api';
 
 type Address = {
   line1?: string | null;
@@ -41,7 +41,7 @@ export default function ProfileRoleButtons({
     setSaving('vendor');
     try {
       await saveVendorProfile(profile);
-      await switchRole('vendor');
+      await chooseRole('vendor');
       setOk(true);
       setTimeout(() => router.push(nextAfterVendor), 800);
     } catch (e: any) {
@@ -57,7 +57,7 @@ export default function ProfileRoleButtons({
     setSaving('proposer');
     try {
       await saveProposerProfile(profile);
-      await switchRole('proposer');
+      await chooseRole('proposer');
       router.push(`${nextAfterProposer}?flash=proposer-profile-saved`);
     } catch (e: any) {
       setErr(e?.message || 'Failed to continue as proposer');

@@ -59,6 +59,7 @@ export default function ProposerProfilePage() {
     setBusy(true); setErr(null);
     try {
       await saveProposerProfile(form); // POST /proposer/profile
+      await chooseRole('proposer');    // ⬅ ensures JWT/cookie carries proposer role
       router.replace('/new?flash=proposer-profile-saved');
     } catch (e: any) {
       setErr(e?.message || 'Failed to save entity profile');
