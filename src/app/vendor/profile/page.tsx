@@ -1,8 +1,9 @@
+// src/app/vendor/profile/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getVendorProfile, getProposerProfile, postJSON } from '@/lib/api';
+import { getVendorProfile, postJSON, apiFetch } from '@/lib/api'; // Safari-safe helpers
 import ProfileRoleButtons from '@/components/ProfileRoleButtons';
 
 type Address = {
@@ -22,32 +23,27 @@ type ProfileForm = {
   telegramConnected?: boolean;
 };
 
-function normalizeWebsite(v: string) {
-  const s = (v || '').trim();
-  if (!s) return '';
-  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
-}
-
-// normalize “address” from server (object|string|addressText) → Address object
-function parseAddress(j: any): Address {
-  const a = j?.address ?? j?.addressText ?? '';
-  if (a && typeof a === 'object') {
-    return {
-      line1: a.line1 || '',
-      city: a.city || '',
-      postalCode: a.postalCode || '',
-      country: a.country || '',
-    };
+function ConnectTelegramButton({ wallet }: { wallet: string }) {
+  // If we somehow still don't have a wallet, show a disabled hint (don't hide the control entirely)
+  if (!wallet) {
+    return (
+      <span className="inline-flex items-center px-3 py-2 rounded-xl border text-slate-400">
+        Connect Telegram (no wallet yet)
+      </span>
+    );
   }
-  const s = String(a || '').trim();
-  if (!s) return { line1: '', city: '', postalCode: '', country: '' };
-  const parts = s.split(',').map((x) => x.trim());
-  return {
-    line1: parts[0] || '',
-    city: parts[1] || '',
-    postalCode: parts[2] || '',
-    country: parts[3] || '',
-  };
+  const bot = (process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName').replace(/^@/, '');
+  const deepLink = `https://t.me/${bot}?start=link_${encodeURIComponent(wallet)}`;
+  return (
+    <a
+      href={deepLink}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
+    >
+      Connect Telegram
+    </a>
+  );
 }
 
 export default function VendorProfilePage() {
@@ -70,32 +66,40 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        setLoading(true);
+        // Load both the profile and the authenticated address (for Telegram link + fallback wallet)
+        const [j, auth] = await Promise.all([
+          getVendorProfile(),
+          apiFetch('/auth/role').catch(() => ({} as any)),
+        ]);
 
-        // Try vendor first, then proposer as fallback
-        const v = await getVendorProfile().catch(() => ({}));
-        const hasVendor = v && Object.keys(v).length > 0;
+        // Normalize address (server can return string or object)
+        const a = j?.address ?? {};
+        const address: Address =
+          typeof a === 'string'
+            ? { line1: a, city: '', postalCode: '', country: '' }
+            : {
+                line1: a?.line1 || '',
+                city: a?.city || '',
+                postalCode: a?.postalCode || '',
+                country: a?.country || '',
+              };
 
-        const src = hasVendor ? v : await getProposerProfile().catch(() => ({}));
-        const hasSrc = src && Object.keys(src).length > 0;
+        const wallet = j?.walletAddress || auth?.address || '';
 
         if (!alive) return;
+        setP({
+          walletAddress: wallet,
+          vendorName: j?.vendorName || '',
+          email: j?.email || '',
+          phone: j?.phone || '',
+          website: j?.website || '',
+          address,
+          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
+        });
 
-        if (hasSrc) {
-          setP({
-            walletAddress: src.walletAddress || '',
-            vendorName: src.vendorName || '',
-            email: src.email || '',
-            phone: src.phone || '',
-            website: src.website || '',
-            address: parseAddress(src),
-            telegramConnected: !!(src?.telegram_chat_id || src?.telegramChatId),
-          });
-        } else {
-          // keep defaults
-        }
+        console.log('[vendor/profile] wallet used for Telegram:', wallet);
       } catch (e: any) {
-        if (alive) setErr(e?.message || 'Failed to load profile');
+        setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
@@ -105,8 +109,15 @@ export default function VendorProfilePage() {
     };
   }, []);
 
-  async function onSaveOnly(e: React.FormEvent) {
-    e.preventDefault();
+  function normalizeWebsite(v: string) {
+    const s = (v || '').trim();
+    if (!s) return '';
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }
+
+  async function onSave(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (saving) return;
     setSaving(true);
     setErr(null);
 
@@ -130,7 +141,11 @@ export default function VendorProfilePage() {
         return;
       }
 
-      await postJSON('/vendor/profile', payload); // just save vendor version
+      // Safari-safe save (Bearer added by api.ts if cookies are blocked)
+      await postJSON('/vendor/profile', payload);
+
+      // Optional: stay on page and just show success via role buttons section
+      // router.push('/vendor/dashboard?flash=vendor-profile-saved');
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
@@ -149,11 +164,15 @@ export default function VendorProfilePage() {
   };
 
   return (
-    <main data-profile-form className="max-w-3xl mx-auto p-6 space-y-4">
+    <main className="max-w-3xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Profile</h1>
-      {err && <div className="text-rose-700">{err}</div>}
+      {err && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">
+          {err}
+        </div>
+      )}
 
-      <form onSubmit={onSaveOnly} className="space-y-4">
+      <form onSubmit={onSave} className="space-y-4" data-vendor-profile-form>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Company / Vendor Name</div>
@@ -202,6 +221,25 @@ export default function VendorProfilePage() {
               placeholder="https://yourdomain.com"
             />
           </label>
+        </div>
+
+        {/* Telegram connect row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="block">
+            <div className="text-sm text-slate-600 mb-1">Telegram</div>
+            {p.telegramConnected ? (
+              <div className="inline-flex items-center gap-2">
+                <span className="text-green-600">Connected</span>
+                {/* Allow re-link just in case */}
+                <ConnectTelegramButton wallet={p.walletAddress} />
+              </div>
+            ) : (
+              <ConnectTelegramButton wallet={p.walletAddress} />
+            )}
+            <p className="text-xs text-slate-500 mt-1">
+              Opens Telegram to link this wallet to your account.
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -254,12 +292,19 @@ export default function VendorProfilePage() {
           </label>
         </div>
 
-        {/* You can keep a plain Save button here if you want */}
-        {/* <button className="px-4 py-2 rounded bg-slate-200" disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
-        </button> */}
+        {/* Optional explicit Save button (role buttons also save) */}
+        <div className="pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl disabled:opacity-60"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
       </form>
 
+      {/* Role selection buttons under the form (both paths save profile) */}
       <div className="pt-4 border-t">
         <h2 className="text-lg font-semibold mb-2">Choose how you want to continue</h2>
         <p className="text-sm text-slate-600 mb-3">
@@ -268,7 +313,7 @@ export default function VendorProfilePage() {
         <ProfileRoleButtons
           profile={profileForRole}
           nextAfterVendor="/vendor/dashboard?flash=vendor-profile-saved"
-          nextAfterProposer="/new?flash=proposer-profile-saved"
+          nextAfterProposer="/new"
         />
       </div>
     </main>
