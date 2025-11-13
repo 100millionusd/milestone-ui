@@ -1,3 +1,4 @@
+// src/app/proposer/profile/ProposerProfileForm.tsx
 'use client';
 
 import { useEffect, useRef, useState } from "react";
@@ -59,6 +60,7 @@ export default function ProposerProfileForm({ initial }: { initial: Initial }) {
   const router = useRouter();
   const inited = useRef(false);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false); // ✅ added (was missing in your previous file)
   const [err, setErr] = useState<string | null>(null);
 
   const [form, setForm] = useState(() => ({
@@ -69,57 +71,57 @@ export default function ProposerProfileForm({ initial }: { initial: Initial }) {
     address: parseAddress(initial?.address, initial?.addressText),
   }));
 
-// Refetch on mount (client) to populate after hydration even if SSR had no auth
-useEffect(() => {
-  let alive = true;
-  (async () => {
-    try {
-      setLoading(true);
-      console.log('[PROFILE] refetch on mount…');
-      const p = await getProposerProfile();
-      console.log('[PROFILE] refetched:', p);
-      if (!alive) return;
+  // Refetch on mount (client) to populate after hydration even if SSR had no auth
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setLoading(true);
+        console.log("[PROFILE] refetch on mount…");
+        const p = await getProposerProfile();
+        console.log("[PROFILE] refetched:", p);
+        if (!alive) return;
 
-      // same parsing logic you already use
-      let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
+        let address: Address = { line1: "", city: "", state: "", postalCode: "", country: "" };
 
-      if (p?.address && typeof p.address === 'object') {
-        address = {
-          line1: p.address.line1 || '',
-          city: p.address.city || '',
-          state: p.address.state || '',
-          postalCode: p.address.postalCode || '',
-          country: p.address.country || '',
-        };
-      } else if (p?.addressText) {
-        const parts = String(p.addressText).split(', ');
-        if (parts.length >= 3) {
+        if (p?.address && typeof p.address === "object") {
           address = {
-            line1: parts[0] || '',
-            city: parts[1] || '',
-            postalCode: parts[2] || '',
-            country: parts[3] || '',
-            state: '',
+            line1: p.address.line1 || "",
+            city: p.address.city || "",
+            state: p.address.state || "",
+            postalCode: p.address.postalCode || "",
+            country: p.address.country || "",
           };
+        } else if (p?.addressText) {
+          const parts = String(p.addressText).split(", ");
+          if (parts.length >= 3) {
+            address = {
+              line1: parts[0] || "",
+              city: parts[1] || "",
+              postalCode: parts[2] || "",
+              country: parts[3] || "",
+              state: "",
+            };
+          }
         }
+
+        setForm({
+          vendorName: p?.vendorName || "",
+          email: p?.email || "",
+          phone: p?.phone || "",
+          website: p?.website || "",
+          address,
+        });
+      } catch (e) {
+        console.warn("[PROFILE] refetch failed:", e);
+      } finally {
+        if (alive) setLoading(false);
       }
-
-      setForm({
-        vendorName: p?.vendorName || '',
-        email: p?.email || '',
-        phone: p?.phone || '',
-        website: p?.website || '',
-        address,
-      });
-    } catch (e) {
-      console.warn('[PROFILE] refetch failed:', e);
-    } finally {
-      if (alive) setLoading(false);
-    }
-  })();
-  return () => { alive = false; };
-}, []);
-
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Guard against double re-init in React strict mode
   useEffect(() => {
@@ -177,9 +179,17 @@ useEffect(() => {
   return (
     <div className="max-w-xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">Entity Profile</h1>
+      <p className="text-slate-600">Complete your organization profile to submit proposals.</p>
+
       {err && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">
           {err}
+        </div>
+      )}
+
+      {loading && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 text-blue-700 px-3 py-2">
+          Loading latest profile…
         </div>
       )}
 
@@ -189,6 +199,7 @@ useEffect(() => {
           className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
           value={form.vendorName}
           onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+          placeholder="Enter your organization name"
         />
       </label>
 
@@ -199,6 +210,7 @@ useEffect(() => {
           className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="contact@organization.com"
         />
       </label>
 
@@ -209,6 +221,7 @@ useEffect(() => {
           className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
           value={form.phone}
           onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          placeholder="+1 (555) 123-4567"
         />
       </label>
 
@@ -219,6 +232,7 @@ useEffect(() => {
           className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
           value={form.website}
           onChange={(e) => setForm({ ...form, website: e.target.value })}
+          placeholder="https://example.com"
         />
       </label>
 
@@ -230,7 +244,9 @@ useEffect(() => {
           <input
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
             value={form.address.line1}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, line1: e.target.value } })}
+            onChange={(e) =>
+              setForm({ ...form, address: { ...form.address, line1: e.target.value } })
+            }
           />
         </label>
 
@@ -248,7 +264,9 @@ useEffect(() => {
           <input
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
             value={form.address.state}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, state: e.target.value } })}
+            onChange={(e) =>
+              setForm({ ...form, address: { ...form.address, state: e.target.value } })
+            }
           />
         </label>
 
@@ -268,7 +286,9 @@ useEffect(() => {
           <input
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
             value={form.address.country}
-            onChange={(e) => setForm({ ...form, address: { ...form.address, country: e.target.value } })}
+            onChange={(e) =>
+              setForm({ ...form, address: { ...form.address, country: e.target.value } })
+            }
           />
         </label>
       </fieldset>
