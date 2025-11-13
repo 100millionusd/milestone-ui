@@ -13,9 +13,22 @@ type Address = {
   country?: string;
 };
 
+type ProposerProfile = {
+  vendorName?: string;
+  vendor_name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: Address;
+  addressText?: string;
+  telegram_chat_id?: string | null;
+  telegram_username?: string | null;
+  whatsapp?: string | null;
+};
+
 export default function ProposerProfilePage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true); // Separate loading state for initial load
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -39,7 +52,7 @@ export default function ProposerProfilePage() {
     (async () => {
       try {
         setLoading(true);
-        const p = await getProposerProfile();
+        const p: ProposerProfile = await getProposerProfile();
         console.log('Profile data from API:', p); // DEBUG
         
         if (!alive) return;
@@ -54,7 +67,7 @@ export default function ProposerProfilePage() {
               line1: p.address?.line1 || '',
               city: p.address?.city || '',
               state: p.address?.state || '',
-              postalCode: p.address?.postalCode || p.address?.postal_code || '',
+              postalCode: p.address?.postalCode || '',
               country: p.address?.country || '',
             },
           });
@@ -62,7 +75,7 @@ export default function ProposerProfilePage() {
       } catch (error: any) {
         if (!alive) return;
         console.error('Failed to load profile:', error);
-        // Don't show error to user for initial load - it might be their first time
+        // Don't show error for initial load - it might be first time
       } finally {
         if (alive) setLoading(false);
       }
@@ -83,16 +96,27 @@ export default function ProposerProfilePage() {
     setErr(null);
     
     try {
-      console.log('Saving profile:', form); // DEBUG
-      await saveProposerProfile(form);
-      console.log('Profile saved successfully'); // DEBUG
+      console.log('Saving profile:', form);
+      
+      // Prepare the data in the exact structure the backend expects
+      const profileData = {
+        vendorName: form.vendorName,
+        email: form.email,
+        phone: form.phone,
+        website: form.website,
+        address: form.address,
+        // Include any additional fields the backend might expect
+      };
+      
+      await saveProposerProfile(profileData);
+      console.log('Profile saved successfully');
       
       await chooseRole('proposer');
-      console.log('Role set to proposer'); // DEBUG
+      console.log('Role set to proposer');
       
       router.push('/new?flash=proposer-profile-saved');
     } catch (e: any) {
-      console.error('Save error:', e); // DEBUG
+      console.error('Save error:', e);
       setErr(e?.message || 'Failed to save entity profile');
     } finally {
       setSaving(false);
@@ -121,7 +145,6 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
-      {/* Rest of your form JSX remains the same */}
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>
         <input 
