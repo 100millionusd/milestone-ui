@@ -177,7 +177,7 @@ if (!profileReady) {
 </div>
     <div className="mt-3">
       <Link
-        href="/proposer/profile"
+        href="/vendor/profile"
         className="inline-flex items-center px-3 py-2 rounded-lg border border-sky-600 text-sky-700 hover:bg-sky-50"
       >
         Open Profile
