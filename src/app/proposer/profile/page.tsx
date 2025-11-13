@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+/** HARD URL for clarity (no %3CAPI%3E), with Bearer fallback. */
+const API = 'https://milestone-api-production.up.railway.app';
+
 type Address = {
   line1?: string;
   city?: string;
@@ -10,7 +13,6 @@ type Address = {
   postalCode?: string;
   country?: string;
 };
-
 type Profile = {
   vendorName?: string;
   email?: string;
@@ -23,8 +25,6 @@ type Profile = {
   whatsapp?: string | null;
 };
 
-const API = 'https://milestone-api-production.up.railway.app';
-
 function getToken(): string {
   try { return localStorage.getItem('lx_jwt') || ''; } catch { return ''; }
 }
@@ -35,8 +35,8 @@ async function api(path: string, init: RequestInit = {}) {
     ...init,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
       ...(init.headers || {}),
+      ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
       ...(t ? { Authorization: `Bearer ${t}` } : {}),
     },
     cache: 'no-store',
@@ -45,7 +45,7 @@ async function api(path: string, init: RequestInit = {}) {
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => '');
-    throw new Error(`HTTP ${r.status} ${txt.slice(0,200)}`);
+    throw new Error(`HTTP ${r.status} ${txt.slice(0, 200)}`);
   }
   const ct = r.headers.get('content-type') || '';
   return ct.includes('application/json') ? r.json() : null;
@@ -80,14 +80,11 @@ function parseAddress(raw: Profile['address'], addressText?: string | null): Add
 
 export default function ProposerProfilePage() {
   const router = useRouter();
-  const mounted = useRef(false);
-
-  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [debug, setDebug] = useState<any>(null);
-  const [viewKey, setViewKey] = useState(0); // 👈 force-remount key
 
-  const [form, setForm] = useState<{
+  // The data we’ll use to seed defaultValue’s
+  const [seed, setSeed] = useState<{
     vendorName: string;
     email: string;
     phone: string;
@@ -101,32 +98,33 @@ export default function ProposerProfilePage() {
     address: { line1:'', city:'', state:'', postalCode:'', country:'' },
   });
 
-  // Always refetch in the browser; then force-remount inputs once with viewKey
-  useEffect(() => {
-    if (mounted.current) return;
-    mounted.current = true;
+  // Force-remount key for the <form> so defaultValue is re-applied
+  const [viewKey, setViewKey] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
 
+  // Fetch (browser) and remount once. This avoids any hydration/controlled glitches.
+  useEffect(() => {
     (async () => {
       try {
-        const token = getToken();
         const role = await api('/auth/role');
-        const profile: Profile = await api('/proposer/profile');
+        const p: Profile = await api('/proposer/profile');
 
         setDebug({
-          tokenPreview: token ? token.slice(0, 30) + '…' : '(none)',
+          tokenPreview: getToken() ? getToken().slice(0, 30) + '…' : '(none)',
           role,
-          profile,
+          profile: p,
         });
 
-        setForm({
-          vendorName: profile?.vendorName || '',
-          email: profile?.email || '',
-          phone: profile?.phone || '',
-          website: profile?.website || '',
-          address: parseAddress(profile?.address, profile?.addressText),
+        const addr = parseAddress(p?.address, p?.addressText);
+        setSeed({
+          vendorName: p?.vendorName || '',
+          email: p?.email || '',
+          phone: p?.phone || '',
+          website: p?.website || '',
+          address: addr,
         });
 
-        // 👇 This guarantees inputs remount with the freshly loaded values
+        // Remount the form so all defaultValue’s are applied with fetched data
         setViewKey(k => k + 1);
       } catch (e) {
         setErr((e as Error).message || 'Load failed');
@@ -134,26 +132,39 @@ export default function ProposerProfilePage() {
     })();
   }, []);
 
-  async function onSave() {
-    if (saving) return;
-    if (!form.vendorName.trim()) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const fd = new FormData(formRef.current!);
+
+    const vendorName = String(fd.get('vendorName') || '').trim();
+    if (!vendorName) {
       setErr('Organization name is required');
       return;
     }
-    setSaving(true);
-    setErr(null);
+
+    const payload = {
+      vendorName,
+      email: String(fd.get('email') || '').trim(),
+      phone: String(fd.get('phone') || '').trim(),
+      website: String(fd.get('website') || '').trim(),
+      address: {
+        line1: String(fd.get('line1') || ''),
+        city: String(fd.get('city') || ''),
+        state: String(fd.get('state') || ''),
+        postalCode: String(fd.get('postalCode') || ''),
+        country: String(fd.get('country') || ''),
+      },
+    };
+
     try {
+      // Save profile
       await api('/proposer/profile', {
         method: 'POST',
-        body: JSON.stringify({
-          vendorName: form.vendorName.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          website: form.website.trim(),
-          address: form.address,
-        }),
+        body: JSON.stringify(payload),
       });
 
+      // Ensure role = proposer and refresh Bearer fallback
       const cr = await api('/profile/choose-role?role=proposer', {
         method: 'POST',
         body: JSON.stringify({ role: 'proposer' }),
@@ -162,26 +173,26 @@ export default function ProposerProfilePage() {
         try { localStorage.setItem('lx_jwt', String(cr.token)); } catch {}
       }
 
+      // Read back and remount again (so displayed values are the saved ones)
       const reread: Profile = await api('/proposer/profile');
-      setForm({
+      const addr = parseAddress(reread?.address, reread?.addressText);
+      setSeed({
         vendorName: reread?.vendorName || '',
         email: reread?.email || '',
         phone: reread?.phone || '',
         website: reread?.website || '',
-        address: parseAddress(reread?.address, reread?.addressText),
+        address: addr,
       });
-      setViewKey(k => k + 1); // 👈 remount again after save
+      setViewKey(k => k + 1);
 
       router.replace('/new?flash=proposer-profile-saved');
     } catch (e) {
       setErr((e as Error).message || 'Save failed');
-    } finally {
-      setSaving(false);
     }
   }
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-4" key={`wrap-${viewKey}`}>
+    <div className="max-w-xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">Entity Profile</h1>
       <p className="text-slate-600">Complete your organization profile to submit proposals.</p>
 
@@ -191,7 +202,6 @@ export default function ProposerProfilePage() {
         </div>
       )}
 
-      {/* Debug shows exactly what we fetched */}
       <details className="rounded-lg border border-slate-200 p-3">
         <summary className="cursor-pointer text-sm text-slate-600">Debug</summary>
         <pre className="text-xs whitespace-pre-wrap break-all mt-2">
@@ -199,14 +209,14 @@ export default function ProposerProfilePage() {
         </pre>
       </details>
 
-      {/* 👇 Force-remount the input subtree when viewKey changes */}
-      <div key={`form-${viewKey}`}>
+      {/* REMOUNT THIS WHOLE FORM WHEN viewKey CHANGES */}
+      <form ref={formRef} key={`proposer-form-${viewKey}`} className="space-y-4" onSubmit={onSubmit} data-proposer-form>
         <label className="block">
           <span className="text-sm font-medium">Organization / Entity Name *</span>
           <input
+            name="vendorName"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.vendorName ?? ''}
-            onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+            defaultValue={seed.vendorName}
             placeholder="Your organization name"
           />
         </label>
@@ -215,9 +225,9 @@ export default function ProposerProfilePage() {
           <span className="text-sm font-medium">Email</span>
           <input
             type="email"
+            name="email"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.email ?? ''}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            defaultValue={seed.email}
             placeholder="contact@example.com"
           />
         </label>
@@ -226,9 +236,9 @@ export default function ProposerProfilePage() {
           <span className="text-sm font-medium">Phone</span>
           <input
             type="tel"
+            name="phone"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.phone ?? ''}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            defaultValue={seed.phone}
             placeholder="+1 (555) 123-4567"
           />
         </label>
@@ -237,9 +247,9 @@ export default function ProposerProfilePage() {
           <span className="text-sm font-medium">Website</span>
           <input
             type="url"
+            name="website"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-            value={form.website ?? ''}
-            onChange={(e) => setForm({ ...form, website: e.target.value })}
+            defaultValue={seed.website}
             placeholder="https://example.com"
           />
         </label>
@@ -250,59 +260,58 @@ export default function ProposerProfilePage() {
           <label className="block md:col-span-2">
             <span className="text-sm">Address Line 1</span>
             <input
+              name="line1"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              value={form.address?.line1 ?? ''}
-              onChange={(e) => setForm({ ...form, address: { ...form.address, line1: e.target.value } })}
+              defaultValue={seed.address.line1}
             />
           </label>
 
           <label className="block">
             <span className="text-sm">City</span>
             <input
+              name="city"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              value={form.address?.city ?? ''}
-              onChange={(e) => setForm({ ...form, address: { ...form.address, city: e.target.value } })}
+              defaultValue={seed.address.city}
             />
           </label>
 
           <label className="block">
             <span className="text-sm">State/Province</span>
             <input
+              name="state"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              value={form.address?.state ?? ''}
-              onChange={(e) => setForm({ ...form, address: { ...form.address, state: e.target.value } })}
+              defaultValue={seed.address.state}
             />
           </label>
 
           <label className="block">
             <span className="text-sm">Postal Code</span>
             <input
+              name="postalCode"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              value={form.address?.postalCode ?? ''}
-              onChange={(e) => setForm({ ...form, address: { ...form.address, postalCode: e.target.value } })}
+              defaultValue={seed.address.postalCode}
             />
           </label>
 
           <label className="block md:col-span-2">
             <span className="text-sm">Country</span>
             <input
+              name="country"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
-              value={form.address?.country ?? ''}
-              onChange={(e) => setForm({ ...form, address: { ...form.address, country: e.target.value } })}
+              defaultValue={seed.address.country}
             />
           </label>
         </fieldset>
 
         <div className="flex gap-3 pt-4">
           <button
-            onClick={onSave}
-            disabled={saving}
-            className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium"
+            type="submit"
+            className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-medium"
           >
-            {saving ? 'Saving…' : 'Save Entity Profile'}
+            Save Entity Profile
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
