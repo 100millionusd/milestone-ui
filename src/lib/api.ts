@@ -1912,13 +1912,40 @@ export function buildMilestonesFromSelection(
 
 // === Role/Profile helpers (Entity vs Vendor) ================================
 
-// Save a VENDOR profile explicitly
 export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } | any> {
+  // Normalize vendor address: only allow { line1, city, postalCode, country }
+  const a = profile?.address;
+  let address: any = null;
+
+  if (typeof a === 'string') {
+    address = { line1: a, city: '', postalCode: '', country: '' };
+  } else if (a && typeof a === 'object') {
+    address = {
+      line1: a.line1 ?? '',
+      city: a.city ?? '',
+      postalCode: a.postalCode ?? '',
+      country: a.country ?? '',
+    };
+  }
+
+  // Build payload without extra keys under address (strip "state" and anything else)
+  const payload: any = {
+    vendorName: profile?.vendorName ?? '',
+    email: profile?.email ?? '',
+    phone: profile?.phone ?? '',
+    website: profile?.website ?? '',
+    ...(address ? { address } : {}),
+  };
+
+  // Debug (optional): see exactly what you’re sending
+  // console.log('[saveVendorProfile] payload →', payload);
+
   return apiFetch(`/vendor/profile`, {
     method: 'POST',
-    body: JSON.stringify(profile),
+    body: JSON.stringify(payload),
   });
 }
+
 
 // ── PROPOSER / ENTITY PROFILE
 export function getProposerProfile() {
