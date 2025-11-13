@@ -6,6 +6,7 @@ import Navigation from '@/components/Navigation';
 import { Web3AuthProvider } from '@/providers/Web3AuthProvider';
 import ClientBootstrap from './ClientBootstrap';
 import ImageEnhancer from '@/components/ImageEnhancer';
+import AuthSync from '@/components/AuthSync';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -21,8 +22,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <ClientBootstrap>
+ <body className={inter.className}>
+  <AuthSync />
+  <ClientBootstrap>
           <Web3AuthProvider>
             <ImageEnhancer />
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">

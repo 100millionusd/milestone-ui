@@ -286,6 +286,15 @@ function setJwt(token: string | null) {
   } catch {}
 }
 
+export function syncJwtCookieFromLocalStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    const t = localStorage.getItem('lx_jwt');
+    if (t) document.cookie = `lx_jwt=${t}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`;
+  } catch {}
+}
+
+
 function isAuthError(e: any) {
   const msg = String(e?.message || e || "").toLowerCase();
   return (
@@ -502,11 +511,12 @@ export async function chooseRole(role: 'vendor' | 'proposer') {
     method: 'POST',
     body: JSON.stringify({ role }),
   });
-  if (r?.token) {
-    // keep localStorage Bearer fallback in sync
-    const token = String(r.token);
-    try { localStorage.setItem('lx_jwt', token); } catch {}
-  }
+ if (r?.token) {
+  const token = String(r.token);
+  try { localStorage.setItem('lx_jwt', token); } catch {}
+  try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
+}
+
   // refresh local role cache if you use one
   try { clearAuthRoleCache?.(); } catch {}
   return r;
@@ -618,7 +628,10 @@ export async function loginWithSignature(
   });
 
   const token = (res && res.token) ? String(res.token) : null;
-  if (token) setJwt(token); // keep localStorage fallback in sync
+  if (token) {
+  setJwt(token); // localStorage
+  try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
+} // keep localStorage fallback in sync
 
   return {
     role: (res?.role as AuthInfo["role"]) || (role as AuthInfo["role"]),
