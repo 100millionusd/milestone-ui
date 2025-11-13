@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getVendorProfile, postJSON } from '@/lib/api'; // ✅ Safari-safe helpers
-import ProfileRoleButtons from '@/components/ProfileRoleButtons'; // ⬅️ ADD THIS IMPORT
+import { getVendorProfile, getProposerProfile, postJSON } from '@/lib/api';
+import ProfileRoleButtons from '@/components/ProfileRoleButtons';
 
 type Address = {
   line1: string;
@@ -22,21 +22,32 @@ type ProfileForm = {
   telegramConnected?: boolean;
 };
 
-// Deep-link button to connect Telegram via /start link_<WALLET>
-function ConnectTelegramButton({ wallet }: { wallet: string }) {
-  const bot = process.env.NEXT_PUBLIC_TG_BOT_NAME || 'YourBotName'; // without '@'
-  if (!wallet) return null;
-  const deepLink = `https://t.me/${bot}?start=link_${encodeURIComponent(wallet)}`;
-  return (
-    <a
-      href={deepLink}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
-    >
-      Connect Telegram
-    </a>
-  );
+function normalizeWebsite(v: string) {
+  const s = (v || '').trim();
+  if (!s) return '';
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
+
+// normalize “address” from server (object|string|addressText) → Address object
+function parseAddress(j: any): Address {
+  const a = j?.address ?? j?.addressText ?? '';
+  if (a && typeof a === 'object') {
+    return {
+      line1: a.line1 || '',
+      city: a.city || '',
+      postalCode: a.postalCode || '',
+      country: a.country || '',
+    };
+  }
+  const s = String(a || '').trim();
+  if (!s) return { line1: '', city: '', postalCode: '', country: '' };
+  const parts = s.split(',').map((x) => x.trim());
+  return {
+    line1: parts[0] || '',
+    city: parts[1] || '',
+    postalCode: parts[2] || '',
+    country: parts[3] || '',
+  };
 }
 
 export default function VendorProfilePage() {
@@ -44,6 +55,7 @@ export default function VendorProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
   const [p, setP] = useState<ProfileForm>({
     walletAddress: '',
     vendorName: '',
@@ -58,34 +70,32 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        // ✅ Safari-safe: goes through api.ts (adds Bearer if cookie is blocked)
-        const j = await getVendorProfile();
+        setLoading(true);
 
-        // Server may return address as string or object — normalize to object.
-        const a = j?.address ?? {};
-        const address: Address =
-          typeof a === 'string'
-            ? { line1: a, city: '', postalCode: '', country: '' }
-            : {
-                line1: a?.line1 || '',
-                city: a?.city || '',
-                postalCode: a?.postalCode || '',
-                country: a?.country || '',
-              };
+        // Try vendor first, then proposer as fallback
+        const v = await getVendorProfile().catch(() => ({}));
+        const hasVendor = v && Object.keys(v).length > 0;
+
+        const src = hasVendor ? v : await getProposerProfile().catch(() => ({}));
+        const hasSrc = src && Object.keys(src).length > 0;
 
         if (!alive) return;
-        setP({
-          walletAddress: j?.walletAddress || '',
-          vendorName: j?.vendorName || '',
-          email: j?.email || '',
-          phone: j?.phone || '',
-          website: j?.website || '',
-          address,
-          // Consider any truthy chat id as connected; support snake/camel
-          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
-        });
+
+        if (hasSrc) {
+          setP({
+            walletAddress: src.walletAddress || '',
+            vendorName: src.vendorName || '',
+            email: src.email || '',
+            phone: src.phone || '',
+            website: src.website || '',
+            address: parseAddress(src),
+            telegramConnected: !!(src?.telegram_chat_id || src?.telegramChatId),
+          });
+        } else {
+          // keep defaults
+        }
       } catch (e: any) {
-        setErr(e?.message || 'Failed to load profile');
+        if (alive) setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
@@ -95,20 +105,14 @@ export default function VendorProfilePage() {
     };
   }, []);
 
-  function normalizeWebsite(v: string) {
-    const s = (v || '').trim();
-    if (!s) return '';
-    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
-  }
-
-  async function onSave(e: React.FormEvent) {
+  async function onSaveOnly(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setErr(null);
 
     try {
       const payload = {
-        vendorName: (p.vendorName || '').trim(), // required (>= 2 chars)
+        vendorName: (p.vendorName || '').trim(),
         email: (p.email || '').trim(),
         phone: (p.phone || '').trim(),
         website: normalizeWebsite(p.website || ''),
@@ -126,10 +130,7 @@ export default function VendorProfilePage() {
         return;
       }
 
-      // ✅ Safari-safe: uses api.ts helper so Bearer is sent if cookie is blocked
-      await postJSON('/vendor/profile', payload);
-
-    router.push('/vendor/dashboard?flash=vendor-profile-saved');
+      await postJSON('/vendor/profile', payload); // just save vendor version
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
@@ -139,7 +140,6 @@ export default function VendorProfilePage() {
 
   if (loading) return <main className="max-w-3xl mx-auto p-6">Loading…</main>;
 
-  // ⬇️ Build the object passed to the role buttons
   const profileForRole = {
     vendorName: p.vendorName,
     email: p.email,
@@ -149,11 +149,11 @@ export default function VendorProfilePage() {
   };
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-4">
+    <main data-profile-form className="max-w-3xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Profile</h1>
       {err && <div className="text-rose-700">{err}</div>}
 
-      <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
+      <form onSubmit={onSaveOnly} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Company / Vendor Name</div>
@@ -202,25 +202,6 @@ export default function VendorProfilePage() {
               placeholder="https://yourdomain.com"
             />
           </label>
-        </div>
-
-        {/* Telegram connect row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="block">
-            <div className="text-sm text-slate-600 mb-1">Telegram</div>
-            {p.telegramConnected ? (
-              <div className="inline-flex items-center gap-2">
-                <span className="text-green-600">Connected</span>
-                {/* Allow re-link just in case */}
-                <ConnectTelegramButton wallet={p.walletAddress} />
-              </div>
-            ) : (
-              <ConnectTelegramButton wallet={p.walletAddress} />
-            )}
-            <p className="text-xs text-slate-500 mt-1">
-              Opens Telegram to link this wallet to your account.
-            </p>
-          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -273,19 +254,22 @@ export default function VendorProfilePage() {
           </label>
         </div>
 
+        {/* You can keep a plain Save button here if you want */}
+        {/* <button className="px-4 py-2 rounded bg-slate-200" disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button> */}
       </form>
 
-      {/* ⬇️ ADD THIS: role selection buttons under the form */}
       <div className="pt-4 border-t">
         <h2 className="text-lg font-semibold mb-2">Choose how you want to continue</h2>
         <p className="text-sm text-slate-600 mb-3">
           Save your profile and continue either as a Vendor (submit bids) or as an Entity (submit proposals).
         </p>
- <ProfileRoleButtons
-  profile={profileForRole}
-  nextAfterVendor="/vendor/dashboard?flash=vendor-profile-saved"
-  nextAfterProposer="/new"
-/>
+        <ProfileRoleButtons
+          profile={profileForRole}
+          nextAfterVendor="/vendor/dashboard?flash=vendor-profile-saved"
+          nextAfterProposer="/new?flash=proposer-profile-saved"
+        />
       </div>
     </main>
   );
