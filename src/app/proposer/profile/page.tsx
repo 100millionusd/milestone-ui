@@ -39,19 +39,33 @@ export default function ProposerProfilePage() {
     (async () => {
       try {
         setLoading(true);
-        console.log('🔄 Loading profile...');
+        console.log('🔄 START: Loading profile from API...');
         
         const p = await getProposerProfile();
-        console.log('📥 Profile data from API:', p);
+        console.log('📥 RAW API RESPONSE:', p);
+        console.log('📥 API RESPONSE TYPE:', typeof p);
+        console.log('📥 IS RESPONSE TRUTHY:', !!p);
         
-        if (!alive) return;
+        if (!alive) {
+          console.log('❌ Component unmounted, skipping update');
+          return;
+        }
         
         if (p && typeof p === 'object') {
+          console.log('✅ Profile data exists, parsing...');
+          console.log('📝 Available keys:', Object.keys(p));
+          
           let address: Address = { line1: '', city: '', state: '', postalCode: '', country: '' };
           
-          // Handle address data - it might come as addressText string
+          // Check what address data we have
+          console.log('🏠 Address data in response:');
+          console.log('   - p.address:', p.address);
+          console.log('   - p.addressText:', p.addressText);
+          console.log('   - typeof p.address:', typeof p.address);
+          console.log('   - typeof p.addressText:', typeof p.addressText);
+          
           if (p.address && typeof p.address === 'object') {
-            // Use address object if available
+            console.log('📍 Using address object from response');
             address = {
               line1: p.address.line1 || '',
               city: p.address.city || '',
@@ -59,10 +73,11 @@ export default function ProposerProfilePage() {
               postalCode: p.address.postalCode || '',
               country: p.address.country || '',
             };
-          } else if (p.addressText) {
-            // Parse address from addressText string
-            console.log('📝 Parsing address from addressText:', p.addressText);
+          } else if (p.addressText && typeof p.addressText === 'string') {
+            console.log('📍 Parsing address from addressText:', p.addressText);
             const parts = p.addressText.split(', ');
+            console.log('📍 Split address parts:', parts);
+            
             if (parts.length >= 3) {
               address = {
                 line1: parts[0] || '',
@@ -71,32 +86,53 @@ export default function ProposerProfilePage() {
                 country: parts[3] || '',
                 state: '', // Not in addressText
               };
+            } else {
+              console.log('❌ Unexpected addressText format');
+              // If format is unexpected, put the whole thing in line1
+              address = {
+                line1: p.addressText,
+                city: '',
+                state: '',
+                postalCode: '',
+                country: '',
+              };
             }
           } else {
-            console.log('❌ No address data found in response');
+            console.log('❌ No address data found');
           }
 
           const newForm = {
-            vendorName: p.vendorName || '',
+            vendorName: p.vendorName || p.vendor_name || '',
             email: p.email || '',
             phone: p.phone || '',
             website: p.website || '',
             address,
           };
 
-          console.log('✅ Setting form with parsed data:', newForm);
+          console.log('✅ FINAL FORM DATA TO SET:', newForm);
           setForm(newForm);
+          console.log('✅ Form state updated');
         } else {
           console.log('❌ No profile data found or invalid format');
+          console.log('❌ p value:', p);
+          console.log('❌ p type:', typeof p);
         }
       } catch (error: any) {
         if (!alive) return;
-        console.error('❌ Failed to load profile:', error);
+        console.error('❌ ERROR loading profile:', error);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error stack:', error.stack);
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+          console.log('🔄 Loading completed');
+        }
       }
     })();
-    return () => { alive = false; };
+    return () => { 
+      console.log('🔄 Cleanup: component unmounting');
+      alive = false; 
+    };
   }, []);
 
   const save = async () => {
@@ -111,33 +147,42 @@ export default function ProposerProfilePage() {
     setErr(null);
     
     try {
-      console.log('💾 Saving profile:', form);
+      console.log('💾 START: Saving profile process...');
+      console.log('💾 Current form data:', form);
       
-      // Prepare data for API - make sure to send address as an object
       const profileData = {
         vendorName: form.vendorName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         website: form.website.trim(),
-        address: form.address, // Send as object
+        address: form.address,
       };
 
       console.log('🚀 Sending to API:', profileData);
       const result = await saveProposerProfile(profileData);
-      console.log('✅ Save result:', result);
+      console.log('✅ Save API response:', result);
       
       console.log('🔄 Setting role to proposer...');
       await chooseRole('proposer');
       console.log('✅ Role set to proposer');
       
+      console.log('🔄 Redirecting to /new...');
       router.push('/new?flash=proposer-profile-saved');
     } catch (e: any) {
-      console.error('❌ Save error:', e);
+      console.error('❌ SAVE ERROR:', e);
+      console.error('❌ Error message:', e.message);
+      console.error('❌ Error stack:', e.stack);
       setErr(e?.message || 'Failed to save entity profile');
     } finally {
       setSaving(false);
+      console.log('💾 Save process completed');
     }
   };
+
+  // Add a debug effect to log form changes
+  useEffect(() => {
+    console.log('📊 FORM STATE UPDATED:', form);
+  }, [form]);
 
   if (loading) {
     return (
@@ -160,6 +205,17 @@ export default function ProposerProfilePage() {
           {err}
         </div>
       )}
+
+      {/* Debug panel */}
+      <details className="bg-slate-100 p-4 rounded-lg">
+        <summary className="cursor-pointer font-mono text-sm">Debug Info</summary>
+        <div className="mt-2">
+          <div className="text-xs font-mono">Form State:</div>
+          <pre className="text-xs bg-white p-2 rounded border max-h-40 overflow-y-auto">
+            {JSON.stringify(form, null, 2)}
+          </pre>
+        </div>
+      </details>
 
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>
