@@ -2,127 +2,77 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveProposerProfile, chooseRole, getProposerProfile } from '@/lib/api';
 
 type Address = { line1?: string; city?: string; state?: string; postalCode?: string; country?: string; };
+type Profile = { vendorName?: string; email?: string; phone?: string; website?: string; address?: Address | string | null; addressText?: string | null; };
 
-function parseAddress(raw: any, addressText?: string | null): Address {
+const API = 'https://milestone-api-production.up.railway.app';
+const getBearer = () => { try { return localStorage.getItem('lx_jwt') || ''; } catch { return ''; } };
+
+function parseAddress(raw?: Address | string | null, addressText?: string | null): Address {
   if (raw && typeof raw === 'object') {
-    return {
-      line1: raw.line1 || '', city: raw.city || '', state: raw.state || '',
-      postalCode: raw.postalCode || '', country: raw.country || '',
-    };
+    return { line1: raw.line1 || '', city: raw.city || '', state: (raw as any).state || '', postalCode: raw.postalCode || '', country: raw.country || '' };
   }
-  const parts = String(typeof raw === 'string' ? raw : addressText || '')
-    .split(',').map(s=>s.trim());
-  return {
-    line1: parts[0] || '', city: parts[1] || '', postalCode: parts[2] || '',
-    country: parts[3] || '', state: '',
-  };
+  const parts = String(typeof raw === 'string' ? raw : (addressText || '')).split(',').map(s => s.trim());
+  return { line1: parts[0] || '', city: parts[1] || '', postalCode: parts[2] || '', country: parts[3] || '', state: '' };
 }
 
-function syncJwtCookieFromLocalStorage() {
-  try {
-    const t = localStorage.getItem('lx_jwt');
-    if (t) document.cookie = `lx_jwt=${t}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`;
-  } catch {}
+async function fetchProfile(): Promise<Profile> {
+  const res = await fetch(`${API}/proposer/profile`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${getBearer()}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`GET /proposer/profile HTTP ${res.status}`);
+  return res.json();
 }
 
 export default function ProposerProfilePage() {
   const router = useRouter();
-  const mounted = useRef(false);
+  const did = useRef(false);
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
 
-  const [form, setForm] = useState<{
-    vendorName: string; email: string; phone: string; website: string; address: Address;
-  }>({
+  const [form, setForm] = useState({
     vendorName: '', email: '', phone: '', website: '',
-    address: { line1: '', city: '', state: '', postalCode: '', country: '' },
+    address: { line1: '', city: '', state: '', postalCode: '', country: '' } as Address,
   });
 
-  // 🔑 SINGLE client refetch on mount (fixes "empty after refresh")
+  // ✅ single refetch on mount — this is what fills the page after refresh
   useEffect(() => {
-    if (mounted.current) return;
-    mounted.current = true;
+    if (did.current) return;
+    did.current = true;
 
     (async () => {
       try {
         setLoading(true);
-        syncJwtCookieFromLocalStorage();
-        console.log('[PROFILE] mount refetch…');
-        const p = await getProposerProfile();
-        console.log('[PROFILE] refetched:', p);
+        console.log('[PROFILE] refetch on mount… token?', (getBearer() || '').slice(0, 12) + '…');
+        const p = await fetchProfile();
+        console.log('[PROFILE] got:', p);
+        setProfile(p);
         setForm({
-          vendorName: p?.vendorName || '',
-          email: p?.email || '',
-          phone: p?.phone || '',
-          website: p?.website || '',
-          address: parseAddress(p?.address, p?.addressText),
+          vendorName: p.vendorName || '',
+          email: p.email || '',
+          phone: p.phone || '',
+          website: p.website || '',
+          address: parseAddress(p.address, p.addressText),
         });
-      } catch (e) {
-        console.warn('[PROFILE] initial refetch failed:', e);
+      } catch (e: any) {
+        console.warn('[PROFILE] refetch failed:', e?.message || e);
+        setErr(e?.message || 'Failed to load profile');
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // Expose a quick debugger in DevTools
-  useEffect(() => {
-    (window as any).__PROPOSER_DEBUG__ = {
-      form,
-      token: localStorage.getItem('lx_jwt'),
-      poke: async () => {
-        const p = await getProposerProfile();
-        console.log('[poke] /proposer/profile ->', p);
-        setForm({
-          vendorName: p?.vendorName || '',
-          email: p?.email || '',
-          phone: p?.phone || '',
-          website: p?.website || '',
-          address: parseAddress(p?.address, p?.addressText),
-        });
-      },
-    };
-  }, [form]);
-
-  async function onSave() {
-    if (saving) return;
-    if (!form.vendorName.trim()) { setErr('Organization name is required'); return; }
-    setSaving(true); setErr(null);
-    try {
-      await saveProposerProfile({
-        vendorName: form.vendorName.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
-        website: form.website.trim(),
-        address: form.address,
-      });
-      const r: any = await chooseRole('proposer');
-      if (r?.token) { localStorage.setItem('lx_jwt', String(r.token)); syncJwtCookieFromLocalStorage(); }
-      const p = await getProposerProfile();
-      setForm({
-        vendorName: p?.vendorName || '',
-        email: p?.email || '',
-        phone: p?.phone || '',
-        website: p?.website || '',
-        address: parseAddress(p?.address, p?.addressText),
-      });
-      router.replace('/new?flash=proposer-profile-saved');
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to save entity profile');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="max-w-xl mx-auto p-6">
-        <div className="flex justify-center items-center py-12">
+        <div className="flex items-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2" />
           <span className="ml-3">Loading profile…</span>
         </div>
@@ -133,6 +83,14 @@ export default function ProposerProfilePage() {
   return (
     <div className="max-w-xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">Entity Profile</h1>
+
+      {/* DEBUG PANEL — keep this while we verify */}
+      <div className="rounded-xl border p-3 bg-slate-50 text-xs overflow-auto">
+        <div className="font-semibold">[DEBUG] auth token present? {getBearer() ? 'yes' : 'no'}</div>
+        <div className="mt-2 font-semibold">[DEBUG] raw profile from API:</div>
+        <pre className="whitespace-pre-wrap break-all">{JSON.stringify(profile, null, 2)}</pre>
+      </div>
+
       {err && <div className="rounded-xl border bg-rose-50 text-rose-700 px-3 py-2">{err}</div>}
 
       <label className="block">
@@ -196,13 +154,6 @@ export default function ProposerProfilePage() {
                  onChange={e=>setForm({...form, address:{...form.address, country:e.target.value}})}/>
         </label>
       </fieldset>
-
-      <div className="flex gap-3 pt-4">
-        <button onClick={onSave} disabled={saving}
-                className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium">
-          {saving ? 'Saving…' : 'Save Entity Profile'}
-        </button>
-      </div>
     </div>
   );
 }
