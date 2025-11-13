@@ -1,8 +1,9 @@
+// src/app/proposer/profile/ProposerProfileForm.tsx
 'use client';
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { saveProposerProfile, chooseRole, getProposerProfile } from "@/lib/api";
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { saveProposerProfile, chooseRole, getProposerProfile } from '@/lib/api';
 
 type Address = {
   line1?: string;
@@ -12,87 +13,122 @@ type Address = {
   country?: string;
 };
 
+type Initial = {
+  vendorName?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: Address | string | null;
+  addressText?: string | null;
+};
+
 function parseAddress(raw: any, addressText?: string | null): Address {
-  if (raw && typeof raw === "object") {
+  // Already structured
+  if (raw && typeof raw === 'object') {
     return {
-      line1: raw.line1 || "",
-      city: raw.city || "",
-      state: raw.state || "",
-      postalCode: raw.postalCode || "",
-      country: raw.country || "",
+      line1: raw.line1 || '',
+      city: raw.city || '',
+      state: raw.state || '',
+      postalCode: raw.postalCode || '',
+      country: raw.country || '',
     };
   }
-  const text = typeof raw === "string" && raw.trim() ? raw : (addressText || "");
-  if (text) {
-    const p = text.split(",").map((s) => s.trim());
-    return {
-      line1: p[0] || "",
-      city: p[1] || "",
-      postalCode: p[2] || "",
-      country: p[3] || "",
-      state: "",
-    };
+
+  // Accept free-text string (or addressText)
+  const text = (typeof raw === 'string' && raw.trim()) ? raw : (addressText || '');
+  if (!text) return { line1: '', city: '', state: '', postalCode: '', country: '' };
+
+  const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+  const [line1 = '', city = '', third = '', fourth = ''] = parts;
+
+  let postalCode = '';
+  let country = '';
+
+  if (parts.length >= 4) {
+    const thirdHasDigits = /\d/.test(third);
+    const fourthHasDigits = /\d/.test(fourth);
+    if (thirdHasDigits && !fourthHasDigits) { postalCode = third; country = fourth; }
+    else if (fourthHasDigits && !thirdHasDigits) { postalCode = fourth; country = third; }
+    else { postalCode = third; country = fourth; }
+  } else if (parts.length === 3) {
+    country = third;
   }
-  return { line1: "", city: "", state: "", postalCode: "", country: "" };
+
+  return { line1, city, state: '', postalCode, country };
 }
 
-export default function ProposerProfileForm() {
+export default function ProposerProfileForm({ initial = {} as Initial }) {
   const router = useRouter();
   const inited = useRef(false);
+
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
-    vendorName: "",
-    email: "",
-    phone: "",
-    website: "",
-    address: { line1: "", city: "", state: "", postalCode: "", country: "" } as Address,
-  });
+  const [form, setForm] = useState(() => ({
+    vendorName: initial?.vendorName || '',
+    email: initial?.email || '',
+    phone: initial?.phone || '',
+    website: initial?.website || '',
+    address: parseAddress(initial?.address, initial?.addressText),
+  }));
 
-  // 🔑 Authoritative refetch on mount (fixes “empty after refresh”)
+  // Refetch on mount (client) so the form populates even if SSR had no auth
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        setLoading(true);
-        console.log('[PROFILE] refetch on mount…');
         const p = await getProposerProfile();
         if (!alive) return;
-        console.log('[PROFILE] refetched:', p);
         setForm({
-          vendorName: p?.vendorName || "",
-          email: p?.email || "",
-          phone: p?.phone || "",
-          website: p?.website || "",
+          vendorName: p?.vendorName || '',
+          email: p?.email || '',
+          phone: p?.phone || '',
+          website: p?.website || '',
           address: parseAddress(p?.address, p?.addressText),
         });
       } catch (e) {
-        console.warn("[PROFILE] refetch failed:", e);
-      } finally {
-        if (alive) setLoading(false);
+        // console.warn('[PROFILE] refetch failed:', e);
       }
     })();
     return () => { alive = false; };
   }, []);
 
-  // Guard against StrictMode double init (no-op, keeps shape stable)
+  // Guard against StrictMode double init & keep any server-provided initial once
   useEffect(() => {
     if (inited.current) return;
     inited.current = true;
+    setForm({
+      vendorName: initial?.vendorName || '',
+      email: initial?.email || '',
+      phone: initial?.phone || '',
+      website: initial?.website || '',
+      address: parseAddress(initial?.address, initial?.addressText),
+    });
+  }, [initial]);
+
+  // Safety: if something ever sets address as a string, coerce it once on first render
+  useEffect(() => {
+    setForm(prev => {
+      const a: any = (prev as any).address;
+      if (typeof a === 'string') {
+        return { ...prev, address: parseAddress(a, (prev as any).addressText) };
+      }
+      return prev;
+    });
+    // run only once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onContinueAsEntity() {
     if (saving) return;
     if (!form.vendorName.trim()) {
-      setErr("Organization name is required");
+      setErr('Organization name is required');
       return;
     }
     setSaving(true);
     setErr(null);
     try {
-      // 1) save
+      // 1) Save profile
       await saveProposerProfile({
         vendorName: form.vendorName.trim(),
         email: form.email.trim(),
@@ -101,42 +137,33 @@ export default function ProposerProfileForm() {
         address: form.address,
       });
 
-      // 2) choose role (stores token in localStorage via your api.ts)
-      await chooseRole("proposer");
+      // 2) Ensure role=proposer (also gives a token)
+      await chooseRole('proposer');
 
-      // 3) refetch once to confirm
-      const p = await getProposerProfile();
+      // 3) Read back once to confirm and sync UI state
+      const reread = await getProposerProfile();
       setForm({
-        vendorName: p?.vendorName || "",
-        email: p?.email || "",
-        phone: p?.phone || "",
-        website: p?.website || "",
-        address: parseAddress(p?.address, p?.addressText),
+        vendorName: reread?.vendorName || '',
+        email: reread?.email || '',
+        phone: reread?.phone || '',
+        website: reread?.website || '',
+        address: parseAddress(reread?.address, reread?.addressText),
       });
 
-      // 4) proceed
-      router.replace("/new?flash=proposer-profile-saved");
+      // 4) Go to creation flow
+      router.replace('/new?flash=proposer-profile-saved');
     } catch (e: any) {
-      setErr(e?.message || "Failed to save entity profile");
+      setErr(e?.message || 'Failed to save entity profile');
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) {
-    return (
-      <div className="max-w-xl mx-auto p-6">
-        <div className="flex justify-center items-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
-          <span className="ml-3">Loading profile…</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">Entity Profile</h1>
+      <p className="text-slate-600">Complete your organization profile to submit proposals.</p>
+
       {err && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2">
           {err}
@@ -146,9 +173,10 @@ export default function ProposerProfileForm() {
       <label className="block">
         <span className="text-sm font-medium">Organization / Entity Name *</span>
         <input
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
           value={form.vendorName}
           onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+          placeholder="Your organization name"
         />
       </label>
 
@@ -156,9 +184,10 @@ export default function ProposerProfileForm() {
         <span className="text-sm font-medium">Email</span>
         <input
           type="email"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="contact@example.com"
         />
       </label>
 
@@ -166,9 +195,10 @@ export default function ProposerProfileForm() {
         <span className="text-sm font-medium">Phone</span>
         <input
           type="tel"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
           value={form.phone}
           onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          placeholder="+1 (555) 123-4567"
         />
       </label>
 
@@ -176,9 +206,10 @@ export default function ProposerProfileForm() {
         <span className="text-sm font-medium">Website</span>
         <input
           type="url"
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
           value={form.website}
           onChange={(e) => setForm({ ...form, website: e.target.value })}
+          placeholder="https://example.com"
         />
       </label>
 
@@ -188,55 +219,45 @@ export default function ProposerProfileForm() {
         <label className="block md:col-span-2">
           <span className="text-sm">Address Line 1</span>
           <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
             value={form.address.line1}
-            onChange={(e) =>
-              setForm({ ...form, address: { ...form.address, line1: e.target.value } })
-            }
+            onChange={(e) => setForm({ ...form, address: { ...form.address, line1: e.target.value } })}
           />
         </label>
 
         <label className="block">
           <span className="text-sm">City</span>
           <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
             value={form.address.city}
-            onChange={(e) =>
-              setForm({ ...form, address: { ...form.address, city: e.target.value } })
-            }
+            onChange={(e) => setForm({ ...form, address: { ...form.address, city: e.target.value } })}
           />
         </label>
 
         <label className="block">
           <span className="text-sm">State/Province</span>
           <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
             value={form.address.state}
-            onChange={(e) =>
-              setForm({ ...form, address: { ...form.address, state: e.target.value } })
-            }
+            onChange={(e) => setForm({ ...form, address: { ...form.address, state: e.target.value } })}
           />
         </label>
 
         <label className="block">
           <span className="text-sm">Postal Code</span>
           <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
             value={form.address.postalCode}
-            onChange={(e) =>
-              setForm({ ...form, address: { ...form.address, postalCode: e.target.value } })
-            }
+            onChange={(e) => setForm({ ...form, address: { ...form.address, postalCode: e.target.value } })}
           />
         </label>
 
         <label className="block md:col-span-2">
           <span className="text-sm">Country</span>
           <input
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
             value={form.address.country}
-            onChange={(e) =>
-              setForm({ ...form, address: { ...form.address, country: e.target.value } })
-            }
+            onChange={(e) => setForm({ ...form, address: { ...form.address, country: e.target.value } })}
           />
         </label>
       </fieldset>
@@ -247,7 +268,7 @@ export default function ProposerProfileForm() {
           disabled={saving}
           className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl disabled:opacity-60 font-medium"
         >
-          {saving ? "Saving…" : "Save Entity Profile"}
+          {saving ? 'Saving…' : 'Save Entity Profile'}
         </button>
       </div>
     </div>
