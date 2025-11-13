@@ -329,13 +329,9 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
      if (!isBrowser) {
     bases.push(trimSlashEnd(API_BASE)); // server-side: only external
   } else {
-    // 1) external (your current default)
-    bases.push(trimSlashEnd(API_BASE));
-    // 2) same-origin (requires rewrites like /auth, /bids, /vendor, /proposals, /proofs, /admin, /ipfs)
-    bases.push("");
-    // 3) same-origin "/api" (if your rewrites use /api/:path*)
-    bases.push("/api");
-  }
+  // Force external API. Same-origin fallbacks cause 404 and mask auth issues.
+  bases.push(trimSlashEnd(API_BASE));
+}
 
   let lastResp: Response | null = null;
 
@@ -1927,8 +1923,15 @@ export function switchRole(role: 'vendor' | 'proposer') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
+  }).then((r: any) => {
+    if (r?.token) {
+      try { localStorage.setItem('lx_jwt', String(r.token)); } catch {}
+    }
+    try { clearAuthRoleCache(); } catch {}
+    return r;
   });
 }
+
 
 export default {
   // auth
