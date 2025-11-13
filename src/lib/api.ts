@@ -182,13 +182,6 @@ export interface VendorSummary {
   lastActivityAt?: string | null;
 }
 
-/** Admin: identify an entity by any of these keys */
-export type EntitySelector = {
-  orgName?: string | null;
-  contactEmail?: string | null;
-  ownerWallet?: string | null;
-};
-
 /** ✅ NEW: Chat message type for SSE chat */
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
@@ -1216,7 +1209,7 @@ export async function listProposers(): Promise<ProposerSummary[]> {
 }
 
 /** Shapes we might receive from callers */
-type EntitySelector = {
+export type EntitySelector = {
   entity?: string | null;
   contactEmail?: string | null;
   wallet?: string | null;
