@@ -1941,10 +1941,10 @@ export function buildMilestonesFromSelection(
 
 // === Role/Profile helpers (Entity vs Vendor) ================================
 
-export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } | any> {
-  // Normalize vendor address: only allow { line1, city, postalCode, country }
+export async function saveVendorProfile(profile: any) {
+  // Normalize vendor address → only { line1, city, postalCode, country }
   const a = profile?.address;
-  let address: any = null;
+  let address: { line1: string; city: string; postalCode: string; country: string } | undefined;
 
   if (typeof a === 'string') {
     address = { line1: a, city: '', postalCode: '', country: '' };
@@ -1957,8 +1957,7 @@ export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } |
     };
   }
 
-  // Build payload without extra keys under address (strip "state" and anything else)
-  const payload: any = {
+  const payload = {
     vendorName: profile?.vendorName ?? '',
     email: profile?.email ?? '',
     phone: profile?.phone ?? '',
@@ -1966,37 +1965,63 @@ export async function saveVendorProfile(profile: any): Promise<{ ok: boolean } |
     ...(address ? { address } : {}),
   };
 
-  // Debug (optional): see exactly what you’re sending
-  // console.log('[saveVendorProfile] payload →', payload);
-
   return apiFetch(`/vendor/profile`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 }
 
 
-// ── PROPOSER / ENTITY PROFILE
-export function getProposerProfile() {
-  return apiFetch('/proposer/profile', { method: 'GET' });
-}
+export async function saveProposerProfile(profile: any) {
+  const a = profile?.address;
+  // Allow string or strict object. If object, keep only allowed keys.
+  const address =
+    typeof a === 'string'
+      ? a
+      : a && typeof a === 'object'
+      ? {
+          line1: a.line1 ?? '',
+          city: a.city ?? '',
+          postalCode: a.postalCode ?? '',
+          country: a.country ?? '',
+        }
+      : undefined;
 
-export function saveProposerProfile(profile: any) {
+  const payload = {
+    vendorName: profile?.vendorName ?? profile?.orgName ?? '',
+    email: profile?.email ?? '',
+    phone: profile?.phone ?? '',
+    website: profile?.website ?? '',
+    ...(address !== undefined ? { address } : {}),
+    city: profile?.city ?? '',
+    country: profile?.country ?? '',
+    whatsapp: profile?.whatsapp ?? '',
+    telegram_chat_id: profile?.telegram_chat_id ?? '',
+    telegram_username: profile?.telegram_username ?? '',
+  };
+
   return apiFetch('/proposer/profile', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(profile),
+    body: JSON.stringify(payload),
   });
 }
 
-// REPLACE the whole function with this:
+export function chooseRole(role: 'vendor' | 'proposer') {
+  return apiFetch('/profile/choose-role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+}
+
 export function switchRole(role: 'vendor' | 'proposer') {
-  // Route exists and is already implemented above:
   return chooseRole(role);
 }
 
-// (optional convenience)
 export const chooseRoleProposer = () => chooseRole('proposer');
+export const chooseRoleVendor   = () => chooseRole('vendor');
 
 
 export default {
