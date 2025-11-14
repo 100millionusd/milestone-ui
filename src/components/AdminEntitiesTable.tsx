@@ -197,6 +197,15 @@ function normalizeRow(r: any): ProposerAgg {
     ownerTelegramChatId
   );
 
+    // Telegram "connected" flag (entities/proposers often only have this boolean)
+  const telegramConnected = !!(
+    r.telegramConnected ??
+    r.profile?.telegramConnected ??
+    r.profile?.telegram?.connected ??
+    r.profile?.social?.telegram?.connected ??
+    r.profile?.connections?.telegram?.connected
+  );
+
   // Status counts
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
@@ -262,7 +271,7 @@ function normalizeRow(r: any): ProposerAgg {
     telegramChatId,
     ownerTelegramUsername,
     ownerTelegramChatId,
-    telegramConnected: false,
+    telegramConnected,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
