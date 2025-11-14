@@ -7,7 +7,6 @@ import {
   listProposers,
   listProposals,
   type Proposal,
-  getAdminVendors as listAdminVendors,  
   // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
@@ -32,14 +31,10 @@ export type ProposerAgg = {
   /** phone also used for WhatsApp */
   phone?: string | null;
   whatsapp?: string | null;
-  ownerPhone?: string | null;
 
   /** Telegram */
   telegramUsername?: string | null;
   telegramChatId?: string | null;
-  ownerTelegramUsername?: string | null;
-  ownerTelegramChatId?: string | null;
-  telegramConnected?: boolean;
 
   wallet: string | null;
   proposalsCount: number;
@@ -51,6 +46,9 @@ export type ProposerAgg = {
   totalBudgetUSD: number;
   lastActivity: string | null;
   archived?: boolean;
+  ownerPhone?: string | null;
+  ownerTelegramUsername?: string | null;
+  ownerTelegramChatId?: string | null;
 };
 
 type SortKey =
@@ -166,7 +164,7 @@ function normalizeRow(r: any): ProposerAgg {
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
   const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
-  // -------- Phone / WhatsApp (top-level + profile) --------
+    // Phone / WhatsApp (also look into profile)
   const ownerPhone = pickNonEmpty(
     r.ownerPhone, r.owner_phone,
     r.profile?.ownerPhone, r.profile?.owner_phone
@@ -177,65 +175,7 @@ function normalizeRow(r: any): ProposerAgg {
     ownerPhone
   );
 
-  // -------- Telegram (robust: flat, profile.*, nested, strings/objects) --------
-  const pickTelegramUsername = (...vals: any[]): string | null => {
-    const fromString = (v: any) => {
-      if (typeof v !== 'string') return null;
-      const s = v.trim();
-      if (!s) return null;
-      return s.startsWith('@') ? s.slice(1) : s;
-    };
-    const fromObj = (o: any) => {
-      if (!o || typeof o !== 'object') return null;
-      return pickNonEmpty(
-        fromString(o.username),
-        fromString(o.handle),
-        fromString(o.name),
-        fromString(o.user),
-        fromString(o.id)
-      );
-    };
-    for (const v of vals) {
-      if (v == null) continue;
-      if (typeof v === 'string') {
-        const s = fromString(v);
-        if (s) return s;
-      } else if (typeof v === 'object') {
-        const s = fromObj(v);
-        if (s) return s;
-      }
-    }
-    return null;
-  };
-
-  const pickTelegramChatId = (...vals: any[]): string | null => {
-    const fromString = (v: any) => {
-      if (v == null) return null;
-      const s = String(v).trim();
-      return s || null;
-    };
-    const fromObj = (o: any) => {
-      if (!o || typeof o !== 'object') return null;
-      return pickNonEmpty(
-        fromString(o.chatId),
-        fromString(o.chat_id),
-        fromString(o.id)
-      );
-    };
-    for (const v of vals) {
-      if (v == null) continue;
-      if (typeof v === 'string' || typeof v === 'number') {
-        const s = fromString(v);
-        if (s) return s;
-      } else if (typeof v === 'object') {
-        const s = fromObj(v);
-        if (s) return s;
-      }
-    }
-    return null;
-  };
-
-    // Telegram — prefer flat fields from /admin/vendors
+  // Telegram (top-level and profile, both owner and generic)
   const ownerTelegramUsername = pickNonEmpty(
     r.ownerTelegramUsername, r.owner_telegram_username,
     r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username
@@ -244,7 +184,6 @@ function normalizeRow(r: any): ProposerAgg {
     r.ownerTelegramChatId, r.owner_telegram_chat_id,
     r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
   );
-
   const telegramUsername = pickNonEmpty(
     r.telegramUsername, r.telegram_username,
     r.profile?.telegramUsername, r.profile?.telegram_username,
@@ -256,12 +195,7 @@ function normalizeRow(r: any): ProposerAgg {
     ownerTelegramChatId
   );
 
-  const telegramConnected = !!pickNonEmpty(
-    r.telegramConnected,
-    r.profile?.telegramConnected
-  );
-
-  // -------- Status counts --------
+  // Status counts
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
   const pendingCount  = Number(r.pendingCount  ?? r.pending_count  ?? sc.pending  ?? 0);
@@ -277,7 +211,10 @@ function normalizeRow(r: any): ProposerAgg {
 
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
-  // -------- Address normalization --------
+  // ---- Address normalization ----
+  // Try all likely locations where backend might send address
+  // ---- Address normalization ----
+  // Try all likely locations where backend might send address
   const rawAddr =
     r.addr_display ??
     r.addressText ??
@@ -304,24 +241,25 @@ function normalizeRow(r: any): ProposerAgg {
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
 
-    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.vendorName, r.entity, r.organization) || null,
+    // include entity_name from backend
+    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
 
+    // display-only address string
     address: addrDisplay,
     city: city || null,
     country: country || null,
 
+    // store email on the row in addition to contactEmail/ownerEmail
     email,
     contactEmail,
     ownerEmail,
 
     phone,
     whatsapp: phone,
-    ownerPhone,
     telegramUsername,
     telegramChatId,
     ownerTelegramUsername,
     ownerTelegramChatId,
-    telegramConnected,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
@@ -446,56 +384,44 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-  if (initial.length) return;
-  let alive = true;
+    if (initial.length) return;
+    let alive = true;
 
-  (async () => {
-    try {
-      setLoading(true);
-
-      // 1) Try /admin/vendors FIRST (this has telegramUsername/chatId)
+    (async () => {
       try {
-        const vendors = await (listAdminVendors as unknown as () => Promise<any>)();
-        const vitems: any[] = Array.isArray(vendors)
-          ? vendors
-          : (Array.isArray(vendors?.items) ? vendors.items : []);
-        if (vitems.length) {
-          const data = vitems.map(normalizeRow);
-          if (alive) setRows(data);
-          return; // ✅ we’re done; use vendors
+        setLoading(true);
+
+        // Try server; handle both array and {items: []} shape
+        let resp: any;
+        try {
+          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
+            includeArchived: true,
+          });
+        } catch {
+          resp = await listProposers();
         }
-      } catch (e) {
-        // no vendors or not exported: fall through
+
+        const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+        let data: ProposerAgg[] = arr.map(normalizeRow);
+
+        // Fallback to proposals aggregation if nothing came back
+        if (!data.length) {
+          const proposals = await listProposals({ includeArchived: true });
+          data = aggregateFromProposals(proposals);
+        }
+
+        if (alive) setRows(data);
+      } catch (e: any) {
+        if (alive) setError(e?.message || 'Failed to load entities');
+      } finally {
+        if (alive) setLoading(false);
       }
+    })();
 
-      // 2) Fallback: /admin/proposers
-      let resp: any;
-      try {
-        resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-          includeArchived: true,
-        });
-      } catch {
-        resp = await listProposers();
-      }
-      const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
-      let data: ProposerAgg[] = arr.map(normalizeRow);
-
-      // 3) Final fallback: aggregate from /proposals
-      if (!data.length) {
-        const proposals = await listProposals({ includeArchived: true });
-        data = aggregateFromProposals(proposals);
-      }
-
-      if (alive) setRows(data);
-    } catch (e: any) {
-      if (alive) setError(e?.message || 'Failed to load entities');
-    } finally {
-      if (alive) setLoading(false);
-    }
-  })();
-
-  return () => { alive = false; };
-}, [initial.length]);
+    return () => {
+      alive = false;
+    };
+  }, [initial.length]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
@@ -739,13 +665,6 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                         {/* DEBUG: remove after verifying */}
-                        <div className="text-[10px] text-slate-400">
-                          tg paths → owner:@{r.ownerTelegramUsername ?? '-'} id:{r.ownerTelegramChatId ?? '-'}
-                          &nbsp;|&nbsp; user:@{r.telegramUsername ?? '-'} id:{r.telegramChatId ?? '-'}
-                          &nbsp;|&nbsp; connected:{String(r.telegramConnected ?? r.profile?.telegramConnected ?? r.profile?.telegram?.connected ?? r.profile?.social?.telegram?.connected ?? r.profile?.connections?.telegram?.connected ?? false)}
-                        </div>
-
                         {/* Telegram: prefer @owner username, fallback to owner chat id */}
                         <div>
                           {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
@@ -766,7 +685,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                         {/* WhatsApp: prefer ownerPhone */}
+                        {/* WhatsApp: prefer ownerPhone */}
                         <div>
                           {r.ownerPhone || r.whatsapp || r.phone ? (
                             <a
@@ -787,14 +706,6 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                             {(r.ownerTelegramUsername ?? r.telegramUsername)
                               ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
                               : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
-                          </div>
-                        )}
-
-                        {/* Telegram connected badge (fallback when no handle/id) */}
-                        {!(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) &&
-                          r.telegramConnected && (
-                          <div className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                            Telegram connected
                           </div>
                         )}
 
