@@ -7,6 +7,7 @@ import {
   listProposers,
   listProposals,
   type Proposal,
+  getAdminVendors as listAdminVendors,  
   // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
@@ -462,14 +463,27 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
           resp = await listProposers();
         }
 
-        const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
-        let data: ProposerAgg[] = arr.map(normalizeRow);
+ const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+let data: ProposerAgg[] = arr.map(normalizeRow);
 
-        // Fallback to proposals aggregation if nothing came back
-        if (!data.length) {
-          const proposals = await listProposals({ includeArchived: true });
-          data = aggregateFromProposals(proposals);
-        }
+// If no proposers, try /admin/vendors (has telegramUsername/chatId)
+if (!data.length) {
+  try {
+    const vendors = await listAdminVendors();
+    const vitems: any[] = Array.isArray(vendors)
+      ? vendors
+      : (Array.isArray(vendors?.items) ? vendors.items : []);
+    if (vitems.length) {
+      data = vitems.map(normalizeRow);
+    }
+  } catch { /* ignore */ }
+}
+
+// If still nothing, fall back to proposals aggregation
+if (!data.length) {
+  const proposals = await listProposals({ includeArchived: true });
+  data = aggregateFromProposals(proposals);
+}
 
         if (alive) setRows(data);
       } catch (e: any) {
