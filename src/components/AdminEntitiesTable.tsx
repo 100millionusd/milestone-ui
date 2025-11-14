@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  getAdminProposers as listProposers,
+  getAdminProposers as listProposers,   // ✅ use the ADMIN endpoint
   listProposals,
   type Proposal,
   adminArchiveEntity as archiveEntity,
@@ -377,60 +377,51 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   // INITIAL LOAD: get entities (proposers), fallback to proposals
-  useEffect(() => {
-    if (initial.length) {
-      setRows(initial);
-      setLoading(false);
-      return;
-    }
+ // INITIAL LOAD: get entities (proposers) from /admin/proposers; fallback to proposals
+useEffect(() => {
+  if (initial.length) {
+    setRows(initial);
+    setLoading(false);
+    return;
+  }
 
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
+  let alive = true;
+  (async () => {
+    try {
+      setLoading(true);
 
-        let resp: any;
-        try {
-          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-            includeArchived: true,
-          });
-        } catch {
-          resp = await listProposers();
-        }
+      // Call ADMIN endpoint (returns { items, total, page, pageSize })
+      const resp = await listProposers({ includeArchived: true, page: 1, limit: 200 });
 
-        const arr: any[] = Array.isArray(resp)
-          ? resp
-          : (Array.isArray(resp?.items) ? resp.items : []);
+      // Shape tolerant: allow array or {items:[]}
+      const arr: any[] = Array.isArray(resp)
+        ? resp
+        : (Array.isArray(resp?.items) ? resp.items : []);
 
-        let data = arr.map(normalizeRow);
+      console.debug('[entities] /admin/proposers items:', arr.length, resp);
 
-        if (!data.length) {
-          const proposals = await listProposals({ includeArchived: true });
-          data = aggregateFromProposals(proposals);
-        }
+      let data = arr.map(normalizeRow);
 
-        if (alive) setRows(data);
-
-        // DEBUG (safe to keep or remove later)
-        console.table(data.map(d => ({
-          entity: d.entity,
-          wallet: d.wallet,
-          ownerTgUser: d.ownerTelegramUsername || '-',
-          ownerTgId: d.ownerTelegramChatId || '-',
-          tgUser: d.telegramUsername || '-',
-          tgId: d.telegramChatId || '-',
-          addr: d.address || '-',
-        })));
-      } catch (e: any) {
-        if (alive) setError(e?.message || 'Failed to load entities');
-      } finally {
-        if (alive) setLoading(false);
+      // Fallback to proposals aggregation if admin list is empty
+      if (!data.length) {
+        const proposals = await listProposals({ includeArchived: true });
+        console.debug('[entities] fallback proposals count:', proposals.length);
+        data = aggregateFromProposals(proposals);
       }
-    })();
 
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial.length]);
+      if (alive) setRows(data);
+    } catch (e: any) {
+      console.error('[entities] load error:', e);
+      if (alive) setError(e?.message || 'Failed to load entities');
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+
+  return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [initial.length]);
+
 
   // Search + archived filter
   const filtered = useMemo(() => {
