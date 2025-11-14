@@ -7,6 +7,7 @@ import {
   listProposers,
   listProposals,
   type Proposal,
+  getAdminVendors as listAdminVendors, 
   // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
@@ -383,45 +384,77 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    if (initial.length) return;
-    let alive = true;
+ useEffect(() => {
+  let alive = true;
+  // only run after initial rows exist
+  if (!rows.length) return;
 
-    (async () => {
-      try {
-        setLoading(true);
+  (async () => {
+    try {
+      const vendors = await (listAdminVendors as unknown as () => Promise<any>)();
+      const vitems: any[] = Array.isArray(vendors)
+        ? vendors
+        : (Array.isArray((vendors as any)?.items) ? (vendors as any).items : []);
+      if (!vitems.length) return;
 
-        // Try server; handle both array and {items: []} shape
-        let resp: any;
-        try {
-          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-            includeArchived: true,
-          });
-        } catch {
-          resp = await listProposers();
-        }
-
-        const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
-        let data: ProposerAgg[] = arr.map(normalizeRow);
-
-        // Fallback to proposals aggregation if nothing came back
-        if (!data.length) {
-          const proposals = await listProposals({ includeArchived: true });
-          data = aggregateFromProposals(proposals);
-        }
-
-        if (alive) setRows(data);
-      } catch (e: any) {
-        if (alive) setError(e?.message || 'Failed to load entities');
-      } finally {
-        if (alive) setLoading(false);
+      // index vendors by wallet (lowercased) and by name as fallback
+      const byWallet = new Map<string, any>();
+      const byName   = new Map<string, any>();
+      for (const v of vitems) {
+        const w = (v.walletAddress || v.wallet || '').toLowerCase();
+        if (w) byWallet.set(w, v);
+        const n = (v.vendorName || v.entityName || v.orgName || v.entity || v.organization || '').toLowerCase();
+        if (n) byName.set(n, v);
       }
-    })();
 
-    return () => {
-      alive = false;
-    };
-  }, [initial.length]);
+      const merged = rows.map((r) => {
+        const w = (r.wallet || '').toLowerCase();
+        const n = (r.entity || '').toLowerCase();
+        const v = (w && byWallet.get(w)) || (n && byName.get(n));
+        if (!v) return r;
+
+        // overlay telegram fields if present from vendors
+        const telegramUsername  = v.telegramUsername ?? r.telegramUsername ?? null;
+        const telegramChatId    = v.telegramChatId   ?? r.telegramChatId   ?? null;
+        const telegramConnected = (v.telegramConnected ?? r.telegramConnected ?? false) as boolean;
+
+        // also overlay addressText if r.address is empty
+        const address =
+          r.address ||
+          v.addressText ||
+          (v.addressObj
+            ? [v.addressObj.line1, v.addressObj.city, v.addressObj.postalCode, v.addressObj.country]
+                .filter(Boolean)
+                .join(', ')
+            : null);
+
+        return {
+          ...r,
+          address,
+          telegramUsername,
+          telegramChatId,
+          telegramConnected,
+        };
+      });
+
+      if (alive) setRows(merged);
+      // DEBUG: remove after verifying
+      console.table(merged.map(m => ({
+        entity: m.entity,
+        wallet: m.wallet,
+        tgUser: m.telegramUsername || '-',
+        tgId: m.telegramChatId || '-',
+        tgConn: m.telegramConnected || false
+      })));
+    } catch {
+      /* ignore */
+    }
+  })();
+
+  return () => { alive = false; };
+  // run once after first data load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [rows.length]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
