@@ -690,6 +690,14 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
+                        {/* Telegram (inline, above address, gray) */}
+                        {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) && (
+                          <div className="text-xs text-slate-500">
+                            {(r.ownerTelegramUsername ?? r.telegramUsername)
+                              ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
+                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
+                          </div>
+
 {/* Address (display string) */}
 {(r.address) && (
   <div
