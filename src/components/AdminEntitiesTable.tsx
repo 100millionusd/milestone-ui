@@ -665,6 +665,11 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
+                        {/* DEBUG: remove after verifying */}
+                        <div className="text-[10px] text-slate-400">
+                          dbg tg: @{r.ownerTelegramUsername ?? r.telegramUsername ?? '-'} / id {r.ownerTelegramChatId ?? r.telegramChatId ?? '-'}
+                        </div>
+
                         {/* Telegram: prefer @owner username, fallback to owner chat id */}
                         <div>
                           {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
