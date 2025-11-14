@@ -697,19 +697,19 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           <div className="text-xs text-slate-500">
                             {(r.ownerTelegramUsername ?? r.telegramUsername)
                               ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
-                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`
-                          )}
+                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
+                          </div>
+                        )}
 
-
-{/* Address (display string) */}
-{(r.address) && (
-  <div
-    className="text-xs text-slate-500 truncate max-w-[280px]"
-    title={r.address || ''}
-  >
-    {r.address}
-  </div>
-)}
+                        {/* Address (display string) */}
+                        {r.address && (
+                          <div
+                            className="text-xs text-slate-500 truncate max-w-[280px]"
+                            title={r.address || ''}
+                          >
+                            {r.address}
+                          </div>
+                        )}
 </Td>
 
                       {/* Wallet — full + copy */}
