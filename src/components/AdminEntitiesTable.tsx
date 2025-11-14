@@ -164,28 +164,36 @@ function normalizeRow(r: any): ProposerAgg {
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
   const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
-  // Phone / WhatsApp
-  const phone =
-    r.phone ??
-    r.ownerPhone ??
-    r.owner_phone ??
-    r.whatsapp ??
-    null;
+    // Phone / WhatsApp (also look into profile)
+  const ownerPhone = pickNonEmpty(
+    r.ownerPhone, r.owner_phone,
+    r.profile?.ownerPhone, r.profile?.owner_phone
+  );
+  const phone = pickNonEmpty(
+    r.phone, r.whatsapp,
+    r.profile?.phone, r.profile?.whatsapp,
+    ownerPhone
+  );
 
-  // Telegram
-  const telegramUsername =
-    r.telegramUsername ??
-    r.telegram_username ??
-    r.ownerTelegramUsername ??
-    r.owner_telegram_username ??
-    null;
-
-  const telegramChatId =
-    r.telegramChatId ??
-    r.telegram_chat_id ??
-    r.ownerTelegramChatId ??
-    r.owner_telegram_chat_id ??
-    null;
+  // Telegram (top-level and profile, both owner and generic)
+  const ownerTelegramUsername = pickNonEmpty(
+    r.ownerTelegramUsername, r.owner_telegram_username,
+    r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username
+  );
+  const ownerTelegramChatId = pickNonEmpty(
+    r.ownerTelegramChatId, r.owner_telegram_chat_id,
+    r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
+  );
+  const telegramUsername = pickNonEmpty(
+    r.telegramUsername, r.telegram_username,
+    r.profile?.telegramUsername, r.profile?.telegram_username,
+    ownerTelegramUsername
+  );
+  const telegramChatId = pickNonEmpty(
+    r.telegramChatId, r.telegram_chat_id,
+    r.profile?.telegramChatId, r.profile?.telegram_chat_id,
+    ownerTelegramChatId
+  );
 
   // Status counts
   const sc = r.statusCounts || r.status_counts || {};
