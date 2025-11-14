@@ -697,10 +697,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           <div className="text-xs text-slate-500">
                             {(r.ownerTelegramUsername ?? r.telegramUsername)
                               ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
-                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
-                          </div>
+                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`
                           )}
-</Td>
+
 
 {/* Address (display string) */}
 {(r.address) && (
