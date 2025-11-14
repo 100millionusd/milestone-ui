@@ -806,6 +806,35 @@ export async function listProposals(params?: {
   return (Array.isArray(rows) ? rows : []).map(toProposal);
 }
 
+// --- ADMIN: list proposers/entities (includes phone + telegram) ---
+export async function getAdminProposers(params?: {
+  includeArchived?: boolean;
+  q?: string;
+  page?: number;
+  limit?: number;
+}) {
+  // requires: const API_BASE = 'https://milestone-api-production.up.railway.app' (already defined in this file)
+  const includeArchived = params?.includeArchived ?? true;
+  const q = params?.q ?? '';
+  const page = params?.page ?? 1;
+  const limit = params?.limit ?? 100;
+
+  const usp = new URLSearchParams();
+  if (includeArchived) usp.set('includeArchived', 'true');
+  if (q) usp.set('q', q);
+  usp.set('page', String(page));
+  usp.set('limit', String(limit));
+
+  const res = await fetch(`${API_BASE}/admin/proposers?${usp.toString()}`, {
+    credentials: 'include',
+  });
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('json')) {
+    throw new Error(`getAdminProposers: expected JSON, got ${res.status} ${ct}`);
+  }
+  return res.json(); // { items, total, page, pageSize }
+}
+
 export async function getProposals(): Promise<Proposal[]> {
   return listProposals();
 }
