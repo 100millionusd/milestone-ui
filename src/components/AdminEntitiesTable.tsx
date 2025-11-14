@@ -446,57 +446,56 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (initial.length) return;
-    let alive = true;
+  if (initial.length) return;
+  let alive = true;
 
-    (async () => {
+  (async () => {
+    try {
+      setLoading(true);
+
+      // 1) Try /admin/vendors FIRST (this has telegramUsername/chatId)
       try {
-        setLoading(true);
-
-        // Try server; handle both array and {items: []} shape
-        let resp: any;
-        try {
-          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-            includeArchived: true,
-          });
-        } catch {
-          resp = await listProposers();
+        const vendors = await (listAdminVendors as unknown as () => Promise<any>)();
+        const vitems: any[] = Array.isArray(vendors)
+          ? vendors
+          : (Array.isArray(vendors?.items) ? vendors.items : []);
+        if (vitems.length) {
+          const data = vitems.map(normalizeRow);
+          if (alive) setRows(data);
+          return; // ✅ we’re done; use vendors
         }
-
- const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
-let data: ProposerAgg[] = arr.map(normalizeRow);
-
-// If no proposers, try /admin/vendors (has telegramUsername/chatId)
-if (!data.length) {
-  try {
-    const vendors = await listAdminVendors();
-    const vitems: any[] = Array.isArray(vendors)
-      ? vendors
-      : (Array.isArray(vendors?.items) ? vendors.items : []);
-    if (vitems.length) {
-      data = vitems.map(normalizeRow);
-    }
-  } catch { /* ignore */ }
-}
-
-// If still nothing, fall back to proposals aggregation
-if (!data.length) {
-  const proposals = await listProposals({ includeArchived: true });
-  data = aggregateFromProposals(proposals);
-}
-
-        if (alive) setRows(data);
-      } catch (e: any) {
-        if (alive) setError(e?.message || 'Failed to load entities');
-      } finally {
-        if (alive) setLoading(false);
+      } catch (e) {
+        // no vendors or not exported: fall through
       }
-    })();
 
-    return () => {
-      alive = false;
-    };
-  }, [initial.length]);
+      // 2) Fallback: /admin/proposers
+      let resp: any;
+      try {
+        resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
+          includeArchived: true,
+        });
+      } catch {
+        resp = await listProposers();
+      }
+      const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+      let data: ProposerAgg[] = arr.map(normalizeRow);
+
+      // 3) Final fallback: aggregate from /proposals
+      if (!data.length) {
+        const proposals = await listProposals({ includeArchived: true });
+        data = aggregateFromProposals(proposals);
+      }
+
+      if (alive) setRows(data);
+    } catch (e: any) {
+      if (alive) setError(e?.message || 'Failed to load entities');
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+
+  return () => { alive = false; };
+}, [initial.length]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
