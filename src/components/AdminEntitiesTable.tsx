@@ -384,6 +384,55 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
+
+  // INITIAL LOAD: get entities from server (proposers), fallback to proposals
+useEffect(() => {
+  // if server rendered with initial rows, just use them
+  if (initial.length) {
+    setRows(initial);
+    setLoading(false);
+    return;
+  }
+
+  let alive = true;
+  (async () => {
+    try {
+      setLoading(true);
+
+      // Try listProposers (accepts array or {items:[]})
+      let resp: any;
+      try {
+        resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
+          includeArchived: true,
+        });
+      } catch {
+        resp = await listProposers();
+      }
+
+      const arr: any[] = Array.isArray(resp)
+        ? resp
+        : (Array.isArray(resp?.items) ? resp.items : []);
+
+      let data = arr.map(normalizeRow);
+
+      // Fallback: aggregate from proposals if empty
+      if (!data.length) {
+        const proposals = await listProposals({ includeArchived: true });
+        data = aggregateFromProposals(proposals);
+      }
+
+      if (alive) setRows(data);
+    } catch (e: any) {
+      if (alive) setError(e?.message || 'Failed to load entities');
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+
+  return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [initial.length]);
+
  useEffect(() => {
   let alive = true;
   // only run after initial rows exist
