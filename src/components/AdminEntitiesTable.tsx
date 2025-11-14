@@ -1,3 +1,4 @@
+// src/components/AdminEntitiesTable.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -6,6 +7,8 @@ import {
   listProposers,
   listProposals,
   type Proposal,
+  getAdminVendors as listAdminVendors,
+  // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
   adminDeleteEntity as deleteEntity,
@@ -29,7 +32,11 @@ export type ProposerAgg = {
   /** phone also used for WhatsApp */
   phone?: string | null;
   whatsapp?: string | null;
-  ownerPhone?: string | null;
+
+  /** Telegram */
+  telegramUsername?: string | null;
+  telegramChatId?: string | null;
+  telegramConnected?: boolean;
 
   wallet: string | null;
   proposalsCount: number;
@@ -41,6 +48,9 @@ export type ProposerAgg = {
   totalBudgetUSD: number;
   lastActivity: string | null;
   archived?: boolean;
+  ownerPhone?: string | null;
+  ownerTelegramUsername?: string | null;
+  ownerTelegramChatId?: string | null;
 };
 
 type SortKey =
@@ -80,7 +90,7 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// Tolerant of odd keys and JSON strings
+// ⬇️ drop-in replacement: tolerant of odd keys and JSON strings
 function addressToDisplay(addr: any): string | null {
   if (!addr) return null;
 
@@ -126,10 +136,10 @@ function addressToDisplay(addr: any): string | null {
       return null;
     };
 
-    const line1   = pickLoose(addr, ['line1','address1','address_line1'], [/line.?1/i, /address/i]);
-    const city    = pickLoose(addr, ['city','town'], [/city|town/i]);
-    const state   = pickLoose(addr, ['state','province','region'], [/state|prov|region/i]);
-    const postal  = pickLoose(addr, ['postalCode','postal_code','zip','zipCode'], [/post|zip/i]);
+    const line1 = pickLoose(addr, ['line1', 'address1', 'address_line1'], [/line.?1/i, /address/i]);
+    const city = pickLoose(addr, ['city', 'town'], [/city|town/i]);
+    const state = pickLoose(addr, ['state', 'province', 'region'], [/state|prov|region/i]);
+    const postal = pickLoose(addr, ['postalCode', 'postal_code', 'zip', 'zipCode'], [/post|zip/i]);
     const country = pickLoose(addr, ['country'], [/country/i]);
 
     const parts = [line1, city, state, postal, country].filter(Boolean) as string[];
@@ -137,20 +147,24 @@ function addressToDisplay(addr: any): string | null {
     return s || null;
   }
 
-  try { return String(addr).trim(); } catch { return null; }
+  try {
+    return String(addr).trim();
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
   const contactEmail = pickNonEmpty(
-    r.email,                 // backend alias
+    r.email, // backend alias
     r.primaryEmail,
     r.primary_email,
     r.contactEmail,
     r.contact_email,
     r.ownerEmail,
     r.owner_email,
-    r.contact                // some backends send `contact`
+    r.contact // some backends send `contact`
   );
 
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
@@ -158,32 +172,77 @@ function normalizeRow(r: any): ProposerAgg {
 
   // Phone / WhatsApp (also look into profile)
   const ownerPhone = pickNonEmpty(
-    r.ownerPhone, r.owner_phone,
-    r.profile?.ownerPhone, r.profile?.owner_phone
+    r.ownerPhone,
+    r.owner_phone,
+    r.profile?.ownerPhone,
+    r.profile?.owner_phone
   );
   const phone = pickNonEmpty(
-    r.phone, r.whatsapp,
-    r.profile?.phone, r.profile?.whatsapp,
+    r.phone,
+    r.whatsapp,
+    r.profile?.phone,
+    r.profile?.whatsapp,
     ownerPhone
+  );
+
+  // Telegram (top-level and profile, both owner and generic)
+  const ownerTelegramUsername = pickNonEmpty(
+    r.ownerTelegramUsername,
+    r.owner_telegram_username,
+    r.profile?.ownerTelegramUsername,
+    r.profile?.owner_telegram_username
+  );
+  const ownerTelegramChatId = pickNonEmpty(
+    r.ownerTelegramChatId,
+    r.owner_telegram_chat_id,
+    r.profile?.ownerTelegramChatId,
+    r.profile?.owner_telegram_chat_id
+  );
+  // Map owner → generic so the UI can rely on telegramUsername/telegramChatId
+  const telegramUsername = pickNonEmpty(
+    r.telegramUsername,
+    r.telegram_username,
+    ownerTelegramUsername, // ← add owner
+    r.profile?.telegramUsername,
+    r.profile?.telegram_username
+  );
+  const telegramChatId = pickNonEmpty(
+    r.telegramChatId,
+    r.telegram_chat_id,
+    ownerTelegramChatId, // ← add owner
+    r.profile?.telegramChatId,
+    r.profile?.telegram_chat_id
+  );
+
+  // Telegram "connected" flag (entities/proposers often only have this boolean)
+  const telegramConnected = !!(
+    r.telegramConnected ??
+    r.profile?.telegramConnected ??
+    r.profile?.telegram?.connected ??
+    r.profile?.social?.telegram?.connected ??
+    r.profile?.connections?.telegram?.connected
   );
 
   // Status counts
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
-  const pendingCount  = Number(r.pendingCount  ?? r.pending_count  ?? sc.pending  ?? 0);
+  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? 0);
   const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? 0);
   const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? 0);
 
   const proposalsCount = Number(
     r.proposalsCount ??
-    r.proposals_count ??
-    sc.total ??
-    approvedCount + pendingCount + rejectedCount + archivedCount
+      r.proposals_count ??
+      sc.total ??
+      approvedCount + pendingCount + rejectedCount + archivedCount
   );
 
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
   // ---- Address normalization ----
+  // Try all likely locations where backend might send address
+  // ---- Address normalization ----
+  // Try all likely locations where backend might send address
   const rawAddr =
     r.addr_display ??
     r.addressText ??
@@ -225,6 +284,11 @@ function normalizeRow(r: any): ProposerAgg {
 
     phone,
     whatsapp: phone,
+    telegramUsername,
+    telegramChatId,
+    ownerTelegramUsername,
+    ownerTelegramChatId,
+    telegramConnected,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
@@ -292,7 +356,7 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
 
     // infer archived if all proposals for this entity are archived
     const active = row.approvedCount + row.pendingCount + row.rejectedCount;
-    row.archived = !!(row.archived || (row.archivedCount || 0) > 0 && active === 0);
+    row.archived = !!(row.archived || ((row.archivedCount || 0) > 0 && active === 0));
 
     byKey.set(key, row);
   }
@@ -323,6 +387,11 @@ function toWhatsAppLink(phone?: string | null, text?: string) {
   if (!d) return null;
   const q = text ? `?text=${encodeURIComponent(text)}` : '';
   return `https://wa.me/${d}${q}`;
+}
+function toTelegramLink(username?: string | null, chatId?: string | null) {
+  if (username) return `https://t.me/${String(username).replace(/^@/, '')}`;
+  if (chatId) return `tg://user?id=${String(chatId)}`;
+  return null;
 }
 
 /* ---------- Component ---------- */
@@ -367,9 +436,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
           resp = await listProposers();
         }
 
-        const arr: any[] = Array.isArray(resp)
-          ? resp
-          : (Array.isArray(resp?.items) ? resp.items : []);
+        const arr: any[] = Array.isArray(resp) ? resp : Array.isArray(resp?.items) ? resp.items : [];
 
         let data = arr.map(normalizeRow);
 
@@ -387,13 +454,15 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       }
     })();
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.length]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
-    const base = showArchived ? rows : rows.filter(r => !r.archived);
+    const base = showArchived ? rows : rows.filter((r) => !r.archived);
     const n = q.trim().toLowerCase();
     if (!n) return base;
     return base.filter((r) => {
@@ -460,8 +529,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     if (r.id != null) return { id: r.id };
     return {
       org_name: r.entity ?? null,
-      contact: r.contactEmail ?? null,     // <- backend expects `contact`
-      owner_wallet: r.wallet ?? null,      // <- backend expects `owner_wallet`
+      contact: r.contactEmail ?? null, // <- backend expects `contact`
+      owner_wallet: r.wallet ?? null, // <- backend expects `owner_wallet`
     };
   }
 
@@ -630,7 +699,36 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                             >
                               {email}
                             </a>
-                          ) : '—'}
+                          ) : (
+                            '—'
+                          )}
+                        </div>
+
+                        <div>
+                          {(r.telegramUsername || r.telegramChatId || r.ownerTelegramUsername || r.ownerTelegramChatId) ? (
+                            <a
+                              href={
+                                toTelegramLink(
+                                  r.telegramUsername ?? r.ownerTelegramUsername ?? null,
+                                  r.telegramChatId ?? r.ownerTelegramChatId ?? null
+                                ) || '#'
+                              }
+                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+                              title="Open in Telegram"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {(r.telegramUsername ?? r.ownerTelegramUsername)
+                                ? `@${String(r.telegramUsername ?? r.ownerTelegramUsername).replace(/^@/, '')}`
+                                : `tg:${r.telegramChatId ?? r.ownerTelegramChatId}`}
+                            </a>
+                          ) : r.telegramConnected ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                              Telegram connected
+                            </span>
+                          ) : (
+                            '—'
+                          )}
                         </div>
 
                         {/* WhatsApp: prefer ownerPhone */}
@@ -645,8 +743,21 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                             >
                               {r.ownerPhone ?? r.whatsapp ?? r.phone}
                             </a>
-                          ) : '—'}
+                          ) : (
+                            '—'
+                          )}
                         </div>
+
+                        {/* Telegram (inline, gray, above address) */}
+                        {(r.telegramUsername || r.telegramChatId || r.telegramConnected) && (
+                          <div className="text-xs text-slate-500">
+                            {r.telegramUsername
+                              ? `@${String(r.telegramUsername).replace(/^@/, '')}`
+                              : r.telegramChatId
+                              ? `tg:${r.telegramChatId}`
+                              : 'Telegram connected'}
+                          </div>
+                        )}
 
                         {/* Address (display string) */}
                         {r.address && (
