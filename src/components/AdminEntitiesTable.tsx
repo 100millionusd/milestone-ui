@@ -4,12 +4,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  getAdminProposers as listProposers,   // ✅ use the ADMIN endpoint
   listProposals,
   type Proposal,
+  // keep admin actions
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
   adminDeleteEntity as deleteEntity,
+  // optional: try admin/proposers first; it may return 0 right now
+  getAdminProposers,
 } from '@/lib/api';
 
 /* ---------- Types ---------- */
@@ -30,13 +32,10 @@ export type ProposerAgg = {
   /** phone also used for WhatsApp */
   phone?: string | null;
   whatsapp?: string | null;
-  ownerPhone?: string | null;
 
-  /** Telegram (owner + generic) */
+  /** Telegram */
   telegramUsername?: string | null;
   telegramChatId?: string | null;
-  ownerTelegramUsername?: string | null;
-  ownerTelegramChatId?: string | null;
   telegramConnected?: boolean;
 
   wallet: string | null;
@@ -49,6 +48,11 @@ export type ProposerAgg = {
   totalBudgetUSD: number;
   lastActivity: string | null;
   archived?: boolean;
+
+  /** owner-specific (we map owner → generic for UI) */
+  ownerPhone?: string | null;
+  ownerTelegramUsername?: string | null;
+  ownerTelegramChatId?: string | null;
 };
 
 type SortKey =
@@ -88,20 +92,19 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// Tolerant address normalizer
+// Address string normalizer
 function addressToDisplay(addr: any): string | null {
   if (!addr) return null;
 
   if (typeof addr === 'string') {
     const s = addr.trim();
     if (!s) return null;
+    // looks like JSON?
     if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('{"') && s.endsWith('}'))) {
       try {
         const parsed = JSON.parse(s);
-        if (parsed && typeof parsed === 'object') {
-          return addressToDisplay(parsed);
-        }
-      } catch { /* fall through */ }
+        if (parsed && typeof parsed === 'object') return addressToDisplay(parsed);
+      } catch {}
     }
     return s;
   }
@@ -144,21 +147,17 @@ function addressToDisplay(addr: any): string | null {
 }
 
 function normalizeRow(r: any): ProposerAgg {
-  // email
   const contactEmail = pickNonEmpty(
     r.email,
-    r.primaryEmail,
-    r.primary_email,
-    r.contactEmail,
-    r.contact_email,
-    r.ownerEmail,
-    r.owner_email,
+    r.primaryEmail, r.primary_email,
+    r.contactEmail, r.contact_email,
+    r.ownerEmail, r.owner_email,
     r.contact
   );
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
   const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
-  // phone / whatsapp
+  // Phone / WhatsApp
   const ownerPhone = pickNonEmpty(
     r.ownerPhone, r.owner_phone,
     r.profile?.ownerPhone, r.profile?.owner_phone
@@ -169,15 +168,15 @@ function normalizeRow(r: any): ProposerAgg {
     ownerPhone
   );
 
-  // telegram owner (from /admin/proposers SQL)
+  // Telegram — owner + generic; we map owner → generic if generic empty
   const ownerTelegramUsername = pickNonEmpty(
-    r.ownerTelegramUsername, r.owner_telegram_username
+    r.ownerTelegramUsername, r.owner_telegram_username,
+    r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username
   );
   const ownerTelegramChatId = pickNonEmpty(
-    r.ownerTelegramChatId, r.owner_telegram_chat_id
+    r.ownerTelegramChatId, r.owner_telegram_chat_id,
+    r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
   );
-
-  // mirror owner → generic so UI can simply use telegramUsername/chatId
   const telegramUsername = pickNonEmpty(
     r.telegramUsername, r.telegram_username,
     ownerTelegramUsername,
@@ -188,7 +187,6 @@ function normalizeRow(r: any): ProposerAgg {
     ownerTelegramChatId,
     r.profile?.telegramChatId, r.profile?.telegram_chat_id
   );
-
   const telegramConnected = !!(
     r.telegramConnected ??
     r.profile?.telegramConnected ??
@@ -197,32 +195,31 @@ function normalizeRow(r: any): ProposerAgg {
     r.profile?.connections?.telegram?.connected
   );
 
-  // counts
+  // Status counts
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
   const pendingCount  = Number(r.pendingCount  ?? r.pending_count  ?? sc.pending  ?? 0);
   const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? 0);
   const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? 0);
+
   const proposalsCount = Number(
-    r.proposalsCount ?? r.proposals_count ?? sc.total ??
+    r.proposalsCount ??
+    r.proposals_count ??
+    sc.total ??
     approvedCount + pendingCount + rejectedCount + archivedCount
   );
+
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
-  // address
+  // Address normalization
   const rawAddr =
     r.addr_display ??
-    r.addressText ??
-    r.address_text ??
-    r.address ??
-    r.profile?.address ??
-    r.profile?.addressText ??
-    r.profile?.address_text ??
+    r.addressText ?? r.address_text ?? r.address ??
+    r.profile?.address ?? r.profile?.addressText ?? r.profile?.address_text ??
     null;
 
   const addrDisplay = addressToDisplay(rawAddr);
 
-  // city/country
   let city = pickNonEmpty(r.city, r.town);
   let country = pickNonEmpty(r.country);
   if ((!city || !country) && rawAddr && typeof rawAddr === 'object') {
@@ -231,49 +228,32 @@ function normalizeRow(r: any): ProposerAgg {
   }
 
   return {
-    id: r.id ?? r.entityId ?? r.proposerId ?? r.entity_key ?? null,
-
-    entity: pickNonEmpty(r.orgName, r.entityName, r.entity_name, r.org_name, r.entity, r.organization) || null,
-
+    id: r.id ?? r.entityId ?? r.proposerId ?? null,
+    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.vendorName, r.entity, r.organization) || null,
     address: addrDisplay,
     city: city || null,
     country: country || null,
-
     email,
     contactEmail,
     ownerEmail,
-
     phone,
     whatsapp: phone,
-    ownerPhone,
-
     telegramUsername,
     telegramChatId,
     ownerTelegramUsername,
     ownerTelegramChatId,
     telegramConnected,
-
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
-
     proposalsCount,
     approvedCount,
     pendingCount,
     rejectedCount,
     archivedCount,
-    totalBudgetUSD: Number(
-      r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
-    ),
+    totalBudgetUSD: Number(r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0),
     lastActivity:
-      r.lastActivityAt ??
-      r.last_activity_at ??
-      r.lastProposalAt ??
-      r.updatedAt ??
-      r.updated_at ??
-      r.createdAt ??
-      r.created_at ??
-      r.last_proposal_at ??
-      null,
-
+      r.lastActivityAt ?? r.last_activity_at ??
+      r.lastProposalAt ?? r.updatedAt ?? r.updated_at ??
+      r.createdAt ?? r.created_at ?? null,
     archived: !!(r.archived ?? r.is_archived ?? inferredArchived),
   };
 }
@@ -305,6 +285,15 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
         lastActivity: null,
         archived: false,
       };
+
+    // surface phones/telegram from proposals into the aggregated row
+    row.ownerPhone = row.ownerPhone || (p as any).ownerPhone || (p as any).owner_phone || null;
+    row.ownerTelegramUsername = row.ownerTelegramUsername || (p as any).ownerTelegramUsername || (p as any).owner_telegram_username || null;
+    row.ownerTelegramChatId   = row.ownerTelegramChatId   || (p as any).ownerTelegramChatId   || (p as any).owner_telegram_chat_id   || null;
+
+    // map owner → generic if generic empty
+    row.telegramUsername = row.telegramUsername || row.ownerTelegramUsername || null;
+    row.telegramChatId   = row.telegramChatId   || row.ownerTelegramChatId   || null;
 
     row.proposalsCount += 1;
     row.totalBudgetUSD += Number(p.amountUSD) || 0;
@@ -376,52 +365,52 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
-  // INITIAL LOAD: get entities (proposers), fallback to proposals
- // INITIAL LOAD: get entities (proposers) from /admin/proposers; fallback to proposals
-useEffect(() => {
-  if (initial.length) {
-    setRows(initial);
-    setLoading(false);
-    return;
-  }
-
-  let alive = true;
-  (async () => {
-    try {
-      setLoading(true);
-
-      // Call ADMIN endpoint (returns { items, total, page, pageSize })
-      const resp = await listProposers({ includeArchived: true, page: 1, limit: 200 });
-
-      // Shape tolerant: allow array or {items:[]}
-      const arr: any[] = Array.isArray(resp)
-        ? resp
-        : (Array.isArray(resp?.items) ? resp.items : []);
-
-      console.debug('[entities] /admin/proposers items:', arr.length, resp);
-
-      let data = arr.map(normalizeRow);
-
-      // Fallback to proposals aggregation if admin list is empty
-      if (!data.length) {
-        const proposals = await listProposals({ includeArchived: true });
-        console.debug('[entities] fallback proposals count:', proposals.length);
-        data = aggregateFromProposals(proposals);
-      }
-
-      if (alive) setRows(data);
-    } catch (e: any) {
-      console.error('[entities] load error:', e);
-      if (alive) setError(e?.message || 'Failed to load entities');
-    } finally {
-      if (alive) setLoading(false);
+  // INITIAL LOAD: try /admin/proposers; if empty, fallback to proposals aggregation
+  useEffect(() => {
+    if (initial.length) {
+      setRows(initial);
+      setLoading(false);
+      return;
     }
-  })();
 
-  return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [initial.length]);
+    let alive = true;
+    (async () => {
+      try {
+        setLoading(true);
 
+        let items: any[] = [];
+        try {
+          const resp = await getAdminProposers({ includeArchived: true, page: 1, limit: 200 });
+          const arr = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+          items = arr;
+          // DEBUG
+          console.debug('[entities] /admin/proposers size:', arr.length);
+        } catch (e) {
+          console.debug('[entities] /admin/proposers failed, will fallback:', e);
+        }
+
+        let data: ProposerAgg[] = [];
+        if (items.length > 0) {
+          data = items.map(normalizeRow);
+        } else {
+          // fallback
+          const proposals = await listProposals({ includeArchived: true });
+          console.debug('[entities] fallback proposals count:', proposals.length);
+          data = aggregateFromProposals(proposals);
+        }
+
+        if (alive) setRows(data);
+      } catch (e: any) {
+        console.error('[entities] load error:', e);
+        if (alive) setError(e?.message || 'Failed to load entities');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.length]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
@@ -492,8 +481,8 @@ useEffect(() => {
     if (r.id != null) return { id: r.id };
     return {
       org_name: r.entity ?? null,
-      contact: r.contactEmail ?? null,
-      owner_wallet: r.wallet ?? null,
+      contact: r.contactEmail ?? null,     // backend expects `contact`
+      owner_wallet: r.wallet ?? null,      // backend expects `owner_wallet`
     };
   }
 
@@ -665,22 +654,19 @@ useEffect(() => {
                           ) : '—'}
                         </div>
 
-                        {/* Telegram (prefer username, fallback to chat id, show "connected" badge if only boolean) */}
+                        {/* Telegram */}
                         <div>
-                          {(r.telegramUsername || r.telegramChatId || r.ownerTelegramUsername || r.ownerTelegramChatId) ? (
+                          {(r.telegramUsername || r.telegramChatId) ? (
                             <a
-                              href={toTelegramLink(
-                                r.telegramUsername ?? r.ownerTelegramUsername ?? null,
-                                r.telegramChatId   ?? r.ownerTelegramChatId   ?? null
-                              ) || '#'}
+                              href={toTelegramLink(r.telegramUsername, r.telegramChatId) || '#'}
                               className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
                               title="Open in Telegram"
                               target="_blank"
                               rel="noreferrer"
                             >
-                              {(r.telegramUsername ?? r.ownerTelegramUsername)
-                                ? `@${String(r.telegramUsername ?? r.ownerTelegramUsername).replace(/^@/, '')}`
-                                : `tg:${r.telegramChatId ?? r.ownerTelegramChatId}`}
+                              {r.telegramUsername
+                                ? `@${String(r.telegramUsername).replace(/^@/, '')}`
+                                : `tg:${r.telegramChatId}`}
                             </a>
                           ) : (r.telegramConnected ? (
                             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
@@ -689,7 +675,7 @@ useEffect(() => {
                           ) : '—')}
                         </div>
 
-                        {/* WhatsApp: prefer ownerPhone but fall back to phone/whatsapp */}
+                        {/* WhatsApp: prefer ownerPhone */}
                         <div>
                           {r.ownerPhone || r.whatsapp || r.phone ? (
                             <a
@@ -704,7 +690,7 @@ useEffect(() => {
                           ) : '—'}
                         </div>
 
-                        {/* Inline Telegram (gray) */}
+                        {/* Telegram inline (gray) */}
                         {(r.telegramUsername || r.telegramChatId || r.telegramConnected) && (
                           <div className="text-xs text-slate-500">
                             {r.telegramUsername
@@ -713,7 +699,7 @@ useEffect(() => {
                           </div>
                         )}
 
-                        {/* Address (display string) */}
+                        {/* Address */}
                         {r.address && (
                           <div
                             className="text-xs text-slate-500 truncate max-w-[280px]"
