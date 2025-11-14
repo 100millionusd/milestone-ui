@@ -88,25 +88,47 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// ⬇️ drop-in replacement: tolerant of odd keys like "posta", "zip_code", etc.
+// ⬇️ drop-in replacement: tolerant of odd keys and JSON strings
 function addressToDisplay(addr: any): string | null {
   if (!addr) return null;
-  if (typeof addr === 'string') return (addr || '').trim() || null;
+
+  // If it's a string, try to parse JSON first (e.g., '{"line1":"..."}')
+  if (typeof addr === 'string') {
+    const s = addr.trim();
+    if (!s) return null;
+
+    // Try JSON parse if it looks like an object
+    if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('{"') && s.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed === 'object') {
+          return addressToDisplay(parsed);
+        }
+      } catch {
+        // fall through and return the raw string
+      }
+    }
+    return s;
+  }
 
   if (typeof addr === 'object') {
     const pickLoose = (obj: any, exact: string[], loose: RegExp[]) => {
       for (const k of exact) {
-        if (obj?.[k]) {
-          const v = String(obj[k]).trim();
-          if (v) return v;
+        const v = obj?.[k];
+        if (v !== undefined && v !== null) {
+          const sv = String(v).trim();
+          if (sv) return sv;
         }
       }
       const keys = Object.keys(obj || {});
       for (const rx of loose) {
         const hit = keys.find((k) => rx.test(k));
-        if (hit && obj[hit]) {
-          const v = String(obj[hit]).trim();
-          if (v) return v;
+        if (hit) {
+          const v = obj[hit];
+          if (v !== undefined && v !== null) {
+            const sv = String(v).trim();
+            if (sv) return sv;
+          }
         }
       }
       return null;
@@ -115,7 +137,7 @@ function addressToDisplay(addr: any): string | null {
     const line1   = pickLoose(addr, ['line1','address1','address_line1'], [/line.?1/i, /address/i]);
     const city    = pickLoose(addr, ['city','town'], [/city|town/i]);
     const state   = pickLoose(addr, ['state','province','region'], [/state|prov|region/i]);
-    const postal  = pickLoose(addr, ['postalCode','postal_code','zip','zipCode'], [/post|zip/i]); // handles "posta"
+    const postal  = pickLoose(addr, ['postalCode','postal_code','zip','zipCode'], [/post|zip/i]);
     const country = pickLoose(addr, ['country'], [/country/i]);
 
     const parts = [line1, city, state, postal, country].filter(Boolean) as string[];
@@ -183,12 +205,16 @@ function normalizeRow(r: any): ProposerAgg {
 
   // ---- Address normalization ----
   // Try all likely locations where backend might send address
+  // ---- Address normalization ----
+  // Try all likely locations where backend might send address
   const rawAddr =
     r.addr_display ??
     r.addressText ??
     r.address_text ??
     r.address ??
     r.profile?.address ??
+    r.profile?.addressText ??
+    r.profile?.address_text ??
     null;
 
   const addrDisplay = addressToDisplay(rawAddr);
@@ -665,14 +691,14 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                         </div>
 
 {/* Address (display string) */}
-  {(r.address || r.addressText) && (
-    <div
-      className="text-xs text-slate-500 truncate max-w-[280px]"
-      title={addressToDisplay(r.address) ?? (typeof r.addressText === 'string' ? r.addressText : '')}
-    >
-      {addressToDisplay(r.address) ?? (typeof r.addressText === 'string' ? r.addressText : '—')}
-    </div>
-  )}
+{(r.address) && (
+  <div
+    className="text-xs text-slate-500 truncate max-w-[280px]"
+    title={r.address || ''}
+  >
+    {r.address}
+  </div>
+)}
 </Td>
 
                       {/* Wallet — full + copy */}
