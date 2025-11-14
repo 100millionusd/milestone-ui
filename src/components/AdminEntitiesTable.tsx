@@ -31,10 +31,14 @@ export type ProposerAgg = {
   /** phone also used for WhatsApp */
   phone?: string | null;
   whatsapp?: string | null;
+  ownerPhone?: string | null;
 
   /** Telegram */
   telegramUsername?: string | null;
   telegramChatId?: string | null;
+  ownerTelegramUsername?: string | null;
+  ownerTelegramChatId?: string | null;
+  telegramConnected?: boolean;
 
   wallet: string | null;
   proposalsCount: number;
@@ -46,9 +50,6 @@ export type ProposerAgg = {
   totalBudgetUSD: number;
   lastActivity: string | null;
   archived?: boolean;
-  ownerPhone?: string | null;
-  ownerTelegramUsername?: string | null;
-  ownerTelegramChatId?: string | null;
 };
 
 type SortKey =
@@ -164,7 +165,7 @@ function normalizeRow(r: any): ProposerAgg {
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
   const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
-    // Phone / WhatsApp (also look into profile)
+  // -------- Phone / WhatsApp (top-level + profile) --------
   const ownerPhone = pickNonEmpty(
     r.ownerPhone, r.owner_phone,
     r.profile?.ownerPhone, r.profile?.owner_phone
@@ -175,27 +176,122 @@ function normalizeRow(r: any): ProposerAgg {
     ownerPhone
   );
 
-  // Telegram (top-level and profile, both owner and generic)
+  // -------- Telegram (robust: flat, profile.*, nested, strings/objects) --------
+  const pickTelegramUsername = (...vals: any[]): string | null => {
+    const fromString = (v: any) => {
+      if (typeof v !== 'string') return null;
+      const s = v.trim();
+      if (!s) return null;
+      return s.startsWith('@') ? s.slice(1) : s;
+    };
+    const fromObj = (o: any) => {
+      if (!o || typeof o !== 'object') return null;
+      return pickNonEmpty(
+        fromString(o.username),
+        fromString(o.handle),
+        fromString(o.name),
+        fromString(o.user),
+        fromString(o.id)
+      );
+    };
+    for (const v of vals) {
+      if (v == null) continue;
+      if (typeof v === 'string') {
+        const s = fromString(v);
+        if (s) return s;
+      } else if (typeof v === 'object') {
+        const s = fromObj(v);
+        if (s) return s;
+      }
+    }
+    return null;
+  };
+
+  const pickTelegramChatId = (...vals: any[]): string | null => {
+    const fromString = (v: any) => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      return s || null;
+    };
+    const fromObj = (o: any) => {
+      if (!o || typeof o !== 'object') return null;
+      return pickNonEmpty(
+        fromString(o.chatId),
+        fromString(o.chat_id),
+        fromString(o.id)
+      );
+    };
+    for (const v of vals) {
+      if (v == null) continue;
+      if (typeof v === 'string' || typeof v === 'number') {
+        const s = fromString(v);
+        if (s) return s;
+      } else if (typeof v === 'object') {
+        const s = fromObj(v);
+        if (s) return s;
+      }
+    }
+    return null;
+  };
+
+  // owner-first
   const ownerTelegramUsername = pickNonEmpty(
-    r.ownerTelegramUsername, r.owner_telegram_username,
-    r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username
-  );
-  const ownerTelegramChatId = pickNonEmpty(
-    r.ownerTelegramChatId, r.owner_telegram_chat_id,
-    r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
-  );
-  const telegramUsername = pickNonEmpty(
-    r.telegramUsername, r.telegram_username,
-    r.profile?.telegramUsername, r.profile?.telegram_username,
-    ownerTelegramUsername
-  );
-  const telegramChatId = pickNonEmpty(
-    r.telegramChatId, r.telegram_chat_id,
-    r.profile?.telegramChatId, r.profile?.telegram_chat_id,
-    ownerTelegramChatId
+    pickTelegramUsername(r.ownerTelegramUsername),
+    pickTelegramUsername(r.owner_telegram_username),
+    pickTelegramUsername(r.profile?.ownerTelegramUsername),
+    pickTelegramUsername(r.profile?.owner_telegram_username),
+    pickTelegramUsername(r.profile?.ownerTelegram),
+    pickTelegramUsername(r.profile?.owner_telegram),
+    pickTelegramUsername(r.profile?.owner?.telegram),
+    pickTelegramUsername(r.profile?.connections?.telegram),
+    pickTelegramUsername(r.profile?.connections?.telegram?.username)
   );
 
-  // Status counts
+  const ownerTelegramChatId = pickNonEmpty(
+    pickTelegramChatId(r.ownerTelegramChatId),
+    pickTelegramChatId(r.owner_telegram_chat_id),
+    pickTelegramChatId(r.profile?.ownerTelegramChatId),
+    pickTelegramChatId(r.profile?.owner_telegram_chat_id),
+    pickTelegramChatId(r.profile?.ownerTelegram),
+    pickTelegramChatId(r.profile?.owner_telegram),
+    pickTelegramChatId(r.profile?.owner?.telegram),
+    pickTelegramChatId(r.profile?.connections?.telegram),
+    pickTelegramChatId(r.profile?.connections?.telegram?.chatId),
+    pickTelegramChatId(r.profile?.connections?.telegram?.chat_id)
+  );
+
+  const telegramUsername = ownerTelegramUsername ?? pickNonEmpty(
+    pickTelegramUsername(r.telegramUsername),
+    pickTelegramUsername(r.telegram_username),
+    pickTelegramUsername(r.profile?.telegramUsername),
+    pickTelegramUsername(r.profile?.telegram_username),
+    pickTelegramUsername(r.profile?.telegram),
+    pickTelegramUsername(r.profile?.social?.telegram),
+    pickTelegramUsername(r.profile?.connections?.telegram),
+    pickTelegramUsername(r.profile?.connections?.telegram?.username)
+  );
+
+  const telegramChatId = ownerTelegramChatId ?? pickNonEmpty(
+    pickTelegramChatId(r.telegramChatId),
+    pickTelegramChatId(r.telegram_chat_id),
+    pickTelegramChatId(r.profile?.telegramChatId),
+    pickTelegramChatId(r.profile?.telegram_chat_id),
+    pickTelegramChatId(r.profile?.telegram),
+    pickTelegramChatId(r.profile?.social?.telegram),
+    pickTelegramChatId(r.profile?.connections?.telegram),
+    pickTelegramChatId(r.profile?.connections?.telegram?.chatId),
+    pickTelegramChatId(r.profile?.connections?.telegram?.chat_id)
+  );
+
+  const telegramConnected = !!pickNonEmpty(
+    r.telegramConnected,
+    r.profile?.telegramConnected,
+    r.profile?.telegram?.connected,
+    r.profile?.social?.telegram?.connected,
+    r.profile?.connections?.telegram?.connected
+  );
+
+  // -------- Status counts --------
   const sc = r.statusCounts || r.status_counts || {};
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
   const pendingCount  = Number(r.pendingCount  ?? r.pending_count  ?? sc.pending  ?? 0);
@@ -211,10 +307,7 @@ function normalizeRow(r: any): ProposerAgg {
 
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
-  // ---- Address normalization ----
-  // Try all likely locations where backend might send address
-  // ---- Address normalization ----
-  // Try all likely locations where backend might send address
+  // -------- Address normalization --------
   const rawAddr =
     r.addr_display ??
     r.addressText ??
@@ -241,25 +334,24 @@ function normalizeRow(r: any): ProposerAgg {
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
 
-    // include entity_name from backend
     entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
 
-    // display-only address string
     address: addrDisplay,
     city: city || null,
     country: country || null,
 
-    // store email on the row in addition to contactEmail/ownerEmail
     email,
     contactEmail,
     ownerEmail,
 
     phone,
     whatsapp: phone,
+    ownerPhone,
     telegramUsername,
     telegramChatId,
     ownerTelegramUsername,
     ownerTelegramChatId,
+    telegramConnected,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
@@ -665,9 +757,11 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                        {/* DEBUG: remove after verifying */}
+                         {/* DEBUG: remove after verifying */}
                         <div className="text-[10px] text-slate-400">
-                          dbg tg: @{r.ownerTelegramUsername ?? r.telegramUsername ?? '-'} / id {r.ownerTelegramChatId ?? r.telegramChatId ?? '-'}
+                          tg paths → owner:@{r.ownerTelegramUsername ?? '-'} id:{r.ownerTelegramChatId ?? '-'}
+                          &nbsp;|&nbsp; user:@{r.telegramUsername ?? '-'} id:{r.telegramChatId ?? '-'}
+                          &nbsp;|&nbsp; connected:{String(r.telegramConnected ?? r.profile?.telegramConnected ?? r.profile?.telegram?.connected ?? r.profile?.social?.telegram?.connected ?? r.profile?.connections?.telegram?.connected ?? false)}
                         </div>
 
                         {/* Telegram: prefer @owner username, fallback to owner chat id */}
@@ -690,7 +784,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                        {/* WhatsApp: prefer ownerPhone */}
+                         {/* WhatsApp: prefer ownerPhone */}
                         <div>
                           {r.ownerPhone || r.whatsapp || r.phone ? (
                             <a
@@ -711,6 +805,14 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                             {(r.ownerTelegramUsername ?? r.telegramUsername)
                               ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
                               : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
+                          </div>
+                        )}
+
+                        {/* Telegram connected badge (fallback when no handle/id) */}
+                        {!(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) &&
+                          r.telegramConnected && (
+                          <div className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                            Telegram connected
                           </div>
                         )}
 
