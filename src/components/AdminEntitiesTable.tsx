@@ -234,61 +234,30 @@ function normalizeRow(r: any): ProposerAgg {
     return null;
   };
 
-  // owner-first
+    // Telegram — prefer flat fields from /admin/vendors
   const ownerTelegramUsername = pickNonEmpty(
-    pickTelegramUsername(r.ownerTelegramUsername),
-    pickTelegramUsername(r.owner_telegram_username),
-    pickTelegramUsername(r.profile?.ownerTelegramUsername),
-    pickTelegramUsername(r.profile?.owner_telegram_username),
-    pickTelegramUsername(r.profile?.ownerTelegram),
-    pickTelegramUsername(r.profile?.owner_telegram),
-    pickTelegramUsername(r.profile?.owner?.telegram),
-    pickTelegramUsername(r.profile?.connections?.telegram),
-    pickTelegramUsername(r.profile?.connections?.telegram?.username)
+    r.ownerTelegramUsername, r.owner_telegram_username,
+    r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username
   );
-
   const ownerTelegramChatId = pickNonEmpty(
-    pickTelegramChatId(r.ownerTelegramChatId),
-    pickTelegramChatId(r.owner_telegram_chat_id),
-    pickTelegramChatId(r.profile?.ownerTelegramChatId),
-    pickTelegramChatId(r.profile?.owner_telegram_chat_id),
-    pickTelegramChatId(r.profile?.ownerTelegram),
-    pickTelegramChatId(r.profile?.owner_telegram),
-    pickTelegramChatId(r.profile?.owner?.telegram),
-    pickTelegramChatId(r.profile?.connections?.telegram),
-    pickTelegramChatId(r.profile?.connections?.telegram?.chatId),
-    pickTelegramChatId(r.profile?.connections?.telegram?.chat_id)
+    r.ownerTelegramChatId, r.owner_telegram_chat_id,
+    r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
   );
 
-  const telegramUsername = ownerTelegramUsername ?? pickNonEmpty(
-    pickTelegramUsername(r.telegramUsername),
-    pickTelegramUsername(r.telegram_username),
-    pickTelegramUsername(r.profile?.telegramUsername),
-    pickTelegramUsername(r.profile?.telegram_username),
-    pickTelegramUsername(r.profile?.telegram),
-    pickTelegramUsername(r.profile?.social?.telegram),
-    pickTelegramUsername(r.profile?.connections?.telegram),
-    pickTelegramUsername(r.profile?.connections?.telegram?.username)
+  const telegramUsername = pickNonEmpty(
+    r.telegramUsername, r.telegram_username,
+    r.profile?.telegramUsername, r.profile?.telegram_username,
+    ownerTelegramUsername
   );
-
-  const telegramChatId = ownerTelegramChatId ?? pickNonEmpty(
-    pickTelegramChatId(r.telegramChatId),
-    pickTelegramChatId(r.telegram_chat_id),
-    pickTelegramChatId(r.profile?.telegramChatId),
-    pickTelegramChatId(r.profile?.telegram_chat_id),
-    pickTelegramChatId(r.profile?.telegram),
-    pickTelegramChatId(r.profile?.social?.telegram),
-    pickTelegramChatId(r.profile?.connections?.telegram),
-    pickTelegramChatId(r.profile?.connections?.telegram?.chatId),
-    pickTelegramChatId(r.profile?.connections?.telegram?.chat_id)
+  const telegramChatId = pickNonEmpty(
+    r.telegramChatId, r.telegram_chat_id,
+    r.profile?.telegramChatId, r.profile?.telegram_chat_id,
+    ownerTelegramChatId
   );
 
   const telegramConnected = !!pickNonEmpty(
     r.telegramConnected,
-    r.profile?.telegramConnected,
-    r.profile?.telegram?.connected,
-    r.profile?.social?.telegram?.connected,
-    r.profile?.connections?.telegram?.connected
+    r.profile?.telegramConnected
   );
 
   // -------- Status counts --------
@@ -334,7 +303,7 @@ function normalizeRow(r: any): ProposerAgg {
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
 
-    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
+    entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.vendorName, r.entity, r.organization) || null,
 
     address: addrDisplay,
     city: city || null,
