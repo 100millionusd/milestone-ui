@@ -88,28 +88,42 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// Build a human display string from any address shape
+// ⬇️ drop-in replacement: tolerant of odd keys like "posta", "zip_code", etc.
 function addressToDisplay(addr: any): string | null {
   if (!addr) return null;
-  if (typeof addr === 'string') return addr.trim() || null;
+  if (typeof addr === 'string') return (addr || '').trim() || null;
 
   if (typeof addr === 'object') {
-    const line1 = pickNonEmpty(addr.line1, addr.address1, addr.address_line1);
-    const city = pickNonEmpty(addr.city, addr.town);
-    const state = pickNonEmpty(addr.state, addr.province, addr.region);
-    const postal = pickNonEmpty(addr.postalCode, addr.postal_code, addr.zip, addr.zipCode);
-    const country = pickNonEmpty(addr.country);
+    const pickLoose = (obj: any, exact: string[], loose: RegExp[]) => {
+      for (const k of exact) {
+        if (obj?.[k]) {
+          const v = String(obj[k]).trim();
+          if (v) return v;
+        }
+      }
+      const keys = Object.keys(obj || {});
+      for (const rx of loose) {
+        const hit = keys.find((k) => rx.test(k));
+        if (hit && obj[hit]) {
+          const v = String(obj[hit]).trim();
+          if (v) return v;
+        }
+      }
+      return null;
+    };
+
+    const line1   = pickLoose(addr, ['line1','address1','address_line1'], [/line.?1/i, /address/i]);
+    const city    = pickLoose(addr, ['city','town'], [/city|town/i]);
+    const state   = pickLoose(addr, ['state','province','region'], [/state|prov|region/i]);
+    const postal  = pickLoose(addr, ['postalCode','postal_code','zip','zipCode'], [/post|zip/i]); // handles "posta"
+    const country = pickLoose(addr, ['country'], [/country/i]);
 
     const parts = [line1, city, state, postal, country].filter(Boolean) as string[];
-    const s = parts.join(', ').replace(/\s+,/g, ',').replace(/,\s+,/g, ',');
+    const s = parts.join(', ').replace(/\s+,/g, ',').replace(/,\s+,/g, ',').trim();
     return s || null;
   }
-  // Unknown shape
-  try {
-    return String(addr);
-  } catch {
-    return null;
-  }
+
+  try { return String(addr).trim(); } catch { return null; }
 }
 
 function normalizeRow(r: any): ProposerAgg {
@@ -650,13 +664,16 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                        {/* Address (display string) */}
-                        {r.address && (
-                          <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
-                            {r.address}
-                          </div>
-                        )}
-                      </Td>
+<Td>
+  {(r.address || r.addressText) && (
+    <div
+      className="text-xs text-slate-500 truncate max-w-[280px]"
+      title={addressToDisplay(r.address) ?? (typeof r.addressText === 'string' ? r.addressText : '')}
+    >
+      {addressToDisplay(r.address) ?? (typeof r.addressText === 'string' ? r.addressText : '—')}
+    </div>
+  )}
+</Td>
 
                       {/* Wallet — full + copy */}
                       <Td className="font-mono text-xs text-slate-800 break-all">
