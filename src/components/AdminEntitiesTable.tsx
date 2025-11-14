@@ -4,14 +4,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  getAdminProposers as listProposers,
+  listProposers,
   listProposals,
   type Proposal,
+  getAdminVendors as listAdminVendors, 
+  // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
   adminDeleteEntity as deleteEntity,
 } from '@/lib/api';
-
 
 /* ---------- Types ---------- */
 
