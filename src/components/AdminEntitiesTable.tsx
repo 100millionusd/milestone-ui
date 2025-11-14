@@ -665,25 +665,27 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                        {/* Telegram: prefer @owner username, fallback to owner chat id */}
-                        <div>
-                          {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
-                            <a
-                              href={toTelegramLink(
-                                r.ownerTelegramUsername ?? r.telegramUsername,
-                                r.ownerTelegramChatId ?? r.telegramChatId
-                              ) || '#'}
-                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-                              title="Open in Telegram"
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {(r.ownerTelegramUsername ?? r.telegramUsername)
-                                ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/,'')}`
-                                : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
-                            </a>
-                          ) : '—'}
-                        </div>
+ {/* Telegram: read flat fields returned by /admin/vendors */}
+<div>
+  {(r.telegramUsername || r.telegramChatId) ? (
+    <a
+      href={toTelegramLink(r.telegramUsername, r.telegramChatId) || '#'}
+      className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+      title="Open in Telegram"
+      target="_blank"
+      rel="noreferrer"
+    >
+      {r.telegramUsername
+        ? `@${String(r.telegramUsername).replace(/^@/, '')}`
+        : `tg:${r.telegramChatId}`}
+    </a>
+  ) : (r.telegramConnected ? (
+    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+      Telegram connected
+    </span>
+  ) : '—')}
+</div>
+
 
                         {/* WhatsApp: prefer ownerPhone */}
                         <div>
@@ -700,14 +702,14 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-                        {/* Telegram (inline, above address, gray) */}
-                        {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) && (
-                          <div className="text-xs text-slate-500">
-                            {(r.ownerTelegramUsername ?? r.telegramUsername)
-                              ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
-                              : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
-                          </div>
-                        )}
+   {/* Telegram (inline, gray, above address) */}
+{(r.telegramUsername || r.telegramChatId || r.telegramConnected) && (
+  <div className="text-xs text-slate-500">
+    {r.telegramUsername
+      ? `@${String(r.telegramUsername).replace(/^@/, '')}`
+      : (r.telegramChatId ? `tg:${r.telegramChatId}` : 'Telegram connected')}
+  </div>
+)}
 
                         {/* Address (display string) */}
                         {r.address && (
