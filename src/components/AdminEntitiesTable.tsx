@@ -664,7 +664,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                           ) : '—'}
                         </div>
 
-<Td>
+{/* Address (display string) */}
   {(r.address || r.addressText) && (
     <div
       className="text-xs text-slate-500 truncate max-w-[280px]"
