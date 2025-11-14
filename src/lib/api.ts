@@ -2008,13 +2008,6 @@ export async function saveProposerProfile(profile: any) {
   });
 }
 
-export function chooseRole(role: 'vendor' | 'proposer') {
-  return apiFetch('/profile/choose-role', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role }),
-  });
-}
 
 export function switchRole(role: 'vendor' | 'proposer') {
   return chooseRole(role);
