@@ -250,6 +250,8 @@ function normalizeRow(r: any): ProposerAgg {
     whatsapp: phone,
     telegramUsername,
     telegramChatId,
+    ownerTelegramUsername,
+    ownerTelegramChatId,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
@@ -697,6 +699,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                               ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/, '')}`
                               : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
                           </div>
+                          )}
+</Td>
 
 {/* Address (display string) */}
 {(r.address) && (
