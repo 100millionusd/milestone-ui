@@ -186,15 +186,16 @@ function normalizeRow(r: any): ProposerAgg {
     r.ownerTelegramChatId, r.owner_telegram_chat_id,
     r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id
   );
+    // Map owner → generic so the UI can rely on telegramUsername/telegramChatId
   const telegramUsername = pickNonEmpty(
     r.telegramUsername, r.telegram_username,
-    r.profile?.telegramUsername, r.profile?.telegram_username,
-    ownerTelegramUsername
+    ownerTelegramUsername,                 // ← add owner
+    r.profile?.telegramUsername, r.profile?.telegram_username
   );
   const telegramChatId = pickNonEmpty(
     r.telegramChatId, r.telegram_chat_id,
-    r.profile?.telegramChatId, r.profile?.telegram_chat_id,
-    ownerTelegramChatId
+    ownerTelegramChatId,                   // ← add owner
+    r.profile?.telegramChatId, r.profile?.telegram_chat_id
   );
 
     // Telegram "connected" flag (entities/proposers often only have this boolean)
@@ -758,19 +759,21 @@ useEffect(() => {
                           ) : '—'}
                         </div>
 
- {/* Telegram: read flat fields returned by /admin/vendors */}
-<div>
-  {(r.telegramUsername || r.telegramChatId) ? (
+ <div>
+  {(r.telegramUsername || r.telegramChatId || r.ownerTelegramUsername || r.ownerTelegramChatId) ? (
     <a
-      href={toTelegramLink(r.telegramUsername, r.telegramChatId) || '#'}
+      href={toTelegramLink(
+        r.telegramUsername ?? r.ownerTelegramUsername ?? null,
+        r.telegramChatId   ?? r.ownerTelegramChatId   ?? null
+      ) || '#'}
       className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
       title="Open in Telegram"
       target="_blank"
       rel="noreferrer"
     >
-      {r.telegramUsername
-        ? `@${String(r.telegramUsername).replace(/^@/, '')}`
-        : `tg:${r.telegramChatId}`}
+      {(r.telegramUsername ?? r.ownerTelegramUsername)
+        ? `@${String(r.telegramUsername ?? r.ownerTelegramUsername).replace(/^@/, '')}`
+        : `tg:${r.telegramChatId ?? r.ownerTelegramChatId}`}
     </a>
   ) : (r.telegramConnected ? (
     <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
