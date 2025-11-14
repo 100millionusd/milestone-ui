@@ -7,7 +7,7 @@ import {
   listProposers,
   listProposals,
   type Proposal,
-  getAdminVendors as listAdminVendors, 
+  getAdminProposers as listProposers
   // use the admin helpers but alias to simple names for clarity
   adminArchiveEntity as archiveEntity,
   adminUnarchiveEntity as unarchiveEntity,
