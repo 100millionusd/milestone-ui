@@ -262,6 +262,7 @@ function normalizeRow(r: any): ProposerAgg {
     telegramChatId,
     ownerTelegramUsername,
     ownerTelegramChatId,
+    telegramConnected: false,
 
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
     proposalsCount,
