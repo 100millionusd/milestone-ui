@@ -36,6 +36,7 @@ export type ProposerAgg = {
   /** Telegram */
   telegramUsername?: string | null;
   telegramChatId?: string | null;
+  telegramConnected?: boolean;
 
   wallet: string | null;
   proposalsCount: number;
