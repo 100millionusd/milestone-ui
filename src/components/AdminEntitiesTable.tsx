@@ -18,13 +18,15 @@ import {
 export type ProposerAgg = {
   id?: number | string | null;
   entity: string | null;
+
+  /** Display-ready address string (never an object) */
   address: string | null;
   city: string | null;
   country: string | null;
 
   contactEmail: string | null;
   ownerEmail: string | null;
-  email?: string | null; 
+  email?: string | null;
 
   /** phone also used for WhatsApp */
   phone?: string | null;
@@ -48,7 +50,6 @@ export type ProposerAgg = {
   ownerTelegramUsername?: string | null;
   ownerTelegramChatId?: string | null;
 };
-
 
 type SortKey =
   | 'entity'
@@ -86,6 +87,30 @@ const guessEmail = (obj: any): string | null => {
   }
   return null;
 };
+
+// Build a human display string from any address shape
+function addressToDisplay(addr: any): string | null {
+  if (!addr) return null;
+  if (typeof addr === 'string') return addr.trim() || null;
+
+  if (typeof addr === 'object') {
+    const line1 = pickNonEmpty(addr.line1, addr.address1, addr.address_line1);
+    const city = pickNonEmpty(addr.city, addr.town);
+    const state = pickNonEmpty(addr.state, addr.province, addr.region);
+    const postal = pickNonEmpty(addr.postalCode, addr.postal_code, addr.zip, addr.zipCode);
+    const country = pickNonEmpty(addr.country);
+
+    const parts = [line1, city, state, postal, country].filter(Boolean) as string[];
+    const s = parts.join(', ').replace(/\s+,/g, ',').replace(/,\s+,/g, ',');
+    return s || null;
+  }
+  // Unknown shape
+  try {
+    return String(addr);
+  } catch {
+    return null;
+  }
+}
 
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
@@ -142,20 +167,44 @@ function normalizeRow(r: any): ProposerAgg {
 
   const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
 
+  // ---- Address normalization ----
+  // Try all likely locations where backend might send address
+  const rawAddr =
+    r.addr_display ??
+    r.addressText ??
+    r.address_text ??
+    r.address ??
+    r.profile?.address ??
+    null;
+
+  const addrDisplay = addressToDisplay(rawAddr);
+
+  // City / Country: prefer explicit fields, otherwise derive from object
+  let city = pickNonEmpty(r.city, r.town);
+  let country = pickNonEmpty(r.country);
+
+  if (!city || !country) {
+    if (rawAddr && typeof rawAddr === 'object') {
+      city = city || pickNonEmpty(rawAddr.city, rawAddr.town);
+      country = country || pickNonEmpty(rawAddr.country);
+    }
+  }
+
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
 
     // include entity_name from backend
     entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
 
+    // display-only address string
+    address: addrDisplay,
+    city: city || null,
+    country: country || null,
+
     // store email on the row in addition to contactEmail/ownerEmail
     email,
     contactEmail,
     ownerEmail,
-
-    address: r.address ?? r.addr_display ?? null,
-    city: r.city ?? null,
-    country: r.country ?? null,
 
     phone,
     whatsapp: phone,
@@ -172,14 +221,14 @@ function normalizeRow(r: any): ProposerAgg {
       r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
     ),
     lastActivity:
-  r.lastActivityAt ??
-  r.last_activity_at ??
-  r.lastProposalAt ??
-  r.updatedAt ??
-  r.updated_at ??
-  r.createdAt ??
-  r.created_at ??
-  null,
+      r.lastActivityAt ??
+      r.last_activity_at ??
+      r.lastProposalAt ??
+      r.updatedAt ??
+      r.updated_at ??
+      r.createdAt ??
+      r.created_at ??
+      null,
 
     archived: !!(r.archived ?? r.is_archived ?? inferredArchived),
   };
@@ -197,7 +246,7 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
       existing || {
         id: null,
         entity: org || null,
-        address: p.address || null,
+        address: addressToDisplay(p.address) || null,
         city: p.city || null,
         country: p.country || null,
         contactEmail: p.contact || p.ownerEmail || null,
@@ -244,7 +293,6 @@ function keyOf(r: ProposerAgg) {
   return `${r.id ?? ''}|${r.entity ?? ''}|${r.contactEmail ?? ''}|${r.wallet ?? ''}`;
 }
 
-
 /** Contact deep links (Entities) */
 function toMailto(email: string, subject?: string) {
   const s = subject ? `?subject=${encodeURIComponent(subject)}` : '';
@@ -266,6 +314,7 @@ function toTelegramLink(username?: string | null, chatId?: string | null) {
   if (chatId)   return `tg://user?id=${String(chatId)}`;
   return null;
 }
+
 /* ---------- Component ---------- */
 
 export default function AdminEntitiesTable({ initial = [] }: Props) {
@@ -278,7 +327,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('entity');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
-  const [showArchived, setShowArchived] = useState(false); // ← NEW
+  const [showArchived, setShowArchived] = useState(false);
   const pageSize = 5;
 
   // per-row busy state
@@ -292,24 +341,24 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
       try {
         setLoading(true);
 
- // Try server; handle both array and {items: []} shape
-let resp: any;
-try {
-  resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-    includeArchived: true,
-  });
-} catch {
-  resp = await listProposers();
-}
+        // Try server; handle both array and {items: []} shape
+        let resp: any;
+        try {
+          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
+            includeArchived: true,
+          });
+        } catch {
+          resp = await listProposers();
+        }
 
-const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
-let data: ProposerAgg[] = arr.map(normalizeRow);
+        const arr: any[] = Array.isArray(resp) ? resp : (Array.isArray(resp?.items) ? resp.items : []);
+        let data: ProposerAgg[] = arr.map(normalizeRow);
 
-// Fallback to proposals aggregation if nothing came back
-if (!data.length) {
-  const proposals = await listProposals({ includeArchived: true });
-  data = aggregateFromProposals(proposals);
-}
+        // Fallback to proposals aggregation if nothing came back
+        if (!data.length) {
+          const proposals = await listProposals({ includeArchived: true });
+          data = aggregateFromProposals(proposals);
+        }
 
         if (alive) setRows(data);
       } catch (e: any) {
@@ -326,16 +375,16 @@ if (!data.length) {
 
   // Search + archived filter
   const filtered = useMemo(() => {
-    const base = showArchived ? rows : rows.filter(r => !r.archived); // ← filter archived
+    const base = showArchived ? rows : rows.filter(r => !r.archived);
     const n = q.trim().toLowerCase();
     if (!n) return base;
     return base.filter((r) => {
-       const hay = [
+      const hay = [
         r.entity,
         r.address,
         r.city,
         r.country,
-        (r as any).email,   // ← include raw email if present
+        (r as any).email,
         r.contactEmail,
         r.ownerEmail,
         r.wallet,
@@ -389,14 +438,14 @@ if (!data.length) {
   }
 
   // Payload for backend (id if present, otherwise the normalized triple)
-function toIdOrKey(r: ProposerAgg) {
-  if (r.id != null) return { id: r.id };
-  return {
-    org_name: r.entity ?? null,
-    contact: r.contactEmail ?? null,     // <- backend expects `contact`
-    owner_wallet: r.wallet ?? null,      // <- backend expects `owner_wallet`
-  };
-}
+  function toIdOrKey(r: ProposerAgg) {
+    if (r.id != null) return { id: r.id };
+    return {
+      org_name: r.entity ?? null,
+      contact: r.contactEmail ?? null,     // <- backend expects `contact`
+      owner_wallet: r.wallet ?? null,      // <- backend expects `owner_wallet`
+    };
+  }
 
   async function onArchive(r: ProposerAgg, nextArchived: boolean) {
     const k = keyOf(r);
@@ -528,7 +577,7 @@ function toIdOrKey(r: ProposerAgg) {
                 {pageRows.map((r, i) => {
                   const k = keyOf(r);
                   const isBusy = !!busy[k];
-                   const email = r.email ?? r.contactEmail ?? r.ownerEmail ?? guessEmail(r as any) ?? null;
+                  const email = r.email ?? r.contactEmail ?? r.ownerEmail ?? guessEmail(r as any) ?? null;
                   return (
                     <tr
                       key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`}
@@ -551,80 +600,79 @@ function toIdOrKey(r: ProposerAgg) {
                         )}
                       </Td>
 
-{/* Contact (deep links) */}
-<Td>
- {/* Email */}
-<div>
-  {email ? (
-    <a
-      href={toMailto(email, 'Proposal contact')}
-      className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-      title="Email"
-    >
-      {email}
-    </a>
-  ) : '—'}
-</div>
+                      {/* Contact (deep links) */}
+                      <Td>
+                        {/* Email */}
+                        <div>
+                          {email ? (
+                            <a
+                              href={toMailto(email, 'Proposal contact')}
+                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+                              title="Email"
+                            >
+                              {email}
+                            </a>
+                          ) : '—'}
+                        </div>
 
-  {/* Telegram: prefer @owner username, fallback to owner chat id */}
-  <div>
-    {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
-      <a
-        href={toTelegramLink(
-          r.ownerTelegramUsername ?? r.telegramUsername,
-          r.ownerTelegramChatId ?? r.telegramChatId
-        ) || '#'}
-        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-        title="Open in Telegram"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {(r.ownerTelegramUsername ?? r.telegramUsername)
-          ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/,'')}`
-          : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
-      </a>
-    ) : '—'}
-  </div>
+                        {/* Telegram: prefer @owner username, fallback to owner chat id */}
+                        <div>
+                          {(r.ownerTelegramUsername || r.ownerTelegramChatId || r.telegramUsername || r.telegramChatId) ? (
+                            <a
+                              href={toTelegramLink(
+                                r.ownerTelegramUsername ?? r.telegramUsername,
+                                r.ownerTelegramChatId ?? r.telegramChatId
+                              ) || '#'}
+                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+                              title="Open in Telegram"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {(r.ownerTelegramUsername ?? r.telegramUsername)
+                                ? `@${String(r.ownerTelegramUsername ?? r.telegramUsername).replace(/^@/,'')}`
+                                : `tg:${r.ownerTelegramChatId ?? r.telegramChatId}`}
+                            </a>
+                          ) : '—'}
+                        </div>
 
-  {/* WhatsApp: prefer ownerPhone */}
-  <div>
-    {r.ownerPhone || r.whatsapp || r.phone ? (
-      <a
-        href={toWhatsAppLink(r.ownerPhone ?? r.whatsapp ?? r.phone) || '#'}
-        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-        title="Open WhatsApp"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {r.ownerPhone ?? r.whatsapp ?? r.phone}
-      </a>
-    ) : '—'}
-  </div>
+                        {/* WhatsApp: prefer ownerPhone */}
+                        <div>
+                          {r.ownerPhone || r.whatsapp || r.phone ? (
+                            <a
+                              href={toWhatsAppLink(r.ownerPhone ?? r.whatsapp ?? r.phone) || '#'}
+                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+                              title="Open WhatsApp"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {r.ownerPhone ?? r.whatsapp ?? r.phone}
+                            </a>
+                          ) : '—'}
+                        </div>
 
-  {/* Address */}
-  {r.address && (
-    <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
-      {r.address}
-    </div>
-  )}
-</Td>
+                        {/* Address (display string) */}
+                        {r.address && (
+                          <div className="text-xs text-slate-500 truncate max-w-[280px]" title={r.address}>
+                            {r.address}
+                          </div>
+                        )}
+                      </Td>
 
-
- {/* Wallet — full + copy */}
-<Td className="font-mono text-xs text-slate-800 break-all">
-  <div className="flex items-center gap-2">
-    <span className="select-all">{r.wallet || '—'}</span>
-    {r.wallet && (
-      <button
-        onClick={() => navigator.clipboard.writeText(r.wallet!)}
-        className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
-        title="Copy wallet address"
-      >
-        Copy
-      </button>
-    )}
-  </div>
-</Td>
+                      {/* Wallet — full + copy */}
+                      <Td className="font-mono text-xs text-slate-800 break-all">
+                        <div className="flex items-center gap-2">
+                          <span className="select-all">{r.wallet || '—'}</span>
+                          {r.wallet && (
+                            <button
+                              onClick={() => navigator.clipboard.writeText(r.wallet!)}
+                              className="text-sky-700 hover:text-sky-900 underline underline-offset-2"
+                              title="Copy wallet address"
+                            >
+                              Copy
+                            </button>
+                          )}
+                        </div>
+                      </Td>
 
                       {/* Counts */}
                       <Td className="text-right">{r.proposalsCount ?? 0}</Td>
