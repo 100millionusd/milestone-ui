@@ -1032,6 +1032,11 @@ export async function getVendorProfile(): Promise<any> {
   return await apiFetch('/vendor/profile');
 }
 
+// --- Proposer profile ---
+export async function getProposerProfile(): Promise<any> {
+  return await apiFetch('/proposer/profile', { next: { revalidate: 0 } });
+}
+
 export async function getVendorBids(): Promise<Bid[]> {
   try {
     const rows = await apiFetch("/vendor/bids");
