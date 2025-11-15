@@ -144,6 +144,20 @@ export default function VendorProfilePage() {
       // Safari-safe save (Bearer added by api.ts if cookies are blocked)
       await postJSON('/vendor/profile', payload);
 
+      try {
+  const fresh = await getVendorProfile();
+  setP((prev) => ({
+    ...prev,
+    vendorName: fresh.vendorName || prev.vendorName,
+    email: fresh.email || prev.email,
+    phone: fresh.phone || prev.phone,
+    website: fresh.website || prev.website,
+    address: typeof fresh.address === 'object'
+      ? fresh.address
+      : { ...prev.address, line1: fresh.address || prev.address.line1 },
+  }));
+} catch {}
+
       // Optional: stay on page and just show success via role buttons section
       // router.push('/vendor/dashboard?flash=vendor-profile-saved');
     } catch (e: any) {
