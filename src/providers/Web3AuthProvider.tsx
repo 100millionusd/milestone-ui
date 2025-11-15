@@ -8,7 +8,7 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-// 💡 SOLUTION: Import uncached getAuthRole and clearAuthRoleCache
+// 💡 We need all these for the role-aware redirect
 import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
@@ -216,7 +216,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     
   }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
 
-  // 💡 SOLUTION: Update refreshRole to use uncached getAuthRole and RETURN the new info
+  // 💡 This function now returns the fresh role info to fix the login race condition
   const refreshRole = async () => {
     try {
       const info = await getAuthRole(); // Use UNCACHED function
@@ -312,30 +312,42 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       // 3. Post-login redirect (using the fresh, correct role)
       try {
         const url = new URL(window.location.href);
-        const nextParam = url.searchParams.get('next');
-        const fallback = pathname || '/';
-        let dest = nextParam || '/';
+        let nextParam = url.searchParams.get('next'); // Get the raw nextParam
+        let dest = '/'; // Final destination
 
         if (finalRole === 'admin') {
-          dest = nextParam || '/admin';
+          dest = nextParam || '/admin'; // Admin can go anywhere
+
         } else if (finalRole === 'vendor') {
+          // 💡 If nextParam is for proposers, ignore it.
+          if (nextParam && (nextParam.startsWith('/proposer') || nextParam === '/new')) {
+            nextParam = null; // Ignore forbidden nextParam
+          }
+          
+          // Check vendor profile completeness
           const p = await getVendorProfile().catch(() => null);
-          dest =
-            !p || !(p?.vendorName || p?.companyName) || !p?.email
+          dest = (!p || !(p?.vendorName || p?.companyName) || !p?.email)
               ? `/vendor/profile?next=${encodeURIComponent(nextParam || '/vendor/dashboard')}`
               : (nextParam || '/vendor/dashboard');
+
         } else if (finalRole === 'proposer') {
+          // 💡 If nextParam is for vendors, ignore it.
+          if (nextParam && nextParam.startsWith('/vendor')) {
+            nextParam = null; // Ignore forbidden nextParam
+          }
+
+          // Check proposer profile completeness
           const p = await getProposerProfile().catch(() => null);
-          dest =
-            !p || !p?.orgName || !p?.contactEmail
+          dest = (!p || !p?.orgName || !p?.contactEmail)
               ? `/proposer/profile?next=${encodeURIComponent(nextParam || '/new')}`
-              : (nextParam || '/new'); // '/new' is the "Submit Proposal" page
+              : (nextParam || '/new');
         } else {
-          // Guest or other... default to a safe page
+          // Guest
           dest = nextParam || '/';
         }
 
-        router.replace(dest);
+        router.replace(dest); // This is now safe and loop-free
+
       } catch (e) {
         console.error("Post-login redirect error:", e);
         // Safe fallback
