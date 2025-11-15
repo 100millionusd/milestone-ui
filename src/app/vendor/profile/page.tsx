@@ -66,19 +66,12 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        // 1. Check the user's role FIRST
-        const auth = await apiFetch('/auth/role').catch(() => ({} as any));
-
-        // 2. SOLUTION: If the active role is 'proposer', redirect them
-        if (auth?.role === 'proposer') {
-          // Redirect to the proposer's equivalent profile page or dashboard
-          router.push('/proposer/profile'); // or '/new'
-          // We don't need to load the vendor profile, so we can stop.
-          return;
-        }
-        
-        // 3. If we are here, role is 'vendor' or 'admin', so load vendor data
-        const j = await getVendorProfile();
+        // Load both the profile and the authenticated address (for Telegram link + fallback wallet)
+        // This is the original, correct logic. It does not check role.
+        const [j, auth] = await Promise.all([
+          getVendorProfile(),
+          apiFetch('/auth/role').catch(() => ({} as any)),
+        ]);
 
         // Normalize address (server can return string or object)
         const a = j?.address ?? {};
@@ -115,7 +108,7 @@ export default function VendorProfilePage() {
     return () => {
       alive = false;
     };
-  }, [router]); // <— Add router to the dependency array
+  }, []); // <— No [router] dependency
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
