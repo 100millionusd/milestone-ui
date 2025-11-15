@@ -8,7 +8,7 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-// 💡 We need all these for the role-aware redirect
+// We still need all these for the role-aware redirect
 import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
@@ -216,7 +216,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     
   }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
 
-  // 💡 This function now returns the fresh role info to fix the login race condition
+  // This function now returns the fresh role info to fix the login race condition
   const refreshRole = async () => {
     try {
       const info = await getAuthRole(); // Use UNCACHED function
@@ -245,17 +245,19 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  // Also re-check on tab focus or route changes (fixes “admin link not visible until refresh”)
+  // Also re-check on tab focus
   useEffect(() => {
     const onFocus = () => void refreshRole();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
-  useEffect(() => {
-    // small debounce to avoid spamming during rapid RSC navigations
-    const t = setTimeout(() => { void refreshRole(); }, 50);
-    return () => clearTimeout(t);
-  }, [pathname]);
+
+  // 💡 SOLUTION: This hook was removed, as it was causing the redirect loop.
+  // The 'mounted' and 'focus' hooks are sufficient.
+  // useEffect(() => {
+  //   const t = setTimeout(() => { void refreshRole(); }, 50);
+  //   return () => clearTimeout(t);
+  // }, [pathname]);
 
   const login = async () => {
     if (!web3auth || loggingIn) return;
@@ -300,7 +302,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       // ==========================================================
-      // 💡 SOLUTION: Await refreshRole AND use its return value
+      // 💡 Await refreshRole AND use its return value
       // ==========================================================
       
       // 1. Clear any stale client-side cache
@@ -386,7 +388,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
-    if (!eth?.on) return;
+    if (!eth?.on) return.
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
