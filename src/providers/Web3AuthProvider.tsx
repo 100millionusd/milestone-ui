@@ -28,7 +28,7 @@ interface Web3AuthContextType {
   token: string | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
-  refreshRole: () => Promise<void>;
+  refreshRole: () => Promise<{ role: Role; address: string | null }>;
 }
 
 const Web3AuthContext = createContext<Web3AuthContextType>({
@@ -40,7 +40,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   token: null,
   login: async () => {},
   logout: async () => {},
-  refreshRole: async () => {},
+  refreshRole: async () => ({ role: 'guest', address: null }),
 });
 
 // ---------- ENV ----------
@@ -223,15 +223,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const r = normalizeRole(info?.role);
       setRole(r);
       setSession(r === 'vendor' || r === 'admin' || r === 'proposer' ? 'authenticated' : 'unauthenticated');
-      if ((info as any)?.address) {
-        const addr = String((info as any).address);
-        setAddress(addr);
-      }
+      const addr = (info as any)?.address ? String((info as any).address) : null;
+      setAddress(addr);
+
       // mirror for cross-tab listeners / UI that peeks localStorage
       try { localStorage.setItem('lx_role', r); } catch {}
       try { window.dispatchEvent(new Event('lx-role-changed')); } catch {}
       // Return the fresh info
-      return { role: r, address: (info as any)?.address || null };
+      return { role: r, address: addr };
     } catch (e) {
       console.warn('refreshRole failed:', e);
       setSession('unauthenticated');
@@ -292,25 +291,25 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // Exchange for JWT (server sets cookie; mirror to localStorage + site cookie)
-      const { role: srvRoleStr, token: jwt } = await loginWithSignature(addr, signature, 'proposer');
+      const { token: jwt } = await loginWithSignature(addr, signature, 'proposer');
       
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch {}
         document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
         setToken(jwt);
       }
-      // optimistic local role (will be corrected by fresh call below)
-      try { localStorage.setItem('lx_role', srvRoleStr || 'proposer'); } catch {}
-
-      // ==========================================================
-      // 💡 SOLUTION: Clear cache, THEN await the fresh role
-      // ==========================================================
-      clearAuthRoleCache(); // 1. Clear any stale cached role
-      const { role: finalRole } = await refreshRole(); // 2. Await the new role from server
       
       // ==========================================================
-      // 💡 SOLUTION: Role-aware post-login redirect (using the fresh role)
+      // 💡 SOLUTION: Await refreshRole AND use its return value
       // ==========================================================
+      
+      // 1. Clear any stale client-side cache
+      clearAuthRoleCache(); 
+      
+      // 2. Await the fresh role *directly* from the server
+      const { role: finalRole } = await refreshRole(); // This now returns the role
+
+      // 3. Post-login redirect (using the fresh, correct role)
       try {
         const url = new URL(window.location.href);
         const nextParam = url.searchParams.get('next');
