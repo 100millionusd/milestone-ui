@@ -94,13 +94,22 @@ const pageNeedsWallet = (p?: string) => {
   return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet');
 };
 
+// ==================================================
+// 💡 SOLUTION: Create a persistent, global instance
+// ==================================================
+let globalWeb3Auth: Web3Auth | null = null;
+let isWeb3AuthInitialized = false;
+// ==================================================
+
+
 // ---------- PROVIDER ----------
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const needsWallet = useMemo(() => pageNeedsWallet(pathname || ''), [pathname]);
 
-  const [web3auth, setWeb3auth] = useState<Web3Auth | null>(null);
+  // Use the global instance as the *initial* state
+  const [web3auth, setWeb3auth] = useState<Web3Auth | null>(globalWeb3Auth);
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('guest');
@@ -120,17 +129,34 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Init Web3Auth (MetaMask + optional WalletConnect) — gated by needsWallet
   useEffect(() => {
-    if (!needsWallet) return;
+    // 1. Only run if we need a wallet AND it's not already set in state
+    if (!needsWallet || web3auth) return;
 
-    // 1. Declare w3a instance here so cleanup function can access it
-    let w3a: Web3Auth | null = null;
+    // 2. If it's already initialized globally, just set it to state and finish.
+    if (globalWeb3Auth && isWeb3AuthInitialized) {
+      setWeb3auth(globalWeb3Auth);
+      return;
+    }
+    
+    // 3. If it's initializing but not done, wait.
+    if (globalWeb3Auth && !isWeb3AuthInitialized) {
+      return; 
+    }
 
+    // 4. This is the FIRST time we're initializing
     const init = async () => {
       try {
         if (!clientId) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
+
+        // Check again in case of a race condition
+        if (globalWeb3Auth) {
+           setWeb3auth(globalWeb3Auth);
+           return;
+        }
+
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -144,8 +170,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        // 2. Assign to the outer variable
-        w3a = new Web3Auth({
+        // 5. Create and assign to GLOBAL instance
+        globalWeb3Auth = new Web3Auth({
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
           privateKeyProvider,
@@ -153,10 +179,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         // External wallets
-        w3a.configureAdapter(new MetamaskAdapter());
+        globalWeb3Auth.configureAdapter(new MetamaskAdapter());
 
         if (wcProjectId) {
-          w3a.configureAdapter(
+          globalWeb3Auth.configureAdapter(
             new WalletConnectV2Adapter({
               adapterSettings: {
                 projectId: wcProjectId,
@@ -168,23 +194,26 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         // No OpenLogin adapter here.
 
-        await w3a.initModal();
-        setWeb3auth(w3a);
+        // 6. Init the modal
+        await globalWeb3Auth.initModal();
+        
+        // 7. Mark as initialized
+        isWeb3AuthInitialized = true;
+        
+        // 8. Set to state
+        setWeb3auth(globalWeb3Auth);
+
       } catch (e) {
         console.error('Web3Auth init error:', e);
+        globalWeb3Auth = null; // Reset on failure
+        isWeb3AuthInitialized = false;
       }
     };
     init();
 
-    // 3. THE FIX: Return a cleanup function
-    return () => {
-      if (w3a) {
-        // This tells Web3Auth to clean up its listeners and modal
-        w3a.destroy().catch((e) => console.error("Web3Auth destroy error:", e));
-        setWeb3auth(null); // Also clear it from state
-      }
-    };
-  }, [needsWallet]);
+    // 9. No cleanup function is needed because the instance is global and persistent.
+    
+  }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
 
   // Fresh server role check (no cache)
   const refreshRole = async () => {
