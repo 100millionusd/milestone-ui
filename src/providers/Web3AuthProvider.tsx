@@ -8,15 +8,14 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-// We still need all these for the role-aware redirect
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRoleOnce, getVendorProfile } from '@/lib/api';
 
-type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
+type Role = 'admin' | 'vendor' | 'guest';
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
 
 const normalizeRole = (v: any): Role => {
   const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  return s === 'admin' || s === 'vendor' || s === 'proposer' ? (s as Role) : 'guest';
+  return s === 'admin' || s === 'vendor' ? (s as Role) : 'guest';
 };
 
 interface Web3AuthContextType {
@@ -28,7 +27,7 @@ interface Web3AuthContextType {
   token: string | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
-  refreshRole: () => Promise<{ role: Role; address: string | null }>;
+  refreshRole: () => Promise<void>;
 }
 
 const Web3AuthContext = createContext<Web3AuthContextType>({
@@ -40,7 +39,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   token: null,
   login: async () => {},
   logout: async () => {},
-  refreshRole: async () => ({ role: 'guest', address: null }),
+  refreshRole: async () => {},
 });
 
 // ---------- ENV ----------
@@ -92,16 +91,8 @@ async function pickHealthyRpc(): Promise<string> {
 // ---------- Only load wallet where needed ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet') || p.startsWith('/proposer') || p.startsWith('/new');
+  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet');
 };
-
-// ==================================================
-// 💡 SINGLETON PATTERN: Create a persistent, global instance
-// ==================================================
-let globalWeb3Auth: Web3Auth | null = null;
-let isWeb3AuthInitialized = false;
-// ==================================================
-
 
 // ---------- PROVIDER ----------
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
@@ -109,8 +100,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const needsWallet = useMemo(() => pageNeedsWallet(pathname || ''), [pathname]);
 
-  // Use the global instance as the *initial* state
-  const [web3auth, setWeb3auth] = useState<Web3Auth | null>(globalWeb3Auth);
+  const [web3auth, setWeb3auth] = useState<Web3Auth | null>(null);
   const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('guest');
@@ -130,34 +120,13 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Init Web3Auth (MetaMask + optional WalletConnect) — gated by needsWallet
   useEffect(() => {
-    // 1. Only run if we need a wallet AND it's not already set in state
-    if (!needsWallet || web3auth) return;
-
-    // 2. If it's already initialized globally, just set it to state and finish.
-    if (globalWeb3Auth && isWeb3AuthInitialized) {
-      setWeb3auth(globalWeb3Auth);
-      return;
-    }
-    
-    // 3. If it's initializing but not done, wait.
-    if (globalWeb3Auth && !isWeb3AuthInitialized) {
-      return; 
-    }
-
-    // 4. This is the FIRST time we're initializing
+    if (!needsWallet) return;
     const init = async () => {
       try {
         if (!clientId) {
           console.error('Missing NEXT_PUBLIC_WEB3AUTH_CLIENT_ID');
           return;
         }
-
-        // Check again in case of a race condition
-        if (globalWeb3Auth) {
-           setWeb3auth(globalWeb3Auth);
-           return;
-        }
-
         const rpcTarget = await pickHealthyRpc();
         const chainConfig = {
           chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -171,8 +140,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        // 5. Create and assign to GLOBAL instance
-        globalWeb3Auth = new Web3Auth({
+        const w3a = new Web3Auth({
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
           privateKeyProvider,
@@ -180,10 +148,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         // External wallets
-        globalWeb3Auth.configureAdapter(new MetamaskAdapter());
+        w3a.configureAdapter(new MetamaskAdapter());
 
         if (wcProjectId) {
-          globalWeb3Auth.configureAdapter(
+          w3a.configureAdapter(
             new WalletConnectV2Adapter({
               adapterSettings: {
                 projectId: wcProjectId,
@@ -195,48 +163,33 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         // No OpenLogin adapter here.
 
-        // 6. Init the modal
-        await globalWeb3Auth.initModal();
-        
-        // 7. Mark as initialized
-        isWeb3AuthInitialized = true;
-        
-        // 8. Set to state
-        setWeb3auth(globalWeb3Auth);
-
+        await w3a.initModal();
+        setWeb3auth(w3a);
       } catch (e) {
         console.error('Web3Auth init error:', e);
-        globalWeb3Auth = null; // Reset on failure
-        isWeb3AuthInitialized = false;
       }
     };
     init();
+  }, [needsWallet]);
 
-    // 9. No cleanup function is needed because the instance is global and persistent.
-    
-  }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
-
-  // This function now returns the fresh role info to fix the login race condition
+  // Fresh server role check (no cache)
   const refreshRole = async () => {
     try {
-      const info = await getAuthRole(); // Use UNCACHED function
+      const info = await getAuthRoleOnce(); // ← FRESH, not the cached once()
       const r = normalizeRole(info?.role);
       setRole(r);
-      setSession(r === 'vendor' || r === 'admin' || r === 'proposer' ? 'authenticated' : 'unauthenticated');
-      const addr = (info as any)?.address ? String((info as any).address) : null;
-      setAddress(addr);
-
+      setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
+      if ((info as any)?.address) {
+        const addr = String((info as any).address);
+        setAddress(addr);
+      }
       // mirror for cross-tab listeners / UI that peeks localStorage
       try { localStorage.setItem('lx_role', r); } catch {}
       try { window.dispatchEvent(new Event('lx-role-changed')); } catch {}
-      // Return the fresh info
-      return { role: r, address: addr };
     } catch (e) {
       console.warn('refreshRole failed:', e);
       setSession('unauthenticated');
       setRole('guest');
-      // Return error state
-      return { role: 'guest' as Role, address: null };
     }
   };
 
@@ -245,14 +198,17 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  // Also re-check on tab focus
+  // Also re-check on tab focus or route changes (fixes “admin link not visible until refresh”)
   useEffect(() => {
     const onFocus = () => void refreshRole();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
-
-  // Removed the useEffect[pathname] hook that was causing the redirect loop
+  useEffect(() => {
+    // small debounce to avoid spamming during rapid RSC navigations
+    const t = setTimeout(() => { void refreshRole(); }, 50);
+    return () => clearTimeout(t);
+  }, [pathname]);
 
   const login = async () => {
     if (!web3auth || loggingIn) return;
@@ -288,67 +244,36 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // Exchange for JWT (server sets cookie; mirror to localStorage + site cookie)
-      const { token: jwt } = await loginWithSignature(addr, signature, 'proposer');
-      
+      const { role: srvRole, token: jwt } = await loginWithSignature(addr, signature);
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch {}
         document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
         setToken(jwt);
       }
-      
-      // ==========================================================
-      // 💡 Await refreshRole AND use its return value
-      // ==========================================================
-      
-      // 1. Clear any stale client-side cache
-      clearAuthRoleCache(); 
-      
-      // 2. Await the fresh role *directly* from the server
-      const { role: finalRole } = await refreshRole(); // This now returns the role
+      // optimistic local role (will be corrected by fresh call below)
+      try { localStorage.setItem('lx_role', srvRole || 'vendor'); } catch {}
 
-      // 3. Post-login redirect (using the fresh, correct role)
+      // Fresh confirm with server (no cache)
+      await refreshRole();
+
+      // Post-login redirect (vendor profile completeness)
       try {
+        const p = await getVendorProfile().catch(() => null);
         const url = new URL(window.location.href);
-        let nextParam = url.searchParams.get('next'); // Get the raw nextParam
-        let dest = '/'; // Final destination
+        const nextParam = url.searchParams.get('next');
+        const fallback = pathname || '/';
+        const dest =
+          !p || !(p?.vendorName || p?.companyName) || !p?.email
+            ? `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`
+            : (nextParam || (role === 'admin' ? '/admin' : '/vendor/dashboard'));
 
-        if (finalRole === 'admin') {
-          dest = nextParam || '/admin'; // Admin can go anywhere
+        // if admin, prefer /admin unless an explicit next=... overrides
+        const finalDest =
+          role === 'admin' && !nextParam ? '/admin' : dest;
 
-        } else if (finalRole === 'vendor') {
-          // 💡 If nextParam is for proposers, ignore it.
-          if (nextParam && (nextParam.startsWith('/proposer') || nextParam === '/new')) {
-            nextParam = null; // Ignore forbidden nextParam
-          }
-          
-          // Check vendor profile completeness
-          const p = await getVendorProfile().catch(() => null);
-          dest = (!p || !(p?.vendorName || p?.companyName) || !p?.email)
-              ? `/vendor/profile?next=${encodeURIComponent(nextParam || '/vendor/dashboard')}`
-              : (nextParam || '/vendor/dashboard');
-
-        } else if (finalRole === 'proposer') {
-          // 💡 If nextParam is for vendors, ignore it.
-          if (nextParam && nextParam.startsWith('/vendor')) {
-            nextParam = null; // Ignore forbidden nextParam
-          }
-
-          // Check proposer profile completeness
-          const p = await getProposerProfile().catch(() => null);
-          dest = (!p || !p?.orgName || !p?.contactEmail)
-              ? `/proposer/profile?next=${encodeURIComponent(nextParam || '/new')}`
-              : (nextParam || '/new');
-        } else {
-          // Guest
-          dest = nextParam || '/';
-        }
-
-        router.replace(dest); // This is now safe and loop-free
-
-      } catch (e) {
-        console.error("Post-login redirect error:", e);
-        // Safe fallback
-        router.replace(finalRole === 'admin' ? '/admin' : (finalRole === 'vendor' ? '/vendor/dashboard' : '/'));
+        router.replace(finalDest);
+      } catch {
+        router.replace(role === 'admin' ? '/admin' : '/vendor/dashboard');
       }
     } catch (e) {
       console.error('Login error:', e);
@@ -383,9 +308,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
-    
-    // 💡 SOLUTION: Fixed the typo here
-    if (!eth?.on) return; 
+    if (!eth?.on) return;
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {

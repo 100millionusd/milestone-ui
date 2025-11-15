@@ -67,7 +67,6 @@ export default function VendorProfilePage() {
     (async () => {
       try {
         // Load both the profile and the authenticated address (for Telegram link + fallback wallet)
-        // This is the original, correct logic. It does not check role.
         const [j, auth] = await Promise.all([
           getVendorProfile(),
           apiFetch('/auth/role').catch(() => ({} as any)),
@@ -108,7 +107,7 @@ export default function VendorProfilePage() {
     return () => {
       alive = false;
     };
-  }, []); // <— No [router] dependency
+  }, []);
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
@@ -144,21 +143,6 @@ export default function VendorProfilePage() {
 
       // Safari-safe save (Bearer added by api.ts if cookies are blocked)
       await postJSON('/vendor/profile', payload);
-
-      try {
-        const fresh = await getVendorProfile();
-        setP((prev) => ({
-          ...prev,
-          vendorName: fresh.vendorName || prev.vendorName,
-          email: fresh.email || prev.email,
-          phone: fresh.phone || prev.phone,
-          website: fresh.website || prev.website,
-          address:
-            typeof fresh.address === 'object'
-              ? fresh.address
-              : { ...prev.address, line1: fresh.address || prev.address.line1 },
-        }));
-      } catch {}
 
       // Optional: stay on page and just show success via role buttons section
       // router.push('/vendor/dashboard?flash=vendor-profile-saved');
