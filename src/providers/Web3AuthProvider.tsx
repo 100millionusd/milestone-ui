@@ -252,12 +252,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  // 💡 SOLUTION: This hook was removed, as it was causing the redirect loop.
-  // The 'mounted' and 'focus' hooks are sufficient.
-  // useEffect(() => {
-  //   const t = setTimeout(() => { void refreshRole(); }, 50);
-  //   return () => clearTimeout(t);
-  // }, [pathname]);
+  // Removed the useEffect[pathname] hook that was causing the redirect loop
 
   const login = async () => {
     if (!web3auth || loggingIn) return;
@@ -388,7 +383,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
-    if (!eth?.on) return.
+    
+    // 💡 SOLUTION: Fixed the typo here
+    if (!eth?.on) return; 
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
