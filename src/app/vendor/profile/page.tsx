@@ -72,13 +72,6 @@ export default function VendorProfilePage() {
           apiFetch('/auth/role').catch(() => ({} as any)),
         ]);
 
-        const role = (auth?.role || (Array.isArray(auth?.roles) ? auth.roles[0] : ''))?.toLowerCase();
-      if (role && role !== 'vendor') {
-        // This wallet is not a Vendor anymore — go to Entity flow
-        router.replace('/new?flash=switched-to-entity');
-        return; // IMPORTANT: stop running the rest of the effect
-      }
-
         // Normalize address (server can return string or object)
         const a = j?.address ?? {};
         const address: Address =
