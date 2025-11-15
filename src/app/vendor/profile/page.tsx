@@ -108,7 +108,7 @@ export default function VendorProfilePage() {
     return () => {
       alive = false;
     };
-  }, []); // <— No [router] dependency
+  }, []); // <— No [router] dependency. This is correct.
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
@@ -195,7 +195,7 @@ export default function VendorProfilePage() {
             <input
               className="border rounded px-3 py-2 w-full"
               value={p.vendorName}
-              onChange={(e) => setP({ ...p, vendorName: e.target.value })}
+              onChange={(e) => setP({ ...p, vendorName: e.targe.value })}
               required
             />
           </label>
