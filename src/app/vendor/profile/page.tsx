@@ -195,7 +195,7 @@ export default function VendorProfilePage() {
             <input
               className="border rounded px-3 py-2 w-full"
               value={p.vendorName}
-              onChange={(e) => setP({ ...p, vendorName: e.targe.value })}
+              onChange={(e) => setP({ ...p, vendorName: e.target.value })}
               required
             />
           </label>
