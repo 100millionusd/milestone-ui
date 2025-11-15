@@ -8,15 +8,14 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-// 💡 SOLUTION: Import getProposerProfile
-import { postJSON, loginWithSignature, getAuthRoleOnce, getVendorProfile, getProposerProfile } from '@/lib/api';
+// 💡 SOLUTION: Import uncached getAuthRole and clearAuthRoleCache
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache } from '@/lib/api';
 
-type Role = 'admin' | 'vendor' | 'guest' | 'proposer'; // 💡 SOLUTION: Add 'proposer'
+type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
 
 const normalizeRole = (v: any): Role => {
   const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  // 💡 SOLUTION: Accept 'proposer' as a valid role
   return s === 'admin' || s === 'vendor' || s === 'proposer' ? (s as Role) : 'guest';
 };
 
@@ -217,12 +216,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     
   }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
 
-  // Fresh server role check (no cache)
+  // 💡 SOLUTION: Update refreshRole to use uncached getAuthRole and RETURN the new info
   const refreshRole = async () => {
     try {
-      // 💡 SOLUTION: Call the *uncached* version from api.ts
-      // We must get the latest role from the server, not a 3-sec-old cache.
-      const info = await (await import('@/lib/api')).getAuthRole();
+      const info = await getAuthRole(); // Use UNCACHED function
       const r = normalizeRole(info?.role);
       setRole(r);
       setSession(r === 'vendor' || r === 'admin' || r === 'proposer' ? 'authenticated' : 'unauthenticated');
@@ -233,10 +230,14 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       // mirror for cross-tab listeners / UI that peeks localStorage
       try { localStorage.setItem('lx_role', r); } catch {}
       try { window.dispatchEvent(new Event('lx-role-changed')); } catch {}
+      // Return the fresh info
+      return { role: r, address: (info as any)?.address || null };
     } catch (e) {
       console.warn('refreshRole failed:', e);
       setSession('unauthenticated');
       setRole('guest');
+      // Return error state
+      return { role: 'guest' as Role, address: null };
     }
   };
 
@@ -291,9 +292,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // Exchange for JWT (server sets cookie; mirror to localStorage + site cookie)
-      // 💡 SOLUTION: Default to 'proposer' as it's the more common entry point
       const { role: srvRoleStr, token: jwt } = await loginWithSignature(addr, signature, 'proposer');
-      const srvRole = normalizeRole(srvRoleStr); // Ensure it's a valid Role type
       
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch {}
@@ -301,15 +300,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(jwt);
       }
       // optimistic local role (will be corrected by fresh call below)
-      try { localStorage.setItem('lx_role', srvRole || 'proposer'); } catch {}
-
-      // Fresh confirm with server (no cache)
-      // This will set the *correct* role ('proposer', 'vendor', 'admin') in state
-      await refreshRole();
-      const finalRole = normalizeRole((await getAuthRoleOnce()).role); // Get the role we just set
+      try { localStorage.setItem('lx_role', srvRoleStr || 'proposer'); } catch {}
 
       // ==========================================================
-      // 💡 SOLUTION: Role-aware post-login redirect
+      // 💡 SOLUTION: Clear cache, THEN await the fresh role
+      // ==========================================================
+      clearAuthRoleCache(); // 1. Clear any stale cached role
+      const { role: finalRole } = await refreshRole(); // 2. Await the new role from server
+      
+      // ==========================================================
+      // 💡 SOLUTION: Role-aware post-login redirect (using the fresh role)
       // ==========================================================
       try {
         const url = new URL(window.location.href);
