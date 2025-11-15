@@ -384,8 +384,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
     
-    // 💡 SOLUTION: Fixed the typo here
-    if (!eth?.on) return; 
+    if (!eth?.on) return; // Fixed typo
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
@@ -420,7 +419,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       value={{ web3auth, provider, address, role, session, token, login, logout, refreshRole }}
     >
       {children}
-    </Web3AuthContext.Provider>
+    </Web.3AuthContext.Provider>
   );
 }
 

@@ -66,18 +66,12 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        // 1. Check the user's role FIRST
-        const auth = await apiFetch('/auth/role').catch(() => ({} as any));
-
-        // 2. SOLUTION: If the active role is 'proposer', redirect them
-        if (auth?.role === 'proposer') {
-          // Redirect to the proposer's equivalent profile page
-          router.push('/proposer/profile'); // or '/new'
-          return; // Stop execution
-        }
-
-        // 3. If role is 'vendor' or 'admin', load vendor data
-        const j = await getVendorProfile();
+        // Load both the profile and the authenticated address (for Telegram link + fallback wallet)
+        // This is the original, correct logic. It does not check role.
+        const [j, auth] = await Promise.all([
+          getVendorProfile(),
+          apiFetch('/auth/role').catch(() => ({} as any)),
+        ]);
 
         // Normalize address (server can return string or object)
         const a = j?.address ?? {};
@@ -114,7 +108,7 @@ export default function VendorProfilePage() {
     return () => {
       alive = false;
     };
-  }, [router]); // <— Add router to the dependency array
+  }, []); // <— No [router] dependency
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
@@ -148,6 +142,7 @@ export default function VendorProfilePage() {
         return;
       }
 
+      // Safari-safe save (Bearer added by api.ts if cookies are blocked)
       await postJSON('/vendor/profile', payload);
 
       try {
@@ -164,6 +159,9 @@ export default function VendorProfilePage() {
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
         }));
       } catch {}
+
+      // Optional: stay on page and just show success via role buttons section
+      // router.push('/vendor/dashboard?flash=vendor-profile-saved');
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
@@ -191,8 +189,6 @@ export default function VendorProfilePage() {
       )}
 
       <form onSubmit={onSave} className="space-y-4" data-vendor-profile-form>
-        {/* ... (rest of your form is identical and correct) ... */}
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Company / Vendor Name</div>
