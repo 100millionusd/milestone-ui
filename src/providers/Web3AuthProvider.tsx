@@ -86,7 +86,7 @@ async function pickHealthyRpc(): Promise<string> {
     // eslint-disable-next-line no-await-in-loop
     if (await probeRpc(url)) return url;
   }
-  return 'https://rpc.sepolia.org';
+  return 'https.rpc.sepolia.org';
 }
 
 // ---------- Only load wallet where needed ----------
@@ -164,7 +164,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           chainId: '0xaa36a7', // sepolia
           rpcTarget,
           displayName: 'Sepolia Testnet',
-          blockExplorerUrl: 'https://sepolia.etherscan.io',
+          blockExplorerUrl: 'https.sepolia.etherscan.io',
           ticker: 'ETH',
           tickerName: 'Ethereum Sepolia',
         };
@@ -419,7 +419,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       value={{ web3auth, provider, address, role, session, token, login, logout, refreshRole }}
     >
       {children}
-    </Web.3AuthContext.Provider>
+    </Web3AuthContext.Provider>
   );
 }
 
