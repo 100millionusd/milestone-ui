@@ -8,14 +8,16 @@ import { MetamaskAdapter } from '@web3auth/metamask-adapter';
 import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
-import { postJSON, loginWithSignature, getAuthRoleOnce, getVendorProfile } from '@/lib/api';
+// 💡 SOLUTION: Import getProposerProfile
+import { postJSON, loginWithSignature, getAuthRoleOnce, getVendorProfile, getProposerProfile } from '@/lib/api';
 
-type Role = 'admin' | 'vendor' | 'guest';
+type Role = 'admin' | 'vendor' | 'guest' | 'proposer'; // 💡 SOLUTION: Add 'proposer'
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
 
 const normalizeRole = (v: any): Role => {
   const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  return s === 'admin' || s === 'vendor' ? (s as Role) : 'guest';
+  // 💡 SOLUTION: Accept 'proposer' as a valid role
+  return s === 'admin' || s === 'vendor' || s === 'proposer' ? (s as Role) : 'guest';
 };
 
 interface Web3AuthContextType {
@@ -91,11 +93,11 @@ async function pickHealthyRpc(): Promise<string> {
 // ---------- Only load wallet where needed ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet');
+  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet') || p.startsWith('/proposer') || p.startsWith('/new');
 };
 
 // ==================================================
-// 💡 SOLUTION: Create a persistent, global instance
+// 💡 SINGLETON PATTERN: Create a persistent, global instance
 // ==================================================
 let globalWeb3Auth: Web3Auth | null = null;
 let isWeb3AuthInitialized = false;
@@ -218,10 +220,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Fresh server role check (no cache)
   const refreshRole = async () => {
     try {
-      const info = await getAuthRoleOnce(); // ← FRESH, not the cached once()
+      // 💡 SOLUTION: Call the *uncached* version from api.ts
+      // We must get the latest role from the server, not a 3-sec-old cache.
+      const info = await (await import('@/lib/api')).getAuthRole();
       const r = normalizeRole(info?.role);
       setRole(r);
-      setSession(r === 'vendor' || r === 'admin' ? 'authenticated' : 'unauthenticated');
+      setSession(r === 'vendor' || r === 'admin' || r === 'proposer' ? 'authenticated' : 'unauthenticated');
       if ((info as any)?.address) {
         const addr = String((info as any).address);
         setAddress(addr);
@@ -287,36 +291,56 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // Exchange for JWT (server sets cookie; mirror to localStorage + site cookie)
-      const { role: srvRole, token: jwt } = await loginWithSignature(addr, signature);
+      // 💡 SOLUTION: Default to 'proposer' as it's the more common entry point
+      const { role: srvRoleStr, token: jwt } = await loginWithSignature(addr, signature, 'proposer');
+      const srvRole = normalizeRole(srvRoleStr); // Ensure it's a valid Role type
+      
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch {}
         document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
         setToken(jwt);
       }
       // optimistic local role (will be corrected by fresh call below)
-      try { localStorage.setItem('lx_role', srvRole || 'vendor'); } catch {}
+      try { localStorage.setItem('lx_role', srvRole || 'proposer'); } catch {}
 
       // Fresh confirm with server (no cache)
+      // This will set the *correct* role ('proposer', 'vendor', 'admin') in state
       await refreshRole();
+      const finalRole = normalizeRole((await getAuthRoleOnce()).role); // Get the role we just set
 
-      // Post-login redirect (vendor profile completeness)
+      // ==========================================================
+      // 💡 SOLUTION: Role-aware post-login redirect
+      // ==========================================================
       try {
-        const p = await getVendorProfile().catch(() => null);
         const url = new URL(window.location.href);
         const nextParam = url.searchParams.get('next');
         const fallback = pathname || '/';
-        const dest =
-          !p || !(p?.vendorName || p?.companyName) || !p?.email
-            ? `/vendor/profile?next=${encodeURIComponent(nextParam || fallback)}`
-            : (nextParam || (role === 'admin' ? '/admin' : '/vendor/dashboard'));
+        let dest = nextParam || '/';
 
-        // if admin, prefer /admin unless an explicit next=... overrides
-        const finalDest =
-          role === 'admin' && !nextParam ? '/admin' : dest;
+        if (finalRole === 'admin') {
+          dest = nextParam || '/admin';
+        } else if (finalRole === 'vendor') {
+          const p = await getVendorProfile().catch(() => null);
+          dest =
+            !p || !(p?.vendorName || p?.companyName) || !p?.email
+              ? `/vendor/profile?next=${encodeURIComponent(nextParam || '/vendor/dashboard')}`
+              : (nextParam || '/vendor/dashboard');
+        } else if (finalRole === 'proposer') {
+          const p = await getProposerProfile().catch(() => null);
+          dest =
+            !p || !p?.orgName || !p?.contactEmail
+              ? `/proposer/profile?next=${encodeURIComponent(nextParam || '/new')}`
+              : (nextParam || '/new'); // '/new' is the "Submit Proposal" page
+        } else {
+          // Guest or other... default to a safe page
+          dest = nextParam || '/';
+        }
 
-        router.replace(finalDest);
-      } catch {
-        router.replace(role === 'admin' ? '/admin' : '/vendor/dashboard');
+        router.replace(dest);
+      } catch (e) {
+        console.error("Post-login redirect error:", e);
+        // Safe fallback
+        router.replace(finalRole === 'admin' ? '/admin' : (finalRole === 'vendor' ? '/vendor/dashboard' : '/'));
       }
     } catch (e) {
       console.error('Login error:', e);
