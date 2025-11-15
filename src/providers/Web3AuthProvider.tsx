@@ -121,6 +121,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Init Web3Auth (MetaMask + optional WalletConnect) — gated by needsWallet
   useEffect(() => {
     if (!needsWallet) return;
+
+    // 1. Declare w3a instance here so cleanup function can access it
+    let w3a: Web3Auth | null = null;
+
     const init = async () => {
       try {
         if (!clientId) {
@@ -140,7 +144,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });
 
-        const w3a = new Web3Auth({
+        // 2. Assign to the outer variable
+        w3a = new Web3Auth({
           clientId,
           web3AuthNetwork: WEB3AUTH_NETWORK,
           privateKeyProvider,
@@ -170,6 +175,15 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
     init();
+
+    // 3. THE FIX: Return a cleanup function
+    return () => {
+      if (w3a) {
+        // This tells Web3Auth to clean up its listeners and modal
+        w3a.destroy().catch((e) => console.error("Web3Auth destroy error:", e));
+        setWeb3auth(null); // Also clear it from state
+      }
+    };
   }, [needsWallet]);
 
   // Fresh server role check (no cache)
