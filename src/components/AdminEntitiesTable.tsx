@@ -525,14 +525,15 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   }
 
   // Payload for backend (id if present, otherwise the normalized triple)
-  function toIdOrKey(r: ProposerAgg) {
-    if (r.id != null) return { id: r.id };
-    return {
-      org_name: r.entity ?? null,
-      contact: r.contactEmail ?? null, // <- backend expects `contact`
-      owner_wallet: r.wallet ?? null, // <- backend expects `owner_wallet`
-    };
-  }
+  // ✅ NEW - CORRECT KEYS
+function toIdOrKey(r: ProposerAgg) {
+  if (r.id != null) return { id: r.id };
+  return {
+    entity: r.entity ?? null,         // <— FIX: Use 'entity'
+    contactEmail: r.contactEmail ?? null, // <— FIX: Use 'contactEmail'
+    wallet: r.wallet ?? null,         // <— FIX: Use 'wallet'
+  };
+}
 
   async function onArchive(r: ProposerAgg, nextArchived: boolean) {
     const k = keyOf(r);
