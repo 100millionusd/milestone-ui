@@ -619,24 +619,30 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
  * Now role-aware: pass 'vendor' | 'proposer'. Defaults to 'vendor'.
  */
 // AFTER
+
 export async function loginWithSignature(
   address: string,
   signature: string,
-  role: 'vendor' | 'proposer' = 'vendor'
+  role?: 'vendor' | 'proposer' // 1. Make role optional (removed '= vendor')
 ): Promise<{ role: AuthInfo["role"]; token: string | null }> {
-  const res = await apiFetch(`/auth/login?role=${role}`, {
+  
+  // 2. Only add the role query param if a role was explicitly passed
+  const roleQuery = role ? `?role=${role}` : '';
+
+  const res = await apiFetch(`/auth/login${roleQuery}`, { // 3. Use the conditional query
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
 
   const token = (res && res.token) ? String(res.token) : null;
   if (token) {
-  setJwt(token); // localStorage
-  try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
-} // keep localStorage fallback in sync
+    setJwt(token); // localStorage
+    try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
+  } // keep localStorage fallback in sync
 
   return {
-    role: (res?.role as AuthInfo["role"]) || (role as AuthInfo["role"]),
+    // 4. Trust the role from the server's response
+    role: (res?.role as AuthInfo["role"]), 
     token,
   };
 }
