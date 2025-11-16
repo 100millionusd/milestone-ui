@@ -154,6 +154,8 @@ function addressToDisplay(addr: any): string | null {
   }
 }
 
+// src/components/AdminEntitiesTable.tsx
+
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
   const contactEmail = pickNonEmpty(
@@ -225,10 +227,10 @@ function normalizeRow(r: any): ProposerAgg {
 
   // Status counts
   const sc = r.statusCounts || r.status_counts || {};
-  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? 0);
-  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? 0);
-  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? 0);
+  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
+  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
+  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? r.proposals?.rejected ?? 0);
+  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? r.proposals?.archived ?? 0);
 
   const proposalsCount = Number(
     r.proposalsCount ??
@@ -237,12 +239,7 @@ function normalizeRow(r: any): ProposerAgg {
       approvedCount + pendingCount + rejectedCount + archivedCount
   );
 
-  const inferredArchived = archivedCount > 0 && (approvedCount + pendingCount + rejectedCount) === 0;
-
   // ---- Address normalization ----
-  // Try all likely locations where backend might send address
-  // ---- Address normalization ----
-  // Try all likely locations where backend might send address
   const rawAddr =
     r.addr_display ??
     r.addressText ??
@@ -308,8 +305,10 @@ function normalizeRow(r: any): ProposerAgg {
       r.createdAt ??
       r.created_at ??
       null,
-
-    archived: !!(r.archived ?? r.is_archived ?? inferredArchived),
+    
+    // ✅ THIS IS THE FIX
+    // Trust the 'archived' flag from the (fixed) api.ts function
+    archived: !!r.archived,
   };
 }
 
@@ -414,6 +413,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
 
   // src/components/AdminEntitiesTable.tsx
 
+  // src/components/AdminEntitiesTable.tsx
+
   // INITIAL LOAD: get entities from server (proposers), fallback to proposals
   useEffect(() => {
     // if server rendered with initial rows, just use them
@@ -433,7 +434,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
         const resp = await listProposers({
           includeArchived: showArchived,
         });
-
+        
         // 2. The response is already the items array from your new function
         const arr: any[] = Array.isArray(resp) ? resp : [];
 

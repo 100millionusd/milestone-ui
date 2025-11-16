@@ -1169,21 +1169,23 @@ export async function rejectVendor(walletAddress: string) {
   });
 }
 
+// src/lib/api.ts
+
 /** ✅ Admin — list all proposers/entities (handles {items:[]}) */
 export async function listProposers(params?: {
   includeArchived?: boolean;
-}): Promise<ProposerSummary[]> { // <-- 1. Add params here
+}): Promise<ProposerSummary[]> {
   try {
-    // 2. Build query string from params
+    // 1. Build query string from params
     const sp = new URLSearchParams();
     if (params?.includeArchived) {
       sp.set('includeArchived', 'true');
     }
     const queryString = sp.toString();
-    
-    // 3. Use the new query string
-    const res = await apiFetch(`/admin/entities${queryString ? `?${queryString}` : ''}`); 
-    
+
+    // 2. Use the new query string
+    const res = await apiFetch(`/admin/entities${queryString ? `?${queryString}` : ''}`);
+
     const rows: any[] = Array.isArray(res?.items)
       ? res.items
       : (Array.isArray(res) ? res : []);
@@ -1205,6 +1207,14 @@ export async function listProposers(params?: {
         r.telegramChatId ??
         r.telegram_chat_id ??
         null;
+
+      // 3. Find the status counts
+      const sc = r.statusCounts || {}; // Handle if statusCounts is missing
+      const approvedCount = Number(sc.approved ?? 0);
+      const pendingCount = Number(sc.pending ?? 0);
+      const rejectedCount = Number(sc.rejected ?? 0);
+      const archivedCount = Number(sc.archived ?? 0);
+      const proposalsCount = Number(r.proposalsCount ?? 0);
 
       return {
         orgName: r.orgName ?? r.org_name ?? r.organization ?? "",
@@ -1239,10 +1249,17 @@ export async function listProposers(params?: {
         ownerTelegramChatId: tgChat,
 
         // counts
-        proposalsCount: Number(r.proposalsCount ?? r.proposals_count ?? r.count ?? 0),
-        approvedCount:  Number(r.approvedCount  ?? r.approved_count  ?? 0),
-        pendingCount:   Number(r.pendingCount   ?? r.pending_count   ?? 0),
-        rejectedCount:  Number(r.rejectedCount  ?? r.rejected_count  ?? 0),
+        proposalsCount,
+        approvedCount,
+        pendingCount,
+        rejectedCount,
+        archivedCount, // 4. Add archivedCount
+
+        //
+        // 5. ✅ THIS IS THE CRITICAL FIX
+        // Pass the server's 'archived' flag directly
+        //
+        archived: !!r.archived, 
 
         totalBudgetUSD: Number(
           r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
