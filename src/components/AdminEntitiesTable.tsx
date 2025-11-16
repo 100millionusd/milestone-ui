@@ -526,12 +526,14 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
 
   // Payload for backend (id if present, otherwise the normalized triple)
 // ✅ THE FIX
-function toIdOrKey(r: ProposerAgg) {
+function toIdOrKey(r: ProposerAgg): EntitySelector {
   if (r.id != null) return { id: r.id };
+  
+  // Send the keys that api.ts normalizeSelector() expects
   return {
     entity: r.entity ?? null,
-    contact: r.contactEmail ?? null,
-    wallet: r.wallet ?? null, // <--- THIS IS THE FIX
+    contactEmail: r.contactEmail ?? null,
+    wallet: r.wallet ?? null,
   };
 }
 
