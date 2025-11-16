@@ -1170,9 +1170,20 @@ export async function rejectVendor(walletAddress: string) {
 }
 
 /** ✅ Admin — list all proposers/entities (handles {items:[]}) */
-export async function listProposers(): Promise<ProposerSummary[]> {
+export async function listProposers(params?: {
+  includeArchived?: boolean;
+}): Promise<ProposerSummary[]> { // <-- 1. Add params here
   try {
-    const res = await apiFetch("/admin/entities?includeArchived=true");
+    // 2. Build query string from params
+    const sp = new URLSearchParams();
+    if (params?.includeArchived) {
+      sp.set('includeArchived', 'true');
+    }
+    const queryString = sp.toString();
+    
+    // 3. Use the new query string
+    const res = await apiFetch(`/admin/entities${queryString ? `?${queryString}` : ''}`); 
+    
     const rows: any[] = Array.isArray(res?.items)
       ? res.items
       : (Array.isArray(res) ? res : []);

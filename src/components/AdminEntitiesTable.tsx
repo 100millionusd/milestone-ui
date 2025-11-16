@@ -412,6 +412,8 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
+  // src/components/AdminEntitiesTable.tsx
+
   // INITIAL LOAD: get entities from server (proposers), fallback to proposals
   useEffect(() => {
     // if server rendered with initial rows, just use them
@@ -425,24 +427,21 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     (async () => {
       try {
         setLoading(true);
+        setError(null); // Clear previous errors
 
-        // Try listProposers (accepts array or {items:[]})
-        let resp: any;
-        try {
-          resp = await (listProposers as unknown as (p?: any) => Promise<any>)({
-            includeArchived: true,
-          });
-        } catch {
-          resp = await listProposers();
-        }
+        // 1. Call listProposers with the *current* state of the checkbox
+        const resp = await listProposers({
+          includeArchived: showArchived,
+        });
 
-        const arr: any[] = Array.isArray(resp) ? resp : Array.isArray(resp?.items) ? resp.items : [];
+        // 2. The response is already the items array from your new function
+        const arr: any[] = Array.isArray(resp) ? resp : [];
 
         let data = arr.map(normalizeRow);
 
         // Fallback: aggregate from proposals if empty
         if (!data.length) {
-          const proposals = await listProposals({ includeArchived: true });
+          const proposals = await listProposals({ includeArchived: showArchived }); // Also respect checkbox here
           data = aggregateFromProposals(proposals);
         }
 
@@ -457,8 +456,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial.length]);
+    // 3. Add showArchived as a dependency
+    // This makes the component re-fetch data whenever the checkbox is clicked
+  }, [initial.length, showArchived]);
 
   // Search + archived filter
   const filtered = useMemo(() => {
