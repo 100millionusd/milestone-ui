@@ -623,13 +623,9 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
 export async function loginWithSignature(
   address: string,
   signature: string,
-  role?: 'vendor' | 'proposer' // 1. Make role optional (removed '= vendor')
+  role: 'vendor' | 'proposer' = 'proposer' // <-- 1. Set default back to 'proposer'
 ): Promise<{ role: AuthInfo["role"]; token: string | null }> {
-  
-  // 2. Only add the role query param if a role was explicitly passed
-  const roleQuery = role ? `?role=${role}` : '';
-
-  const res = await apiFetch(`/auth/login${roleQuery}`, { // 3. Use the conditional query
+  const res = await apiFetch(`/auth/login?role=${role}`, {
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
@@ -641,15 +637,14 @@ export async function loginWithSignature(
   } // keep localStorage fallback in sync
 
   return {
-    // 4. Trust the role from the server's response
-    role: (res?.role as AuthInfo["role"]), 
+    // 2. Use the original return logic
+    role: (res?.role as AuthInfo["role"]) || (role as AuthInfo["role"]),
     token,
   };
 }
 
 export const loginVendor   = (addr: string, sig: string) => loginWithSignature(addr, sig, 'vendor');
 export const loginProposer = (addr: string, sig: string) => loginWithSignature(addr, sig, 'proposer');
-
 /* ==========================
    🆕 Agent Digest (dashboard)
    - GET /agent/digest
