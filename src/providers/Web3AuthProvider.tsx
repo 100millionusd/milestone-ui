@@ -26,7 +26,7 @@ interface Web3AuthContextType {
   role: Role;
   session: Session;
   token: string | null;
-  login: () => Promise<void>;
+  login: (role: 'vendor' | 'proposer') => Promise<void>; // 💡 CHANGED
   logout: () => Promise<void>;
   refreshRole: () => Promise<{ role: Role; address: string | null }>;
 }
@@ -38,7 +38,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   role: 'guest',
   session: 'unauthenticated',
   token: null,
-  login: async () => {},
+  login: async (role: 'vendor' | 'proposer') => {}, // 💡 CHANGED
   logout: async () => {},
   refreshRole: async () => ({ role: 'guest', address: null }),
 });
@@ -254,7 +254,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Removed the useEffect[pathname] hook that was causing the redirect loop
 
-  const login = async () => {
+  // 💡 CHANGED: login now accepts the user's role intent
+  const login = async (role: 'vendor' | 'proposer') => {
     if (!web3auth || loggingIn) return;
     setLoggingIn(true);
     try {
@@ -287,8 +288,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const { nonce } = await postJSON('/auth/nonce', { address: addr });
       const signature = await signer.signMessage(nonce);
 
-      // Exchange for JWT (server sets cookie; mirror to localStorage + site cookie)
-      const { token: jwt } = await loginWithSignature(addr, signature, 'proposer');
+      // 💡 CHANGED: Pass the chosen role to the server
+      const { token: jwt } = await loginWithSignature(addr, signature, role);
       
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch {}
