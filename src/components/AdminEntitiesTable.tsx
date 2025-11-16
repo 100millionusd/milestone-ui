@@ -525,13 +525,13 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   }
 
   // Payload for backend (id if present, otherwise the normalized triple)
-  // ✅ NEW - CORRECT KEYS
+// ✅ NEW - CORRECT KEY
 function toIdOrKey(r: ProposerAgg) {
   if (r.id != null) return { id: r.id };
   return {
-    entity: r.entity ?? null,         // <— FIX: Use 'entity'
-    contactEmail: r.contactEmail ?? null, // <— FIX: Use 'contactEmail'
-    wallet: r.wallet ?? null,         // <— FIX: Use 'wallet'
+    entity: r.entity ?? null,         // <--- FIX
+    contact: r.contactEmail ?? null,
+    owner_wallet: r.wallet ?? null,
   };
 }
 
