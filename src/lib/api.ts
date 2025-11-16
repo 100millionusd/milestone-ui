@@ -1267,11 +1267,13 @@ export type EntitySelector = {
 };
 
 /** Normalize to { entity, contactEmail, wallet } that the server expects */
+// ✅ NEW - api.ts L1035
 function normalizeSelector(sel: EntitySelector) {
+  // This version matches the robust logic in your server.js file
   return {
-    entity: sel.entity ?? sel.orgName ?? null,
-    contactEmail: sel.contactEmail ?? sel.ownerEmail ?? sel.contact ?? null,
-    wallet: sel.wallet ?? sel.ownerWallet ?? null,
+    entity: sel.entity ?? sel.orgName ?? (sel as any).org_name ?? null,
+    contactEmail: sel.contactEmail ?? sel.ownerEmail ?? sel.contact ?? (sel as any).contact_email ?? null,
+    wallet: sel.wallet ?? sel.ownerWallet ?? (sel as any).owner_wallet ?? (sel as any).wallet_address ?? null,
   };
 }
 
