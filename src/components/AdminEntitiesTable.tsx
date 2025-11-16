@@ -525,12 +525,13 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   }
 
   // Payload for backend (id if present, otherwise the normalized triple)
+// ✅ THE FIX
 function toIdOrKey(r: ProposerAgg) {
   if (r.id != null) return { id: r.id };
   return {
     entity: r.entity ?? null,
     contact: r.contactEmail ?? null,
-    wallet: r.wallet ?? null, // <--- THIS WAS THE LAST BUG
+    wallet: r.wallet ?? null, // <--- THIS IS THE FIX
   };
 }
 
