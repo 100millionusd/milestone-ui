@@ -24,7 +24,6 @@ type ProfileForm = {
 };
 
 function ConnectTelegramButton({ wallet }: { wallet: string }) {
-  // If we somehow still don't have a wallet, show a disabled hint (don't hide the control entirely)
   if (!wallet) {
     return (
       <span className="inline-flex items-center px-3 py-2 rounded-xl border text-slate-400">
@@ -66,12 +65,17 @@ export default function VendorProfilePage() {
     let alive = true;
     (async () => {
       try {
-        // Load both the profile and the authenticated address (for Telegram link + fallback wallet)
-        // This is the original, correct logic. It does not check role.
-        const [j, auth] = await Promise.all([
-          getVendorProfile(),
-          apiFetch('/auth/role').catch(() => ({} as any)),
-        ]);
+        // 1. Check the user's role FIRST
+        const auth = await apiFetch('/auth/role').catch(() => ({} as any));
+
+        // 2. THIS IS THE FIX: If the active role is 'proposer', redirect them
+        if (auth?.role === 'proposer') {
+          router.push('/proposer/profile'); // Send to the correct page
+          return; // Stop execution
+        }
+
+        // 3. If role is 'vendor' or 'admin', load vendor data
+        const j = await getVendorProfile();
 
         // Normalize address (server can return string or object)
         const a = j?.address ?? {};
@@ -108,7 +112,7 @@ export default function VendorProfilePage() {
     return () => {
       alive = false;
     };
-  }, []); // <— No [router] dependency. This is correct.
+  }, [router]); // <— Add router to the dependency array
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
@@ -142,7 +146,6 @@ export default function VendorProfilePage() {
         return;
       }
 
-      // Safari-safe save (Bearer added by api.ts if cookies are blocked)
       await postJSON('/vendor/profile', payload);
 
       try {
@@ -159,9 +162,6 @@ export default function VendorProfilePage() {
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
         }));
       } catch {}
-
-      // Optional: stay on page and just show success via role buttons section
-      // router.push('/vendor/dashboard?flash=vendor-profile-saved');
     } catch (e: any) {
       setErr(e?.message || 'Failed to save');
     } finally {
