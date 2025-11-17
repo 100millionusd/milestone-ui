@@ -1248,6 +1248,7 @@ export async function listProposers(params?: {
         telegramChatId: tgChat,
         ownerTelegramUsername: tgUser,
         ownerTelegramChatId: tgChat,
+        telegramConnected: tgConnected,
 
         // counts
         proposalsCount,
