@@ -96,25 +96,41 @@ export default function ProposerProfilePage() {
         const wallet = j?.walletAddress || auth?.address || '';
 
         if (!alive) return;
-        setP({
+setP((prev) => ({ // Use functional update
+          ...prev,
           walletAddress: wallet,
-          vendorName: j?.vendorName || '', // Server returns 'vendorName' alias for orgName
-          email: j?.email || '',          // Server returns 'email' alias for contactEmail
+          vendorName: j?.vendorName || '',
+          email: j?.email || '',
           phone: j?.phone || '',
           website: j?.website || '',
           address,
-          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
-        });
+          // 2. [FIX] Check for username OR chat id to turn button green
+          telegramConnected: !!(
+            j?.telegram_chat_id || 
+            j?.telegramChatId || 
+            j?.telegramUsername || 
+            j?.telegram_username
+          ),
+        }));
       } catch (e: any) {
-        setErr(e?.message || 'Failed to load profile');
+        if (alive) setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
-    })();
+    }
+
+    // 3. Load data immediately on mount
+    loadProfile();
+
+    // 4. [FIX] AND load data again every time the user clicks back to this tab
+    window.addEventListener('focus', loadProfile);
+
     return () => {
       alive = false;
+      // 5. [FIX] Clean up the listener
+      window.removeListener('focus', loadProfile);
     };
-  }, [router]); // <— Add router to the dependency array
+  }, [router]);
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
