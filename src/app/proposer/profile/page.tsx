@@ -128,7 +128,7 @@ export default function ProposerProfilePage() {
     return () => {
       alive = false;
       // 5. [FIX] Clean up the listener
-      window.removeListener('focus', loadProfile);
+      window.removeEventListener('focus', loadProfile);
     };
   }, [router]);
 
