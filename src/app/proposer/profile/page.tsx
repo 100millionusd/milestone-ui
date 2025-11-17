@@ -163,6 +163,12 @@ export default function ProposerProfilePage() {
             typeof fresh.address === 'object'
               ? fresh.address
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
+            telegramConnected: !!(
+            fresh?.telegram_chat_id || 
+            fresh?.telegramChatId || 
+            fresh?.telegramUsername ||
+            fresh?.telegram_username
+            ),
         }));
       } catch {}
 
