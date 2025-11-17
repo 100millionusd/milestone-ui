@@ -1,4 +1,4 @@
-use client';
+'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -27,7 +27,7 @@ async function getNonce(address: string): Promise<string> {
 
 export default function HeroCtas({ className = '' }: { className?: string }) {
   const router = useRouter();
-  const [busy, setBusy] = new useState<null | 'vendor' | 'proposer'>(null);
+  const [busy, setBusy] = useState<null | 'vendor' | 'proposer'>(null);
 
   async function connectAndLogin(role: 'vendor' | 'proposer') {
     setBusy(role);
@@ -75,22 +75,20 @@ export default function HeroCtas({ className = '' }: { className?: string }) {
   return (
     <div className={`flex flex-wrap items-center justify-center gap-4 ${className}`}>
       <button
-        // [FIX] Changed this onClick handler
+        // [FIX] ONLY this line is changed
         onClick={() => router.push('/vendor/login?next=/vendor/dashboard')}
         disabled={!!busy}
         className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-white hover:bg-cyan-600 disabled:opacity-60"
       >
-        {/* [ORIGINAL] Kept your original text logic */}
         {busy === 'vendor' ? 'Connecting…' : 'Submit a Bid'}
       </button>
 
       <button
-        // [FIX] Changed this onClick handler
+        // [FIX] ONLY this line is changed
         onClick={() => router.push('/vendor/login?next=/new')}
         disabled={!!busy}
         className="inline-flex items-center justify-center rounded-xl border border-white/40 px-6 py-3 font-semibold text-white hover:bg-white/10 disabled:opacity-60"
       >
-        {/* [ORIGINAL] Kept your original text logic */}
         {busy === 'proposer' ? 'Connecting…' : 'Submit Proposal'}
       </button>
     </div>
