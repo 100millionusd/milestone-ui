@@ -1209,6 +1209,13 @@ export async function listProposers(params?: {
         r.telegram_chat_id ??
         null;
 
+        const tgConnected = !!(
+        r.telegramConnected ?? 
+        r.telegram_connected ??
+        r.profile?.telegramConnected ?? 
+        r.profile?.telegram_connected
+      );
+
       // 3. Find the status counts
       const sc = r.statusCounts || {}; // Handle if statusCounts is missing
       const approvedCount = Number(sc.approved ?? 0);
