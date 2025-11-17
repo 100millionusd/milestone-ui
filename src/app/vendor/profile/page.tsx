@@ -1,4 +1,3 @@
-// src/app/vendor/profile/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -61,23 +60,25 @@ export default function VendorProfilePage() {
     telegramConnected: false,
   });
 
+  // [FIX] This useEffect hook is updated with the onfocus listener
   useEffect(() => {
     let alive = true;
-    (async () => {
+
+    // 1. Moved load logic into a reusable function
+    async function loadProfile() {
       try {
-        // 1. Check the user's role FIRST
         const auth = await apiFetch('/auth/role').catch(() => ({} as any));
 
-        // 2. THIS IS THE FIX: If the active role is 'proposer', redirect them
+        if (!alive) return;
         if (auth?.role === 'proposer') {
-          router.push('/proposer/profile'); // Send to the correct page
-          return; // Stop execution
+          router.push('/proposer/profile');
+          return;
         }
 
-        // 3. If role is 'vendor' or 'admin', load vendor data
+        // Get fresh data
         const j = await getVendorProfile();
+        if (!alive) return;
 
-        // Normalize address (server can return string or object)
         const a = j?.address ?? {};
         const address: Address =
           typeof a === 'string'
@@ -91,28 +92,41 @@ export default function VendorProfilePage() {
 
         const wallet = j?.walletAddress || auth?.address || '';
 
-        if (!alive) return;
-        setP({
+        setP((prev) => ({ // Use functional update
+          ...prev,
           walletAddress: wallet,
           vendorName: j?.vendorName || '',
           email: j?.email || '',
           phone: j?.phone || '',
           website: j?.website || '',
           address,
-          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
-        });
-
-        console.log('[vendor/profile] wallet used for Telegram:', wallet);
+          // 2. [FIX] Check for username OR chat id to turn button green
+          telegramConnected: !!(
+            j?.telegram_chat_id || 
+            j?.telegramChatId || 
+            j?.telegramUsername || 
+            j?.telegram_username
+          ),
+        }));
       } catch (e: any) {
-        setErr(e?.message || 'Failed to load profile');
+        if (alive) setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
-    })();
+    }
+
+    // 3. Load data immediately on mount
+    loadProfile();
+
+    // 4. [FIX] AND load data again every time the user clicks back to this tab
+    window.addEventListener('focus', loadProfile);
+
     return () => {
       alive = false;
+      // 5. [FIX] Clean up the listener
+      window.removeEventListener('focus', loadProfile);
     };
-  }, [router]); // <— Add router to the dependency array
+  }, [router]);
 
   function normalizeWebsite(v: string) {
     const s = (v || '').trim();
@@ -120,6 +134,7 @@ export default function VendorProfilePage() {
     return /^https?:\/\//i.test(s) ? s : `https://${s}`;
   }
 
+  // [FIX] This onSave function is updated to also refresh Telegram status
   async function onSave(e?: React.FormEvent) {
     if (e) e.preventDefault();
     if (saving) return;
@@ -160,6 +175,13 @@ export default function VendorProfilePage() {
             typeof fresh.address === 'object'
               ? fresh.address
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
+          // [FIX] Also update telegram status on save
+          telegramConnected: !!(
+            fresh?.telegram_chat_id || 
+            fresh?.telegramChatId || 
+            fresh?.telegramUsername ||
+            fresh?.telegram_username
+          ),
         }));
       } catch {}
     } catch (e: any) {
