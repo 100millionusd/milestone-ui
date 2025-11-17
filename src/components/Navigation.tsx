@@ -115,7 +115,7 @@ if (backendRole === 'admin') {
     () => [
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-      { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
+      { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor', 'proposer'], requiresApproval: true },
       { href: '/new', label: 'Submit Proposal', roles: ['guest', 'proposer'] },
       {
         label: 'Admin',
@@ -130,7 +130,7 @@ if (backendRole === 'admin') {
         ],
       },
       { href: '/vendor/dashboard', label: 'MyDesk' },
-      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor', 'admin'] },
+      { href: '/vendor/oversight', label: 'My Activity', roles: ['vendor', 'admin', 'proposer'] },
     ],
     []
   );
