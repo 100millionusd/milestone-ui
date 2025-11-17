@@ -67,21 +67,22 @@ export default function ProposerProfilePage() {
 
   useEffect(() => {
     let alive = true;
-    (async () => {
+
+    // 1. Moved load logic into a reusable function
+    async function loadProfile() {
       try {
-        // 1. Check the user's role FIRST
         const auth = await apiFetch('/auth/role').catch(() => ({} as any));
 
-        // 2. THIS IS THE FIX: If the active role is 'vendor', redirect them
+        if (!alive) return;
         if (auth?.role === 'vendor') {
           router.push('/vendor/profile'); 
-          return; // Stop execution
+          return;
         }
 
-        // 3. If role is 'proposer' or 'admin', load proposer data
-        const j = await getProposerProfile();
+        // Get fresh data
+        const j = await getProposerProfile(); 
+        if (!alive) return;
 
-        // Normalize address (server can return string or object)
         const a = j?.address ?? {};
         const address: Address =
           typeof a === 'string'
@@ -95,8 +96,7 @@ export default function ProposerProfilePage() {
 
         const wallet = j?.walletAddress || auth?.address || '';
 
-        if (!alive) return;
-setP((prev) => ({ // Use functional update
+        setP((prev) => ({ // Use functional update
           ...prev,
           walletAddress: wallet,
           vendorName: j?.vendorName || '',
@@ -179,12 +179,13 @@ setP((prev) => ({ // Use functional update
             typeof fresh.address === 'object'
               ? fresh.address
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
-            telegramConnected: !!(
+          // [FIX] Also update telegram status on save
+          telegramConnected: !!(
             fresh?.telegram_chat_id || 
             fresh?.telegramChatId || 
             fresh?.telegramUsername ||
             fresh?.telegram_username
-            ),
+          ),
         }));
       } catch {}
 
