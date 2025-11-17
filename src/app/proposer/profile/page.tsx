@@ -1,3 +1,4 @@
+// src/app/proposer/profile/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -12,6 +13,8 @@ type Address = {
   country: string;
 };
 
+// This form uses "vendorName" as the field name for "Organization Name"
+// to make it compatible with ProfileRoleButtons.
 type ProfileForm = {
   walletAddress: string;
   vendorName: string; // This will hold the Proposer's 'orgName'
@@ -62,23 +65,23 @@ export default function ProposerProfilePage() {
     telegramConnected: false,
   });
 
-  // 1. THIS IS THE NEW useEffect THAT REFRESHES ON FOCUS
   useEffect(() => {
     let alive = true;
-
-    // 2. Put the data-loading logic into its own function
-    async function loadProfile() {
+    (async () => {
       try {
-        setLoading(true); // Show loading on re-fetch
+        // 1. Check the user's role FIRST
         const auth = await apiFetch('/auth/role').catch(() => ({} as any));
 
+        // 2. THIS IS THE FIX: If the active role is 'vendor', redirect them
         if (auth?.role === 'vendor') {
-          if (alive) router.push('/vendor/profile'); 
-          return;
+          router.push('/vendor/profile'); 
+          return; // Stop execution
         }
 
+        // 3. If role is 'proposer' or 'admin', load proposer data
         const j = await getProposerProfile();
 
+        // Normalize address (server can return string or object)
         const a = j?.address ?? {};
         const address: Address =
           typeof a === 'string'
@@ -95,32 +98,21 @@ export default function ProposerProfilePage() {
         if (!alive) return;
         setP({
           walletAddress: wallet,
-          vendorName: j?.vendorName || '',
-          email: j?.email || '',
+          vendorName: j?.vendorName || '', // Server returns 'vendorName' alias for orgName
+          email: j?.email || '',          // Server returns 'email' alias for contactEmail
           phone: j?.phone || '',
           website: j?.website || '',
           address,
-          // 3. THIS IS THE FIX FOR THE GREEN BUTTON
-          // Check for username OR chat ID
-          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId || j?.telegramUsername),
+          telegramConnected: !!(j?.telegram_chat_id || j?.telegramChatId),
         });
       } catch (e: any) {
-        if (alive) setErr(e?.message || 'Failed to load profile');
+        setErr(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
-    }
-
-    // 4. Load data immediately on mount
-    loadProfile();
-
-    // 5. AND load data again every time the user clicks back to this tab
-    window.addEventListener('focus', loadProfile);
-
+    })();
     return () => {
       alive = false;
-      // 6. Clean up the listener
-      window.removeListener('focus', loadProfile);
     };
   }, [router]); // <— Add router to the dependency array
 
@@ -156,6 +148,7 @@ export default function ProposerProfilePage() {
         return;
       }
       
+      // Use the correct save function
       await saveProposerProfile(payload);
 
       try {
@@ -170,8 +163,6 @@ export default function ProposerProfilePage() {
             typeof fresh.address === 'object'
               ? fresh.address
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
-          // 7. Also update telegram status on save
-          telegramConnected: !!(fresh?.telegram_chat_id || fresh?.telegramChatId || fresh?.telegramUsername),
         }));
       } catch {}
 
@@ -182,7 +173,7 @@ export default function ProposerProfilePage() {
     }
   }
 
-  if (loading && !p.walletAddress) return <main className="max-w-3xl mx-auto p-6">Loading…</main>;
+  if (loading) return <main className="max-w-3xl mx-auto p-6">Loading…</main>;
 
   const profileForRole = {
     vendorName: p.vendorName,
@@ -202,8 +193,6 @@ export default function ProposerProfilePage() {
       )}
 
       <form onSubmit={onSave} className="space-y-4" data-proposer-profile-form>
-        {/* ... (rest of the form fields: org name, wallet, email, phone, website) ... */}
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Organization Name</div>
@@ -254,7 +243,6 @@ export default function ProposerProfilePage() {
           </label>
         </div>
 
-
         {/* Telegram connect row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="block">
@@ -262,6 +250,7 @@ export default function ProposerProfilePage() {
             {p.telegramConnected ? (
               <div className="inline-flex items-center gap-2">
                 <span className="text-green-600">Connected</span>
+                {/* Allow re-link just in case */}
                 <ConnectTelegramButton wallet={p.walletAddress} />
               </div>
             ) : (
@@ -272,8 +261,6 @@ export default function ProposerProfilePage() {
             </p>
           </div>
         </div>
-
-        {/* ... (rest of the form fields: address, city, postal, country) ... */}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <label className="block md:col-span-2">
