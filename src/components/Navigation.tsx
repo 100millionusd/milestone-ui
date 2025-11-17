@@ -6,7 +6,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { getAuthRoleOnce } from '@/lib/api';
 
-// 1. [FIX] Add 'proposer' to the list of possible roles
 type Role = 'admin' | 'vendor' | 'proposer' | 'guest';
 
 type NavItem =
@@ -71,21 +70,16 @@ export default function Navigation() {
         if (!alive) return;
 
         const backendRole = String(info?.role || '').toLowerCase();
-
-        // 2. [FIX] Correctly map the backend role, including 'proposer'
-        let mappedRole: Role;
-        if (backendRole === 'admin') {
-          mappedRole = 'admin';
-        } else if (backendRole === 'vendor') {
-          mappedRole = 'vendor';
-        } else if (backendRole === 'proposer') {
-          mappedRole = 'proposer';
-        } else if (info?.address) {
-          // Fallback for users with address but no specific role
-          mappedRole = 'guest'; 
-        } else {
-          mappedRole = 'guest';
-        }
+ let mappedRole: Role;
+if (backendRole === 'admin') {
+  mappedRole = 'admin';
+} else if (backendRole === 'vendor') {
+  mappedRole = 'vendor';
+} else if (backendRole === 'proposer') {
+  mappedRole = 'proposer';
+} else {
+  mappedRole = 'guest';
+}
 
         const vs = String(info?.vendorStatus ?? 'pending').toLowerCase() as
           | 'approved'
@@ -122,7 +116,6 @@ export default function Navigation() {
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor'], requiresApproval: true },
-      // 3. [FIX] Show "Submit Proposal" for guests (to log in) AND proposers (to submit)
       { href: '/new', label: 'Submit Proposal', roles: ['guest', 'proposer'] },
       {
         label: 'Admin',
@@ -132,7 +125,6 @@ export default function Navigation() {
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
           { href: '/admin/proofs', label: 'Proofs' },
-          // 4. [FIX] Completed the truncated list
           { href: '/admin/entities', label: 'Entities' },
           { href: '/admin/vendors', label: 'Vendors' },
         ],
@@ -146,7 +138,6 @@ export default function Navigation() {
   const showItem = (item: NavItem) => {
     if (!('children' in item) && (item as any).requiresApproval && !canSeeProjects) return false;
     if (!('children' in item) && item.href === '/vendor/oversight' && role === 'admin') return false;
-    // This correctly hides /new from admin, but our role check will show it for proposers
     if (!('children' in item) && item.href === '/new' && role === 'admin') return false;
     if (!('children' in item) && item.href === '/vendor/dashboard' && role === 'admin') return false;
 
@@ -185,12 +176,6 @@ export default function Navigation() {
     if (e) e.preventDefault();
     router.push(href);
   };
-
-  // 5. [FIX] Create dynamic profile link variable
-  const profileHref = useMemo(() => {
-    if (role === 'proposer') return '/proposer/profile';
-    return '/vendor/profile'; // Default for vendor, admin
-  }, [role]);
 
   return (
     <header className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg sticky top-0 z-[1000]">
@@ -283,15 +268,14 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                   {address ? (
                     <>
-                      {/* 6. [FIX] Use the dynamic profileHref variable */}
-                      <div
-                        onClick={() => handleNavigation(profileHref)}
-                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
-                        title="Profile"
-                        aria-label="Profile"
-                      >
-                        Profile
-                      </div>
+ <div
+  onClick={() => handleNavigation('/vendor/profile')}
+  className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
+  title="Profile"
+  aria-label="Profile"
+>
+  Profile
+</div>
 
                       <button
                         onClick={handleLogout}
@@ -364,15 +348,14 @@ export default function Navigation() {
 
               {address ? (
                 <>
-                  {/* 7. [FIX] Use the dynamic profileHref variable */}
-                  <div
-                    onClick={() => handleNavigation(profileHref)}
-                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
-                    title="Profile"
-                    aria-label="Profile"
-                  >
-                    Profile
-                  </div>
+ <div
+  onClick={() => handleNavigation('/vendor/profile')}
+  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
+  title="Profile"
+  aria-label="Profile"
+>
+  Profile
+</div>
                   <button
                     onClick={() => {
                       setIsMobileMenuOpen(false);
@@ -381,7 +364,7 @@ export default function Navigation() {
                     className="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700"
                   >
                     Logout
-                  </button>_
+                  </button>
                 </>
               ) : (
                 <div
