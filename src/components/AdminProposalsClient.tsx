@@ -4,8 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Proposal } from '@/lib/api';
 import {
-  listProposals,           // fetch with includeArchived so "Archived" tab works
-  getProposals,            // (kept to not break other imports/usages)
+  listProposals,
   approveProposal,
   rejectProposal,
   archiveProposal,
@@ -46,13 +45,15 @@ function AttachmentGrid({
   items: any[];
   onOpenLightbox: (src: string) => void;
 }) {
-  const list = (Array.isArray(items) ? items : []).map((d) => {
-    const url = resolveUrl(d);
-    const name =
-      String(d?.name || d?.filename || d?.title || '').trim() ||
-      (url ? url.split('/').pop() || 'file' : 'file');
-    return { url, name };
-  }).filter(x => !!x.url) as { url: string; name: string }[];
+  const list = (Array.isArray(items) ? items : [])
+    .map((d) => {
+      const url = resolveUrl(d);
+      const name =
+        String(d?.name || d?.filename || d?.title || '').trim() ||
+        (url ? url.split('/').pop() || 'file' : 'file');
+      return { url, name };
+    })
+    .filter((x) => !!x.url) as { url: string; name: string }[];
 
   if (list.length === 0) return null;
 
@@ -73,11 +74,7 @@ function AttachmentGrid({
                 title={f.name}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={f.url}
-                  alt={f.name}
-                  className="w-full h-full object-cover"
-                />
+                <img src={f.url} alt={f.name} className="w-full h-full object-cover" />
                 <span className="absolute inset-x-0 bottom-0 bg-black/50 text-[10px] text-white px-1 py-0.5 truncate">
                   {f.name}
                 </span>
@@ -111,7 +108,7 @@ function AttachmentGrid({
  * Entities (proposers) types
  * ======================= */
 type ProposerRow = {
-  id: string;                    // entity_key (wallet/email/org)
+  id: string; // entity_key
   orgName: string;
   address: string | null;
   walletAddress: string | null;
@@ -120,19 +117,28 @@ type ProposerRow = {
   proposalsCount: number;
   totalBudgetUSD: number;
   lastProposalAt: string | null;
-  // Made statusCounts optional in type definition to reflect reality of potential missing data
   statusCounts?: { approved: number; pending: number; rejected: number; archived: number };
 };
+
 type ProposersResponse = {
   items: ProposerRow[];
   total: number;
   page: number;
   pageSize: number;
 };
+
 const fmtUSD = (n: number) =>
-  Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+  Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(n || 0);
+
 const fmtDateTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
-async function loadProposers(params: { q?: string; includeArchived?: boolean; page?: number; limit?: number } = {}) {
+
+async function loadProposers(
+  params: { q?: string; includeArchived?: boolean; page?: number; limit?: number } = {}
+) {
   const { q = '', includeArchived = false, page = 1, limit = 50 } = params;
   const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (q) qs.set('q', q);
@@ -143,7 +149,6 @@ async function loadProposers(params: { q?: string; includeArchived?: boolean; pa
 }
 
 type TabKey = 'all' | 'pending' | 'approved' | 'rejected' | 'completed' | 'archived';
-
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
@@ -177,15 +182,14 @@ export default function AdminProposalsClient({
   // Entities filters
   const [includeArchived, setIncludeArchived] = useState(false);
 
-useEffect(() => {
-  if (mode !== 'proposals') {
-    // if we land on Entities, don’t show a proposals loading state
-    setLoading(false);
-    return;
-  }
-  if (initialProposals.length === 0) fetchProposals();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [initialProposals.length, mode]);
+  useEffect(() => {
+    if (mode !== 'proposals') {
+      setLoading(false);
+      return;
+    }
+    if (initialProposals.length === 0) fetchProposals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProposals.length, mode]);
 
   const fetchProposals = async () => {
     try {
@@ -204,7 +208,9 @@ useEffect(() => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
       const updated = await approveProposal(proposalId);
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
+      setProposals((prev) =>
+        prev.map((p) => (p.proposalId === proposalId ? { ...p, ...updated } : p))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve proposal');
     }
@@ -214,7 +220,9 @@ useEffect(() => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
     try {
       const updated = await rejectProposal(proposalId);
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
+      setProposals((prev) =>
+        prev.map((p) => (p.proposalId === proposalId ? { ...p, ...updated } : p))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject proposal');
     }
@@ -225,7 +233,9 @@ useEffect(() => {
     if (!confirm('Archive this proposal?')) return;
     try {
       const updated = await archiveProposal(proposalId);
-      setProposals(prev => prev.map(p => (p.proposalId === proposalId ? { ...p, ...updated } : p)));
+      setProposals((prev) =>
+        prev.map((p) => (p.proposalId === proposalId ? { ...p, ...updated } : p))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to archive proposal');
     }
@@ -233,10 +243,11 @@ useEffect(() => {
 
   const handleDelete = async (proposalId: number) => {
     if (!Number.isFinite(proposalId)) return setError('Invalid proposal ID');
-    if (!confirm('Permanently DELETE this proposal (and its bids/proofs)? This cannot be undone.')) return;
+    if (!confirm('Permanently DELETE this proposal (and its bids/proofs)? This cannot be undone.'))
+      return;
     try {
       await deleteProposal(proposalId);
-      setProposals(prev => prev.filter(p => p.proposalId !== proposalId));
+      setProposals((prev) => prev.filter((p) => p.proposalId !== proposalId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete proposal');
     }
@@ -260,7 +271,12 @@ useEffect(() => {
       try {
         setEntitiesLoading(true);
         setEntitiesError(null);
-        const data = await loadProposers({ q: query, includeArchived, page: entitiesPage, limit: 50 });
+        const data = await loadProposers({
+          q: query,
+          includeArchived,
+          page: entitiesPage,
+          limit: 50,
+        });
         if (alive) setEntities(data);
       } catch (e: any) {
         if (alive) setEntitiesError(e?.message || 'Failed to load');
@@ -268,7 +284,9 @@ useEffect(() => {
         if (alive) setEntitiesLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [mode, query, includeArchived, entitiesPage]);
 
   const counts = useMemo(() => {
@@ -289,18 +307,24 @@ useEffect(() => {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = proposals.filter(p => {
+    const base = proposals.filter((p) => {
       if (!q) return true;
       const hay = `${p.title || ''} ${p.orgName || ''} ${p.summary || ''}`.toLowerCase();
       return hay.includes(q);
     });
     switch (tab) {
-      case 'pending': return base.filter(p => p.status === 'pending');
-      case 'approved': return base.filter(p => p.status === 'approved');
-      case 'rejected': return base.filter(p => p.status === 'rejected');
-      case 'completed': return base.filter(p => p.status === 'completed');
-      case 'archived': return base.filter(p => p.status === 'archived');
-      default: return base;
+      case 'pending':
+        return base.filter((p) => p.status === 'pending');
+      case 'approved':
+        return base.filter((p) => p.status === 'approved');
+      case 'rejected':
+        return base.filter((p) => p.status === 'rejected');
+      case 'completed':
+        return base.filter((p) => p.status === 'completed');
+      case 'archived':
+        return base.filter((p) => p.status === 'archived');
+      default:
+        return base;
     }
   }, [proposals, tab, query]);
 
@@ -312,16 +336,24 @@ useEffect(() => {
       <div className="max-w-5xl mx-auto px-4 py-10">
         <h1 className="text-2xl font-bold mb-6">Admin — Proposals & Entities</h1>
 
-        {/* Top-level tabs: Proposals | Entities */}
+        {/* Top-level tabs */}
         <div className="mb-4 flex gap-2">
           <button
-            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${mode === 'proposals' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
+              mode === 'proposals'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
             onClick={() => setMode('proposals')}
           >
             Proposals
           </button>
           <button
-            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${mode === 'entities' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+            className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
+              mode === 'entities'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
             onClick={() => setMode('entities')}
           >
             Entities
@@ -329,14 +361,13 @@ useEffect(() => {
         </div>
 
         {/* ===========================
-            PROPOSALS MODE (existing UI)
+            PROPOSALS MODE
            =========================== */}
         {mode === 'proposals' && (
           <>
-            {/* Tabs + search (status filter for proposals) */}
             <div className="mb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex flex-wrap gap-2">
-                {TABS.map(t => (
+                {TABS.map((t) => (
                   <button
                     key={t.key}
                     onClick={() => setTab(t.key)}
@@ -357,7 +388,7 @@ useEffect(() => {
               <div className="w-full md:w-80">
                 <input
                   value={query}
-                  onChange={e => setQuery(e.target.value)}
+                  onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search proposals…"
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                 />
@@ -370,7 +401,6 @@ useEffect(() => {
                   key={p.proposalId}
                   className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6"
                 >
-                  {/* Header */}
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
                       <h3 className="text-lg font-semibold text-slate-900">{p.title}</h3>
@@ -396,7 +426,6 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {/* Contact & meta */}
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                     <p className="text-slate-700">
                       <span className="font-semibold text-slate-900">Contact:</span> {p.contact}
@@ -412,19 +441,12 @@ useEffect(() => {
                     </p>
                   </div>
 
-                  {/* Attachments (from Proposal.docs) */}
                   {Array.isArray(p.docs) && p.docs.length > 0 && (
-                    <AttachmentGrid
-                      items={p.docs}
-                      onOpenLightbox={(src) => setLightbox(src)}
-                    />
+                    <AttachmentGrid items={p.docs} onOpenLightbox={(src) => setLightbox(src)} />
                   )}
 
-
-                  {/* ✅ Keep AI Chat Agent */}
                   <ProposalAgent proposal={p} />
 
-                  {/* Actions */}
                   <div className="mt-5 flex flex-wrap gap-2">
                     <button
                       onClick={() => handleApprove(p.proposalId)}
@@ -467,15 +489,17 @@ useEffect(() => {
         )}
 
         {/* ===========================
-            ENTITIES MODE (new table)
+            ENTITIES MODE (with Fixes)
            =========================== */}
         {mode === 'entities' && (
           <div className="space-y-4">
-            {/* Filters for entities */}
             <div className="flex items-center gap-3">
               <input
                 value={query}
-                onChange={(e) => { setEntitiesPage(1); setQuery(e.target.value); }}
+                onChange={(e) => {
+                  setEntitiesPage(1);
+                  setQuery(e.target.value);
+                }}
                 placeholder="Search org/contact/wallet"
                 className="w-72 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
               />
@@ -483,7 +507,10 @@ useEffect(() => {
                 <input
                   type="checkbox"
                   checked={includeArchived}
-                  onChange={(e) => { setEntitiesPage(1); setIncludeArchived(e.target.checked); }}
+                  onChange={(e) => {
+                    setEntitiesPage(1);
+                    setIncludeArchived(e.target.checked);
+                  }}
                 />
                 Include archived
               </label>
@@ -506,42 +533,52 @@ useEffect(() => {
                 <tbody>
                   {entitiesLoading && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">Loading…</td>
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                        Loading…
+                      </td>
                     </tr>
                   )}
                   {entitiesError && !entitiesLoading && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-6 text-center text-red-600">{entitiesError}</td>
+                      <td colSpan={8} className="px-3 py-6 text-center text-red-600">
+                        {entitiesError}
+                      </td>
                     </tr>
                   )}
                   {!entitiesLoading && !entitiesError && entities.items.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">No results</td>
+                      <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                        No results
+                      </td>
                     </tr>
                   )}
-                  {!entitiesLoading && !entitiesError && entities.items.map((r) => (
-                    <tr key={r.id} className="border-t">
-                      <td className="px-3 py-2">{r.orgName || '—'}</td>
-                      <td className="px-3 py-2">{r.address || '—'}</td>
-                      <td className="px-3 py-2">{r.contactEmail || r.ownerEmail || '—'}</td>
-                      <td className="px-3 py-2">{r.walletAddress || '—'}</td>
-                      <td className="px-3 py-2 text-right">{r.proposalsCount}</td>
-                      
-                      {/* --- FIX APPLIED HERE --- */}
-                      <td className="px-3 py-2">
-                        {r.statusCounts?.approved ?? 0} / {r.statusCounts?.pending ?? 0} / {r.statusCounts?.rejected ?? 0}
-                      </td>
-                      {/* ----------------------- */}
-
-                      <td className="px-3 py-2 text-right">{fmtUSD(r.totalBudgetUSD)}</td>
-                      <td className="px-3 py-2">{fmtDateTime(r.lastProposalAt)}</td>
-                    </tr>
-                  ))}
+                  {!entitiesLoading &&
+                    !entitiesError &&
+                    entities.items.map((r) => (
+                      <tr key={r.id} className="border-t">
+                        <td className="px-3 py-2">{r.orgName || '—'}</td>
+                        
+                        {/* --- FIXED ADDRESS RENDER --- */}
+                        <td className="px-3 py-2">{formatEntityAddress(r.address)}</td>
+                        
+                        <td className="px-3 py-2">{r.contactEmail || r.ownerEmail || '—'}</td>
+                        <td className="px-3 py-2">{r.walletAddress || '—'}</td>
+                        <td className="px-3 py-2 text-right">{r.proposalsCount}</td>
+                        
+                        {/* --- FIXED STATUS COUNTS --- */}
+                        <td className="px-3 py-2">
+                          {r.statusCounts?.approved ?? 0} / {r.statusCounts?.pending ?? 0} /{' '}
+                          {r.statusCounts?.rejected ?? 0}
+                        </td>
+                        
+                        <td className="px-3 py-2 text-right">{fmtUSD(r.totalBudgetUSD)}</td>
+                        <td className="px-3 py-2">{fmtDateTime(r.lastProposalAt)}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Pager */}
             <div className="flex items-center gap-2">
               <button
                 className="border rounded px-3 py-1"
@@ -563,7 +600,6 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Lightbox (kept) */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8"
@@ -596,4 +632,38 @@ function StatusPill({ status }: { status: string }) {
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
+}
+
+// --- FIX FOR ADDRESS FORMATTING ---
+function formatEntityAddress(raw: string | null): string {
+  if (!raw) return '—';
+  let result = raw;
+
+  // Detect and parse JSON blobs like {"line1":"..."}
+  const jsonRegex = /\{.*?\}/g;
+
+  result = result.replace(jsonRegex, (match) => {
+    try {
+      const parsed = JSON.parse(match);
+      const parts = [
+        parsed.line1,
+        parsed.line2,
+        parsed.city,
+        parsed.state,
+        parsed.postalCode,
+        parsed.country,
+      ].filter(Boolean);
+      if (parts.length > 0) return parts.join(', ');
+      return '';
+    } catch {
+      // If parsing failed, keep the original blob text or clear it
+      return match;
+    }
+  });
+
+  // Cleanup double commas or leading/trailing messy separators
+  return result
+    .replace(/,\s*,/g, ', ') // "part1, , part2" -> "part1, part2"
+    .replace(/^[\s,]+|[\s,]+$/g, '') // remove leading/trailing commas/spaces
+    .trim();
 }
