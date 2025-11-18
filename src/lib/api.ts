@@ -1588,29 +1588,18 @@ export async function uploadProofFiles(
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f, f.name);
-
-  // IMPORTANT: relative fetch → hits Next /api route, not your external API_BASE
-  const res = await fetch(`/api/proofs/upload`, {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
+  // We map over the files and upload them one by one using your FIXED function.
+  // This goes directly to the backend, skipping the broken /api/proofs/upload route.
+  const uploadPromises = files.map(async (file) => {
+    const result = await uploadFileToIPFS(file);
+    return {
+      cid: String(result?.cid || ''),
+      url: String(result?.url || ''),
+      name: String(result?.name || file.name),
+    };
   });
 
-  if (!res.ok) {
-    let msg = `Upload HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
-    throw new Error(msg);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  const list = Array.isArray(json?.uploads) ? json.uploads : [];
-  return list.map((u: any) => ({
-    cid: String(u?.cid || ''),
-    url: String(u?.url || ''),
-    name: String(u?.name || (String(u?.url || '').split('/').pop() || 'file')),
-  }));
+  return Promise.all(uploadPromises);
 }
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
