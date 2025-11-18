@@ -1,6 +1,3 @@
-src/app/api/proofs/upload/route.ts
-
-
 // src/app/api/proofs/upload/route.ts
 import { NextResponse } from 'next/server';
 
@@ -118,4 +115,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'upload_failed', message: msg }, { status });
   }
 }
-
