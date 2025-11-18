@@ -120,7 +120,8 @@ type ProposerRow = {
   proposalsCount: number;
   totalBudgetUSD: number;
   lastProposalAt: string | null;
-  statusCounts: { approved: number; pending: number; rejected: number; archived: number };
+  // Made statusCounts optional in type definition to reflect reality of potential missing data
+  statusCounts?: { approved: number; pending: number; rejected: number; archived: number };
 };
 type ProposersResponse = {
   items: ProposerRow[];
@@ -412,12 +413,12 @@ useEffect(() => {
                   </div>
 
                   {/* Attachments (from Proposal.docs) */}
-{Array.isArray(p.docs) && p.docs.length > 0 && (
-  <AttachmentGrid
-    items={p.docs}
-    onOpenLightbox={(src) => setLightbox(src)}
-  />
-)}
+                  {Array.isArray(p.docs) && p.docs.length > 0 && (
+                    <AttachmentGrid
+                      items={p.docs}
+                      onOpenLightbox={(src) => setLightbox(src)}
+                    />
+                  )}
 
 
                   {/* ✅ Keep AI Chat Agent */}
@@ -525,9 +526,13 @@ useEffect(() => {
                       <td className="px-3 py-2">{r.contactEmail || r.ownerEmail || '—'}</td>
                       <td className="px-3 py-2">{r.walletAddress || '—'}</td>
                       <td className="px-3 py-2 text-right">{r.proposalsCount}</td>
+                      
+                      {/* --- FIX APPLIED HERE --- */}
                       <td className="px-3 py-2">
-                        {r.statusCounts.approved} / {r.statusCounts.pending} / {r.statusCounts.rejected}
+                        {r.statusCounts?.approved ?? 0} / {r.statusCounts?.pending ?? 0} / {r.statusCounts?.rejected ?? 0}
                       </td>
+                      {/* ----------------------- */}
+
                       <td className="px-3 py-2 text-right">{fmtUSD(r.totalBudgetUSD)}</td>
                       <td className="px-3 py-2">{fmtDateTime(r.lastProposalAt)}</td>
                     </tr>
