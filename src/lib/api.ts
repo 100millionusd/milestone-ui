@@ -1471,6 +1471,17 @@ export async function getProofs(bidId?: number | string): Promise<Proof[]> {
   return (Array.isArray(rows) ? rows : []).map(toProof);
 }
 
+// ✅ NEW FUNCTION: Fetch files/proofs for a specific proposal from Backend
+export async function getProposalFiles(proposalId: number): Promise<any[]> {
+  if (!Number.isFinite(proposalId)) return [];
+  
+  // Calls Railway Backend: GET /proofs?proposalId=215
+  const rows = await apiFetch(`/proofs?proposalId=${encodeURIComponent(String(proposalId))}`);
+  
+  // Return the list (or empty array if null)
+  return Array.isArray(rows) ? rows : [];
+}
+
 /* ==========================
    Agent2 Proof Chat (SSE)
    - Streams tokens from POST /proofs/:id/chat
@@ -1612,16 +1623,13 @@ export async function saveProofFilesToDb(params: {
   note?: string;
   replaceExisting?: boolean;       
 }) {
-  // ✅ FIX: Use apiFetch to send data to the Backend (Railway)
-  // instead of the broken Next.js route.
-  return apiFetch(`/proofs`, { 
+  // ✅ FIX: Direct call to Railway Backend (bypassing Next.js /api/proofs)
+  return apiFetch(`/proofs`, {
     method: 'POST',
     body: JSON.stringify({
-      // Note: Ensure your backend /proofs endpoint supports 'proposalId'
-      // If it usually requires 'bidId', you might need to adjust this payload.
       proposalId: Number(params.proposalId),
       milestoneIndex: Number(params.milestoneIndex),
-      description: params.note ?? "", // Mapping 'note' to 'description' which is standard for proofs
+      description: params.note ?? "",
       files: params.files,
       mode: params.replaceExisting ? 'replace' : 'append', 
     }),
