@@ -46,7 +46,14 @@ function toArray<T>(x: T | T[] | null): T[] {
 
 async function pinOne(file: FileLike, metadata?: any) {
   const fd = new FormData();
-  fd.append('file', file as any, (file as any).name || 'file');
+
+  // 👇 FIX: Explicitly convert file to ArrayBuffer -> Blob
+  // This prevents stream errors when proxying PDFs in Node runtime
+  const arrayBuffer = await file.arrayBuffer();
+  const blob = new Blob([arrayBuffer], { type: file.type });
+  
+  fd.append('file', blob, file.name || 'file');
+  
   if (metadata) fd.append('pinataMetadata', JSON.stringify(metadata));
 
   const controller = new AbortController();
@@ -56,7 +63,7 @@ async function pinOne(file: FileLike, metadata?: any) {
     const res = await fetch(PINATA_ENDPOINT, {
       method: 'POST',
       headers: pinataHeaders(),
-      body: fd as any, // undici sets boundary
+      body: fd as any, 
       signal: controller.signal,
       cache: 'no-store',
     });
@@ -110,6 +117,7 @@ export async function POST(req: Request) {
     // return both keys for client compatibility
     return NextResponse.json({ ok: true, uploads, files: uploads }, { status: 201 });
   } catch (e: any) {
+    console.error("Upload Error Detail:", e); // Log the actual error for debugging
     const msg = String(e?.message || e);
     const status = /AbortError/i.test(msg) ? 504 : 500;
     return NextResponse.json({ ok: false, error: 'upload_failed', message: msg }, { status });
