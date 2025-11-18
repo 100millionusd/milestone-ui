@@ -90,29 +90,38 @@ const guessEmail = (obj: any): string | null => {
   return null;
 };
 
-// ⬇️ drop-in replacement: tolerant of odd keys and JSON strings
 function addressToDisplay(addr: any): string | null {
   if (!addr) return null;
 
-  // If it's a string, try to parse JSON first (e.g., '{"line1":"..."}')
+  // 1. If it's a string, it might contain JSON (e.g. '{"line1":...}')
   if (typeof addr === 'string') {
-    const s = addr.trim();
-    if (!s) return null;
+    let str = addr.trim();
+    if (!str) return null;
 
-    // Try JSON parse if it looks like an object
-    if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('{"') && s.endsWith('}'))) {
+    // Regex to find JSON-like structures: starts with { ends with }
+    const jsonRegex = /\{.*?\}/g;
+
+    // Replace any JSON blob found in the string with a formatted address
+    const cleaned = str.replace(jsonRegex, (match) => {
       try {
-        const parsed = JSON.parse(s);
-        if (parsed && typeof parsed === 'object') {
-          return addressToDisplay(parsed);
-        }
+        const parsed = JSON.parse(match);
+        // Recursively call this function on the parsed object
+        const fmt = addressToDisplay(parsed);
+        return fmt || '';
       } catch {
-        // fall through and return the raw string
+        // If it looks like JSON but fails to parse, return it as is
+        return match;
       }
-    }
-    return s;
+    });
+
+    // Clean up resulting string (remove double commas, trim)
+    return cleaned
+      .replace(/,\s*,/g, ', ')
+      .replace(/^[\s,]+|[\s,]+$/g, '')
+      .trim();
   }
 
+  // 2. If it's an object, extract fields
   if (typeof addr === 'object') {
     const pickLoose = (obj: any, exact: string[], loose: RegExp[]) => {
       for (const k of exact) {
@@ -147,14 +156,13 @@ function addressToDisplay(addr: any): string | null {
     return s || null;
   }
 
+  // Fallback
   try {
     return String(addr).trim();
   } catch {
     return null;
   }
 }
-
-// src/components/AdminEntitiesTable.tsx
 
 function normalizeRow(r: any): ProposerAgg {
   // prefer any non-empty value for email
