@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProposal, getBids, getBid, getAuthRoleOnce, getProofs, payMilestone } from '@/lib/api';
+import { getProposal, getBids, getBid, getAuthRoleOnce, getProofs, payMilestone, getProposalFiles } from '@/lib/api';
 import AdminProofs from '@/components/AdminProofs';
 import MilestonePayments from '@/components/MilestonePayments';
 import ChangeRequestsPanel from '@/components/ChangeRequestsPanel';
@@ -31,12 +31,6 @@ const PINATA_GATEWAY = (() => {
     .replace(/(?:\/ipfs)+$/i, '');
   return `${base}/ipfs`;
 })();
-
-// ⚠️ Proofs endpoint
-const PROOFS_ENDPOINT =
-  process.env.NEXT_PUBLIC_PROOFS_ENDPOINT && process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.trim() !== ''
-    ? process.env.NEXT_PUBLIC_PROOFS_ENDPOINT.replace(/\/+$/, '')
-    : '/api/proofs';
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -313,73 +307,75 @@ export default function ProjectDetailPage() {
   }, []);
 
   // Fetch proofs (merged)
-  const refreshProofs = async () => {
-    if (!Number.isFinite(projectIdNum)) return;
-    setLoadingProofs(true);
+  // REPLACE THE ENTIRE refreshProofs FUNCTION WITH THIS:
+const refreshProofs = async () => {
+  if (!Number.isFinite(projectIdNum)) return;
+  setLoadingProofs(true);
 
-    try {
-      const localUrl = `${PROOFS_ENDPOINT}?proposalId=${encodeURIComponent(projectIdNum)}&_t=${Date.now()}`;
-      const localReq = fetch(localUrl, { credentials: 'include', cache: 'no-store' })
-        .then(r => (r.ok ? r.json() : []))
-        .catch(() => []);
+  try {
+    // 1. Fetch proofs/files directly from Backend using the new API function
+    // (This replaces the broken fetch to /api/proofs)
+    const localRows = await getProposalFiles(projectIdNum);
 
-      const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
+    const accepted = safeBids.find(b => b.status === 'approved') || safeBids[0] || null;
 
-      const adminReq = accepted
-        ? getProofs(Number(accepted.bidId))
-            .then(rows => {
-              return (Array.isArray(rows) ? rows : []).map((p: any) => ({
-                proposalId: projectIdNum,
-                milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
-                note: p?.description || p?.title || '',
-                files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
-                  url: f?.url || '',
-                  name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
-                })) : [],
-              }));
-            })
-            .catch(() => [])
-        : Promise.resolve([]);
+    // 2. Fetch admin/vendor proofs if there is an accepted bid
+    const adminReq = accepted
+      ? getProofs(Number(accepted.bidId))
+          .then(rows => {
+            return (Array.isArray(rows) ? rows : []).map((p: any) => ({
+              proposalId: projectIdNum,
+              milestoneIndex: Number(p?.milestoneIndex ?? p?.milestone_index),
+              note: p?.description || p?.title || '',
+              files: Array.isArray(p?.files) ? p.files.map((f: any) => ({
+                url: f?.url || '',
+                name: f?.name || (f?.url ? decodeURIComponent(String(f.url).split('/').pop() || 'file') : 'file'),
+              })) : [],
+            }));
+          })
+          .catch(() => [])
+      : Promise.resolve([]);
 
-      const [localRows, adminRows] = await Promise.all([localReq, adminReq]);
+    const adminRows = await adminReq;
 
-      const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
-      const seen = new Set<string>();
-      const merged: any[] = [];
+    // 3. Merge Logic (unchanged)
+    const key = (r: any, f: any) => `${Number(r.milestoneIndex)}|${String((f?.url || '').trim()).toLowerCase()}`;
+    const seen = new Set<string>();
+    const merged: any[] = [];
 
-      function pushRecord(r: any) {
-        const files = Array.isArray(r.files) ? r.files : [];
-        for (const f of files) {
-          const k = key(r, f);
-          if (!f?.url || seen.has(k)) continue;
-          seen.add(k);
-          merged.push({
-            proposalId: projectIdNum,
-            milestoneIndex: Number(r.milestoneIndex),
-            note: r.note || '',
-            files: [{ url: String(f.url), name: String(f.name || 'file') }],
-          });
-        }
+    function pushRecord(r: any) {
+      const files = Array.isArray(r.files) ? r.files : [];
+      for (const f of files) {
+        const k = key(r, f);
+        if (!f?.url || seen.has(k)) continue;
+        seen.add(k);
+        merged.push({
+          proposalId: projectIdNum,
+          milestoneIndex: Number(r.milestoneIndex),
+          note: r.note || '',
+          files: [{ url: String(f.url), name: String(f.name || 'file') }],
+        });
       }
-
-      (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
-      (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
-
-      const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
-      for (const r of merged) {
-        const ms = Number(r.milestoneIndex);
-        if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
-        byMs.get(ms)!.files.push(...r.files);
-      }
-
-      setProofs(Array.from(byMs.values()));
-    } catch (e) {
-      console.warn('refreshProofs failed:', e);
-      setProofs([]);
-    } finally {
-      setLoadingProofs(false);
     }
-  };
+
+    (Array.isArray(localRows) ? localRows : []).forEach(pushRecord);
+    (Array.isArray(adminRows) ? adminRows : []).forEach(pushRecord);
+
+    const byMs = new Map<number, { proposalId:number; milestoneIndex:number; note?:string; files:any[] }>();
+    for (const r of merged) {
+      const ms = Number(r.milestoneIndex);
+      if (!byMs.has(ms)) byMs.set(ms, { proposalId: projectIdNum, milestoneIndex: ms, note: '', files: [] });
+      byMs.get(ms)!.files.push(...r.files);
+    }
+
+    setProofs(Array.from(byMs.values()));
+  } catch (e) {
+    console.warn('refreshProofs failed:', e);
+    setProofs([]);
+  } finally {
+    setLoadingProofs(false);
+  }
+};
 
   useEffect(() => {
     let alive = true;
