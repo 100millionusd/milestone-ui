@@ -1561,24 +1561,15 @@ export function uploadJsonToIPFS(data: any) {
 export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
-  const token = getJwt();
 
-  const init: RequestInit = {
+  // Use apiFetch: it automatically handles the Token and detects FormData
+  // to CORRECTLY let the browser set the Content-Type + Boundary.
+  const result = await apiFetch(`/ipfs/upload-file`, {
     method: "POST",
     body: fd,
-    mode: "cors",
-    redirect: "follow",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    credentials: "include",
-  };
+  });
 
-  const r = await fetchWithFallback(`/ipfs/upload-file`, init);
-
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
-    throw new Error(j?.error || `HTTP ${r.status}`);
-  }
-  const result = await r.json();
+  // Add the gateway URL if missing (same logic as before)
   if (result?.cid && !result?.url) {
     const gateway =
       (typeof process !== "undefined" &&
@@ -1586,9 +1577,9 @@ export async function uploadFileToIPFS(file: File) {
       "gateway.pinata.cloud";
     result.url = `https://${gateway}/ipfs/${result.cid}`;
   }
+  
   return result;
 }
-
 // ========= Proof uploads (Pinata via our Next API) =========
 // 1) Upload <input type="file"> files to /api/proofs/upload
 //    Returns: [{ cid, url, name }]
