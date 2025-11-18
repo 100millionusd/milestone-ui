@@ -1,6 +1,7 @@
 // src/app/api/proofs/upload/route.ts
 import { NextResponse } from 'next/server';
 
+// 1. Force Node.js runtime (Standard for file handling)
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -30,49 +31,60 @@ function pinataHeaders(): Record<string, string> {
 }
 
 async function pinOne(file: File, metadata?: any) {
+  console.log(`[API] Uploading: ${file.name} (${file.size} bytes)`);
+
+  // 2. SAFETY CHECK: Netlify has a strict 6MB Request Body Limit.
+  // If the file is larger than ~5.8MB, Netlify will kill the connection instantly.
+  if (file.size > 5.8 * 1024 * 1024) {
+    throw new Error(`File too large (Netlify limit is 6MB). File is ${(file.size / (1024*1024)).toFixed(2)}MB`);
+  }
+
   const fd = new FormData();
 
-  // 1. Convert File to ArrayBuffer to ensure clean read in Node.js
+  // 3. CRITICAL FIX: Convert to Node Buffer
+  // This fixes the "stream hang" issue that happens with PDFs in Next.js 13+
   const arrayBuffer = await file.arrayBuffer();
-  const blob = new Blob([arrayBuffer], { type: file.type });
+  const buffer = Buffer.from(arrayBuffer);
   
+  // Append buffer with filename and explicit content type
+  const blob = new Blob([buffer], { type: file.type || 'application/pdf' });
   fd.append('file', blob, file.name);
 
   if (metadata) {
     fd.append('pinataMetadata', JSON.stringify(metadata));
   }
 
-  // 2. Timeout safety (15 seconds)
+  // 4. Setup Timeout (15s) to prevent silent crashes
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    // 3. THE CRITICAL FIX: duplex: 'half'
-    // This is required for Node.js fetch when sending a body!
     const res = await fetch(PINATA_ENDPOINT, {
       method: 'POST',
       headers: pinataHeaders(),
       body: fd,
       signal: controller.signal,
-      // @ts-ignore - Typescript might complain, but this is required for Node fetch
+      // 5. MANDATORY FIX: 'duplex: half' is required for file uploads in Node 18+
+      // @ts-expect-error - TypeScript might not know this property yet, but it is required
       duplex: 'half', 
     });
 
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Pinata Error ${res.status}: ${errText}`);
+      const text = await res.text();
+      throw new Error(`Pinata Error ${res.status}: ${text}`);
     }
 
     const json = await res.json();
     const cid = json.IpfsHash || json.ipfsHash || json.Hash;
-    
+
+    console.log(`[API] Success CID: ${cid}`);
     return { 
       cid, 
       url: `${gatewayBase()}/${cid}?filename=${encodeURIComponent(file.name)}`, 
       name: file.name 
     };
   } finally {
-    clearTimeout(t);
+    clearTimeout(timeoutId);
   }
 }
 
@@ -80,7 +92,6 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     
-    // Filter explicitly for files
     const candidates = [
       ...form.getAll('file'),
       ...form.getAll('files')
@@ -105,11 +116,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, uploads });
     
   } catch (e: any) {
-    console.error("Upload failed:", e);
+    console.error("[API] Upload Failed:", e);
+    
+    // Return the ACTUAL error message so you can see it in the browser console
     return NextResponse.json({ 
       ok: false, 
       error: 'upload_failed', 
-      message: e.message 
+      message: e.message || 'Unknown error',
+      details: String(e)
     }, { status: 500 });
   }
 }
