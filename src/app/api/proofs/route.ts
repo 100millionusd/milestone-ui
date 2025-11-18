@@ -1,281 +1,117 @@
-// src/app/api/proofs/route.ts
+// src/app/api/proofs/upload/route.ts
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // allow long uploads
 
-const prisma = new PrismaClient();
+const PINATA_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
 
-// ----------------- helpers -----------------
 function gatewayBase(): string {
-  const gw = process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY
-        ? String(process.env.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, '')
-        : 'https://gateway.pinata.cloud/ipfs');
-  return gw;
+  const envGw =
+    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY;
+
+  // host-only → ensure single /ipfs suffix
+  let base = envGw
+    ? `https://${String(envGw).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+    : 'https://gateway.pinata.cloud';
+
+  base = base.replace(/\/+$/, '');
+  if (!/\/ipfs$/i.test(base)) base += '/ipfs';
+  return base;
 }
 
-type InFile = { url?: string; cid?: string; name?: string; path?: string } | string;
-
-function normalizeFiles(
-  input: InFile[]
-): { url?: string | null; cid?: string | null; name?: string | null; path?: string | null }[] {
-  const gw = gatewayBase();
-  const bad = (s: string) => s.includes('<gw>') || s.includes('<CID') || s.includes('>') || /^\s*$/.test(s);
-  const isCid = (s: string) => /^[A-Za-z0-9]+$/.test(s) && !/^https?:\/\//i.test(s);
-  const fixProtocol = (s: string) => (/^https?:\/\//i.test(s) ? s : `https://${s.replace(/^https?:\/\//, '')}`);
-
-  return (Array.isArray(input) ? input : []).flatMap((f: InFile) => {
-    if (typeof f === 'string') {
-      if (bad(f)) return [];
-      if (isCid(f)) return [{ cid: f, url: `${gw}/${f}`, name: f, path: null }];
-      const url = fixProtocol(f);
-      return [{ url, cid: null, name: decodeURIComponent(url.split('/').pop() || 'file'), path: null }];
-    }
-    const cid = f?.cid || null;
-    let url = f?.url || (cid ? `${gw}/${cid}` : null);
-    if (url) {
-      if (bad(url)) return [];
-      url = fixProtocol(url);
-    }
-    const name = f?.name ?? (url ? decodeURIComponent(url.split('/').pop() || 'file') : cid || null);
-    const path = (f as any)?.path || null;
-    return [{ url, cid, name, path }];
-  });
+function pinataHeaders(): Record<string, string> {
+  const jwt = process.env.PINATA_JWT?.trim();
+  if (jwt) {
+    // accept raw token or "Bearer <token>"
+    const val = /^Bearer\s+/i.test(jwt) ? jwt : `Bearer ${jwt}`;
+    return { Authorization: val };
+  }
+  const key = process.env.PINATA_API_KEY;
+  const secret = process.env.PINATA_SECRET_API_KEY;
+  if (key && secret) {
+    return { pinata_api_key: key, pinata_secret_api_key: secret };
+  }
+  throw new Error('Missing Pinata credentials');
 }
 
-// -------- exifr GPS (on-the-fly) ----------
-const IMAGE_EXT_RE = /\.(jpe?g|tiff?|png|webp|gif|heic|heif)(\?|#|$)/i;
-const gpsCache = new Map<string, { lat: number; lon: number } | null>();
+type FileLike = Blob & { name?: string };
 
-async function getExifr(): Promise<any> {
-  const mod = await import('exifr');
-  // @ts-ignore - exifr default export
-  return mod.default || mod;
+function toArray<T>(x: T | T[] | null): T[] {
+  if (!x) return [];
+  return Array.isArray(x) ? x : [x];
 }
 
-async function gpsFromUrl(url?: string) {
-  if (!url) return null;
-  const key = url.split('?')[0];
-  if (!IMAGE_EXT_RE.test(key)) return null;        // only try images
-  if (gpsCache.has(key)) return gpsCache.get(key)!;
+async function pinOne(file: FileLike, metadata?: any) {
+  const fd = new FormData();
+  fd.append('file', file as any, (file as any).name || 'file');
+  if (metadata) fd.append('pinataMetadata', JSON.stringify(metadata));
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 110_000);
 
   try {
-    // Some gateways reject bare fetches; send headers.
-    const res = await fetch(key, {
+    const res = await fetch(PINATA_ENDPOINT, {
+      method: 'POST',
+      headers: pinataHeaders(),
+      body: fd as any, // undici sets boundary
+      signal: controller.signal,
       cache: 'no-store',
-      headers: {
-        'Accept': 'image/*',
-        // any non-empty UA helps with certain gateways/CDNs
-        'User-Agent': 'MilestoneProofs/1.0 (+support@yourdomain)'
-      }
-    });
-    if (!res.ok) {
-      // console.warn('[proofs] fetch failed', res.status, key);
-      gpsCache.set(key, null);
-      return null;
-    }
-
-    const ab = await res.arrayBuffer();
-    const exifr = await getExifr();
-
-    // Fast path
-    let g: any = await exifr.gps(ab).catch(() => null);
-
-    // Fallback: some files expose GPS under different names/IFDs
-    if (!g) {
-      const meta: any = await exifr
-        .parse(ab, { tiff: true, ifd0: true, exif: true, gps: true })
-        .catch(() => null);
-      if (meta) {
-        g = {
-          latitude:  meta?.GPSLatitude  ?? meta?.latitude  ?? meta?.lat  ?? null,
-          longitude: meta?.GPSLongitude ?? meta?.longitude ?? meta?.lon  ?? null,
-        };
-      }
-    }
-
-    const lat = Number.isFinite(g?.latitude)  ? Number(g.latitude)  : null;
-    const lon = Number.isFinite(g?.longitude) ? Number(g.longitude) : null;
-
-    const val = (lat != null && lon != null) ? { lat, lon } : null;
-    if (!val) {
-      // console.warn('[proofs] no GPS in EXIF', key);
-    }
-    gpsCache.set(key, val);
-    return val;
-  } catch {
-    gpsCache.set(key, null);
-    return null;
-  }
-}
-
-function preferNumber(...vals: any[]) {
-  for (const v of vals) {
-    if (typeof v === 'number' && Number.isFinite(v)) return v as number;
-  }
-  return null;
-}
-
-// --------------- GET ----------------------
-/** GET /api/proofs?proposalId=123 */
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const proposalId = Number(searchParams.get('proposalId'));
-    if (!Number.isFinite(proposalId)) {
-      return NextResponse.json(
-        { error: 'bad_request', details: 'proposalId is required and must be a number' },
-        { status: 400 }
-      );
-    }
-
-    const rows = await prisma.proof.findMany({
-      where: { proposalId },
-      orderBy: [{ milestoneIndex: 'asc' }, { createdAt: 'asc' }],
-      include: { files: true },
     });
 
-    // Build response and inject per-file lat/lon, reading EXIF if needed.
-    const out = await Promise.all(
-      rows.map(async (p: any) => {
-        const files = await Promise.all(
-          (p.files || []).map(async (f: any) => {
-            const url: string | undefined = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
-            const exif = f.exif ?? undefined;
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Pinata ${res.status}: ${text.slice(0, 500)}`);
 
-            // Prefer DB-provided values if present, otherwise try exifr
-            let lat = preferNumber(f.lat, exif?.gpsLatitude);
-            let lon = preferNumber(f.lon, exif?.gpsLongitude);
+    let json: any = {};
+    try { json = JSON.parse(text); } catch {}
+    const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
+    if (!cid) throw new Error('Pinata response missing CID');
 
-            if ((lat == null || lon == null) && url) {
-              const g = await gpsFromUrl(url);
-              if (g) {
-                lat = g.lat;
-                lon = g.lon;
-              }
-            }
-
-            return {
-              url,
-              cid: f.cid || undefined,
-              name: f.name || undefined,
-              exif, // if your DB already stores it
-              lat,  // only when actual GPS exists
-              lon,  // only when actual GPS exists
-            };
-          })
-        );
-
-        return {
-          proposalId: p.proposalId,
-          milestoneIndex: p.milestoneIndex,
-          note: p.note || undefined,
-          files,
-        };
-      })
-    );
-
-    return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: 'db_error', message: String(e?.message || e) },
-      { status: 500 }
-    );
+    const name = (file as any).name || 'file';
+    const url = `${gatewayBase()}/${cid}?filename=${encodeURIComponent(name)}`;
+    return { cid, url, name };
+  } finally {
+    clearTimeout(t);
   }
 }
 
-// --------------- POST ---------------------
-/** POST /api/proofs */
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const proposalId = Number(body.proposalId);
-    const milestoneIndex = Number(body.milestoneIndex);
-    const note = typeof body.note === 'string' ? body.note : null;
-    const filesInput = Array.isArray(body.files) ? (body.files as InFile[]) : [];
+    const form = await req.formData();
 
-    // NEW: support replace mode (default = append)
-    const mode: 'append' | 'replace' =
-      body?.mode === 'replace' || body?.replaceExisting === true ? 'replace' : 'append';
+    // accept BOTH field names: "file" and "files"
+    const candidates: FileLike[] = [
+      ...toArray(form.get('file') as any),
+      ...(form.getAll('file') as any[]),
+      ...(form.getAll('files') as any[]),
+    ].filter(Boolean);
 
-    if (!Number.isFinite(proposalId) || !Number.isFinite(milestoneIndex) || milestoneIndex < 0) {
+    if (!candidates.length) {
       return NextResponse.json(
-        { error: 'bad_request', details: 'proposalId and milestoneIndex (>=0) are required' },
+        { ok: false, error: 'no_files', message: 'Send files as "file" or "files".' },
         { status: 400 }
       );
     }
 
-    const files = normalizeFiles(filesInput);
+    const proposalId = form.get('proposalId')?.toString() || '';
+    const milestoneIndex = form.get('milestoneIndex')?.toString() || '';
 
-    const existing = await prisma.proof.findFirst({
-      where: { proposalId, milestoneIndex },
-      include: { files: true },
-    });
-
-    let saved;
-    if (!existing) {
-      saved = await prisma.proof.create({
-        data: { proposalId, milestoneIndex, note, files: { create: files } },
-        include: { files: true },
-      });
-    } else {
-      saved = await prisma.proof.update({
-        where: { id: existing.id },
-        data: {
-          note: note ?? existing.note,
-          files:
-            mode === 'replace'
-              ? { deleteMany: {}, create: files } // wipe then add
-              : { create: files }, // append only
-        },
-        include: { files: true },
-      });
+    const uploads = [];
+    for (const f of candidates) {
+      const meta = {
+        name: (f as any).name || 'file',
+        keyvalues: { proposalId, milestoneIndex },
+      };
+      uploads.push(await pinOne(f, meta));
     }
 
-    // Mirror GET response shape; also compute lat/lon on-the-fly for new/updated files
-    const out = await Promise.all(
-      (saved.files || []).map(async (f: any) => {
-        const url: string | undefined = f.url ?? (f.cid ? `${gatewayBase()}/${f.cid}` : undefined);
-        const exif = f.exif ?? undefined;
-
-        let lat = preferNumber(f.lat, exif?.gpsLatitude);
-        let lon = preferNumber(f.lon, exif?.gpsLongitude);
-
-        if ((lat == null || lon == null) && url) {
-          const g = await gpsFromUrl(url);
-          if (g) {
-            lat = g.lat;
-            lon = g.lon;
-          }
-        }
-
-        return {
-          url,
-          cid: f.cid || undefined,
-          name: f.name || undefined,
-          exif,
-          lat,
-          lon,
-        };
-      })
-    );
-
-    return NextResponse.json(
-      {
-        proposalId: saved.proposalId,
-        milestoneIndex: saved.milestoneIndex,
-        note: saved.note || undefined,
-        files: out,
-      },
-      { status: 201 }
-    );
+    // return both keys for client compatibility
+    return NextResponse.json({ ok: true, uploads, files: uploads }, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: 'db_error', message: String(e?.message || e) },
-      { status: 500 }
-    );
+    const msg = String(e?.message || e);
+    const status = /AbortError/i.test(msg) ? 504 : 500;
+    return NextResponse.json({ ok: false, error: 'upload_failed', message: msg }, { status });
   }
 }
