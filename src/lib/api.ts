@@ -1471,17 +1471,6 @@ export async function getProofs(bidId?: number | string): Promise<Proof[]> {
   return (Array.isArray(rows) ? rows : []).map(toProof);
 }
 
-// ✅ NEW FUNCTION: Fetch files/proofs for a specific proposal from Backend
-export async function getProposalFiles(proposalId: number): Promise<any[]> {
-  if (!Number.isFinite(proposalId)) return [];
-  
-  // Calls Railway Backend: GET /proofs?proposalId=215
-  const rows = await apiFetch(`/proofs?proposalId=${encodeURIComponent(String(proposalId))}`);
-  
-  // Return the list (or empty array if null)
-  return Array.isArray(rows) ? rows : [];
-}
-
 /* ==========================
    Agent2 Proof Chat (SSE)
    - Streams tokens from POST /proofs/:id/chat
@@ -1572,15 +1561,24 @@ export function uploadJsonToIPFS(data: any) {
 export async function uploadFileToIPFS(file: File) {
   const fd = new FormData();
   fd.append("file", file);
+  const token = getJwt();
 
-  // Use apiFetch: it automatically handles the Token and detects FormData
-  // to CORRECTLY let the browser set the Content-Type + Boundary.
-  const result = await apiFetch(`/ipfs/upload-file`, {
+  const init: RequestInit = {
     method: "POST",
     body: fd,
-  });
+    mode: "cors",
+    redirect: "follow",
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: "include",
+  };
 
-  // Add the gateway URL if missing (same logic as before)
+  const r = await fetchWithFallback(`/ipfs/upload-file`, init);
+
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j?.error || `HTTP ${r.status}`);
+  }
+  const result = await r.json();
   if (result?.cid && !result?.url) {
     const gateway =
       (typeof process !== "undefined" &&
@@ -1588,9 +1586,9 @@ export async function uploadFileToIPFS(file: File) {
       "gateway.pinata.cloud";
     result.url = `https://${gateway}/ipfs/${result.cid}`;
   }
-  
   return result;
 }
+
 // ========= Proof uploads (Pinata via our Next API) =========
 // 1) Upload <input type="file"> files to /api/proofs/upload
 //    Returns: [{ cid, url, name }]
@@ -1599,41 +1597,60 @@ export async function uploadProofFiles(
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // We map over the files and upload them one by one using your FIXED function.
-  // This goes directly to the backend, skipping the broken /api/proofs/upload route.
-  const uploadPromises = files.map(async (file) => {
-    const result = await uploadFileToIPFS(file);
-    return {
-      cid: String(result?.cid || ''),
-      url: String(result?.url || ''),
-      name: String(result?.name || file.name),
-    };
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name);
+
+  // IMPORTANT: relative fetch → hits Next /api route, not your external API_BASE
+  const res = await fetch(`/api/proofs/upload`, {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
   });
 
-  return Promise.all(uploadPromises);
+  if (!res.ok) {
+    let msg = `Upload HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json().catch(() => ({}));
+  const list = Array.isArray(json?.uploads) ? json.uploads : [];
+  return list.map((u: any) => ({
+    cid: String(u?.cid || ''),
+    url: String(u?.url || ''),
+    name: String(u?.name || (String(u?.url || '').split('/').pop() || 'file')),
+  }));
 }
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
 //    (this is what makes them appear in the Project “Files” tab automatically)
-// PASTE THIS FIXED VERSION
 export async function saveProofFilesToDb(params: {
   proposalId: number;
-  milestoneIndex: number; 
+  milestoneIndex: number; // ZERO-BASED (M1=0, M2=1, …)
   files: Array<{ url: string; name?: string; cid?: string }>;
   note?: string;
-  replaceExisting?: boolean;       
+  replaceExisting?: boolean;       // ← optional: set true to wipe old files for this milestone
 }) {
-  // ✅ FIX: Direct call to Railway Backend (bypassing Next.js /api/proofs)
-  return apiFetch(`/proofs`, {
+  const res = await fetch(`/api/proofs`, {
     method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       proposalId: Number(params.proposalId),
       milestoneIndex: Number(params.milestoneIndex),
-      description: params.note ?? "",
+      note: params.note ?? null,
       files: params.files,
-      mode: params.replaceExisting ? 'replace' : 'append', 
+      mode: params.replaceExisting ? 'replace' : 'append',  // ← new
     }),
   });
+
+  if (!res.ok) {
+    let msg = `Proof save HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  return await res.json();
 }
 
 // ---- Milestone archive helpers (batched + cached) ----
