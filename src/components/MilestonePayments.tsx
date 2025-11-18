@@ -7,6 +7,7 @@ import {
   payMilestone,
   submitProof,
   saveProofFilesToDb,
+  uploadProofFiles, // ✅ Added this import
   type Bid,
   type Milestone,
   getAuthRoleOnce,
@@ -14,7 +15,7 @@ import {
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
-// ---- upload helpers (shrink big images, retry on 504) ----
+// ---- upload helpers (shrink big images) ----
 async function shrinkImageIfNeeded(file: File): Promise<File> {
   if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
 
@@ -44,20 +45,7 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
   });
 }
 
-async function postWithRetry(url: string, fd: FormData): Promise<any> {
-  const go = async () => {
-    const r = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
-    if (!r.ok) throw new Error(`Upload HTTP ${r.status}`);
-    return r.json();
-  };
-  try {
-    return await go();
-  } catch (e: any) {
-    if (!/504/.test(String(e?.message))) throw e;
-    await new Promise((r) => setTimeout(r, 1500));
-    return await go();
-  }
-}
+// ❌ Removed postWithRetry since we use api.ts now
 
 interface MilestonePaymentsProps {
   bid: Bid;
@@ -181,7 +169,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         }
       );
       if (!r.ok) {
-        // swallow but log (optional)
         console.debug('[cr] respond non-OK:', r.status);
       }
     } catch (e) {
@@ -203,7 +190,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     };
   }, [resolvedProposalId]);
 
-  // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
+  // Identify admin vs vendor
   useEffect(() => {
   let cancelled = false;
   (async () => {
@@ -231,33 +218,29 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
       // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
-
-      // 1) Upload to Pinata via Next upload route (sequential, shrink + retry)
-      const uploaded: Array<{ name: string; cid: string; url: string }> = [];
-      for (const original of localFiles) {
-        const file = await shrinkImageIfNeeded(original);
-
-        const fd = new FormData();
-        // IMPORTANT: the field name must be exactly "files" (plural)
-        fd.append('files', file, file.name || 'file');
-
-        const json = await postWithRetry('/api/proofs/upload', fd);
-        // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
-        if (json?.uploads?.length) {
-          uploaded.push(...json.uploads);
-        } else if (json?.cid && json?.url) {
-          // defensive fallback if handler ever returns single file
-          uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
-        }
+      
+      // 1. Optimize images locally (optional)
+      const optimizedFiles: File[] = [];
+      for (const f of localFiles) {
+        optimizedFiles.push(await shrinkImageIfNeeded(f));
       }
 
-      // 2) Map uploaded → filesToSave (full URL, name, cid)
-      const filesToSave = uploaded.map((u) => ({ url: u.url, name: u.name, cid: u.cid }));
+      // 2. ✅ FIX: Upload using the central api.ts function
+      // This uses uploadFileToIPFS internally which we fixed to handle headers correctly.
+      // It returns Array<{ cid, url, name }>
+      const uploaded = await uploadProofFiles(optimizedFiles);
 
-      // 3) Save to /api/proofs so Files tab updates
+      // 3. Map uploaded → filesToSave
+      const filesToSave = uploaded.map((u) => ({ 
+        url: u.url, 
+        name: u.name, 
+        cid: u.cid 
+      }));
+
+      // 4. Save to DB (Using fixed saveProofFilesToDb)
       await saveProofFilesToDb({
         proposalId: Number(pid),
-        milestoneIndex: index, // ZERO-BASED
+        milestoneIndex: index,
         files: filesToSave,
         note: note || 'vendor proof',
       });
@@ -265,11 +248,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       // 👉 mark submitted locally so the vendor sees it instantly
       setSubmittedLocal((prev) => ({ ...prev, [index]: true }));
 
-      // 4) Notify page to refresh immediately + precise submitted event
+      // 5. Notify page to refresh
       if (typeof window !== 'undefined') {
         const detail = { proposalId: Number(pid) };
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); 
         window.dispatchEvent(
           new CustomEvent('proofs:submitted', {
             detail: { proposalId: Number(pid), bidId: Number(bid.bidId), milestoneIndex: Number(index) },
@@ -277,13 +260,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         );
       }
 
-      // 5) If there is an OPEN change request → append a response
+      // 6. If there is an OPEN change request → append a response
       const crId = pickOpenCrId(index);
       if (crId) {
         await appendCrResponse(crId, note, filesToSave);
       }
 
-      // 6) Optional: backend proofs for legacy readers
+      // 7. Optional: legacy backend proof submit
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,
@@ -294,7 +277,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })),
       }).catch(() => {});
 
-      // reload CRs (if status changed server-side)
+      // reload CRs
       if (Number.isFinite(pid as number)) await loadChangeRequests(Number(pid));
 
       // clear local inputs
@@ -319,13 +302,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
       await payMilestone(bid.bidId, index);
-      // Optimistic latch so the button vanishes immediately
       setPaidLocal((prev) => ({ ...prev, [index]: true }));
       alert('Payment released.');
       onUpdate();
     } catch (e: any) {
       const msg = String(e?.message || '');
-      // If server is idempotent and replies 409/“already paid”, latch locally too
       if (/\b409\b/.test(msg) || /already paid|already in progress/i.test(msg)) {
         setPaidLocal((prev) => ({ ...prev, [index]: true }));
         alert('Already paid.');
@@ -448,10 +429,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           const isPaid = paidTruth;
           const isDone = !!m.completed || isPaid;
 
-          // show "Submitted" immediately after upload on this device
           const submitted = !!submittedLocal[i];
-
-          // allow re-submit only when admin opened a Change Request, or when there is no proof yet
           const hasOpenCR = !!(crByMs[i]?.length);
           const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
           
