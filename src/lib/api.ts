@@ -1604,33 +1604,28 @@ export async function uploadProofFiles(
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
 //    (this is what makes them appear in the Project “Files” tab automatically)
+// PASTE THIS FIXED VERSION
 export async function saveProofFilesToDb(params: {
   proposalId: number;
-  milestoneIndex: number; // ZERO-BASED (M1=0, M2=1, …)
+  milestoneIndex: number; 
   files: Array<{ url: string; name?: string; cid?: string }>;
   note?: string;
-  replaceExisting?: boolean;       // ← optional: set true to wipe old files for this milestone
+  replaceExisting?: boolean;       
 }) {
-  const res = await fetch(`/api/proofs`, {
+  // ✅ FIX: Use apiFetch to send data to the Backend (Railway)
+  // instead of the broken Next.js route.
+  return apiFetch(`/proofs`, { 
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      // Note: Ensure your backend /proofs endpoint supports 'proposalId'
+      // If it usually requires 'bidId', you might need to adjust this payload.
       proposalId: Number(params.proposalId),
       milestoneIndex: Number(params.milestoneIndex),
-      note: params.note ?? null,
+      description: params.note ?? "", // Mapping 'note' to 'description' which is standard for proofs
       files: params.files,
-      mode: params.replaceExisting ? 'replace' : 'append',  // ← new
+      mode: params.replaceExisting ? 'replace' : 'append', 
     }),
   });
-
-  if (!res.ok) {
-    let msg = `Proof save HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
-    throw new Error(msg);
-  }
-
-  return await res.json();
 }
 
 // ---- Milestone archive helpers (batched + cached) ----
