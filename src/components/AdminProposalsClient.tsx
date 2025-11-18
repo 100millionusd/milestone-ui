@@ -9,6 +9,7 @@ import {
   approveProposal,
   rejectProposal,
   archiveProposal,
+  API_BASE,
   deleteProposal,
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
