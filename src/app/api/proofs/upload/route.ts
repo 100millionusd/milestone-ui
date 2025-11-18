@@ -1,17 +1,25 @@
+src/app/api/proofs/upload/route.ts
+
+
 // src/app/api/proofs/upload/route.ts
 import { NextResponse } from 'next/server';
 
-// 1. Force Node.js runtime (Standard for file handling)
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // allow long uploads
 
 const PINATA_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
 
 function gatewayBase(): string {
-  const envGw = process.env.NEXT_PUBLIC_PINATA_GATEWAY || process.env.NEXT_PUBLIC_IPFS_GATEWAY;
+  const envGw =
+    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY;
+
+  // host-only → ensure single /ipfs suffix
   let base = envGw
     ? `https://${String(envGw).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
     : 'https://gateway.pinata.cloud';
+
   base = base.replace(/\/+$/, '');
   if (!/\/ipfs$/i.test(base)) base += '/ipfs';
   return base;
@@ -20,7 +28,9 @@ function gatewayBase(): string {
 function pinataHeaders(): Record<string, string> {
   const jwt = process.env.PINATA_JWT?.trim();
   if (jwt) {
-    return { Authorization: /^Bearer\s+/i.test(jwt) ? jwt : `Bearer ${jwt}` };
+    // accept raw token or "Bearer <token>"
+    const val = /^Bearer\s+/i.test(jwt) ? jwt : `Bearer ${jwt}`;
+    return { Authorization: val };
   }
   const key = process.env.PINATA_API_KEY;
   const secret = process.env.PINATA_SECRET_API_KEY;
@@ -30,100 +40,82 @@ function pinataHeaders(): Record<string, string> {
   throw new Error('Missing Pinata credentials');
 }
 
-async function pinOne(file: File, metadata?: any) {
-  console.log(`[API] Uploading: ${file.name} (${file.size} bytes)`);
+type FileLike = Blob & { name?: string };
 
-  // 2. SAFETY CHECK: Netlify has a strict 6MB Request Body Limit.
-  // If the file is larger than ~5.8MB, Netlify will kill the connection instantly.
-  if (file.size > 5.8 * 1024 * 1024) {
-    throw new Error(`File too large (Netlify limit is 6MB). File is ${(file.size / (1024*1024)).toFixed(2)}MB`);
-  }
+function toArray<T>(x: T | T[] | null): T[] {
+  if (!x) return [];
+  return Array.isArray(x) ? x : [x];
+}
 
+async function pinOne(file: FileLike, metadata?: any) {
   const fd = new FormData();
+  fd.append('file', file as any, (file as any).name || 'file');
+  if (metadata) fd.append('pinataMetadata', JSON.stringify(metadata));
 
-  // 3. CRITICAL FIX: Convert to Node Buffer
-  // This fixes the "stream hang" issue that happens with PDFs in Next.js 13+
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  
-  // Append buffer with filename and explicit content type
-  const blob = new Blob([buffer], { type: file.type || 'application/pdf' });
-  fd.append('file', blob, file.name);
-
-  if (metadata) {
-    fd.append('pinataMetadata', JSON.stringify(metadata));
-  }
-
-  // 4. Setup Timeout (15s) to prevent silent crashes
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const t = setTimeout(() => controller.abort(), 110_000);
 
   try {
     const res = await fetch(PINATA_ENDPOINT, {
       method: 'POST',
       headers: pinataHeaders(),
-      body: fd,
+      body: fd as any, // undici sets boundary
       signal: controller.signal,
-      // 5. MANDATORY FIX: 'duplex: half' is required for file uploads in Node 18+
-      // @ts-expect-error - TypeScript might not know this property yet, but it is required
-      duplex: 'half', 
+      cache: 'no-store',
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Pinata Error ${res.status}: ${text}`);
-    }
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Pinata ${res.status}: ${text.slice(0, 500)}`);
 
-    const json = await res.json();
-    const cid = json.IpfsHash || json.ipfsHash || json.Hash;
+    let json: any = {};
+    try { json = JSON.parse(text); } catch {}
+    const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
+    if (!cid) throw new Error('Pinata response missing CID');
 
-    console.log(`[API] Success CID: ${cid}`);
-    return { 
-      cid, 
-      url: `${gatewayBase()}/${cid}?filename=${encodeURIComponent(file.name)}`, 
-      name: file.name 
-    };
+    const name = (file as any).name || 'file';
+    const url = `${gatewayBase()}/${cid}?filename=${encodeURIComponent(name)}`;
+    return { cid, url, name };
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(t);
   }
 }
 
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
-    
-    const candidates = [
-      ...form.getAll('file'),
-      ...form.getAll('files')
-    ].filter((f): f is File => f instanceof File);
 
-    if (candidates.length === 0) {
-      return NextResponse.json({ ok: false, error: 'no_files' }, { status: 400 });
+    // accept BOTH field names: "file" and "files"
+    const candidates: FileLike[] = [
+      ...toArray(form.get('file') as any),
+      ...(form.getAll('file') as any[]),
+      ...(form.getAll('files') as any[]),
+    ].filter(Boolean);
+
+    if (!candidates.length) {
+      return NextResponse.json(
+        { ok: false, error: 'no_files', message: 'Send files as "file" or "files".' },
+        { status: 400 }
+      );
     }
 
     const proposalId = form.get('proposalId')?.toString() || '';
     const milestoneIndex = form.get('milestoneIndex')?.toString() || '';
 
     const uploads = [];
-    
     for (const f of candidates) {
-      uploads.push(await pinOne(f, {
-        name: f.name,
-        keyvalues: { proposalId, milestoneIndex }
-      }));
+      const meta = {
+        name: (f as any).name || 'file',
+        keyvalues: { proposalId, milestoneIndex },
+      };
+      uploads.push(await pinOne(f, meta));
     }
 
-    return NextResponse.json({ ok: true, uploads });
-    
+    // return both keys for client compatibility
+    return NextResponse.json({ ok: true, uploads, files: uploads }, { status: 201 });
   } catch (e: any) {
-    console.error("[API] Upload Failed:", e);
-    
-    // Return the ACTUAL error message so you can see it in the browser console
-    return NextResponse.json({ 
-      ok: false, 
-      error: 'upload_failed', 
-      message: e.message || 'Unknown error',
-      details: String(e)
-    }, { status: 500 });
+    const msg = String(e?.message || e);
+    const status = /AbortError/i.test(msg) ? 504 : 500;
+    return NextResponse.json({ ok: false, error: 'upload_failed', message: msg }, { status });
   }
 }
+
