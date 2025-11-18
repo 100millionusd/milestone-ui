@@ -135,10 +135,7 @@ async function loadProposers(params: { q?: string; includeArchived?: boolean; pa
   const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (q) qs.set('q', q);
   if (includeArchived) qs.set('includeArchived', 'true');
-  
-  // [FIX] Changed this URL from /admin/proposers to /admin/entities
-  const res = await fetch(`/admin/entities?${qs.toString()}`, { credentials: 'include' }); 
-  
+  const res = await fetch(`/admin/proposers?${qs.toString()}`, { credentials: 'include' }); // <-- THIS LINE IS WRONG
   if (!res.ok) throw new Error('Failed to load entities');
   return (await res.json()) as ProposersResponse;
 }
