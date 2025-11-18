@@ -3,16 +3,15 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-// 👇 1. Changed imports: Removed uploadFileToIPFS, Added uploadProofFiles
 import { 
   createProposal, 
-  uploadProofFiles, // <--- Use this instead
+  uploadProofFiles, // ✅ Use this (supports PDFs)
   getAuthRoleOnce, 
   getProposerProfile 
 } from "@/lib/api";
 import Link from 'next/link';
 
-// ... (Keep allowOnlyExplicitSubmit and isProfileReady functions exactly as they were) ...
+// ✅ Guard: only allow submit when the clicked button opts in
 const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
   // @ts-ignore nativeEvent is fine in Next/React DOM
   const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
@@ -21,6 +20,7 @@ const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => 
   }
 };
 
+// Is the user's profile “complete” enough to allow proposal submit?
 const isProfileReady = (p: any) => {
   if (!p) return false;
   const hasName =
@@ -70,6 +70,7 @@ export default function NewProposalPage() {
   });
   const [files, setFiles] = useState<File[]>([]);
 
+  // Load connected wallet
   useEffect(() => {
     (async () => {
       try {
@@ -79,6 +80,7 @@ export default function NewProposalPage() {
     })();
   }, []);
 
+  // Load proposer profile
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -105,24 +107,20 @@ export default function NewProposalPage() {
     }
 
     try {
-      // 👇 2. FIXED UPLOAD LOGIC
-      // Use uploadProofFiles (batch) which hits the Next.js API -> Pinata (supports PDFs)
-      // instead of uploadFileToIPFS which hits the crashy backend.
+      // 1. Upload files (supports PDFs via /api/proofs/upload)
       let docs: Array<{ cid: string; url: string; name: string; size: number }> = [];
-
+      
       if (files.length > 0) {
         const uploaded = await uploadProofFiles(files);
-        
-        // Map results back to the docs format, matching by index to get size
         docs = uploaded.map((u, i) => ({
           cid: u.cid,
           url: u.url,
           name: u.name,
-          size: files[i]?.size || 0 // fallback to 0 if index mismatch (rare)
+          size: files[i]?.size || 0
         }));
       }
-      // 👆 END FIX
 
+      // 2. Create Proposal
       const amount = parseFloat(formData.amountUSD);
       const body = {
         orgName: formData.orgName,
@@ -152,13 +150,20 @@ export default function NewProposalPage() {
     }
   };
 
+  // ✅ Add new files to the list (instead of replacing)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setFiles((prev) => [...prev, ...newFiles]);
+      e.target.value = ''; // Clear input so same file can be selected again
     }
   };
 
-  // ... (Return JSX remains exactly the same) ...
+  // ✅ Remove a specific file
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Proposal</h1>
@@ -223,7 +228,7 @@ export default function NewProposalPage() {
             value={formData.title}
             onChange={(e) => setFormData({...formData, title: e.target.value})}
             className="w-full p-2 border rounded"
-            />
+          />
         </div>
 
         <div>
@@ -324,15 +329,46 @@ export default function NewProposalPage() {
           </div>
         </div>
 
+        {/* ✅ Files Section with Mini Removal Buttons */}
         <div>
           <label className="block text-sm font-medium mb-1">Supporting Documents</label>
-          <input
-            type="file"
-            multiple
-            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-            onChange={handleFileChange}
-            className="w-full p-2 border rounded"
-          />
+          <div className="space-y-3">
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              onChange={handleFileChange}
+              className="w-full p-2 border rounded"
+            />
+            
+            {/* Selected Files List */}
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {files.map((file, i) => (
+                  <div 
+                    key={`${file.name}-${i}`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-sm text-slate-700 shadow-sm"
+                  >
+                    <span className="truncate max-w-[180px]" title={file.name}>
+                      {file.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="text-slate-400 hover:text-rose-600 transition-colors"
+                      title="Remove file"
+                    >
+                      {/* Close Icon */}
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <p className="text-sm text-gray-500 mt-1">Upload any relevant documents (PDF, images, etc.)</p>
         </div>
 
@@ -342,14 +378,14 @@ export default function NewProposalPage() {
             data-allow-submit="true"
             disabled={loading || !profileReady}
             title={!profileReady ? 'Complete your profile first' : undefined}
-            className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
+            className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400 hover:bg-blue-700 transition-colors"
           >
             {loading ? 'Creating...' : 'Create Proposal'}
           </button>
           <button
             type="button"
             onClick={() => router.back()}
-            className="bg-gray-500 text-white px-6 py-2 rounded"
+            className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600 transition-colors"
           >
             Cancel
           </button>
