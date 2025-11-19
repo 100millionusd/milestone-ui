@@ -94,7 +94,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
 
   // Collapsible state: key is milestone index, value is boolean (true = expanded)
-  // Defaults to empty {}, so all false (closed) initially.
   const [expandedMilestones, setExpandedMilestones] = useState<Record<number, boolean>>({});
 
   // -------- helpers --------
@@ -106,6 +105,17 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   const toggleMilestone = (i: number) => {
     setExpandedMilestones((prev) => ({ ...prev, [i]: !prev[i] }));
+  };
+
+  const shorten = (s: string) => (s && s.length > 10 ? `${s.slice(0, 6)}...${s.slice(-4)}` : s || '—');
+
+  const formatDateTime = (d: string | Date | boolean | undefined) => {
+    if (!d || d === true) return '—';
+    try {
+      return new Date(d as any).toLocaleString(undefined, {
+        month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+    } catch { return '—'; }
   };
 
   const deriveProposalId = () => {
@@ -189,7 +199,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         }
       );
       if (!r.ok) {
-        // swallow but log (optional)
         console.debug('[cr] respond non-OK:', r.status);
       }
     } catch (e) {
@@ -211,7 +220,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     };
   }, [resolvedProposalId]);
 
-  // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
+  // Identify admin vs vendor
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -236,48 +245,40 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
     try {
       setBusyIndex(index);
-
-      // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // 1) Upload to Pinata via Next upload route (sequential, shrink + retry)
+      // 1) Upload to Pinata
       const uploaded: Array<{ name: string; cid: string; url: string }> = [];
       for (const original of localFiles) {
         const file = await shrinkImageIfNeeded(original);
-
         const fd = new FormData();
-        // IMPORTANT: the field name must be exactly "files" (plural)
         fd.append('files', file, file.name || 'file');
-
         const json = await postWithRetry('/api/proofs/upload', fd);
-        // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
         if (json?.uploads?.length) {
           uploaded.push(...json.uploads);
         } else if (json?.cid && json?.url) {
-          // defensive fallback if handler ever returns single file
           uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
         }
       }
 
-      // 2) Map uploaded → filesToSave (full URL, name, cid)
+      // 2) Map to DB objects
       const filesToSave = uploaded.map((u) => ({ url: u.url, name: u.name, cid: u.cid }));
 
-      // 3) Save to /api/proofs so Files tab updates
+      // 3) Save
       await saveProofFilesToDb({
         proposalId: Number(pid),
-        milestoneIndex: index, // ZERO-BASED
+        milestoneIndex: index,
         files: filesToSave,
         note: note || 'vendor proof',
       });
 
-      // 👉 mark submitted locally so the vendor sees it instantly
       setSubmittedLocal((prev) => ({ ...prev, [index]: true }));
 
-      // 4) Notify page to refresh immediately + precise submitted event
+      // 4) Notify
       if (typeof window !== 'undefined') {
         const detail = { proposalId: Number(pid) };
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail }));
         window.dispatchEvent(
           new CustomEvent('proofs:submitted', {
             detail: { proposalId: Number(pid), bidId: Number(bid.bidId), milestoneIndex: Number(index) },
@@ -285,13 +286,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         );
       }
 
-      // 5) If there is an OPEN change request → append a response
+      // 5) Respond to CR if open
       const crId = pickOpenCrId(index);
       if (crId) {
         await appendCrResponse(crId, note, filesToSave);
       }
 
-      // 6) Optional: backend proofs for legacy readers
+      // 6) Legacy backend
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,
@@ -302,10 +303,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })),
       }).catch(() => {});
 
-      // reload CRs (if status changed server-side)
       if (Number.isFinite(pid as number)) await loadChangeRequests(Number(pid));
 
-      // clear local inputs
       setText(index, '');
       setFiles(index, null);
 
@@ -327,13 +326,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
       await payMilestone(bid.bidId, index);
-      // Optimistic latch so the button vanishes immediately
       setPaidLocal((prev) => ({ ...prev, [index]: true }));
       alert('Payment released.');
       onUpdate();
     } catch (e: any) {
       const msg = String(e?.message || '');
-      // If server is idempotent and replies 409/“already paid”, latch locally too
       if (/\b409\b/.test(msg) || /already paid|already in progress/i.test(msg)) {
         setPaidLocal((prev) => ({ ...prev, [index]: true }));
         alert('Already paid.');
@@ -371,10 +368,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     if (raw && typeof raw === 'string') {
       try { raw = JSON.parse(raw); } catch { /* keep as string */ }
     }
-    const itemsArr =
-      Array.isArray(raw) ? raw :
-        Array.isArray(raw?.items) ? raw.items :
-          [];
+    const itemsArr = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
     const items = (itemsArr as any[]).map((x) =>
       typeof x === 'string'
         ? { text: x, done: false }
@@ -395,7 +389,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           </ul>
         )}
         <p className="text-[11px] text-amber-800 mt-2">
-          Re-upload the requested files and press <b>Submit Proof</b> again. Admin will see each response in the thread.
+          Re-upload requested files and press <b>Submit Proof</b> again.
         </p>
       </div>
     );
@@ -434,7 +428,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       </div>
 
       {/* Wallet */}
-      <div className="mb-4 p-3 bg-gray-50 rounded">
+      <div className="mb-6 p-3 bg-gray-50 rounded">
         <p className="font-medium text-gray-600">Vendor Wallet Address</p>
         <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
         <p className="text-xs text-gray-500 mt-1">
@@ -442,198 +436,176 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         </p>
       </div>
 
-      {/* Milestones list */}
-      <div className="space-y-4">
-        <h4 className="font-semibold">Payment Milestones</h4>
+      {/* Table Header */}
+      <h4 className="font-semibold mb-3">Milestones</h4>
 
-        {bid.milestones.map((m: Milestone, i: number) => {
-          const paidTruth =
-            !!m.paymentTxHash ||
-            !!m.paymentDate ||
-            String(m.status || '').toLowerCase() === 'paid' ||
-            !!paidLocal[i];
+      <div className="overflow-x-auto border rounded-lg">
+        <table className="min-w-full text-sm text-left text-gray-600">
+          {/* THEAD is OUTSIDE the loop */}
+          <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b">
+            <tr>
+              <th className="px-6 py-3">#</th>
+              <th className="px-6 py-3">Title</th>
+              <th className="px-6 py-3">Amount</th>
+              <th className="px-6 py-3">Status</th>
+              <th className="px-6 py-3 whitespace-nowrap">Completed</th>
+              <th className="px-6 py-3 whitespace-nowrap">Paid</th>
+              <th className="px-6 py-3">Tx</th>
+              <th className="px-6 py-3 w-10"></th>
+            </tr>
+          </thead>
+          
+          {/* TBODY contains the loop */}
+          <tbody>
+            {bid.milestones.map((m: Milestone, i: number) => {
+              const paidTruth =
+                !!m.paymentTxHash ||
+                !!m.paymentDate ||
+                String(m.status || '').toLowerCase() === 'paid' ||
+                !!paidLocal[i];
 
-          const isPaid = paidTruth;
-          const isDone = !!m.completed || isPaid;
+              const isPaid = paidTruth;
+              const isDone = !!m.completed || isPaid;
+              const submitted = !!submittedLocal[i];
 
-          // show "Submitted" immediately after upload on this device
-          const submitted = !!submittedLocal[i];
+              // allow re-submit only when admin opened a Change Request, or when there is no proof yet
+              const hasOpenCR = !!(crByMs[i]?.length);
+              const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
 
-          // allow re-submit only when admin opened a Change Request, or when there is no proof yet
-          const hasOpenCR = !!(crByMs[i]?.length);
-          const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
+              const isExpanded = !!expandedMilestones[i];
 
-          const statusText = isPaid
-            ? 'Paid'
-            : isDone
-              ? 'Completed (Unpaid)'
-              : submitted
-                ? 'Submitted'
-                : 'Pending';
+              // Status Badge Logic
+              let statusBadge;
+              if (isPaid) {
+                statusBadge = <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">Paid</span>;
+              } else if (isDone) {
+                statusBadge = <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">Completed</span>;
+              } else if (submitted) {
+                statusBadge = <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">Submitted</span>;
+              } else {
+                statusBadge = <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs font-medium">Pending</span>;
+              }
 
-          // Check expanded state (default is false/closed)
-          const isExpanded = !!expandedMilestones[i];
-
-          return (
-            <div
-              key={i}
-              className={`border rounded ${
-                isPaid
-                  ? 'bg-green-50 border-green-200'
-                  : isDone
-                    ? 'bg-yellow-50 border-yellow-200'
-                    : 'bg-gray-50'
-              }`}
-            >
-              {/* Collapsible Header */}
-              <div 
-                onClick={() => toggleMilestone(i)}
-                className="flex items-center justify-between p-4 cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  {/* Chevron Icon */}
-                  <svg
-                    className={`w-4 h-4 transform transition-transform text-gray-500 ${isExpanded ? 'rotate-180' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              return (
+                <React.Fragment key={i}>
+                  {/* Summary Row */}
+                  <tr 
+                    onClick={() => toggleMilestone(i)}
+                    className={`bg-white border-b hover:bg-gray-50 cursor-pointer transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                  
-                  <div>
-                    <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-                    {m.dueDate && (
-                      <div className="text-xs text-gray-600">
-                        Due: {new Date(m.dueDate).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    <td className="px-6 py-4 font-medium text-gray-900">M{i + 1}</td>
+                    <td className="px-6 py-4 font-medium text-gray-900">{m.name || `Milestone ${i + 1}`}</td>
+                    <td className="px-6 py-4">${Number(m.amount || 0).toLocaleString()}</td>
+                    <td className="px-6 py-4">{statusBadge}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      {isDone && m.completed ? formatDateTime(m.completed) : '—'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      {isPaid && m.paymentDate ? formatDateTime(m.paymentDate) : '—'}
+                    </td>
+                    <td className="px-6 py-4 font-mono text-xs text-blue-600">
+                      {shorten(m.paymentTxHash as string)}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                       <svg
+                        className={`w-4 h-4 transform transition-transform text-gray-400 ${isExpanded ? 'rotate-180' : ''}`}
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </td>
+                  </tr>
 
-                <div className="text-right">
-                  <div className="text-lg font-bold text-green-700">
-                    ${Number(m.amount || 0).toLocaleString()}
-                  </div>
-                  <span
-                    className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
-                      isPaid
-                        ? 'bg-green-100 text-green-800'
-                        : isDone
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    {statusText}
-                  </span>
-                </div>
-              </div>
+                  {/* Details Row (Collapsible) */}
+                  {isExpanded && (
+                    <tr className="bg-gray-50 border-b">
+                      <td colSpan={8} className="px-6 py-4">
+                        <div className="max-w-3xl">
+                          {renderChangeRequestBanner(i)}
 
-              {/* Body Content - conditionally visible */}
-              {isExpanded && (
-                <div className="px-4 pb-4 border-t border-gray-200/50 pt-4">
-                  {/* Show admin change request (if any) */}
-                  {renderChangeRequestBanner(i)}
+                          {isPaid && (
+                            <div className="space-y-2">
+                              <PaymentVerification
+                                transactionHash={m.paymentTxHash as string}
+                                currency={bid.preferredStablecoin}
+                                amount={Number(m.amount || 0)}
+                                toAddress={bid.walletAddress}
+                              />
+                              {m.proof && <p className="text-xs text-gray-500">Proof: {m.proof}</p>}
+                            </div>
+                          )}
 
-                  {/* Paid → show verification / details */}
-                  {isPaid && (
-                    <div className="space-y-2">
-                      <div className="p-2 bg-white rounded border text-sm">
-                        <div className="text-green-700">
-                          ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+                          {!isPaid && (
+                            <div className="mt-1">
+                              {canSubmit ? (
+                                <div className="bg-white p-4 rounded border">
+                                  <label className="block text-sm font-medium mb-2 text-gray-900">
+                                    Submit Proof
+                                  </label>
+                                  <textarea
+                                    value={textByIndex[i] || ''}
+                                    onChange={(e) => setText(i, e.target.value)}
+                                    rows={2}
+                                    className="w-full p-2 border rounded text-sm mb-3"
+                                    placeholder="Notes (optional)..."
+                                  />
+                                  <div className="flex items-center gap-3 mb-3">
+                                    <input
+                                      type="file"
+                                      multiple
+                                      onChange={(e) => setFiles(i, e.target.files)}
+                                      className="text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                    />
+                                    {!!(filesByIndex[i]?.length) && (
+                                      <span className="text-xs text-gray-600">
+                                        {filesByIndex[i].length} selected
+                                      </span>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleSubmitProof(i); }}
+                                    disabled={busyIndex === i}
+                                    className="bg-green-600 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-60 hover:bg-green-700 transition-colors"
+                                  >
+                                    {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+                                  </button>
+                                </div>
+                              ) : (
+                                !isDone && (
+                                  <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-3 inline-block">
+                                    Proof submitted — awaiting review.
+                                  </div>
+                                )
+                              )}
+
+                              {isDone && !isPaid && isAdmin && (
+                                <div className="mt-3">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleReleasePayment(i); }}
+                                    disabled={busyIndex === i || !!paidLocal[i]}
+                                    className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-60 hover:bg-indigo-700 transition-colors"
+                                  >
+                                    {busyIndex === i ? 'Processing…' : 'Release Payment'}
+                                  </button>
+                                </div>
+                              )}
+
+                              {isDone && !isPaid && !isAdmin && (
+                                <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-3 inline-block">
+                                  Awaiting admin to release payment.
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {m.paymentTxHash && (
-                          <div className="mt-1">
-                            <span className="font-medium">TX Hash: </span>
-                            <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
-                          </div>
-                        )}
-                        {m.proof && (
-                          <div className="mt-1">
-                            <span className="font-medium">Proof: </span>
-                            {m.proof}
-                          </div>
-                        )}
-                      </div>
-
-                      <PaymentVerification
-                        transactionHash={m.paymentTxHash as string}
-                        currency={bid.preferredStablecoin}
-                        amount={Number(m.amount || 0)}
-                        toAddress={bid.walletAddress}
-                      />
-                    </div>
+                      </td>
+                    </tr>
                   )}
-
-                  {/* Not paid → allow proof submission / payment release */}
-                  {!isPaid && (
-                    <div className="mt-1">
-                      {canSubmit ? (
-                        <>
-                          <label className="block text-sm font-medium mb-1">
-                            Proof of completion (text optional)
-                          </label>
-                          <textarea
-                            value={textByIndex[i] || ''}
-                            onChange={(e) => setText(i, e.target.value)}
-                            rows={3}
-                            className="w-full p-2 border rounded text-sm mb-2"
-                            placeholder="Notes (optional, files will be attached automatically)"
-                          />
-                          <div className="flex items-center gap-3 mb-2">
-                            <input
-                              type="file"
-                              multiple
-                              onChange={(e) => setFiles(i, e.target.files)}
-                              className="text-sm"
-                            />
-                            {!!(filesByIndex[i]?.length) && (
-                              <span className="text-xs text-gray-600">
-                                {filesByIndex[i].length} file(s) selected
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => handleSubmitProof(i)}
-                            disabled={busyIndex === i}
-                            className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                          >
-                            {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-                          </button>
-                          <p className="text-[11px] text-gray-500 mt-1">
-                            If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-                          </p>
-                        </>
-                      ) : (
-                        !isDone && (
-                          <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
-                            Proof submitted — awaiting review.
-                          </div>
-                        )
-                      )}
-
-                      {isDone && !isPaid && isAdmin && (
-                        <div className="mt-3">
-                          <button
-                            onClick={() => handleReleasePayment(i)}
-                            disabled={busyIndex === i || !!paidLocal[i]}
-                            className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-                          >
-                            {busyIndex === i ? 'Processing…' : 'Release Payment'}
-                          </button>
-                        </div>
-                      )}
-
-                      {isDone && !isPaid && !isAdmin && (
-                        <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
-                          Awaiting admin to release payment.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Manual Payment Processor (admin only) */}
