@@ -420,7 +420,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
   const [showArchived, setShowArchived] = useState(false);
-  const pageSize = 10; // Increased page size slightly for better overview
+  const pageSize = 10; 
 
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -700,8 +700,10 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                                 {[r.city, r.country].filter(Boolean).join(', ')}
                             </div>
                             )}
+                            
+                            {/* UPDATED: Removed truncate and max-w to allow full visibility */}
                             {r.address && (
-                                <div className="text-[10px] text-slate-400 truncate max-w-[200px]" title={r.address}>
+                                <div className="text-[10px] text-slate-400 break-words">
                                     {r.address}
                                 </div>
                             )}
