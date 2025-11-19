@@ -467,7 +467,7 @@ export default function ProjectsPage() {
     <div className="max-w-6xl mx-auto p-6">
       {/* Tabs */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900 mb-6">Projects & Proposals</h1>
+        <h1 className="text-lg font-bold text-slate-900 mb-6">Projects & Proposals</h1>
         <div className="inline-flex rounded-lg bg-slate-100 p-1 shadow-inner">
           <TabButton
             current={activeTab}
