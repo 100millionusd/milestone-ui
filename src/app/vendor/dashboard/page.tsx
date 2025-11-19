@@ -386,21 +386,98 @@ useEffect(() => {
                   <StatusPill status={bid.status} label={computedStatusLabel(bid)} />
                 </div>
 
-                {/* Milestones */}
-                <div className="mt-5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Milestones</h4>
-                    <p className="font-mono text-xs text-slate-500">{progress}%</p>
-                  </div>
-                  <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                    <p>
-                      Completed <span className="font-medium text-slate-900">{done}<span className="text-slate-400"> / {total}</span></span>
-                    </p>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full bg-slate-900 transition-[width] duration-500" style={{ width: `${progress}%` }} />
-                  </div>
-                </div>
+ {/* --- MILESTONE TRACKER START --- */}
+<div className="mt-5">
+  <div className="mb-2 flex items-center justify-between">
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+      Milestones ({done}/{total})
+    </h4>
+    {/* Simple visual bar for quick context */}
+    <div className="flex gap-0.5">
+      {ms.map((m: any, i: number) => (
+        <div 
+          key={i}
+          className={`h-1.5 w-3 rounded-full ${
+            m.status === 'paid' ? 'bg-emerald-500' :
+            m.completed ? 'bg-blue-500' : 'bg-slate-200'
+          }`} 
+        />
+      ))}
+    </div>
+  </div>
+
+  {/* Scrollable Compact List */}
+  <div className="flex max-h-[200px] flex-col gap-2 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+    {ms.map((m: any, i: number) => {
+      // Determine Status & Style
+      const isPaid = m.status === 'paid';
+      const isCompleted = !isPaid && (m.completed || m.status === 'completed');
+      
+      let containerClass = "border-slate-100 bg-slate-50";
+      let textClass = "text-slate-500";
+      let icon = "○"; // Default circle
+
+      if (isPaid) {
+        containerClass = "border-emerald-200 bg-emerald-50/50";
+        textClass = "text-emerald-700";
+        icon = "✓"; // Checkmark
+      } else if (isCompleted) {
+        containerClass = "border-blue-200 bg-blue-50/50";
+        textClass = "text-blue-700";
+        icon = "●"; // Filled circle
+      }
+
+      return (
+        <div 
+          key={i} 
+          className={`flex items-center justify-between rounded-md border px-3 py-2 text-xs transition-colors ${containerClass}`}
+        >
+          {/* Left: ID + Title */}
+          <div className="flex min-w-0 items-center gap-3">
+            <span className={`font-bold ${textClass}`}>{icon}</span>
+            <div className="flex flex-col">
+              <span className="truncate font-medium text-slate-900">
+                {m.title || `Milestone ${i + 1}`}
+              </span>
+              <span className="font-mono text-[10px] text-slate-400">
+                {/* Amount fallback */}
+                {m.amount ? `$${Number(m.amount).toLocaleString()}` : '-'}
+              </span>
+            </div>
+          </div>
+
+          {/* Right: Status + Tx */}
+          <div className="flex flex-col items-end gap-0.5 text-right">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              isPaid ? "bg-emerald-100 text-emerald-800" : 
+              isCompleted ? "bg-blue-100 text-blue-800" : "bg-slate-200 text-slate-600"
+            }`}>
+              {isPaid ? "Paid" : isCompleted ? "Completed" : "Pending"}
+            </span>
+            
+            {/* TX Link - Only if exists */}
+            {m.txHash ? (
+              <a 
+                href={`https://sepolia.etherscan.io/tx/${m.txHash}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 font-mono text-[10px] text-blue-600 hover:underline"
+                title="View on Etherscan"
+              >
+                <span>Tx: {m.txHash.slice(0, 6)}...</span>
+                <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            ) : (
+              <span className="text-[10px] text-slate-300">No Tx</span>
+            )}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</div>
 
                 {/* Actions */}
                 <div className="mt-5 flex flex-wrap gap-3">
