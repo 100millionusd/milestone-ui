@@ -1156,25 +1156,78 @@ const bidFiles = safeBids.flatMap((b: any) => {
     </div>
   </section>
 )}
-      {/* Timeline */}
-      {tab === 'timeline' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Activity Timeline</h3>
-          {timeline.length ? (
-            <ol className="relative border-l pl-4">
-              {timeline.map((e, i) => (
-                <li key={i} className="mb-4">
-                  <div className="absolute -left-2.5 w-2 h-2 rounded-full bg-slate-400 mt-1.5" />
-                  <div className="text-sm">
-                    <div className="font-medium">{e.label}</div>
-                    <div className="opacity-70">{fmt(e.at)} {e.meta ? `• ${e.meta}` : ''}</div>
+   {tab === 'timeline' && (
+  <section className="max-w-3xl mx-auto">
+    <div className="mb-6 flex items-center justify-between">
+      <h3 className="font-semibold text-lg text-gray-900">Project History</h3>
+      <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full">
+        {timeline.length} Events
+      </span>
+    </div>
+
+    <div className="relative border-l-2 border-gray-200 ml-4 space-y-8 pb-8">
+      {timeline.length ? (
+        timeline.slice().reverse().map((e, i) => {
+          // Helper to determine styling based on event type
+          let iconBg = 'bg-gray-100';
+          let iconColor = 'text-gray-500';
+          let iconPath = <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />; // Info default
+
+          if (e.type.includes('paid')) {
+            iconBg = 'bg-emerald-100';
+            iconColor = 'text-emerald-600';
+            iconPath = <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />;
+          } else if (e.type.includes('completed') || e.type.includes('approved')) {
+            iconBg = 'bg-blue-100';
+            iconColor = 'text-blue-600';
+            iconPath = <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />;
+          } else if (e.type.includes('bid')) {
+            iconBg = 'bg-purple-100';
+            iconColor = 'text-purple-600';
+            iconPath = <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />;
+          } else if (e.type.includes('created') || e.type.includes('updated')) {
+             iconBg = 'bg-gray-100';
+             iconColor = 'text-gray-600';
+             iconPath = <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />;
+          }
+
+          return (
+            <div key={i} className="relative pl-8">
+              {/* Icon Dot */}
+              <div className={`absolute -left-[9px] top-0 flex h-6 w-6 items-center justify-center rounded-full ring-4 ring-white ${iconBg} ${iconColor}`}>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  {iconPath}
+                </svg>
+              </div>
+
+              {/* Card Content */}
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start bg-white border border-gray-100 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{e.label}</p>
+                  {e.meta && (
+                    <p className="mt-1 text-sm text-gray-600 bg-gray-50 inline-block px-2 py-0.5 rounded border border-gray-100">
+                      {e.meta}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-2 sm:mt-0 sm:text-right">
+                  <time className="text-xs text-gray-400 font-medium whitespace-nowrap" dateTime={e.at || ''}>
+                    {fmt(e.at)}
+                  </time>
+                  <div className="text-[10px] text-gray-300 uppercase tracking-wider mt-0.5">
+                    {e.type.replace('_', ' ')}
                   </div>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="text-sm text-gray-500">No activity yet.</p>}
-        </section>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <div className="pl-8 py-4 text-gray-500 text-sm italic">No activity recorded yet.</div>
       )}
+    </div>
+  </section>
+)}
 
       {/* Bids */}
       {tab === 'bids' && (
