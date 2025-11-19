@@ -444,7 +444,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
                       className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
                       title="Ask Agent 2 about this bid/proof"
                     >
-                      Discuss in Chat
+                      Ask Agent2
                     </button>
                   </div>
 
