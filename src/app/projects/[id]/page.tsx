@@ -1639,132 +1639,205 @@ const bidFiles = safeBids.flatMap((b: any) => {
 
 
       {/* Admin */}
-      {tab === 'admin' && me.role === 'admin' && (
-        <section className="border rounded p-4">
-          <h3 className="font-semibold mb-3">Admin — Proofs & Moderation</h3>
+   {tab === 'admin' && me.role === 'admin' && (
+  <section className="space-y-8">
+    {/* 1. Proofs & Moderation (Existing) */}
+    <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b bg-gray-50">
+        <h3 className="font-semibold text-gray-900">Proofs & Moderation</h3>
+      </div>
+      <div className="p-6">
+        <AdminProofs
+          bidIds={safeBids.map(b => Number(b.bidId)).filter(Number.isFinite)}
+          proposalId={projectIdNum}
+          bids={safeBids}
+          onRefresh={refreshProofs}
+        />
+      </div>
+    </div>
 
-          <AdminProofs
-            bidIds={safeBids.map(b => Number(b.bidId)).filter(Number.isFinite)}
-            proposalId={projectIdNum}
-            bids={safeBids}
-            onRefresh={refreshProofs}
-          />
+    {/* 2. Change Requests (Existing) */}
+    <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b bg-gray-50">
+        <h3 className="font-semibold text-gray-900">Change Management</h3>
+      </div>
+      <div className="p-6">
+        <ChangeRequestsPanel proposalId={projectIdNum} />
+      </div>
+    </div>
 
-          <div className="mt-6">
-            <ChangeRequestsPanel proposalId={projectIdNum} />
+    {/* 3. TREASURY DASHBOARD (The Upgrade) */}
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <span className="p-1 bg-emerald-100 text-emerald-600 rounded">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        </span>
+        Treasury & Payments
+      </h3>
+
+      {acceptedBid ? (
+        <>
+          {/* Financial Snapshot Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+             {/* Total Liability */}
+             <div className="bg-white border rounded-lg p-4 shadow-sm flex flex-col justify-between">
+               <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commitment</div>
+               <div className="text-2xl font-bold text-gray-900 mt-1">
+                 {currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}
+               </div>
+             </div>
+             
+             {/* Disbursed */}
+             <div className="bg-white border rounded-lg p-4 shadow-sm flex flex-col justify-between">
+               <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Funds Disbursed</div>
+               <div className="text-2xl font-bold text-emerald-600 mt-1">
+                 {currency.format(
+                    acceptedMilestones
+                      .filter(msIsPaid)
+                      .reduce((acc, m) => acc + Number(m.amount || 0), 0)
+                 )}
+               </div>
+             </div>
+
+             {/* Remaining */}
+             <div className="bg-white border rounded-lg p-4 shadow-sm flex flex-col justify-between">
+               <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pending Release</div>
+               <div className="text-2xl font-bold text-amber-600 mt-1">
+                 {currency.format(
+                    acceptedMilestones
+                      .filter(m => !msIsPaid(m))
+                      .reduce((acc, m) => acc + Number(m.amount || 0), 0)
+                 )}
+               </div>
+             </div>
           </div>
 
-          <div className="mt-8">
-            <h4 className="font-semibold mb-2">Admin — Payments</h4>
+          {/* The Ledger Table */}
+          <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-gray-500 uppercase bg-gray-50/50 border-b">
+                  <tr>
+                    <th className="px-6 py-3 font-medium">#</th>
+                    <th className="px-6 py-3 font-medium">Milestone</th>
+                    <th className="px-6 py-3 font-medium">Amount</th>
+                    <th className="px-6 py-3 font-medium">Status</th>
+                    <th className="px-6 py-3 font-medium">Transaction</th>
+                    <th className="px-6 py-3 font-medium text-right">Controls</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {acceptedMilestones.map((m, idx) => {
+                    const src = (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+                    const key = msKey(Number(acceptedBid.bidId), idx);
+                    
+                    const paid = msIsPaid(src);
+                    const pendingLocal = safePending.has(key);
+                    const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || pendingLocal;
+                    const completedRow = paid || !!(src as any)?.completed;
+                    const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
+                    
+                    // Is this row actionable? (Completed, Not Paid, Not Processing)
+                    const canRelease = !paid && completedRow && !safeInFlight;
 
-            {acceptedBid ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-600">
-                      <th className="py-2 pr-4">#</th>
-                      <th className="py-2 pr-4">Title</th>
-                      <th className="py-2 pr-4">Amount</th>
-                      <th className="py-2 pr-4">Status</th>
-                      <th className="py-2 pr-4">Tx</th>
-                      <th className="py-2 pr-4">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {acceptedMilestones.map((m, idx) => {
-                      const src =
-                        (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+                    return (
+                      <tr 
+                        key={idx} 
+                        className={classNames(
+                          'transition-colors',
+                          canRelease ? 'bg-amber-50/50' : 'hover:bg-gray-50'
+                        )}
+                      >
+                        <td className="px-6 py-4 text-gray-500">{idx + 1}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-medium text-gray-900">{m.name || 'Untitled'}</div>
+                          {canRelease && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wide mt-0.5">Action Required</div>}
+                        </td>
+                        <td className="px-6 py-4 font-medium text-gray-900">
+                          {m.amount ? currency.format(Number(m.amount)) : '—'}
+                        </td>
+                        <td className="px-6 py-4">
+                          {paid ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Paid
+                            </span>
+                          ) : safeInFlight ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 animate-pulse">
+                              Processing
+                            </span>
+                          ) : completedRow ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                              Awaiting Release
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                              Locked
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-xs font-mono text-gray-500">
+                          {((src as any).paymentTxHash || (src as any).safePaymentTxHash) ? (
+                             <a href={`https://etherscan.io/tx/${(src as any).paymentTxHash || (src as any).safePaymentTxHash}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                               {`${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(0, 6)}...${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(-4)}`}
+                             </a>
+                          ) : '—'}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {canRelease ? (
+                            <div className="flex justify-end items-center gap-2">
+                              {/* Manual Release Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleReleasePayment(idx)}
+                                disabled={releasingKey === key}
+                                className="text-gray-600 hover:text-gray-900 border border-gray-300 bg-white hover:bg-gray-50 px-3 py-1.5 text-xs font-medium rounded shadow-sm transition-all disabled:opacity-50"
+                              >
+                                {releasingKey === key ? '...' : 'Mark Paid'}
+                              </button>
 
-                      const key = msKey(Number(acceptedBid.bidId), idx);
-                      const paid = msIsPaid(src);
-                      const pendingLocal = safePending.has(key);
-                      const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || pendingLocal;
-                      const completedRow = paid || !!(src as any)?.completed;
-                      const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
-
-                      const status =
-                        paid ? 'paid'
-                        : safeInFlight ? 'payment_pending'
-                        : completedRow ? 'completed'
-                        : hasProofNow ? 'submitted'
-                        : 'pending';
-
-                      const canRelease = !paid && completedRow && !safeInFlight;
-
-                      return (
-                        <tr key={idx} className="border-t">
-                          <td className="py-2 pr-4">M{idx + 1}</td>
-                          <td className="py-2 pr-4">{m.name || '—'}</td>
-                          <td className="py-2 pr-4">
-                            {m.amount ? currency.format(Number(m.amount)) : '—'}
-                          </td>
-                          <td className="py-2 pr-4">{status}</td>
-                          <td className="py-2 pr-4">
-                            {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
-                              ? `${String((src as any).paymentTxHash || (src as any).safePaymentTxHash).slice(0, 10)}…`
-                              : '—'}
-                          </td>
-                          <td className="py-2 pr-4">
-                            {canRelease ? (
-                              <div className="flex items-center gap-2">
-                                {/* Manual */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleReleasePayment(idx)}
-                                  disabled={releasingKey === key}
-                                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                                  title="Release payment"
-                                >
-                                  {releasingKey === key ? 'Releasing…' : 'RELEASE PAYMENT'}
-                                </button>
-
-                                {/* SAFE */}
-                                <SafePayButton
-                                  bidId={Number(acceptedBid.bidId)}
-                                  milestoneIndex={idx}
-                                  amountUSD={Number(m?.amount || 0)}
-                                  disabled={!canRelease || releasingKey === key}
-                                  onQueued={async () => {
-                                    const k = msKey(Number(acceptedBid.bidId), idx);
-                                    addSafePending(k);
-                                    setReleasingKey(k);
-                                    try {
-                                      payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx });
-                                    } catch {}
-                                    startPollUntilPaid(Number(acceptedBid.bidId), idx);
-                                    try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
-
-                                    await refreshApproved(acceptedBid.bidId);
-                                    await refreshProofs();
-                                    requestDebouncedRefresh(async () => {
-                                      const next = await getBids(projectIdNum);
-                                      setBids(Array.isArray(next) ? next : []);
-                                    }, 500);
-                                  }}
-                                />
-                              </div>
-                            ) : (
-                              <>
-                                {paid ? (
-                                  <span className="text-green-700 text-xs font-medium">Paid</span>
-                                ) : safeInFlight ? (
-                                  <span className="text-amber-700 bg-amber-100 rounded px-2 py-1 text-xs font-medium">Payment Pending</span>
-                                ) : null}
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No approved bid yet.</p>
-            )}
+                              {/* Safe / Crypto Button */}
+                              <SafePayButton
+                                bidId={Number(acceptedBid.bidId)}
+                                milestoneIndex={idx}
+                                amountUSD={Number(m?.amount || 0)}
+                                disabled={!canRelease || releasingKey === key}
+                                onQueued={async () => {
+                                  const k = msKey(Number(acceptedBid.bidId), idx);
+                                  addSafePending(k);
+                                  setReleasingKey(k);
+                                  try { payChanRef.current?.postMessage({ type: 'mx:pay:queued', bidId: Number(acceptedBid.bidId), milestoneIndex: idx }); } catch {}
+                                  startPollUntilPaid(Number(acceptedBid.bidId), idx);
+                                  try { (await import('@/lib/api')).invalidateBidsCache?.(); } catch {}
+                                  await refreshApproved(acceptedBid.bidId);
+                                  await refreshProofs();
+                                  requestDebouncedRefresh(async () => {
+                                    const next = await getBids(projectIdNum);
+                                    setBids(Array.isArray(next) ? next : []);
+                                  }, 500);
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </section>
+        </>
+      ) : (
+        <div className="bg-gray-50 border rounded-lg p-8 text-center">
+          <div className="text-gray-400 mb-2">No accepted bid active</div>
+          <p className="text-sm text-gray-500">Accept a vendor bid to unlock treasury controls.</p>
+        </div>
       )}
+    </div>
+  </section>
+)}
 
       <div className="pt-2">
         <Link href="/projects" className="text-blue-600 hover:underline">← Back to Projects</Link>
