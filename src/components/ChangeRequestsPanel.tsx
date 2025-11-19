@@ -184,10 +184,17 @@ export default function ChangeRequestsPanel(props: Props) {
     [rows, idx]
   );
 
-  // Action is only required if the request is OPEN AND the vendor has NOT replied yet.
-  // If the proof is approved (status=resolved), or the vendor replied, action is not required.
+  // HELPER: Determine if a CR is truly actionable (Open status AND not resolved via date AND no reply yet)
+  const isRowActionable = (r: ChangeRequestRow) => {
+    const isResolved = r.status === "resolved" || !!r.resolvedAt;
+    if (isResolved) return false;
+    const hasReply = Array.isArray(r.responses) && r.responses.length > 0;
+    // Status is open, not resolved by date, and vendor hasn't replied
+    return r.status === "open" && !hasReply;
+  };
+
   const actionableCount = useMemo(
-    () => filteredRows.filter((r) => r.status === "open" && (!r.responses || r.responses.length === 0)).length,
+    () => filteredRows.filter(isRowActionable).length,
     [filteredRows]
   );
 
@@ -278,7 +285,7 @@ export default function ChangeRequestsPanel(props: Props) {
           <h4 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Request History
             {!loading && actionableCount > 0 ? (
-                // Only show red if ACTUAL action is required (no reply yet)
+                // Only show red if ACTUAL action is required (Open + No Reply + Not Resolved)
                 <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-bold animate-pulse">
                    <Icons.Alert />
                    Action Required
@@ -370,13 +377,17 @@ export default function ChangeRequestsPanel(props: Props) {
                   const draft = drafts[cr.id];
                   const sending = !!draft?.sending;
                   
-                  const isOpen = cr.status === "open";
+                  // ROBUST STATUS LOGIC:
+                  // 1. If status is 'resolved' OR resolvedAt is present, it's Resolved.
+                  const isResolved = cr.status === "resolved" || !!cr.resolvedAt;
+                  // 2. If not resolved, check strictly for 'open'.
+                  const isStatusOpen = !isResolved && cr.status === "open";
                   const hasReplied = responses.length > 0;
 
-                  // "Action Required" ONLY if Open AND No Reply yet.
-                  const isActionRequired = isOpen && !hasReplied;
-                  // "Waiting for Review" if Open AND Has Reply.
-                  const isPendingReview = isOpen && hasReplied;
+                  // "Action Required" = Open AND Not Resolved AND No Reply.
+                  const isActionRequired = isStatusOpen && !hasReplied;
+                  // "Waiting for Review" = Open AND Not Resolved AND Has Reply.
+                  const isPendingReview = isStatusOpen && hasReplied;
 
                   return (
                     <li key={cr.id} className={`group relative bg-white rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${
@@ -519,7 +530,7 @@ export default function ChangeRequestsPanel(props: Props) {
                         )}
 
                         {/* Reply Input Area (Only if Open) */}
-                        {isOpen && (
+                        {isStatusOpen && (
                           <div className="mt-6 bg-slate-50 rounded-xl border border-slate-200 p-1">
                             <textarea
                               className="w-full bg-white rounded-lg border-0 p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 min-h-[100px] resize-y"
