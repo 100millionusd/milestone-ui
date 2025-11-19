@@ -184,9 +184,10 @@ export default function ChangeRequestsPanel(props: Props) {
     [rows, idx]
   );
 
-  // Calculate if any action is required (any open status)
-  const openCount = useMemo(
-    () => filteredRows.filter((r) => r.status === "open").length,
+  // Action is only required if the request is OPEN AND the vendor has NOT replied yet.
+  // If the proof is approved (status=resolved), or the vendor replied, action is not required.
+  const actionableCount = useMemo(
+    () => filteredRows.filter((r) => r.status === "open" && (!r.responses || r.responses.length === 0)).length,
     [filteredRows]
   );
 
@@ -266,7 +267,7 @@ export default function ChangeRequestsPanel(props: Props) {
   
   return (
     <div className={`mt-6 rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${
-        openCount > 0 && !isExpanded ? "border-red-200 shadow-red-50" : "border-slate-200"
+        actionableCount > 0 && !isExpanded ? "border-red-200 shadow-red-50" : "border-slate-200"
     }`}>
       {/* --- Collapsible Header --- */}
       <button 
@@ -276,14 +277,13 @@ export default function ChangeRequestsPanel(props: Props) {
         <div className="flex flex-col items-start">
           <h4 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Request History
-            {!loading && openCount > 0 ? (
-                // Action Required Badge (Red)
+            {!loading && actionableCount > 0 ? (
+                // Only show red if ACTUAL action is required (no reply yet)
                 <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-bold animate-pulse">
                    <Icons.Alert />
                    Action Required
                 </span>
             ) : !loading && (
-                // Normal Count Badge (Gray)
                 <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                     filteredRows.length > 0 ? "bg-slate-100 text-slate-600" : "bg-slate-100 text-slate-400"
                 }`}>
@@ -369,21 +369,34 @@ export default function ChangeRequestsPanel(props: Props) {
                   const responses = Array.isArray(cr.responses) ? cr.responses : [];
                   const draft = drafts[cr.id];
                   const sending = !!draft?.sending;
+                  
                   const isOpen = cr.status === "open";
+                  const hasReplied = responses.length > 0;
+
+                  // "Action Required" ONLY if Open AND No Reply yet.
+                  const isActionRequired = isOpen && !hasReplied;
+                  // "Waiting for Review" if Open AND Has Reply.
+                  const isPendingReview = isOpen && hasReplied;
 
                   return (
                     <li key={cr.id} className={`group relative bg-white rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${
-                        isOpen ? "border-red-200 ring-1 ring-red-100" : "border-slate-200"
+                        isActionRequired ? "border-red-200 ring-1 ring-red-100" : "border-slate-200"
                     }`}>
                       
                       {/* Card Header */}
                       <div className={`px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3 ${
-                          isOpen ? "bg-red-50/30 border-red-100" : "bg-slate-50/50 border-slate-100"
+                          isActionRequired 
+                            ? "bg-red-50/30 border-red-100" 
+                            : "bg-slate-50/50 border-slate-100"
                       }`}>
                         <div className="flex items-center gap-3">
-                           {isOpen ? (
+                           {isActionRequired ? (
                                 <div className="text-red-500 animate-pulse">
                                      <Icons.Alert />
+                                </div>
+                           ) : isPendingReview ? (
+                                <div className="text-amber-500">
+                                     <Icons.Clock />
                                 </div>
                            ) : (
                                 <Icons.CheckCircle />
@@ -391,7 +404,7 @@ export default function ChangeRequestsPanel(props: Props) {
                           <div className="flex flex-col">
                              <div className="flex items-center gap-2">
                                  <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
-                                 {isOpen && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />}
+                                 {isActionRequired && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />}
                              </div>
                              <span className="text-xs text-slate-500 tabular-nums">
                                 {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
@@ -399,13 +412,18 @@ export default function ChangeRequestsPanel(props: Props) {
                           </div>
                         </div>
                         
-                        {isOpen ? (
+                        {/* BADGE LOGIC */}
+                        {isActionRequired ? (
                             <div className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
                                 ACTION REQUIRED
                             </div>
+                        ) : isPendingReview ? (
+                            <div className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                                WAITING FOR REVIEW
+                            </div>
                         ) : (
                             <div className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                {cr.status.toUpperCase()}
+                                RESOLVED
                             </div>
                         )}
                       </div>
