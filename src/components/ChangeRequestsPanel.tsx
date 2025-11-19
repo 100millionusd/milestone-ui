@@ -51,7 +51,7 @@ type Props = {
 
 type Draft = { message: string; files: File[]; sending?: boolean; error?: string };
 
-// --- Icons for UI Polish ---
+// --- Icons ---
 const Icons = {
   Refresh: () => (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
@@ -76,6 +76,9 @@ const Icons = {
   ),
   AdminUser: () => (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+  ),
+  ChevronDown: () => (
+    <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
   )
 };
 
@@ -88,6 +91,8 @@ export default function ChangeRequestsPanel(props: Props) {
   } = props;
 
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
+  // New state for collapsing the panel
+  const [isExpanded, setIsExpanded] = useState(true);
 
   useEffect(() => {
     if (typeof forceMilestoneIndex === "number") return;
@@ -251,277 +256,300 @@ export default function ChangeRequestsPanel(props: Props) {
 
   // -------------------- render --------------------
   
-  if (loading) {
-    return (
-      <div className="mt-8 flex flex-col items-center justify-center space-y-3 text-slate-400 animate-pulse">
-        <div className="h-2 w-1/3 bg-slate-200 rounded"></div>
-        <div className="h-2 w-1/4 bg-slate-200 rounded"></div>
-      </div>
-    );
-  }
-
-  if (err) {
-    return (
-      <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        {err}
-      </div>
-    );
-  }
-
   return (
-    <div className="mt-8">
-      {/* --- Header --- */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h4 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
+    <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden transition-all">
+      {/* --- Collapsible Header --- */}
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-6 py-4 bg-white hover:bg-slate-50/50 transition-colors text-left"
+      >
+        <div className="flex flex-col">
+          <h4 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Request History
-            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{filteredRows.length}</span>
-          </h4>
-          <p className="text-sm text-slate-500 mt-0.5">Communications regarding Milestone {idx + 1}</p>
-        </div>
-        <button
-          onClick={load}
-          className="group p-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"
-          title="Refresh"
-        >
-          <div className="group-active:rotate-180 transition-transform duration-300">
-            <Icons.Refresh />
-          </div>
-        </button>
-      </div>
-
-      {/* --- Tabs --- */}
-      {showTabs && (
-        <div className="mb-6 flex overflow-x-auto pb-2 no-scrollbar gap-2 border-b border-slate-100">
-          {allMilestones.map((mi) => (
-            <button
-              key={mi}
-              onClick={() => setActiveMilestoneIndex(mi)}
-              className={[
-                "relative px-4 py-2 rounded-t-lg text-sm font-medium transition-all duration-200",
-                mi === idx
-                  ? "text-slate-900 bg-white border-x border-t border-slate-100 shadow-[0_-2px_6px_-2px_rgba(0,0,0,0.02)] z-10"
-                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50",
-              ].join(" ")}
-            >
-              Milestone {mi + 1}
-              {mi === idx && <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-white" />}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* --- Empty State --- */}
-      {!filteredRows.length && (
-        <div className="py-12 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-          <div className="mx-auto w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center text-slate-300 mb-3">
-            <Icons.CheckCircle />
-          </div>
-          <p className="text-slate-500 text-sm">No change requests found for this milestone.</p>
-        </div>
-      )}
-
-      {/* --- List --- */}
-      <ol className="space-y-8">
-        {filteredRows.map((cr) => {
-          const responses = Array.isArray(cr.responses) ? cr.responses : [];
-          const draft = drafts[cr.id];
-          const sending = !!draft?.sending;
-          const isOpen = cr.status === "open";
-
-          return (
-            <li key={cr.id} className="group relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all hover:shadow-md">
-              
-              {/* Card Header */}
-              <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                   {isOpen ? <Icons.Clock /> : <Icons.CheckCircle />}
-                  <div className="flex flex-col">
-                     <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
-                     <span className="text-xs text-slate-500 tabular-nums">
-                        {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
-                     </span>
-                  </div>
-                </div>
-                
-                <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                  isOpen 
-                  ? "bg-amber-50 text-amber-700 border-amber-200" 
-                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+            {!loading && (
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                    filteredRows.length > 0 ? "bg-slate-100 text-slate-600" : "bg-slate-100 text-slate-400"
                 }`}>
-                  {cr.status.toUpperCase()}
-                </div>
+                    {filteredRows.length}
+                </span>
+            )}
+          </h4>
+          <p className="text-sm text-slate-500 mt-1">Communications regarding Milestone {idx + 1}</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className={`transform transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}>
+             <Icons.ChevronDown />
+          </div>
+        </div>
+      </button>
+
+      {/* --- Expandable Content --- */}
+      {isExpanded && (
+        <div className="border-t border-slate-100 bg-slate-50/30 px-6 pb-6 pt-4">
+            
+          {/* Loading State */}
+          {loading && (
+            <div className="flex flex-col items-center justify-center space-y-3 text-slate-400 animate-pulse py-8">
+                <div className="h-2 w-1/3 bg-slate-200 rounded"></div>
+                <div className="h-2 w-1/4 bg-slate-200 rounded"></div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {!loading && err && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                {err}
+            </div>
+          )}
+
+          {!loading && !err && (
+            <>
+              <div className="flex justify-end mb-4">
+                <button
+                    onClick={load}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-900 flex items-center gap-1.5 transition-colors"
+                >
+                    <Icons.Refresh />
+                    Refresh Thread
+                </button>
               </div>
 
-              <div className="p-6">
-                {/* Admin Original Request */}
-                <div className="flex gap-4 mb-8">
-                    <div className="flex-shrink-0 mt-1">
-                        <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-sm">
-                            <Icons.AdminUser />
-                        </div>
-                    </div>
-                    <div className="flex-grow">
-                        <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-none p-4 text-sm text-slate-800 shadow-sm relative">
-                            {cr.comment && <p className="whitespace-pre-wrap leading-relaxed">{cr.comment}</p>}
-                            {cr.checklist?.length ? (
-                                <div className="mt-3 space-y-2">
-                                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Action Items</div>
-                                    <ul className="space-y-2">
-                                    {cr.checklist.map((c, i) => (
-                                        <li key={i} className="flex items-start gap-2 text-slate-700">
-                                            <input type="checkbox" disabled className="mt-1 rounded border-slate-300 text-slate-900 focus:ring-0" />
-                                            <span className="opacity-80">{c}</span>
-                                        </li>
-                                    ))}
-                                    </ul>
-                                </div>
-                            ) : null}
-                        </div>
-                    </div>
+              {/* --- Tabs --- */}
+              {showTabs && (
+                <div className="mb-6 flex overflow-x-auto pb-2 no-scrollbar gap-2 border-b border-slate-100">
+                  {allMilestones.map((mi) => (
+                    <button
+                      key={mi}
+                      onClick={() => setActiveMilestoneIndex(mi)}
+                      className={[
+                        "relative px-4 py-2 rounded-t-lg text-sm font-medium transition-all duration-200",
+                        mi === idx
+                          ? "text-slate-900 bg-white border-x border-t border-slate-100 shadow-[0_-2px_6px_-2px_rgba(0,0,0,0.02)] z-10"
+                          : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50",
+                      ].join(" ")}
+                    >
+                      Milestone {mi + 1}
+                      {mi === idx && <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-white" />}
+                    </button>
+                  ))}
                 </div>
+              )}
 
-                {/* Thread / Timeline */}
-                {responses.length > 0 && (
-                  <div className="relative ml-4 pl-8 border-l-2 border-slate-100 space-y-8 mb-8">
-                    {responses.map((resp, idx) => (
-                      <div key={idx} className="relative group/item">
-                        <div className="absolute -left-[39px] top-0 w-5 h-5 rounded-full bg-white border-2 border-blue-500 ring-4 ring-white"></div>
+              {/* --- Empty State --- */}
+              {!filteredRows.length && (
+                <div className="py-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
+                  <div className="mx-auto w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mb-3">
+                    <Icons.CheckCircle />
+                  </div>
+                  <p className="text-slate-500 text-sm">No change requests found for this milestone.</p>
+                </div>
+              )}
+
+              {/* --- List --- */}
+              <ol className="space-y-8">
+                {filteredRows.map((cr) => {
+                  const responses = Array.isArray(cr.responses) ? cr.responses : [];
+                  const draft = drafts[cr.id];
+                  const sending = !!draft?.sending;
+                  const isOpen = cr.status === "open";
+
+                  return (
+                    <li key={cr.id} className="group relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all hover:shadow-md">
+                      
+                      {/* Card Header */}
+                      <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                           {isOpen ? <Icons.Clock /> : <Icons.CheckCircle />}
+                          <div className="flex flex-col">
+                             <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
+                             <span className="text-xs text-slate-500 tabular-nums">
+                                {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
+                             </span>
+                          </div>
+                        </div>
                         
-                        <div className="flex items-baseline justify-between mb-1">
-                            <span className="text-xs font-bold text-slate-900">Vendor Reply</span>
-                            <span className="text-xs text-slate-400 tabular-nums">{new Date(resp.createdAt).toLocaleString()}</span>
+                        <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                          isOpen 
+                          ? "bg-amber-50 text-amber-700 border-amber-200" 
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        }`}>
+                          {cr.status.toUpperCase()}
+                        </div>
+                      </div>
+
+                      <div className="p-6">
+                        {/* Admin Original Request */}
+                        <div className="flex gap-4 mb-8">
+                            <div className="flex-shrink-0 mt-1">
+                                <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                                    <Icons.AdminUser />
+                                </div>
+                            </div>
+                            <div className="flex-grow">
+                                <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-none p-4 text-sm text-slate-800 shadow-sm relative">
+                                    {cr.comment && <p className="whitespace-pre-wrap leading-relaxed">{cr.comment}</p>}
+                                    {cr.checklist?.length ? (
+                                        <div className="mt-3 space-y-2">
+                                            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Action Items</div>
+                                            <ul className="space-y-2">
+                                            {cr.checklist.map((c, i) => (
+                                                <li key={i} className="flex items-start gap-2 text-slate-700">
+                                                    <input type="checkbox" disabled className="mt-1 rounded border-slate-300 text-slate-900 focus:ring-0" />
+                                                    <span className="opacity-80">{c}</span>
+                                                </li>
+                                            ))}
+                                            </ul>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
                         </div>
 
-                        {resp.note && (
-                          <div className="text-sm text-slate-700 whitespace-pre-wrap bg-white mb-3">
-                            {resp.note}
+                        {/* Thread / Timeline */}
+                        {responses.length > 0 && (
+                          <div className="relative ml-4 pl-8 border-l-2 border-slate-100 space-y-8 mb-8">
+                            {responses.map((resp, idx) => (
+                              <div key={idx} className="relative group/item">
+                                <div className="absolute -left-[39px] top-0 w-5 h-5 rounded-full bg-white border-2 border-blue-500 ring-4 ring-white"></div>
+                                
+                                <div className="flex items-baseline justify-between mb-1">
+                                    <span className="text-xs font-bold text-slate-900">Vendor Reply</span>
+                                    <span className="text-xs text-slate-400 tabular-nums">{new Date(resp.createdAt).toLocaleString()}</span>
+                                </div>
+
+                                {resp.note && (
+                                  <div className="text-sm text-slate-700 whitespace-pre-wrap bg-white mb-3">
+                                    {resp.note}
+                                  </div>
+                                )}
+                                
+                                {resp.files?.length > 0 && (
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                    {resp.files.map((f, i) => {
+                                      const href = toUrl(f);
+                                      const img = isImageHref(href);
+                                      return img ? (
+                                        <a
+                                          key={i}
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="group/img relative block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={href}
+                                            alt={f.name || "image"}
+                                            className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110"
+                                          />
+                                          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors" />
+                                        </a>
+                                      ) : (
+                                        <a
+                                          key={i}
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex flex-col p-3 rounded-lg border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-colors group/file"
+                                        >
+                                          <div className="flex items-center justify-between mb-2 text-slate-400 group-hover/file:text-blue-500">
+                                             <Icons.File />
+                                             <Icons.ExternalLink />
+                                          </div>
+                                          <span className="text-xs font-medium text-slate-700 truncate w-full">{f.name || "Attachment"}</span>
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                           </div>
                         )}
-                        
-                        {resp.files?.length > 0 && (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                            {resp.files.map((f, i) => {
-                              const href = toUrl(f);
-                              const img = isImageHref(href);
-                              return img ? (
-                                <a
-                                  key={i}
-                                  href={href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="group/img relative block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={href}
-                                    alt={f.name || "image"}
-                                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110"
-                                  />
-                                  <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors" />
-                                </a>
-                              ) : (
-                                <a
-                                  key={i}
-                                  href={href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex flex-col p-3 rounded-lg border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-colors group/file"
-                                >
-                                  <div className="flex items-center justify-between mb-2 text-slate-400 group-hover/file:text-blue-500">
-                                     <Icons.File />
-                                     <Icons.ExternalLink />
-                                  </div>
-                                  <span className="text-xs font-medium text-slate-700 truncate w-full">{f.name || "Attachment"}</span>
-                                </a>
-                              );
-                            })}
+
+                        {/* Reply Input Area (Only if Open) */}
+                        {isOpen && (
+                          <div className="mt-6 bg-slate-50 rounded-xl border border-slate-200 p-1">
+                            <textarea
+                              className="w-full bg-white rounded-lg border-0 p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 min-h-[100px] resize-y"
+                              placeholder="Write your response here..."
+                              value={draft?.message ?? ""}
+                              onChange={(e) => setDraft(cr.id, { message: e.target.value })}
+                              disabled={sending}
+                            />
+                            
+                            <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center">
+                                    <label className="cursor-pointer inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
+                                        <div className="relative">
+                                            <input
+                                                type="file"
+                                                multiple
+                                                onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
+                                                disabled={sending}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                            />
+                                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-slate-200/50">
+                                                <Icons.Attachment />
+                                                <span>Attach Files</span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                     {!!draft?.files?.length && (
+                                        <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                            {draft.files.length} file{draft.files.length > 1 ? 's' : ''}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                     <button
+                                        type="button"
+                                        onClick={() =>
+                                            setDrafts((prev) => {
+                                            const n = { ...prev };
+                                            delete n[cr.id];
+                                            return n;
+                                            })
+                                        }
+                                        disabled={sending || (!draft?.message && !draft?.files?.length)}
+                                        className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
+                                        >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => submitReply(cr)}
+                                        disabled={sending}
+                                        className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+                                    >
+                                        {sending ? (
+                                            <>Sending...</>
+                                        ) : (
+                                            <>
+                                                <span>Send Reply</span>
+                                                <Icons.Send />
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                            {!!draft?.error && (
+                                <div className="mx-3 mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">
+                                    {draft.error}
+                                </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Reply Input Area (Only if Open) */}
-                {isOpen && (
-                  <div className="mt-6 bg-slate-50 rounded-xl border border-slate-200 p-1">
-                    <textarea
-                      className="w-full bg-white rounded-lg border-0 p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 min-h-[100px] resize-y"
-                      placeholder="Write your response here..."
-                      value={draft?.message ?? ""}
-                      onChange={(e) => setDraft(cr.id, { message: e.target.value })}
-                      disabled={sending}
-                    />
-                    
-                    <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center">
-                            <label className="cursor-pointer inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
-                                <div className="relative">
-                                    <input
-                                        type="file"
-                                        multiple
-                                        onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
-                                        disabled={sending}
-                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                    />
-                                    <div className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-slate-200/50">
-                                        <Icons.Attachment />
-                                        <span>Attach Files</span>
-                                    </div>
-                                </div>
-                            </label>
-                             {!!draft?.files?.length && (
-                                <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                    {draft.files.length} file{draft.files.length > 1 ? 's' : ''}
-                                </span>
-                            )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                             <button
-                                type="button"
-                                onClick={() =>
-                                    setDrafts((prev) => {
-                                    const n = { ...prev };
-                                    delete n[cr.id];
-                                    return n;
-                                    })
-                                }
-                                disabled={sending || (!draft?.message && !draft?.files?.length)}
-                                className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
-                                >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={() => submitReply(cr)}
-                                disabled={sending}
-                                className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
-                            >
-                                {sending ? (
-                                    <>Sending...</>
-                                ) : (
-                                    <>
-                                        <span>Send Reply</span>
-                                        <Icons.Send />
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                    {!!draft?.error && (
-                        <div className="mx-3 mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">
-                            {draft.error}
-                        </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+                    </li>
+                  );
+                })}
+              </ol>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
