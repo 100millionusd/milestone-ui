@@ -108,6 +108,16 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   // FIX: Move ID resolution to state to avoid side-effects in render
   const [activeProposalId, setActiveProposalId] = useState<number | undefined>(undefined);
 
+  // State for collapsible sections
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  const toggleMilestone = (index: number) => {
+    setExpanded((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
   // -------- helpers --------
   const setText = (i: number, v: string) =>
     setTextByIndex((prev) => ({ ...prev, [i]: v }));
@@ -460,6 +470,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           const submitted = !!submittedLocal[i];
           const hasOpenCR = !!(crByMs[i]?.length);
           const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
+          const isExpanded = !!expanded[i];
           
           const statusText = isPaid
             ? 'Paid'
@@ -472,7 +483,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           return (
             <div
               key={i}
-              className={`border rounded p-4 ${
+              className={`border rounded overflow-hidden transition-colors ${
                 isPaid
                   ? 'bg-green-50 border-green-200'
                   : isDone
@@ -480,14 +491,26 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     : 'bg-gray-50'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-                  {m.dueDate && (
-                    <div className="text-xs text-gray-600">
-                      Due: {new Date(m.dueDate).toLocaleDateString()}
-                    </div>
-                  )}
+              {/* Header - Always visible, clickable */}
+              <div 
+                className="flex items-center justify-between p-4 cursor-pointer hover:bg-opacity-75 transition-colors select-none"
+                onClick={() => toggleMilestone(i)}
+              >
+                <div className="flex items-center gap-3">
+                   {/* Chevron Icon */}
+                   <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                   </div>
+                   <div>
+                    <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+                    {m.dueDate && (
+                      <div className="text-xs text-gray-600">
+                        Due: {new Date(m.dueDate).toLocaleDateString()}
+                      </div>
+                    )}
+                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-lg font-bold text-green-700">
@@ -507,95 +530,100 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {renderChangeRequestBanner(i)}
+              {/* Body - Visible only when expanded */}
+              {isExpanded && (
+                <div className="p-4 border-t border-gray-200/50">
+                  {renderChangeRequestBanner(i)}
 
-              {isPaid && (
-                <div className="mt-3 space-y-2">
-                  <div className="p-2 bg-white rounded border text-sm">
-                    <div className="text-green-700">
-                      ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
-                    </div>
-                    {m.paymentTxHash && (
-                      <div className="mt-1">
-                        <span className="font-medium">TX Hash: </span>
-                        <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
-                      </div>
-                    )}
-                    {m.proof && (
-                      <div className="mt-1">
-                        <span className="font-medium">Proof: </span>
-                        {m.proof}
-                      </div>
-                    )}
-                  </div>
-
-                  <PaymentVerification
-                    transactionHash={m.paymentTxHash as string}
-                    currency={bid.preferredStablecoin}
-                    amount={Number(m.amount || 0)}
-                    toAddress={bid.walletAddress}
-                  />
-                </div>
-              )}
-
-              {!isPaid && (
-                <div className="mt-3">
-                  {canSubmit ? (
-                    <>
-                      <label className="block text-sm font-medium mb-1">
-                        Proof of completion (text optional)
-                      </label>
-                      <textarea
-                        value={textByIndex[i] || ''}
-                        onChange={(e) => setText(i, e.target.value)}
-                        rows={3}
-                        className="w-full p-2 border rounded text-sm mb-2"
-                        placeholder="Notes (optional, files will be attached automatically)"
-                      />
-                      <div className="flex items-center gap-3 mb-2">
-                        <input
-                          type="file"
-                          multiple
-                          onChange={(e) => setFiles(i, e.target.files)}
-                          className="text-sm"
-                        />
-                        {!!(filesByIndex[i]?.length) && (
-                          <span className="text-xs text-gray-600">
-                            {filesByIndex[i].length} file(s) selected
-                          </span>
+                  {isPaid && (
+                    <div className="space-y-2">
+                      <div className="p-2 bg-white rounded border text-sm">
+                        <div className="text-green-700">
+                          ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+                        </div>
+                        {m.paymentTxHash && (
+                          <div className="mt-1">
+                            <span className="font-medium">TX Hash: </span>
+                            <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
+                          </div>
+                        )}
+                        {m.proof && (
+                          <div className="mt-1">
+                            <span className="font-medium">Proof: </span>
+                            {m.proof}
+                          </div>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleSubmitProof(i)}
-                        disabled={busyIndex === i}
-                        className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-                      </button>
-                    </>
-                  ) : (
-                    !isDone && (
-                      <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
-                        Proof submitted — awaiting review.
-                      </div>
-                    )
-                  )}
 
-                  {isDone && !isPaid && isAdmin && (
-                    <div className="mt-3">
-                      <button
-                        onClick={() => handleReleasePayment(i)}
-                        disabled={busyIndex === i || !!paidLocal[i]}
-                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
-                      </button>
+                      <PaymentVerification
+                        transactionHash={m.paymentTxHash as string}
+                        currency={bid.preferredStablecoin}
+                        amount={Number(m.amount || 0)}
+                        toAddress={bid.walletAddress}
+                      />
                     </div>
                   )}
 
-                  {isDone && !isPaid && !isAdmin && (
-                    <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
-                      Awaiting admin to release payment.
+                  {!isPaid && (
+                    <div className="mt-2">
+                      {canSubmit ? (
+                        <>
+                          <label className="block text-sm font-medium mb-1">
+                            Proof of completion (text optional)
+                          </label>
+                          <textarea
+                            value={textByIndex[i] || ''}
+                            onChange={(e) => setText(i, e.target.value)}
+                            rows={3}
+                            className="w-full p-2 border rounded text-sm mb-2"
+                            placeholder="Notes (optional, files will be attached automatically)"
+                          />
+                          <div className="flex items-center gap-3 mb-2">
+                            <input
+                              type="file"
+                              multiple
+                              onChange={(e) => setFiles(i, e.target.files)}
+                              className="text-sm"
+                            />
+                            {!!(filesByIndex[i]?.length) && (
+                              <span className="text-xs text-gray-600">
+                                {filesByIndex[i].length} file(s) selected
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleSubmitProof(i)}
+                            disabled={busyIndex === i}
+                            className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+                          >
+                            {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+                          </button>
+                        </>
+                      ) : (
+                        !isDone && (
+                          <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                            Proof submitted — awaiting review.
+                          </div>
+                        )
+                      )}
+
+                      {isDone && !isPaid && isAdmin && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleReleasePayment(i)}
+                            disabled={busyIndex === i || !!paidLocal[i]}
+                            className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+                          >
+                            {busyIndex === i ? 'Processing…' : 'Release Payment'}
+                          </button>
+                        </div>
+                      )}
+
+                      {isDone && !isPaid && !isAdmin && (
+                        <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
+                          Awaiting admin to release payment.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
