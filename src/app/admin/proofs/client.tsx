@@ -398,12 +398,15 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
 
-  // --- State: Interaction (Lightbox / CR) ---
+  // --- State: Interaction (Lightbox / CR / Expansion) ---
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const [crFor, setCrFor] = useState<{ bidId: number; proposalId: number; milestoneIndex: number } | null>(null);
   const [crText, setCrText] = useState<Record<string, string>>({});
   const [crBusy, setCrBusy] = useState<Record<string, boolean>>({});
   const [crErr, setCrErr] = useState<Record<string, string | null>>({});
+  
+  // ** New: Accordion state **
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   // --- State: Caching & Local Tracking ---
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
@@ -423,6 +426,16 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   const safeStatusCache = useRef<Map<string, { isExecuted: boolean; txHash?: string | null; at: number }>>(new Map());
   const pollers = useRef<Set<string>>(new Set());
   const bcRef = useRef<BroadcastChannel | null>(null);
+
+  // --------------------------------------------------------------------------
+  // Helper: Accordion Toggle
+  // --------------------------------------------------------------------------
+  const toggleExpanded = (key: string) => {
+    const next = new Set(expandedIds);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setExpandedIds(next);
+  };
 
   // --------------------------------------------------------------------------
   // Inner Component: Agent2 Panel
@@ -756,17 +769,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       if (DEBUG_FILES) console.log('🔍 loadProofs: Raw bids data:', rows);
 
       // clear local pending for server-paid
-for (const bid of rows || []) {
+      for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          // FIX: Check for paymentTxHash or safePaymentTxHash directly
-          // This ensures we clear the pending chip even if helper logic is strict
-          const isEffectivePaid = 
-            msIsPaid(ms[i]) || 
-            !!ms[i].paymentTxHash || 
-            (!!ms[i].safePaymentTxHash && !ms[i].paymentPending);
-
-          if (isEffectivePaid) {
+          if (msIsPaid(ms[i])) {
             const key = mkKey(bid.bidId, i);
             removePending(key);
             setPaidOverrideKey(key, false);
@@ -1019,31 +1025,17 @@ for (const bid of rows || []) {
     }
   };
 
- const handlePay = async (bidId: number, milestoneIndex: number) => {
+  const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
-      
-      // 1. Trigger the server payment
       await payMilestone(bidId, milestoneIndex);
-
-      // 2. Mark as Pending immediately (Yellow status, hides button)
       const key = mkKey(bidId, milestoneIndex);
       addPending(key);
-      
-      // 3. Notify other tabs/components
       emitPayQueued(bidId, milestoneIndex);
-
-      // 4. Start polling for the real TX hash
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
-      
-      // 5. Attempt one immediate refresh just in case it was fast
-      router.refresh();
-      loadProofs(true);
-
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      // If it failed, remove the pending status so user can try again
       removePending(mkKey(bidId, milestoneIndex));
     } finally {
       setProcessing(null);
@@ -1307,7 +1299,7 @@ for (const bid of rows || []) {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8">
+    <div className="max-w-5xl mx-auto py-8 px-4">
       {/* Debug Controls */}
       {DEBUG_FILES && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -1359,232 +1351,246 @@ for (const bid of rows || []) {
         />
       </div>
 
+      <div className="mb-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        Processed / History
+      </div>
+
       {(filtered || []).length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
           <div className="text-5xl mb-3">{tab === 'archived' ? '📁' : '🗂️'}</div>
           <p className="text-slate-700">{tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}</p>
         </div>
       ) : (
-        <div className="space-y-12"> {/* Big Gap between Bids */}
+        <div className="space-y-4"> 
           {filtered.map((bid: any) => (
-            <div key={bid.bidId} className="border-b border-slate-200 pb-8 last:border-0 last:pb-0">
-              
-              {/* Bid Group Header */}
-              <div className="mb-4 px-2 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                       {bid.vendorName} 
-                       <span className="text-slate-400 font-normal text-base">— Proposal #{bid.proposalId}</span>
-                    </h2>
-                    <p className="text-slate-500 text-sm mt-1">Bid ID: {bid.bidId}</p>
-                  </div>
-                  <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">
-                    Manage Proposal →
-                  </Link>
-              </div>
-              
-              <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
+             (bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
+                const key = mkKey(bid.bidId, origIdx);
+                const isExpanded = expandedIds.has(key);
 
-              {/* Milestones Stack */}
-              <div className="space-y-6"> {/* Explicit spacing between milestone cards */}
-                {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
-                  const key = mkKey(bid.bidId, origIdx);
+                const approved = msIsApproved(m) || isCompleted(m);
+                const paid = msIsPaid(m) || paidOverride.has(key);
+                const localPending = pendingPay.has(key);
+                const hasRealSafeHash = !!readSafeTxHash(m);
+                const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
+                const showRequestChanges = hasProof(m) && !approved && !paid && !isArchived(bid.bidId, origIdx);
 
-                  const approved = msIsApproved(m) || isCompleted(m);
-                  const paid = msIsPaid(m) || paidOverride.has(key);
-                  const localPending = pendingPay.has(key);
-                  const hasRealSafeHash = !!readSafeTxHash(m);
-                  const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
-                  const showRequestChanges = hasProof(m) && !approved && !paid && !isArchived(bid.bidId, origIdx);
+                // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
+                const lp = latestProofByKey[key];
+                const fromProofs = entriesFromProofFiles(lp?.files || []);
+                const fromMilestone = extractFilesFromMilestone(m);
+                const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
-                  // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
-                  const lp = latestProofByKey[key];
-                  const fromProofs = entriesFromProofFiles(lp?.files || []);
-                  const fromMilestone = extractFilesFromMilestone(m);
-                  const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
-
-                  return (
-                    <div key={`${bid.bidId}:${origIdx}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                      
-                      {/* MILESTONE HEADER STRIP */}
-                      <div className="bg-slate-50/50 border-b border-slate-100 px-6 py-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <span className="font-semibold text-slate-800">{m.name}</span>
-                             
-                             {/* Status Chips */}
-                             {isArchived(bid.bidId, origIdx) && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200 font-medium">Archived</span>
-                              )}
-                              {approved && !paid && !msHasSafeMarker(m) && !localPending && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 font-medium">Approved</span>
-                              )}
-                              {showPendingChip && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100 font-medium">Payment Pending</span>
-                              )}
-                              {paid && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100 font-medium">Paid</span>}
-                          </div>
-                          <div className="text-sm text-slate-500">
-                             <span className="font-medium text-slate-900">${m.amount}</span> <span className="mx-1">·</span> Due: {m.dueDate}
-                          </div>
-                      </div>
-
-                      {/* MILESTONE CONTENT BODY */}
-                      <div className="px-6 py-6">
-                        <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
-                        <DebugPanel data={filesToShow} title={`Files to Show: ${origIdx}`} />
-
-                        {/* Proof text/description */}
-                        {renderProof(m)}
-                        {(!m?.proof || (typeof m.proof === 'string' && !/https?:\/\//i.test(m.proof))) && lp?.description && (
-                          <p className="text-sm text-gray-700 mt-2 bg-slate-50 p-3 rounded border border-slate-100">{lp.description}</p>
-                        )}
-
-                        {/* Files */}
-                        <div className="mt-4">
-                           <FilesStrip files={filesToShow} onImageClick={(urls, index) => setLightbox({ urls, index })} />
-                        </div>
-
-                        {/* Agent2 Panel - Separate Block */}
-                        <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
-
-                        {/* Change Request Thread */}
-                        {!isArchived(bid.bidId, origIdx) && (
-                          <div className="mt-6 pt-4 border-t border-slate-100">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Change Request History</h4>
-                            <ChangeRequestsPanel
-                              key={`cr:${bid.proposalId}:${origIdx}`}
-                              proposalId={Number(bid.proposalId)}
-                              initialMilestoneIndex={origIdx}
-                              forceMilestoneIndex={origIdx}
-                              hideMilestoneTabs
-                            />
-                          </div>
-                        )}
-
-                        {/* Transaction Hash */}
-                        {(m.paymentTxHash || m.safePaymentTxHash) && (
-                          <div className="mt-4 p-2 bg-green-50 text-green-700 text-xs rounded border border-green-100 flex items-center gap-2">
-                             ✅ <strong>Paid:</strong> <span className="font-mono truncate">{m.paymentTxHash || m.safePaymentTxHash}</span>
-                          </div>
-                        )}
-
-                        {!hasProof(m) && !approved && (
-                           <div className="mt-4 p-3 bg-amber-50 text-amber-800 text-sm rounded border border-amber-100 text-center">
-                              ⏳ No proof submitted yet.
+                return (
+                  <div key={`${bid.bidId}:${origIdx}`} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all">
+                    
+                    {/* ACCORDION HEADER (Clickable) */}
+                    <div 
+                      onClick={() => toggleExpanded(key)}
+                      className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors select-none"
+                    >
+                        <div className="flex items-center gap-4">
+                           {/* Status Icon Circle */}
+                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0 ${
+                              approved ? 'bg-emerald-100 text-emerald-600' : 
+                              hasProof(m) ? 'bg-amber-100 text-amber-600' : 
+                              'bg-slate-100 text-slate-400'
+                           }`}>
+                              {approved ? '✓' : hasProof(m) ? '!' : '○'}
                            </div>
+
+                           <div>
+                              <h3 className="font-bold text-slate-900">{m.name}</h3>
+                              <p className="text-xs text-slate-500">
+                                 Bid #{bid.bidId} · <span className="uppercase">{bid.vendorName}</span> · ${m.amount}
+                              </p>
+                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                           {/* Status Badges */}
+                           {paid && (
+                              <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1">
+                                 Paid ↗
+                              </span>
+                           )}
+                           {approved && (
+                              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
+                                 APPROVED
+                              </span>
+                           )}
+                           {!approved && hasProof(m) && (
+                              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                                 NEEDS REVIEW
+                              </span>
+                           )}
+                            {showPendingChip && (
+                              <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+                                 PENDING PAYMENT
+                              </span>
+                           )}
+
+                           {/* Chevron */}
+                           <svg 
+                              className={`w-5 h-5 text-slate-400 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} 
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                           >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                           </svg>
+                        </div>
+                    </div>
+
+                    {/* EXPANDABLE BODY */}
+                    {isExpanded && (
+                      <div className="border-t border-slate-100 bg-slate-50/30">
+                        <div className="px-6 py-6">
+                          <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
+                          
+                          {/* Proof text/description */}
+                          {renderProof(m)}
+                          {(!m?.proof || (typeof m.proof === 'string' && !/https?:\/\//i.test(m.proof))) && lp?.description && (
+                            <p className="text-sm text-gray-700 mt-2 bg-white p-3 rounded border border-slate-100 shadow-sm">{lp.description}</p>
+                          )}
+
+                          {/* Files */}
+                          <div className="mt-4">
+                             <FilesStrip files={filesToShow} onImageClick={(urls, index) => setLightbox({ urls, index })} />
+                          </div>
+
+                          {/* Agent2 Panel */}
+                          <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
+
+                          {/* Change Request Thread */}
+                          {!isArchived(bid.bidId, origIdx) && (
+                            <div className="mt-6 pt-4 border-t border-slate-200">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Change Request History</h4>
+                              <ChangeRequestsPanel
+                                key={`cr:${bid.proposalId}:${origIdx}`}
+                                proposalId={Number(bid.proposalId)}
+                                initialMilestoneIndex={origIdx}
+                                forceMilestoneIndex={origIdx}
+                                hideMilestoneTabs
+                              />
+                            </div>
+                          )}
+
+                          {/* Tx Info */}
+                          {(m.paymentTxHash || m.safePaymentTxHash) && (
+                            <div className="mt-4 p-2 bg-green-50 text-green-700 text-xs rounded border border-green-100 flex items-center gap-2 w-fit">
+                               ✅ <strong>Paid:</strong> <span className="font-mono truncate max-w-[200px]">{m.paymentTxHash || m.safePaymentTxHash}</span>
+                            </div>
+                          )}
+
+                          {!hasProof(m) && !approved && (
+                             <div className="mt-4 p-3 bg-amber-50 text-amber-800 text-sm rounded border border-amber-100 text-center">
+                                ⏳ No proof submitted yet.
+                             </div>
+                          )}
+                        </div>
+
+                        {/* ACTION TOOLBAR (Only visible when expanded) */}
+                        {tab !== 'archived' && (
+                          <div className="bg-white border-t border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                            
+                            {/* LEFT: Admin Actions */}
+                            <div className="flex items-center gap-2">
+                              {!isArchived(bid.bidId, origIdx) ? (
+                                <button
+                                  onClick={() => handleArchive(bid.bidId, origIdx)}
+                                  disabled={processing === `archive-${bid.bidId}-${origIdx}`}
+                                  className="px-4 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 text-sm font-medium transition shadow-sm disabled:opacity-50"
+                                  title="Hide this milestone"
+                                >
+                                  {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleUnarchive(bid.bidId, origIdx)}
+                                  disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
+                                  className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-700 text-sm font-medium transition shadow-sm disabled:opacity-50"
+                                >
+                                  {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
+                                </button>
+                              )}
+
+                               {hasProof(m) && !approved && (() => {
+                                  const rKey = mkKey(bid.bidId, origIdx);
+                                  const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
+                                  const isLocked = rejectedLocal.has(rKey);
+                                  const disabled = isProcessing || isLocked;
+                                  return (
+                                    <button
+                                      onClick={() => handleReject(bid.bidId, origIdx)}
+                                      disabled={disabled}
+                                      className={`px-4 py-2 rounded border border-red-200 text-red-600 bg-white hover:bg-red-50 text-sm font-medium transition shadow-sm disabled:opacity-50 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
+                                    </button>
+                                  );
+                                })()}
+                            </div>
+
+                            {/* RIGHT: Primary Actions */}
+                            <div className="flex items-center gap-3">
+                              {showRequestChanges && (
+                                <button
+                                  onClick={() =>
+                                    setCrFor({
+                                      bidId: Number(bid.bidId),
+                                      proposalId: Number(bid.proposalId),
+                                      milestoneIndex: origIdx,
+                                    })
+                                  }
+                                  className="px-4 py-2 rounded border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 text-sm font-medium transition shadow-sm"
+                                >
+                                  Request Changes
+                                </button>
+                              )}
+
+                              {hasProof(m) && !approved && (
+                                <button
+                                  onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
+                                  disabled={processing === `approve-${bid.bidId}-${origIdx}`}
+                                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium shadow-sm transition disabled:opacity-50"
+                                >
+                                  {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
+                                </button>
+                              )}
+
+                              {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
+                                <div className="flex items-center gap-2 pl-2 border-l border-slate-200 bg-emerald-50/50 p-1 rounded-lg">
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePay(bid.bidId, origIdx)}
+                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                    className={`px-4 py-2 rounded text-white text-sm font-medium shadow-sm transition ${processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-emerald-600 opacity-60 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                                    title="Release payment manually (EOA)"
+                                  >
+                                    {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Pay (Manual)'}
+                                  </button>
+
+                                  <SafePayButton
+                                    bidId={bid.bidId}
+                                    milestoneIndex={origIdx}
+                                    amountUSD={Number(m?.amount || 0)}
+                                    disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                    onQueued={() => {
+                                      const k = mkKey(bid.bidId, origIdx);
+                                      addPending(k);
+                                      emitPayQueued(bid.bidId, origIdx);
+                                      pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+                                      router.refresh();
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
-
-                      {/* ========================== */}
-                      {/* ACTION DECK (TOOLBAR)      */}
-                      {/* ========================== */}
-                      {tab !== 'archived' && (
-                        <div className="bg-white border-t border-slate-100 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-                          
-                          {/* LEFT: Admin / Secondary Actions */}
-                          <div className="flex items-center gap-2">
-                            {!isArchived(bid.bidId, origIdx) ? (
-                              <button
-                                onClick={() => handleArchive(bid.bidId, origIdx)}
-                                disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                                className="px-4 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 text-sm font-medium transition shadow-sm disabled:opacity-50"
-                                title="Hide this milestone"
-                              >
-                                {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleUnarchive(bid.bidId, origIdx)}
-                                disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
-                                className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-700 text-sm font-medium transition shadow-sm disabled:opacity-50"
-                              >
-                                {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
-                              </button>
-                            )}
-
-                             {hasProof(m) && !approved && (() => {
-                                const rKey = mkKey(bid.bidId, origIdx);
-                                const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
-                                const isLocked = rejectedLocal.has(rKey);
-                                const disabled = isProcessing || isLocked;
-                                return (
-                                  <button
-                                    onClick={() => handleReject(bid.bidId, origIdx)}
-                                    disabled={disabled}
-                                    className={`px-4 py-2 rounded border border-red-200 text-red-600 bg-white hover:bg-red-50 text-sm font-medium transition shadow-sm disabled:opacity-50 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                  >
-                                    {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
-                                  </button>
-                                );
-                              })()}
-                          </div>
-
-                          {/* RIGHT: Primary Actions (Flow: Request -> Approve -> Pay) */}
-                          <div className="flex items-center gap-3">
-                            
-                            {/* 1. Request Changes */}
-                            {showRequestChanges && (
-                              <button
-                                onClick={() =>
-                                  setCrFor({
-                                    bidId: Number(bid.bidId),
-                                    proposalId: Number(bid.proposalId),
-                                    milestoneIndex: origIdx,
-                                  })
-                                }
-                                className="px-4 py-2 rounded border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 text-sm font-medium transition shadow-sm"
-                              >
-                                Request Changes
-                              </button>
-                            )}
-
-                            {/* 2. Approve Proof */}
-                            {hasProof(m) && !approved && (
-                              <button
-                                onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
-                                disabled={processing === `approve-${bid.bidId}-${origIdx}`}
-                                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-medium shadow-sm transition disabled:opacity-50"
-                              >
-                                {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
-                              </button>
-                            )}
-
-                            {/* 3. Pay (Only shows if approved/completed) */}
-                            {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
-                              <div className="flex items-center gap-2 pl-2 border-l border-slate-200 bg-emerald-50/50 p-1 rounded-lg">
-                                <button
-                                  type="button"
-                                  onClick={() => handlePay(bid.bidId, origIdx)}
-                                  disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                  className={`px-4 py-2 rounded text-white text-sm font-medium shadow-sm transition ${processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-emerald-600 opacity-60 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                                  title="Release payment manually (EOA)"
-                                >
-                                  {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Pay (Manual)'}
-                                </button>
-
-                                <SafePayButton
-                                  bidId={bid.bidId}
-                                  milestoneIndex={origIdx}
-                                  amountUSD={Number(m?.amount || 0)}
-                                  disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                  onQueued={() => {
-                                    const k = mkKey(bid.bidId, origIdx);
-                                    addPending(k);
-                                    emitPayQueued(bid.bidId, origIdx);
-                                    pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                    router.refresh();
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+                    )}
+                  </div>
+                );
+             })
           ))}
         </div>
       )}
