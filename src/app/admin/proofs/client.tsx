@@ -1024,31 +1024,27 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   };
 
- const handlePay = async (bidId: number, milestoneIndex: number) => {
+const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
       
-      // 1. Trigger the server payment
+      // 1. Trigger API
       await payMilestone(bidId, milestoneIndex);
-
-      // 2. Mark as Pending immediately (Yellow status, hides button)
+      
+      // 2. Set Pending Visuals immediately
       const key = mkKey(bidId, milestoneIndex);
       addPending(key);
-      
-      // 3. Notify other tabs/components
       emitPayQueued(bidId, milestoneIndex);
 
-      // 4. Start polling for the real TX hash
+      // 3. Poll for the result (now smarter about hashes)
       pollUntilPaid(bidId, milestoneIndex).catch(() => {});
       
-      // 5. Attempt one immediate refresh just in case it was fast
-      router.refresh();
-      loadProofs(true);
+      // 4. Force a quick check in case it was instant
+      setTimeout(() => loadProofs(true), 1000);
 
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      // If it failed, remove the pending status so user can try again
       removePending(mkKey(bidId, milestoneIndex));
     } finally {
       setProcessing(null);
