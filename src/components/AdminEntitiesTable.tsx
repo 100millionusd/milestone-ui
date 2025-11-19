@@ -701,9 +701,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                             </div>
                             )}
                             
-                            {/* UPDATED: Removed truncate and max-w to allow full visibility */}
+                            {/* UPDATED: Increased font size to text-xs (was text-[10px]) */}
                             {r.address && (
-                                <div className="text-[10px] text-slate-400 break-words">
+                                <div className="text-xs text-slate-400 break-words">
                                     {r.address}
                                 </div>
                             )}
