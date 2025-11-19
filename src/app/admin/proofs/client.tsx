@@ -756,10 +756,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       if (DEBUG_FILES) console.log('🔍 loadProofs: Raw bids data:', rows);
 
       // clear local pending for server-paid
-      for (const bid of rows || []) {
+for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (msIsPaid(ms[i])) {
+          // FIX: Check for paymentTxHash or safePaymentTxHash directly
+          // This ensures we clear the pending chip even if helper logic is strict
+          const isEffectivePaid = 
+            msIsPaid(ms[i]) || 
+            !!ms[i].paymentTxHash || 
+            (!!ms[i].safePaymentTxHash && !ms[i].paymentPending);
+
+          if (isEffectivePaid) {
             const key = mkKey(bid.bidId, i);
             removePending(key);
             setPaidOverrideKey(key, false);
