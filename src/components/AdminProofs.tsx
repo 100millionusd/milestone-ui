@@ -954,19 +954,19 @@ function ProofCard(props: ProofCardProps) {
                         </div>
                     </div>
                     
-                    {/* Server Actions (Archive) */}
-                    <div className="text-right">
+ {/* Server Actions (Archive) */}
+                    <div className="mt-3">
                          {!isArchived ? (
                             <button
                             onClick={() => onArchive(true)}
-                            className="text-[10px] text-slate-400 hover:text-slate-600 underline decoration-dotted"
+                            className="w-full py-2 text-xs font-medium rounded border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors shadow-sm"
                             >
                             Archive this milestone
                             </button>
                         ) : (
                             <button
                             onClick={() => onArchive(false)}
-                            className="text-[10px] text-indigo-400 hover:text-indigo-600 underline decoration-dotted"
+                            className="w-full py-2 text-xs font-medium rounded border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors shadow-sm"
                             >
                             Unarchive
                             </button>
