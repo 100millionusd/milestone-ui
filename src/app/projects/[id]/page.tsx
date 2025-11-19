@@ -1127,7 +1127,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
         <details className="group border rounded-lg bg-white overflow-hidden shadow-sm">
           <summary className="px-6 py-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors select-none list-none">
             <div className="flex items-center gap-3">
-              {/* Chevron */}
               <div className="p-1 rounded bg-gray-200 group-open:bg-blue-100 text-gray-500 group-open:text-blue-600 transition-colors">
                 <svg className="w-5 h-5 transform transition-transform duration-200 group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1142,7 +1141,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
             </span>
           </summary>
 
-          {/* Hidden content: Just the Table */}
           <div className="border-t border-gray-200">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
@@ -1160,7 +1158,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
                   {acceptedMilestones.map((m, idx) => {
                     const src = (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
                     const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
-                    
                     const paid = msIsPaid(src);
                     const localPending = safePending.has(key);
                     const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
@@ -1169,60 +1166,25 @@ const bidFiles = safeBids.flatMap((b: any) => {
 
                     let statusLabel = 'Pending';
                     let statusClass = 'bg-gray-100 text-gray-600 border-gray-200';
-
-                    if (paid) {
-                      statusLabel = 'Paid';
-                      statusClass = 'bg-green-100 text-green-700 border-green-200';
-                    } else if (safeInFlight) {
-                      statusLabel = 'Processing';
-                      statusClass = 'bg-amber-100 text-amber-700 border-amber-200';
-                    } else if (completedRow) {
-                      statusLabel = 'Completed';
-                      statusClass = 'bg-blue-100 text-blue-700 border-blue-200';
-                    } else if (hasProofNow) {
-                      statusLabel = 'Submitted';
-                      statusClass = 'bg-indigo-50 text-indigo-600 border-indigo-100';
-                    }
+                    if (paid) { statusLabel = 'Paid'; statusClass = 'bg-green-100 text-green-700 border-green-200'; }
+                    else if (safeInFlight) { statusLabel = 'Processing'; statusClass = 'bg-amber-100 text-amber-700 border-amber-200'; }
+                    else if (completedRow) { statusLabel = 'Completed'; statusClass = 'bg-blue-100 text-blue-700 border-blue-200'; }
+                    else if (hasProofNow) { statusLabel = 'Submitted'; statusClass = 'bg-indigo-50 text-indigo-600 border-indigo-100'; }
 
                     return (
                       <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-6 py-4 font-medium text-gray-500">{idx + 1}</td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-gray-900">{m.name || 'Untitled'}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-bold text-gray-900">
-                            {m.amount ? currency.format(Number(m.amount)) : '—'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusClass}`}>
-                            {statusLabel}
-                          </span>
-                        </td>
+                        <td className="px-6 py-4"><div className="font-medium text-gray-900">{m.name || 'Untitled'}</div></td>
+                        <td className="px-6 py-4"><span className="font-bold text-gray-900">{m.amount ? currency.format(Number(m.amount)) : '—'}</span></td>
+                        <td className="px-6 py-4"><span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusClass}`}>{statusLabel}</span></td>
                         <td className="px-6 py-4 text-gray-500 text-xs space-y-1">
-                          {completedRow && (
-                            <div title="Completion Date">
-                              <span className="font-medium">Done:</span> {fmt(m.completionDate).split(',')[0]}
-                            </div>
-                          )}
-                          {paid && (
-                            <div title="Payment Date">
-                               <span className="font-medium">Paid:</span> {fmt((m as any).paymentDate || (src as any).paidAt || (src as any).safeExecutedAt).split(',')[0]}
-                            </div>
-                          )}
+                          {completedRow && <div title="Completion Date"><span className="font-medium">Done:</span> {fmt(m.completionDate).split(',')[0]}</div>}
+                          {paid && <div title="Payment Date"><span className="font-medium">Paid:</span> {fmt((m as any).paymentDate || (src as any).paidAt || (src as any).safeExecutedAt).split(',')[0]}</div>}
                           {!completedRow && !paid && '—'}
                         </td>
                         <td className="px-6 py-4">
                           {((src as any).paymentTxHash || (src as any).safePaymentTxHash) ? (
-                            <a 
-                              href={`https://etherscan.io/tx/${(src as any).paymentTxHash || (src as any).safePaymentTxHash}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline text-xs"
-                            >
-                              <span>View Tx</span>
-                            </a>
+                            <a href={`https://etherscan.io/tx/${(src as any).paymentTxHash || (src as any).safePaymentTxHash}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline text-xs"><span>View Tx</span></a>
                           ) : <span className="text-gray-400 text-xs">—</span>}
                         </td>
                       </tr>
@@ -1234,7 +1196,19 @@ const bidFiles = safeBids.flatMap((b: any) => {
           </div>
         </details>
 
-        {/* 3. Change Requests (Manual Payment Processor <MilestonePayments> is REMOVED) */}
+        {/* 3. Payment Cards List (Restored, but we will hide the manual processor inside it via the other file) */}
+        {(acceptedBid || safeBids[0]) && (
+          <div className="border rounded-lg bg-white shadow-sm p-6">
+             <h4 className="text-sm font-semibold text-gray-900 mb-3">Milestone Payments</h4>
+            <MilestonePayments
+              bid={acceptedBid || safeBids[0]}
+              onUpdate={refreshProofs}
+              proposalId={projectIdNum}
+            />
+          </div>
+        )}
+
+        {/* 4. Change Requests */}
         <div className="border rounded-lg bg-white shadow-sm p-6">
           <h3 className="font-semibold mb-2 text-gray-900">Change Requests</h3>
           <p className="text-sm text-gray-500 mb-4">Manage negotiations between admin and vendor.</p>
@@ -1242,7 +1216,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
         </div>
       </>
     ) : (
-      /* Empty State */
       <div className="border rounded-lg bg-white shadow-sm p-12 text-center">
           <div className="mx-auto h-12 w-12 text-gray-400">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
