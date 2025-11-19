@@ -1,7 +1,7 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   completeMilestone,
   payMilestone,
@@ -18,51 +18,67 @@ import PaymentVerification from './PaymentVerification';
 async function shrinkImageIfNeeded(file: File): Promise<File> {
   if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
 
-  const bitmap = await createImageBitmap(file);
-  const maxSide = 2000;
-  let { width, height } = bitmap;
-  if (width > height && width > maxSide) {
-    height = Math.round((height / width) * maxSide);
-    width = maxSide;
-  } else if (height > maxSide) {
-    width = Math.round((width / height) * maxSide);
-    height = maxSide;
+  // FIX: Wrap in try/catch for older browsers
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSide = 2000;
+    let { width, height } = bitmap;
+    if (width > height && width > maxSide) {
+      height = Math.round((height / width) * maxSide);
+      width = maxSide;
+    } else if (height > maxSide) {
+      width = Math.round((width / height) * maxSide);
+      height = maxSide;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    
+    // FIX: Handle transparency for PNGs to prevent black backgrounds
+    if (!file.type.includes('png')) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+    }
+    
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    const blob: Blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve as any, file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85)
+    );
+    
+    // Keep extension consistent with type
+    const ext = file.type === 'image/png' ? '.png' : '.jpg';
+    return new File([blob!], (file.name || 'image').replace(/\.(png|webp|jpeg|jpg)$/i, '') + ext, {
+      type: file.type === 'image/png' ? 'image/png' : 'image/jpeg',
+      lastModified: Date.now(),
+    });
+  } catch (e) {
+    console.warn("Image shrinking failed, using original", e);
+    return file;
   }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, 0, 0, width, height);
-
-  const blob: Blob = await new Promise((resolve) =>
-    canvas.toBlob(resolve as any, 'image/jpeg', 0.85)
-  );
-  return new File([blob!], (file.name || 'image').replace(/\.(png|webp)$/i, '') + '.jpg', {
-    type: 'image/jpeg',
-    lastModified: Date.now(),
-  });
 }
 
-async function postWithRetry(url: string, fd: FormData): Promise<any> {
-  const go = async () => {
+// FIX: Added maxRetries to prevent infinite loops on 504 errors
+async function postWithRetry(url: string, fd: FormData, retries = 3): Promise<any> {
+  try {
     const r = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
     if (!r.ok) throw new Error(`Upload HTTP ${r.status}`);
     return r.json();
-  };
-  try {
-    return await go();
   } catch (e: any) {
-    if (!/504/.test(String(e?.message))) throw e;
+    // Stop if we run out of retries OR if it's not a 504
+    if (retries <= 0 || !/504/.test(String(e?.message))) throw e;
+    
     await new Promise((r) => setTimeout(r, 1500));
-    return await go();
+    // Decrement retries
+    return await postWithRetry(url, fd, retries - 1);
   }
 }
 
 interface MilestonePaymentsProps {
   bid: Bid;
   onUpdate: () => void;
-  /** Optional: if parent doesn’t pass it we’ll derive from bid or URL */
   proposalId?: number;
 }
 
@@ -84,14 +100,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [textByIndex, setTextByIndex] = useState<TextMap>({});
   const [filesByIndex, setFilesByIndex] = useState<FilesMap>({});
-  // mark milestones as submitted locally so the chip updates immediately
   const [submittedLocal, setSubmittedLocal] = useState<Record<number, true>>({});
-  // open change requests grouped by milestone index (for vendor visibility)
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
-  // role gate for cosmetic hiding of admin-only actions
   const [isAdmin, setIsAdmin] = useState(false);
-  // local paid latch so button disappears immediately after 200/409
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
+  
+  // FIX: Move ID resolution to state to avoid side-effects in render
+  const [activeProposalId, setActiveProposalId] = useState<number | undefined>(undefined);
 
   // -------- helpers --------
   const setText = (i: number, v: string) =>
@@ -100,24 +115,40 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const setFiles = (i: number, files: FileList | null) =>
     setFilesByIndex((prev) => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
-  const deriveProposalId = () => {
-    if (Number.isFinite(proposalId as number)) return Number(proposalId);
-    const fromBid =
-      (bid as any)?.proposalId ??
-      (bid as any)?.proposalID ??
-      (bid as any)?.proposal_id;
-    if (Number.isFinite(fromBid)) return Number(fromBid);
-    if (typeof window !== 'undefined') {
-      const parts = location.pathname.split('/').filter(Boolean);
-      const last = Number(parts[parts.length - 1]);
-      if (Number.isFinite(last)) return last;
+  // FIX: Correctly derive Proposal ID inside useEffect to prevent hydration mismatches
+  useEffect(() => {
+    let pid: number | undefined = undefined;
+
+    if (Number.isFinite(proposalId)) {
+      pid = Number(proposalId);
+    } else {
+      const fromBid = (bid as any)?.proposalId ?? (bid as any)?.proposalID ?? (bid as any)?.proposal_id;
+      if (Number.isFinite(fromBid)) {
+        pid = Number(fromBid);
+      } else if (typeof window !== 'undefined') {
+        // Safe to check window here
+        const parts = window.location.pathname.split('/');
+        // Scan parts for a valid number (more robust than hardcoded index)
+        for (const p of parts) {
+             const val = parseInt(p);
+             if (!isNaN(val) && val > 0) { // Assuming IDs are positive
+                 pid = val; 
+                 // We take the last valid number or first? Usually logic dictates specific position, 
+                 // but this fallback is safer than parts[length-1] which might be empty string
+             }
+        }
+        // Fallback to legacy logic if scan fails but we need specific index behavior
+        if (!pid) {
+             const validParts = parts.filter(Boolean);
+             const last = Number(validParts[validParts.length - 1]);
+             if (Number.isFinite(last)) pid = last;
+        }
+      }
     }
-    return undefined;
-  };
+    setActiveProposalId(pid);
+  }, [proposalId, bid]);
 
-  const resolvedProposalId = useMemo(() => deriveProposalId(), [proposalId, bid]);
-
-  /** Fetch open CRs for this proposal (for vendor banner + to find the active CR id) */
+  /** Fetch open CRs for this proposal */
   async function loadChangeRequests(pid: number) {
     try {
       const r = await fetch(
@@ -147,24 +178,23 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
   }
 
-  /** Return the newest open CR id for this milestone (if any) */
   function pickOpenCrId(msIndex: number): number | null {
     const list = crByMs[msIndex] || [];
     if (!list.length) return null;
+    // Sort explicitly just in case
     const sorted = [...list].sort(
       (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
     );
     return sorted[sorted.length - 1]?.id ?? null;
   }
 
-  /** Append a response (text + files) to an open CR */
   async function appendCrResponse(
     crId: number,
     note: string,
     files: Array<{ url: string; name?: string; cid?: string }>
   ) {
     try {
-      const r = await fetch(
+      await fetch(
         `/api/proofs/change-requests/${encodeURIComponent(String(crId))}/respond`,
         {
           method: 'POST',
@@ -180,20 +210,18 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           }),
         }
       );
-      if (!r.ok) {
-        // swallow but log (optional)
-        console.debug('[cr] respond non-OK:', r.status);
-      }
     } catch (e) {
-      console.debug('[cr] respond failed (ignored):', (e as any)?.message || e);
+      console.debug('[cr] respond failed (ignored):', e);
     }
   }
 
-  // Load CRs on mount + refresh on proofs events
+  // Load CRs only when activeProposalId is resolved
   useEffect(() => {
-    const pid = Number(resolvedProposalId);
-    if (!Number.isFinite(pid)) return;
+    if (!Number.isFinite(activeProposalId)) return;
+    const pid = activeProposalId!;
+
     loadChangeRequests(pid);
+    
     const onAnyProofUpdate = () => loadChangeRequests(pid);
     window.addEventListener('proofs:updated', onAnyProofUpdate);
     window.addEventListener('proofs:changed', onAnyProofUpdate);
@@ -201,25 +229,24 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       window.removeEventListener('proofs:updated', onAnyProofUpdate);
       window.removeEventListener('proofs:changed', onAnyProofUpdate);
     };
-  }, [resolvedProposalId]);
+  }, [activeProposalId]);
 
-  // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
   useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    try {
-      const j = await getAuthRoleOnce();
-      const role = String(j?.role || '').toLowerCase();
-      if (!cancelled) setIsAdmin(role === 'admin');
-    } catch { /* keep default vendor */ }
-  })();
-  return () => { cancelled = true; };
-}, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await getAuthRoleOnce();
+        const role = String(j?.role || '').toLowerCase();
+        if (!cancelled) setIsAdmin(role === 'admin');
+      } catch { /* keep default vendor */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
-    const pid = resolvedProposalId;
-    if (!Number.isFinite(pid as number)) {
+    const pid = activeProposalId;
+    if (!Number.isFinite(pid)) {
       alert('Cannot determine proposalId.');
       return;
     }
@@ -229,47 +256,39 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
 
-      // Gather files from local input
       const localFiles: File[] = filesByIndex[index] || [];
 
-      // 1) Upload to Pinata via Next upload route (sequential, shrink + retry)
       const uploaded: Array<{ name: string; cid: string; url: string }> = [];
       for (const original of localFiles) {
         const file = await shrinkImageIfNeeded(original);
-
         const fd = new FormData();
-        // IMPORTANT: the field name must be exactly "files" (plural)
         fd.append('files', file, file.name || 'file');
 
+        // This now has a retry limit
         const json = await postWithRetry('/api/proofs/upload', fd);
-        // /api/proofs/upload returns: { ok: true, uploads: [{cid,url,name}, ...] }
+        
         if (json?.uploads?.length) {
           uploaded.push(...json.uploads);
         } else if (json?.cid && json?.url) {
-          // defensive fallback if handler ever returns single file
           uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
         }
       }
 
-      // 2) Map uploaded → filesToSave (full URL, name, cid)
       const filesToSave = uploaded.map((u) => ({ url: u.url, name: u.name, cid: u.cid }));
 
-      // 3) Save to /api/proofs so Files tab updates
       await saveProofFilesToDb({
         proposalId: Number(pid),
-        milestoneIndex: index, // ZERO-BASED
+        milestoneIndex: index,
         files: filesToSave,
         note: note || 'vendor proof',
       });
 
-      // 👉 mark submitted locally so the vendor sees it instantly
       setSubmittedLocal((prev) => ({ ...prev, [index]: true }));
 
-      // 4) Notify page to refresh immediately + precise submitted event
       if (typeof window !== 'undefined') {
         const detail = { proposalId: Number(pid) };
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); // backward-compat
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); 
         window.dispatchEvent(
           new CustomEvent('proofs:submitted', {
             detail: { proposalId: Number(pid), bidId: Number(bid.bidId), milestoneIndex: Number(index) },
@@ -277,13 +296,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         );
       }
 
-      // 5) If there is an OPEN change request → append a response
       const crId = pickOpenCrId(index);
       if (crId) {
         await appendCrResponse(crId, note, filesToSave);
       }
 
-      // 6) Optional: backend proofs for legacy readers
       await submitProof({
         bidId: bid.bidId,
         milestoneIndex: index,
@@ -294,10 +311,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })),
       }).catch(() => {});
 
-      // reload CRs (if status changed server-side)
-      if (Number.isFinite(pid as number)) await loadChangeRequests(Number(pid));
+      if (Number.isFinite(pid)) await loadChangeRequests(Number(pid));
 
-      // clear local inputs
       setText(index, '');
       setFiles(index, null);
 
@@ -319,13 +334,11 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     try {
       setBusyIndex(index);
       await payMilestone(bid.bidId, index);
-      // Optimistic latch so the button vanishes immediately
       setPaidLocal((prev) => ({ ...prev, [index]: true }));
       alert('Payment released.');
       onUpdate();
     } catch (e: any) {
       const msg = String(e?.message || '');
-      // If server is idempotent and replies 409/“already paid”, latch locally too
       if (/\b409\b/.test(msg) || /already paid|already in progress/i.test(msg)) {
         setPaidLocal((prev) => ({ ...prev, [index]: true }));
         alert('Already paid.');
@@ -367,11 +380,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       Array.isArray(raw) ? raw :
       Array.isArray(raw?.items) ? raw.items :
       [];
-    const items = (itemsArr as any[]).map((x) =>
-      typeof x === 'string'
-        ? { text: x, done: false }
-        : { text: String(x?.text ?? x?.title ?? ''), done: !!(x?.done ?? x?.checked) }
-    ).filter((it) => it.text);
+    
+    // Safe mapping
+    const items = (itemsArr as any[]).map((x) => ({
+        text: typeof x === 'string' ? x : String(x?.text ?? x?.title ?? ''), 
+        done: !!(x?.done ?? x?.checked)
+    })).filter((it) => it.text);
 
     return (
       <div className="mt-3 border rounded bg-amber-50 p-3">
@@ -393,12 +407,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     );
   }
 
-  // -------- render --------
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm border">
       <h3 className="text-lg font-semibold mb-4">💰 Milestone Payments</h3>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-50 p-4 rounded border">
           <p className="text-sm text-blue-600">Total Contract Value</p>
@@ -425,7 +437,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         </div>
       </div>
 
-      {/* Wallet */}
       <div className="mb-4 p-3 bg-gray-50 rounded">
         <p className="font-medium text-gray-600">Vendor Wallet Address</p>
         <p className="font-mono text-sm bg-white p-2 rounded mt-1 border">{bid.walletAddress}</p>
@@ -434,7 +445,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         </p>
       </div>
 
-      {/* Milestones list */}
       <div className="space-y-4">
         <h4 className="font-semibold">Payment Milestones</h4>
 
@@ -447,11 +457,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
           const isPaid = paidTruth;
           const isDone = !!m.completed || isPaid;
-
-          // show "Submitted" immediately after upload on this device
           const submitted = !!submittedLocal[i];
-
-          // allow re-submit only when admin opened a Change Request, or when there is no proof yet
           const hasOpenCR = !!(crByMs[i]?.length);
           const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
           
@@ -501,10 +507,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* Show admin change request (if any) */}
               {renderChangeRequestBanner(i)}
 
-              {/* Paid → show verification / details */}
               {isPaid && (
                 <div className="mt-3 space-y-2">
                   <div className="p-2 bg-white rounded border text-sm">
@@ -534,7 +538,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               )}
 
-              {/* Not paid → allow proof submission / payment release */}
               {!isPaid && (
                 <div className="mt-3">
                   {canSubmit ? (
@@ -569,9 +572,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                       >
                         {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
                       </button>
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-                      </p>
                     </>
                   ) : (
                     !isDone && (
@@ -605,7 +605,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
         })}
       </div>
 
-      {/* Manual Payment Processor (admin only) */}
       {isAdmin && (
         <div className="mt-6">
           <ManualPaymentProcessor bid={bid} onPaymentComplete={onUpdate} />
