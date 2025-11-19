@@ -14,11 +14,11 @@ const getMilestoneDescription = (m: any) => m?.notes ?? m?.desc ?? m?.descriptio
 const getDisplayFiles = (bid: any) =>
   (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
 
-/* ——— NEW: Reusable Collapsible Wrapper ——— */
+/* ——— Reusable Collapsible Wrapper ——— */
 function CollapsibleSection({
   title,
   children,
-  defaultOpen = false, // CHANGED: Defaults to closed now
+  defaultOpen = false,
   action
 }: {
   title: React.ReactNode;
@@ -477,9 +477,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
                     </div>
                   )}
 
-                  {/* Collapsible Analysis Body - Defaulted to closed */}
+                  {/* Analysis Body - Always visible now */}
                   {a ? (
-                    <AnalysisView a={a} collapsedDefault={true} />
+                    <AnalysisView a={a} />
                   ) : (
                     <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
                   )}
@@ -529,62 +529,52 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AnalysisView({ a, collapsedDefault = false }: { a: any; collapsedDefault?: boolean }) {
-  const [expanded, setExpanded] = useState(!collapsedDefault);
-
+// UPDATED: No toggle, details always visible
+function AnalysisView({ a }: { a: any }) {
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-         <div className="flex gap-3">
-          {'fit' in a && (
-            <span>
-              Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b>
-            </span>
-          )}
-          {'confidence' in a && (
-            <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>
-          )}
-        </div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-xs text-blue-600 hover:underline"
-        >
-          {expanded ? 'Hide Details' : 'Show Details'}
-        </button>
+      {/* Header Stats */}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+         {'fit' in a && (
+           <span>
+             Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b>
+           </span>
+         )}
+         {'confidence' in a && (
+           <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>
+         )}
+         {'pdfUsed' in a && (
+            <span className="text-slate-500 ml-2">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>
+         )}
       </div>
 
-      {expanded && (
-        <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-           {'pdfUsed' in a && (
-            <div className="text-xs text-slate-400 mb-2">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></div>
-          )}
+      {/* Details Body */}
+      <div className="mt-2">
+        {a.summary && (
+          <div className="mb-3">
+            <div className="text-xs font-bold text-slate-500 uppercase mb-1">Summary</div>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-slate-800 bg-white p-2 rounded border border-slate-100">{a.summary}</p>
+          </div>
+        )}
 
-          {a.summary && (
-            <div className="mb-3">
-              <div className="text-xs font-bold text-slate-500 uppercase mb-1">Summary</div>
-              <p className="whitespace-pre-line text-sm leading-relaxed text-slate-800 bg-white p-2 rounded border border-slate-100">{a.summary}</p>
-            </div>
-          )}
+        {Array.isArray(a.risks) && a.risks.length > 0 && (
+          <div className="mb-3">
+            <div className="text-xs font-bold text-rose-600 uppercase mb-1">Risks Detected</div>
+            <ul className="list-disc list-inside text-sm space-y-1 bg-rose-50 p-2 rounded border border-rose-100 text-rose-800">
+              {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+            </ul>
+          </div>
+        )}
 
-          {Array.isArray(a.risks) && a.risks.length > 0 && (
-            <div className="mb-3">
-              <div className="text-xs font-bold text-rose-600 uppercase mb-1">Risks Detected</div>
-              <ul className="list-disc list-inside text-sm space-y-1 bg-rose-50 p-2 rounded border border-rose-100 text-rose-800">
-                {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
-            <div>
-              <div className="text-xs font-bold text-slate-500 uppercase mb-1">Milestone Notes</div>
-              <ul className="list-disc list-inside text-sm space-y-1 text-slate-700">
-                {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+        {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
+          <div>
+            <div className="text-xs font-bold text-slate-500 uppercase mb-1">Milestone Notes</div>
+            <ul className="list-disc list-inside text-sm space-y-1 text-slate-700">
+              {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -728,7 +718,7 @@ function MilestonesSection({
   onUpdated: (b:any)=>void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  // New state to collapse the list - CHANGED to false (closed)
+  // New state to collapse the list - defaults to false (closed)
   const [expanded, setExpanded] = useState(false);
   const milestones = useMemo(() => (Array.isArray(bid.milestones) ? bid.milestones : []), [bid?.milestones]);
 
