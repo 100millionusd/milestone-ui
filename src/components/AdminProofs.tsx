@@ -1,7 +1,7 @@
 // src/components/AdminProofs.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
@@ -320,6 +320,23 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   // View derivation
   const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
+  // --- GROUPING LOGIC FOR BETTER VISIBILITY ---
+  // Sort by: Needs Review (pending) -> then by ID
+  const { pendingRows, processedRows } = useMemo(() => {
+    const pending: typeof visibleRows = [];
+    const processed: typeof visibleRows = [];
+    visibleRows.forEach(row => {
+        // Treat 'pending' as Needs Review. Everything else (approved, rejected, etc) is Processed.
+        if (row.p.status === 'pending' || !row.p.status) {
+            pending.push(row);
+        } else {
+            processed.push(row);
+        }
+    });
+    return { pendingRows: pending, processedRows: processed };
+  }, [visibleRows]);
+
+
   // Archive togglers
   async function archiveMs(bidId: number, idx: number, reason?: string) {
     const key = msKey(bidId, idx);
@@ -351,73 +368,119 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
 
   const archivedCount = rows.reduce((n, r) => n + (r.isArchived ? 1 : 0), 0);
 
-  if (loading) return <div className="p-6">Loading proofs…</div>;
-  if (error) return <div className="p-6 text-rose-600">{error}</div>;
+  if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading proofs…</div>;
+  if (error) return <div className="p-6 text-rose-600 bg-rose-50 rounded border border-rose-200">{error}</div>;
 
   return (
-    <div className="grid gap-4">
-      {/* Archive view controls */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setView('active')}
-          className={`px-3 py-1 rounded border text-sm ${view === 'active' ? 'bg-slate-900 text-white' : ''}`}
-        >
-          Active
-        </button>
-        <button
-          onClick={() => setView('archived')}
-          className={`px-3 py-1 rounded border text-sm ${view === 'archived' ? 'bg-slate-900 text-white' : ''}`}
-        >
-          Archived ({archivedCount})
-        </button>
-        <div className="ml-auto flex items-center gap-2">
+    <div className="grid gap-6">
+      {/* Controls Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-3 rounded-lg border shadow-sm">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md">
           <button
-            onClick={refreshAll}
-            className="px-3 py-1 rounded bg-slate-900 text-white text-sm"
+            onClick={() => setView('active')}
+            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+                view === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
           >
-            Refresh
+            Active
           </button>
+          <button
+            onClick={() => setView('archived')}
+            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+                view === 'archived' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Archived ({archivedCount})
+          </button>
+        </div>
+        
+        <div className="flex items-center gap-3">
           {view === 'archived' && archivedCount > 0 && (
             <button
               onClick={unarchiveAll}
-              className="px-3 py-1 rounded border text-sm"
-              title="Bring back all archived milestones"
+              className="px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100 text-sm border border-transparent hover:border-slate-200"
             >
               Unarchive all
             </button>
           )}
+          <button
+            onClick={refreshAll}
+            className="flex items-center gap-2 px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+          >
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
-      {visibleRows.map(({ p, k, isArchived }) => {
-        const bidId = Number(p.bidId);
-        const idx = Number(p.milestoneIndex);
-        return (
-          <ProofCard
-            key={k}
-            proof={p}
-            bids={bids}
-            proposalId={proposalId}
-            onRefresh={refreshAll}
-            crOpenFor={crOpenFor}
-            setCrOpenFor={setCrOpenFor}
-            crComment={crComment}
-            setCrComment={setCrComment}
-            crChecklist={crChecklist}
-            setCrChecklist={setCrChecklist}
-            isArchived={isArchived}
-            pkey={k}
-            onArchive={(next) => {
-              if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
-              return next ? archiveMs(bidId, idx) : unarchiveMs(bidId, idx);
-            }}
-          />
-        );
-      })}
+      {/* SECTION: Needs Review */}
+      {pendingRows.length > 0 && (
+        <div className="space-y-4">
+           <h3 className="text-sm font-bold text-amber-700 uppercase tracking-wider flex items-center gap-2">
+             <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+             Needs Review ({pendingRows.length})
+           </h3>
+           {pendingRows.map(({ p, k, isArchived }) => (
+             <ProofCardWrapper
+                key={k}
+                p={p}
+                k={k}
+                isArchived={isArchived}
+                bids={bids}
+                proposalId={proposalId}
+                onRefresh={refreshAll}
+                crOpenFor={crOpenFor}
+                setCrOpenFor={setCrOpenFor}
+                crComment={crComment}
+                setCrComment={setCrComment}
+                crChecklist={crChecklist}
+                setCrChecklist={setCrChecklist}
+                archMap={archMap}
+                setArchMap={setArchMap}
+                archiveMs={archiveMs}
+                unarchiveMs={unarchiveMs}
+                defaultExpanded={true} // Auto expand pending
+             />
+           ))}
+        </div>
+      )}
+
+      {/* SECTION: Processed (Approved/Rejected) */}
+      {processedRows.length > 0 && (
+        <div className="space-y-4">
+           {pendingRows.length > 0 && <hr className="border-slate-200 my-6" />}
+           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+             Processed / History
+           </h3>
+           {processedRows.map(({ p, k, isArchived }) => (
+             <ProofCardWrapper
+                key={k}
+                p={p}
+                k={k}
+                isArchived={isArchived}
+                bids={bids}
+                proposalId={proposalId}
+                onRefresh={refreshAll}
+                crOpenFor={crOpenFor}
+                setCrOpenFor={setCrOpenFor}
+                crComment={crComment}
+                setCrComment={setCrComment}
+                crChecklist={crChecklist}
+                setCrChecklist={setCrChecklist}
+                archMap={archMap}
+                setArchMap={setArchMap}
+                archiveMs={archiveMs}
+                unarchiveMs={unarchiveMs}
+                defaultExpanded={false} // Auto collapse processed
+             />
+           ))}
+        </div>
+      )}
 
       {visibleRows.length === 0 && (
-        <div className="text-gray-500 text-center py-10 border rounded bg-white">
-          {view === 'archived' ? 'No archived proofs.' : 'No proofs submitted yet.'}
+        <div className="flex flex-col items-center justify-center py-16 border-2 border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+          <p className="text-slate-500 font-medium">
+            {view === 'archived' ? 'No archived proofs found.' : 'No active proofs submitted yet.'}
+          </p>
         </div>
       )}
     </div>
@@ -425,7 +488,37 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
 }
 
 /* ============================
-   Proof Card
+   Proof Card Wrapper & Logic
+============================ */
+// This wrapper just extracts the logic for archiving so ProofCard is cleaner
+function ProofCardWrapper(props: any) {
+    const { p, k, isArchived, archiveMs, unarchiveMs, setArchMap, ...rest } = props;
+    const bidId = Number(p.bidId);
+    const idx = Number(p.milestoneIndex);
+
+    const handleArchiveToggle = async (shouldArchive: boolean) => {
+        if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+        if (shouldArchive) {
+            await archiveMs(bidId, idx);
+        } else {
+            await unarchiveMs(bidId, idx);
+        }
+    };
+
+    return (
+        <ProofCard
+            proof={p}
+            pkey={k}
+            isArchived={isArchived}
+            onArchive={handleArchiveToggle}
+            {...rest}
+        />
+    );
+}
+
+
+/* ============================
+   Proof Card (Redesigned)
 ============================ */
 type ProofCardProps = {
   proof: Proof;
@@ -441,6 +534,7 @@ type ProofCardProps = {
   isArchived: boolean;
   pkey: string;
   onArchive: (archive: boolean) => void;
+  defaultExpanded?: boolean;
 };
 
 function ProofCard(props: ProofCardProps) {
@@ -452,10 +546,12 @@ function ProofCard(props: ProofCardProps) {
     crOpenFor, setCrOpenFor,
     crComment, setCrComment,
     crChecklist, setCrChecklist,
-    isArchived, pkey, onArchive,
+    isArchived, onArchive,
+    defaultExpanded = false,
   } = props;
 
   const router = useRouter();
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   const [prompt, setPrompt] = useState('');
   const [chat, setChat] = useState('');
@@ -514,29 +610,6 @@ function ProofCard(props: ProofCardProps) {
   // --- JSON-only Approve helper (prevents dumping HTML into the page) ---
   function isProbablyHtml(s: string | undefined | null) {
     return !!s && /<!doctype html|<html[\s>]/i.test(s);
-  }
-  async function approveViaApi(proofId: number) {
-    const r = await fetch(`${API_BASE}/proofs/${proofId}/approve`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    });
-    const ct = r.headers.get('content-type') || '';
-    if (!r.ok) {
-      if (ct.includes('application/json')) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
-      } else {
-        const txt = await r.text().catch(() => '');
-        throw new Error(
-          isProbablyHtml(txt)
-            ? `Unexpected HTML from server (are you logged in as admin?). HTTP ${r.status}`
-            : `HTTP ${r.status}`
-        );
-      }
-    }
-    if (ct.includes('application/json')) { await r.json().catch(() => ({})); }
   }
 
   // APPROVE — approve proof (if available) + complete milestone, then notify + refresh
@@ -653,239 +726,304 @@ function ProofCard(props: ProofCardProps) {
 
   const statusChip =
     proof.status === 'approved'
-      ? 'bg-green-100 text-green-700'
+      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
       : proof.status === 'rejected'
-      ? 'bg-red-100 text-red-700'
-      : 'bg-yellow-100 text-yellow-700';
+      ? 'bg-rose-100 text-rose-800 border-rose-200'
+      : 'bg-amber-100 text-amber-800 border-amber-200';
+
+  const cardBorder = expanded 
+    ? 'border-slate-300 shadow-md' 
+    : 'border-slate-200 shadow-sm hover:border-slate-300';
 
   return (
-    <div className="bg-white rounded-lg shadow border p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold mb-1">
-            {proof.title || `Proof — ${milestoneLabel}`}
-          </h2>
-          <p className="text-sm text-gray-600 mb-2">
-            Vendor: <span className="font-medium">{proof.vendorName || '—'}</span> &middot; Bid #{proof.bidId} &middot; {milestoneLabel}
-          </p>
-
-          {/* Payment status with TX link (EOA or Safe; chain-aware) */}
-          <div className="mt-1 text-sm">
-            {isPaid ? (
-              <span className="inline-flex items-center gap-1 text-green-700">
-                <span>Paid ✅</span>
-                {tx && (
-                  <>
-                    <span>• Tx:</span>
-                    <a
-                      href={txUrlByChain(tx, chainId)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                    >
-                      {shortTx(tx)}
-                    </a>
-                  </>
-                )}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-slate-700">
-                <span>Unpaid</span>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {isArchived && (
-            <span className="px-2 py-1 text-xs rounded border bg-slate-100 text-slate-700">
-              Archived
-            </span>
-          )}
-          <span className={`px-2 py-1 text-xs rounded ${statusChip}`}>{proof.status}</span>
-        </div>
-      </div>
-
-      <p className="text-gray-700 mb-3 whitespace-pre-wrap">{proof.description || 'No description'}</p>
-
-      {/* Attachments */}
-      {Array.isArray(proof.files) && proof.files.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-          {proof.files.map((file, i) => {
-            const href = toGatewayUrl(file);
-            const imgish = isImg(href) || isImg(file.name);
-            if (imgish) {
-              return (
-                <a
-                  key={i}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative overflow-hidden rounded border"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={href}
-                    alt={file.name}
-                    className="h-32 w-full object-cover group-hover:scale-105 transition"
-                  />
-                  <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs px-2 py-1 truncate">
-                    {file.name || href.split('/').pop()}
-                  </div>
-                </a>
-              );
-            }
-            return (
-              <div key={i} className="p-3 rounded border bg-gray-50">
-                <p className="truncate text-sm">{file.name || href.split('/').pop()}</p>
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  Open
-                </a>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Existing AI analysis (if any) */}
-      {proof.aiAnalysis && (
-        <div className="mb-4 p-3 rounded border bg-slate-50">
-          <div className="text-xs text-slate-700 whitespace-pre-wrap">
-            <strong>AI Summary:</strong>{' '}
-            {typeof (proof as any).aiAnalysis?.summary === 'string'
-              ? (proof as any).aiAnalysis.summary
-              : JSON.stringify((proof as any).aiAnalysis, null, 2)}
-          </div>
-        </div>
-      )}
-
-      {/* Prompt + actions */}
-      <div className="mb-3">
-        <textarea
-          className="w-full border rounded p-2 text-sm"
-          rows={3}
-          placeholder="Ask Agent 2 about this proof (it will consider the PDF/text and images)."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <button
-          onClick={onRun}
-          disabled={!canAnalyze || running}
-          className="px-3 py-1 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Re-run analysis and save to aiAnalysis' : 'Proof ID missing'}
-        >
-          {running ? 'Running…' : 'Run Agent 2'}
-        </button>
-
-        <button
-          onClick={onChat}
-          disabled={!canAnalyze || streaming}
-          className="px-3 py-1 rounded bg-indigo-600 text-white text-xs disabled:opacity-50"
-          title={canAnalyze ? 'Stream a one-off chat answer' : 'Proof ID missing'}
-        >
-          {streaming ? 'Asking…' : 'Ask Agent 2 (Chat)'}
-        </button>
-
-        <div className="ml-auto flex gap-2">
-          <button
-            onClick={() => setCrOpenFor(crOpenFor === (proof.proofId || -1) ? null : (proof.proofId || -1))}
-            className="px-3 py-1 text-sm bg-amber-600 text-white rounded"
-            title="Create a change request for this milestone"
-          >
-            Request Changes
-          </button>
-
-          <button
-            onClick={handleApprove}
-            disabled={proof.status === 'approved' || busyApprove}
-            className="px-3 py-1 text-sm bg-emerald-600 text-white rounded disabled:bg-gray-300"
-          >
-            {busyApprove ? 'Approving…' : 'Approve'}
-          </button>
-
-          <button
-            onClick={handleReject}
-            disabled={proof.status === 'rejected' || busyReject}
-            className="px-3 py-1 text-sm bg-rose-600 text-white rounded disabled:bg-gray-300"
-          >
-            {busyReject ? 'Rejecting…' : 'Reject'}
-          </button>
-
-          {/* Archive / Unarchive (server) */}
-          {!isArchived ? (
-            <button
-              onClick={() => onArchive(true)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Archive this milestone (server)"
-            >
-              Archive
-            </button>
-          ) : (
-            <button
-              onClick={() => onArchive(false)}
-              className="px-3 py-1 text-sm border rounded"
-              title="Unarchive this milestone (server)"
-            >
-              Unarchive
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Change Request inline form */}
-      {crOpenFor === (proof.proofId || -1) && (
-        <div className="rounded border bg-white p-3 mt-2">
-          <div className="text-sm font-medium mb-2">Request changes for {milestoneLabel}</div>
-          <div className="grid gap-2">
-            <label className="text-xs text-gray-600">Comment (what to change)</label>
-            <textarea
-              className="w-full border rounded p-2 text-sm"
-              rows={3}
-              value={crComment}
-              onChange={(e) => setCrComment(e.target.value)}
-            />
-            <label className="text-xs text-gray-600">Checklist (comma separated)</label>
-            <input
-              className="w-full border rounded p-2 text-sm"
-              value={crChecklist}
-              onChange={(e) => setCrChecklist(e.target.value)}
-              placeholder="e.g. add photo of invoice, include site coordinates"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleCreateChangeRequest}
-                disabled={busyCR}
-                className="px-3 py-1 text-sm bg-amber-700 text-white rounded disabled:opacity-60"
-              >
-                {busyCR ? 'Sending…' : 'Send Request'}
-              </button>
-              <button
-                onClick={() => setCrOpenFor(null)}
-                type="button"
-                className="px-3 py-1 text-sm bg-gray-200 rounded"
-              >
-                Cancel
-              </button>
+    <div className={`bg-white rounded-xl border transition-all duration-200 ${cardBorder}`}>
+      {/* Header / Summary Row (Click to toggle) */}
+      <div 
+        className="p-4 flex items-center justify-between cursor-pointer select-none group"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-4 overflow-hidden">
+            {/* Icon / Status Indicator */}
+            <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                proof.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 
+                proof.status === 'rejected' ? 'bg-rose-50 text-rose-600' : 
+                'bg-amber-50 text-amber-600'
+            }`}>
+                {proof.status === 'approved' ? '✓' : proof.status === 'rejected' ? '✕' : '?'}
             </div>
-          </div>
+
+            <div className="min-w-0">
+                <h2 className="font-bold text-slate-900 truncate text-base">
+                    {milestoneLabel}
+                </h2>
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <span className="truncate max-w-[150px]">Bid #{proof.bidId}</span>
+                    <span>&middot;</span>
+                    <span className="truncate font-medium text-slate-700">{proof.vendorName || 'Unknown Vendor'}</span>
+                </div>
+            </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-shrink-0">
+             {isPaid && (
+                 <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-xs font-medium text-emerald-700">
+                    <span>Paid</span>
+                    {tx && <span className="opacity-50 text-[10px]">↗</span>}
+                 </div>
+             )}
+            <span className={`px-3 py-1 text-xs font-semibold rounded-full border uppercase tracking-wide ${statusChip}`}>
+                {proof.status || 'Pending'}
+            </span>
+            <div className={`transform transition-transform duration-200 text-slate-400 ${expanded ? 'rotate-180' : ''}`}>
+                ▼
+            </div>
+        </div>
+      </div>
+
+      {/* Expandable Body */}
+      {expanded && (
+        <div className="border-t border-slate-100 bg-slate-50/30 p-6">
+            
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Left Column: Evidence (Description + Files) */}
+                <div className="lg:col-span-2 space-y-6">
+                    {/* Description */}
+                    <div>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Vendor Description</h4>
+                        <div className="p-4 bg-white rounded-lg border border-slate-200 text-slate-700 text-sm whitespace-pre-wrap leading-relaxed shadow-sm">
+                            {proof.description || <span className="text-slate-400 italic">No description provided.</span>}
+                        </div>
+                    </div>
+
+                    {/* Attachments */}
+                    <div>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                            Attachments {Array.isArray(proof.files) && `(${proof.files.length})`}
+                        </h4>
+                        {Array.isArray(proof.files) && proof.files.length > 0 ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {proof.files.map((file, i) => {
+                                const href = toGatewayUrl(file);
+                                const imgish = isImg(href) || isImg(file.name);
+                                if (imgish) {
+                                return (
+                                    <a
+                                    key={i}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                                    >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                        src={href}
+                                        alt={file.name}
+                                        className="h-full w-full object-cover group-hover:scale-105 transition duration-500"
+                                    />
+                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                                        <p className="text-[10px] text-white truncate">{file.name}</p>
+                                    </div>
+                                    </a>
+                                );
+                                }
+                                return (
+                                <div key={i} className="p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-200 hover:shadow-sm transition-all flex flex-col justify-between h-full">
+                                    <p className="truncate text-xs font-medium text-slate-700 mb-2" title={file.name}>{file.name || 'Unknown File'}</p>
+                                    <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
+                                    >
+                                    View File ↗
+                                    </a>
+                                </div>
+                                );
+                            })}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 rounded p-4">No files attached.</div>
+                        )}
+                    </div>
+
+                     {/* Payment Info Detail (if paid) */}
+                     {isPaid && tx && (
+                        <div className="text-xs text-slate-500 flex items-center gap-2">
+                            <span className="font-medium">Payment TX:</span>
+                            <a
+                                href={txUrlByChain(tx, chainId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline decoration-slate-300 hover:decoration-slate-500 hover:text-slate-700 truncate max-w-md"
+                            >
+                                {tx}
+                            </a>
+                        </div>
+                    )}
+                </div>
+
+                {/* Right Column: Operations (AI, Actions, Admin) */}
+                <div className="space-y-6">
+                    
+                    {/* AI Analysis Box */}
+                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-4">
+                        <div className="flex items-center justify-between mb-3">
+                             <h4 className="text-xs font-bold text-indigo-800 uppercase tracking-wider flex items-center gap-1">
+                                🤖 Agent 2 Analysis
+                             </h4>
+                        </div>
+                        
+                        {proof.aiAnalysis && (
+                            <div className="mb-4 p-3 rounded bg-white/80 border border-indigo-100 shadow-sm">
+                                <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                                    {typeof (proof as any).aiAnalysis?.summary === 'string'
+                                    ? (proof as any).aiAnalysis.summary
+                                    : JSON.stringify((proof as any).aiAnalysis, null, 2)}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Chat / Prompt */}
+                        <div className="space-y-2">
+                             <textarea
+                                className="w-full border border-indigo-200 rounded-md p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                rows={2}
+                                placeholder="Ask Agent 2 to verify specifics..."
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={onRun}
+                                    disabled={!canAnalyze || running}
+                                    className="flex-1 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-50 transition-colors"
+                                >
+                                    {running ? 'Running...' : 'Re-Run Analysis'}
+                                </button>
+                                <button
+                                    onClick={onChat}
+                                    disabled={!canAnalyze || streaming}
+                                    className="flex-1 px-3 py-1.5 rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs font-medium disabled:opacity-50 transition-colors"
+                                >
+                                    {streaming ? 'Thinking...' : 'Quick Chat'}
+                                </button>
+                            </div>
+                             {/* Chat Output Stream */}
+                            {chat && (
+                                <div className="mt-2 rounded border border-indigo-200 bg-white p-3 max-h-40 overflow-y-auto">
+                                <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Primary Actions */}
+                    <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Decision</h4>
+                        
+                        <div className="grid grid-cols-1 gap-2">
+                             {/* Change Request Toggle */}
+                            <button
+                                onClick={() => setCrOpenFor(crOpenFor === (proof.proofId || -1) ? null : (proof.proofId || -1))}
+                                className={`w-full py-2 text-xs font-medium rounded border transition-colors ${
+                                    crOpenFor === (proof.proofId || -1) 
+                                    ? 'bg-amber-50 border-amber-200 text-amber-700' 
+                                    : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 hover:text-amber-600'
+                                }`}
+                            >
+                                {crOpenFor === (proof.proofId || -1) ? 'Cancel Request' : 'Request Changes'}
+                            </button>
+                            
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={handleReject}
+                                    disabled={proof.status === 'rejected' || busyReject}
+                                    className="flex-1 py-2 text-xs font-medium rounded bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
+                                >
+                                    {busyReject ? '...' : 'Reject'}
+                                </button>
+                                <button
+                                    onClick={handleApprove}
+                                    disabled={proof.status === 'approved' || busyApprove}
+                                    className="flex-1 py-2 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-50 disabled:bg-slate-300 transition-colors"
+                                >
+                                    {busyApprove ? 'Approving...' : 'Approve'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Server Actions (Archive) */}
+                    <div className="text-right">
+                         {!isArchived ? (
+                            <button
+                            onClick={() => onArchive(true)}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 underline decoration-dotted"
+                            >
+                            Archive this milestone
+                            </button>
+                        ) : (
+                            <button
+                            onClick={() => onArchive(false)}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-600 underline decoration-dotted"
+                            >
+                            Unarchive
+                            </button>
+                        )}
+                    </div>
+
+                </div> {/* End Right Column */}
+            </div> {/* End Grid */}
+
+            {/* Change Request Form (Full Width below grid if active) */}
+            {crOpenFor === (proof.proofId || -1) && (
+                <div className="mt-6 p-4 rounded-lg border border-amber-200 bg-amber-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center gap-2 mb-3 text-amber-800 font-medium text-sm">
+                        <span>✍️ Request Changes</span>
+                    </div>
+                    <div className="grid gap-3">
+                        <div>
+                            <label className="block text-xs font-medium text-amber-800 mb-1">Comment (Instructions for vendor)</label>
+                            <textarea
+                            className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                            rows={3}
+                            value={crComment}
+                            onChange={(e) => setCrComment(e.target.value)}
+                            placeholder="Explain what needs to be fixed..."
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-amber-800 mb-1">Checklist (Optional, comma separated)</label>
+                            <input
+                            className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                            value={crChecklist}
+                            onChange={(e) => setCrChecklist(e.target.value)}
+                            placeholder="e.g. Upload clearer invoice, Add GPS coordinates"
+                            />
+                        </div>
+                        <div className="flex justify-end pt-2">
+                            <button
+                                onClick={handleCreateChangeRequest}
+                                disabled={busyCR}
+                                className="px-4 py-2 text-sm bg-amber-700 hover:bg-amber-800 text-white rounded font-medium shadow-sm disabled:opacity-70 transition-colors"
+                            >
+                                {busyCR ? 'Sending Request...' : 'Send Change Request'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* Global Error Display inside card */}
+            {err && (
+                <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700 font-medium">
+                    Error: {err}
+                </div>
+            )}
+
         </div>
       )}
-
-      {/* Chat stream output */}
-      {chat && (
-        <div className="rounded border bg-white p-3">
-          <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
-        </div>
-      )}
-
-      {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
     </div>
   );
 }
