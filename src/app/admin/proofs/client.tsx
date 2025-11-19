@@ -1458,7 +1458,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               <button
                                 onClick={() => handleArchive(bid.bidId, origIdx)}
                                 disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                                className="text-slate-500 hover:text-slate-700 text-sm font-medium px-3 py-2 rounded hover:bg-slate-200 transition disabled:opacity-50"
+                                className="px-4 py-2 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 text-sm font-medium transition shadow-sm disabled:opacity-50"
                                 title="Hide this milestone"
                               >
                                 {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
@@ -1467,7 +1467,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               <button
                                 onClick={() => handleUnarchive(bid.bidId, origIdx)}
                                 disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
-                                className="text-slate-500 hover:text-slate-700 text-sm font-medium px-3 py-2 rounded hover:bg-slate-200 transition disabled:opacity-50"
+                                className="px-4 py-2 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 text-sm font-medium transition shadow-sm disabled:opacity-50"
                               >
                                 {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
                               </button>
@@ -1482,7 +1482,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                   <button
                                     onClick={() => handleReject(bid.bidId, origIdx)}
                                     disabled={disabled}
-                                    className={`text-sm font-medium px-3 py-2 rounded transition disabled:opacity-50 ${disabled ? 'text-slate-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}
+                                    className={`px-4 py-2 rounded border border-red-200 text-red-600 bg-white hover:bg-red-50 text-sm font-medium transition shadow-sm disabled:opacity-50 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   >
                                     {isProcessing ? 'Rejecting...' : isLocked ? 'Rejected' : 'Reject'}
                                   </button>
