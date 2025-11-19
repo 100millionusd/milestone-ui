@@ -1016,25 +1016,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     if (!confirm('Release payment for this milestone?')) return;
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
+      
+      // 1. Trigger the server payment
       await payMilestone(bidId, milestoneIndex);
-      
+
+      // 2. Mark as Pending immediately (Yellow status, hides button)
       const key = mkKey(bidId, milestoneIndex);
-
-      // FIX: Immediately mark as paid so buttons vanish and "Paid" chip appears
-      setPaidOverrideKey(key, true);
-      removePending(key); 
-
-      // Trigger immediate data refresh to get the official server state/TxHash
-      await loadProofs(true); 
-      router.refresh();
+      addPending(key);
       
-      emitPayDone(bidId, milestoneIndex);
+      // 3. Notify other tabs/components
+      emitPayQueued(bidId, milestoneIndex);
+
+      // 4. Start polling for the real TX hash
+      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+      
+      // 5. Attempt one immediate refresh just in case it was fast
+      router.refresh();
+      loadProofs(true);
+
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      // On failure, ensure we clean up any optimistic state
-      const key = mkKey(bidId, milestoneIndex);
-      removePending(key);
-      setPaidOverrideKey(key, false);
+      // If it failed, remove the pending status so user can try again
+      removePending(mkKey(bidId, milestoneIndex));
     } finally {
       setProcessing(null);
     }
