@@ -93,12 +93,19 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   // local paid latch so button disappears immediately after 200/409
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
 
+  // Collapsible state: key is milestone index, value is boolean (true = collapsed)
+  const [collapsedMilestones, setCollapsedMilestones] = useState<Record<number, boolean>>({});
+
   // -------- helpers --------
   const setText = (i: number, v: string) =>
     setTextByIndex((prev) => ({ ...prev, [i]: v }));
 
   const setFiles = (i: number, files: FileList | null) =>
     setFilesByIndex((prev) => ({ ...prev, [i]: files ? Array.from(files) : [] }));
+
+  const toggleMilestone = (i: number) => {
+    setCollapsedMilestones((prev) => ({ ...prev, [i]: !prev[i] }));
+  };
 
   const deriveProposalId = () => {
     if (Number.isFinite(proposalId as number)) return Number(proposalId);
@@ -205,16 +212,16 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
   // Identify admin vs vendor (cosmetic gating of the Release button & manual processor)
   useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    try {
-      const j = await getAuthRoleOnce();
-      const role = String(j?.role || '').toLowerCase();
-      if (!cancelled) setIsAdmin(role === 'admin');
-    } catch { /* keep default vendor */ }
-  })();
-  return () => { cancelled = true; };
-}, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await getAuthRoleOnce();
+        const role = String(j?.role || '').toLowerCase();
+        if (!cancelled) setIsAdmin(role === 'admin');
+      } catch { /* keep default vendor */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // -------- actions --------
   async function handleSubmitProof(index: number) {
@@ -365,8 +372,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
     const itemsArr =
       Array.isArray(raw) ? raw :
-      Array.isArray(raw?.items) ? raw.items :
-      [];
+        Array.isArray(raw?.items) ? raw.items :
+          [];
     const items = (itemsArr as any[]).map((x) =>
       typeof x === 'string'
         ? { text: x, done: false }
@@ -454,7 +461,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           // allow re-submit only when admin opened a Change Request, or when there is no proof yet
           const hasOpenCR = !!(crByMs[i]?.length);
           const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
-          
+
           const statusText = isPaid
             ? 'Paid'
             : isDone
@@ -463,10 +470,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 ? 'Submitted'
                 : 'Pending';
 
+          // Check collapsed state
+          const isCollapsed = !!collapsedMilestones[i];
+
           return (
             <div
               key={i}
-              className={`border rounded p-4 ${
+              className={`border rounded ${
                 isPaid
                   ? 'bg-green-50 border-green-200'
                   : isDone
@@ -474,15 +484,30 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                     : 'bg-gray-50'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
-                  {m.dueDate && (
-                    <div className="text-xs text-gray-600">
-                      Due: {new Date(m.dueDate).toLocaleDateString()}
-                    </div>
-                  )}
+              {/* Collapsible Header */}
+              <div 
+                onClick={() => toggleMilestone(i)}
+                className="flex items-center justify-between p-4 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  {/* Chevron Icon */}
+                  <svg
+                    className={`w-4 h-4 transform transition-transform text-gray-500 ${isCollapsed ? '' : 'rotate-180'}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                  
+                  <div>
+                    <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
+                    {m.dueDate && (
+                      <div className="text-xs text-gray-600">
+                        Due: {new Date(m.dueDate).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
                 </div>
+
                 <div className="text-right">
                   <div className="text-lg font-bold text-green-700">
                     ${Number(m.amount || 0).toLocaleString()}
@@ -501,101 +526,106 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* Show admin change request (if any) */}
-              {renderChangeRequestBanner(i)}
+              {/* Body Content - conditionally hidden */}
+              {!isCollapsed && (
+                <div className="px-4 pb-4 border-t border-gray-200/50 pt-4">
+                  {/* Show admin change request (if any) */}
+                  {renderChangeRequestBanner(i)}
 
-              {/* Paid → show verification / details */}
-              {isPaid && (
-                <div className="mt-3 space-y-2">
-                  <div className="p-2 bg-white rounded border text-sm">
-                    <div className="text-green-700">
-                      ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
-                    </div>
-                    {m.paymentTxHash && (
-                      <div className="mt-1">
-                        <span className="font-medium">TX Hash: </span>
-                        <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
-                      </div>
-                    )}
-                    {m.proof && (
-                      <div className="mt-1">
-                        <span className="font-medium">Proof: </span>
-                        {m.proof}
-                      </div>
-                    )}
-                  </div>
-
-                  <PaymentVerification
-                    transactionHash={m.paymentTxHash as string}
-                    currency={bid.preferredStablecoin}
-                    amount={Number(m.amount || 0)}
-                    toAddress={bid.walletAddress}
-                  />
-                </div>
-              )}
-
-              {/* Not paid → allow proof submission / payment release */}
-              {!isPaid && (
-                <div className="mt-3">
-                  {canSubmit ? (
-                    <>
-                      <label className="block text-sm font-medium mb-1">
-                        Proof of completion (text optional)
-                      </label>
-                      <textarea
-                        value={textByIndex[i] || ''}
-                        onChange={(e) => setText(i, e.target.value)}
-                        rows={3}
-                        className="w-full p-2 border rounded text-sm mb-2"
-                        placeholder="Notes (optional, files will be attached automatically)"
-                      />
-                      <div className="flex items-center gap-3 mb-2">
-                        <input
-                          type="file"
-                          multiple
-                          onChange={(e) => setFiles(i, e.target.files)}
-                          className="text-sm"
-                        />
-                        {!!(filesByIndex[i]?.length) && (
-                          <span className="text-xs text-gray-600">
-                            {filesByIndex[i].length} file(s) selected
-                          </span>
+                  {/* Paid → show verification / details */}
+                  {isPaid && (
+                    <div className="space-y-2">
+                      <div className="p-2 bg-white rounded border text-sm">
+                        <div className="text-green-700">
+                          ✅ Paid{m.paymentDate ? ` on ${new Date(m.paymentDate).toLocaleDateString()}` : ''}
+                        </div>
+                        {m.paymentTxHash && (
+                          <div className="mt-1">
+                            <span className="font-medium">TX Hash: </span>
+                            <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
+                          </div>
+                        )}
+                        {m.proof && (
+                          <div className="mt-1">
+                            <span className="font-medium">Proof: </span>
+                            {m.proof}
+                          </div>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleSubmitProof(i)}
-                        disabled={busyIndex === i}
-                        className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
-                      </button>
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
-                      </p>
-                    </>
-                  ) : (
-                    !isDone && (
-                      <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
-                        Proof submitted — awaiting review.
-                      </div>
-                    )
-                  )}
 
-                  {isDone && !isPaid && isAdmin && (
-                    <div className="mt-3">
-                      <button
-                        onClick={() => handleReleasePayment(i)}
-                        disabled={busyIndex === i || !!paidLocal[i]}
-                        className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
-                      >
-                        {busyIndex === i ? 'Processing…' : 'Release Payment'}
-                      </button>
+                      <PaymentVerification
+                        transactionHash={m.paymentTxHash as string}
+                        currency={bid.preferredStablecoin}
+                        amount={Number(m.amount || 0)}
+                        toAddress={bid.walletAddress}
+                      />
                     </div>
                   )}
 
-                  {isDone && !isPaid && !isAdmin && (
-                    <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
-                      Awaiting admin to release payment.
+                  {/* Not paid → allow proof submission / payment release */}
+                  {!isPaid && (
+                    <div className="mt-1">
+                      {canSubmit ? (
+                        <>
+                          <label className="block text-sm font-medium mb-1">
+                            Proof of completion (text optional)
+                          </label>
+                          <textarea
+                            value={textByIndex[i] || ''}
+                            onChange={(e) => setText(i, e.target.value)}
+                            rows={3}
+                            className="w-full p-2 border rounded text-sm mb-2"
+                            placeholder="Notes (optional, files will be attached automatically)"
+                          />
+                          <div className="flex items-center gap-3 mb-2">
+                            <input
+                              type="file"
+                              multiple
+                              onChange={(e) => setFiles(i, e.target.files)}
+                              className="text-sm"
+                            />
+                            {!!(filesByIndex[i]?.length) && (
+                              <span className="text-xs text-gray-600">
+                                {filesByIndex[i].length} file(s) selected
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleSubmitProof(i)}
+                            disabled={busyIndex === i}
+                            className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-60"
+                          >
+                            {busyIndex === i ? 'Submitting…' : 'Submit Proof'}
+                          </button>
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            If you picked files above, they’ll be uploaded to Pinata and saved to the project automatically.
+                          </p>
+                        </>
+                      ) : (
+                        !isDone && (
+                          <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                            Proof submitted — awaiting review.
+                          </div>
+                        )
+                      )}
+
+                      {isDone && !isPaid && isAdmin && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleReleasePayment(i)}
+                            disabled={busyIndex === i || !!paidLocal[i]}
+                            className="bg-indigo-600 text-white px-3 py-2 rounded disabled:opacity-60"
+                          >
+                            {busyIndex === i ? 'Processing…' : 'Release Payment'}
+                          </button>
+                        </div>
+                      )}
+
+                      {isDone && !isPaid && !isAdmin && (
+                        <div className="mt-3 text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded p-2">
+                          Awaiting admin to release payment.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
