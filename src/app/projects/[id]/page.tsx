@@ -1792,7 +1792,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
                                 disabled={releasingKey === key}
                                 className="text-gray-600 hover:text-gray-900 border border-gray-300 bg-white hover:bg-gray-50 px-3 py-1.5 text-xs font-medium rounded shadow-sm transition-all disabled:opacity-50"
                               >
-                                {releasingKey === key ? '...' : 'Mark Paid'}
+                                {releasingKey === key ? '...' : 'Release Payment'}
                               </button>
 
                               {/* Safe / Crypto Button */}
