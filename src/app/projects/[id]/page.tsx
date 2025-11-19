@@ -1509,53 +1509,127 @@ const bidFiles = safeBids.flatMap((b: any) => {
 
 {/* Files */}
 {tab === 'files' && (
-  <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">Files</h3>
+  <section className="space-y-8">
+    {/* Logic to sort files into buckets */}
+    {(() => {
+      const projFiles = allFiles.filter(f => f.scope === 'Project');
+      const proofFiles = allFiles.filter(f => f.scope.toLowerCase().includes('proof') || f.scope.toLowerCase().includes('milestone'));
+      const bidFiles = allFiles.filter(f => !projFiles.includes(f) && !proofFiles.includes(f));
 
-    {loadingProofs && allFiles.length === 0 ? (
-      <p className="text-sm text-gray-500">Loading files…</p>
-    ) : allFiles.length === 0 ? (
-      <p className="text-sm text-gray-500">No files yet.</p>
-    ) : (
-      (() => {
-        // ONE HORIZONTAL STRIP — no grouping, no grid
-        const flatDocs = allFiles.map((r: any) => r.doc);
+      // Reusable Card Component
+      const FileCard = ({ file }: { file: any }) => {
+        const doc = file.doc;
+        const baseUrl = normalizeIpfsUrl(doc.url, doc.cid);
+        const name = doc.name || (baseUrl ? decodeURIComponent(baseUrl.split('/').pop() || '') : 'file');
+        const href = baseUrl ? withFilename(baseUrl, name) : '#';
+        const isImg = isImageName(name) || isImageName(href);
 
         return (
-          <div className="overflow-x-auto scroll-smooth">
-            <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
-              {flatDocs.map((doc: any, i: number) => (
-                <div key={i} className="shrink-0 snap-start pointer-events-auto">
-                  {typeof renderAttachment === 'function' ? (
-                    renderAttachment(doc, i)   // keep your original clickable tile
-                  ) : (
-                    <a
-                      href={
-                        doc?.url ||
-                        doc?.href ||
-                        doc?.link ||
-                        doc?.gatewayUrl ||
-                        (doc?.cid ? `https://ipfs.io/ipfs/${doc.cid}` : '#')
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded border p-3 text-sm hover:shadow"
-                    >
-                      <div className="font-medium truncate">
-                        {doc?.name || doc?.filename || doc?.cid || 'file'}
-                      </div>
-                      {doc?.cid ? (
-                        <div className="text-xs opacity-60">ipfs://{doc.cid}</div>
-                      ) : null}
-                    </a>
-                  )}
+          <div className="group relative flex flex-col bg-white border rounded-lg shadow-sm hover:shadow-md transition-all overflow-hidden">
+            {/* Preview / Icon Area */}
+            <div className="h-32 bg-gray-100 flex items-center justify-center overflow-hidden relative border-b border-gray-50">
+              {isImg && baseUrl ? (
+                <img 
+                  src={href} 
+                  alt={name} 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 cursor-pointer"
+                  onClick={() => setLightbox(href)}
+                />
+              ) : (
+                <div className="text-gray-400 group-hover:text-gray-600 transition-colors">
+                   {/* Generic Document Icon */}
+                   <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 </div>
-              ))}
+              )}
+              
+              {/* Overlay Actions (Hover) */}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-start justify-end p-2 opacity-0 group-hover:opacity-100">
+                 <a 
+                   href={href} 
+                   target="_blank" 
+                   rel="noopener noreferrer"
+                   className="p-1.5 bg-white text-gray-700 rounded shadow-sm hover:text-blue-600 hover:shadow transition-all"
+                   title="Open in new tab"
+                   onClick={(e) => e.stopPropagation()}
+                 >
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                 </a>
+              </div>
+            </div>
+
+            {/* Metadata Area */}
+            <div className="p-3 flex flex-col flex-1 bg-white">
+              <div className="font-medium text-sm text-gray-900 truncate mb-1" title={name}>
+                {name}
+              </div>
+              <div className="text-[11px] text-gray-400 uppercase tracking-wide truncate" title={file.scope}>
+                {file.scope}
+              </div>
             </div>
           </div>
         );
-      })()
-    )}
+      };
+
+      return (
+        <>
+           {/* Empty State */}
+           {allFiles.length === 0 && (
+             <div className="p-12 text-center border rounded-lg bg-white border-dashed">
+               <div className="mx-auto h-12 w-12 text-gray-300 mb-2">
+                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+               </div>
+               <h3 className="text-gray-900 font-medium">No files uploaded</h3>
+               <p className="text-gray-500 text-sm">Documents attached to bids or milestones will appear here.</p>
+             </div>
+           )}
+
+           {/* 1. Project Files */}
+           {projFiles.length > 0 && (
+             <div>
+               <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                 <span className="flex items-center justify-center w-6 h-6 bg-blue-100 text-blue-600 rounded text-xs">
+                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                 </span>
+                 Project Brief & Specs
+               </h3>
+               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                 {projFiles.map((f, i) => <FileCard key={i} file={f} />)}
+               </div>
+             </div>
+           )}
+
+           {/* 2. Proofs */}
+           {proofFiles.length > 0 && (
+             <div className={projFiles.length ? 'pt-8 border-t' : ''}>
+               <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-emerald-100 text-emerald-600 rounded text-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </span>
+                  Milestone Proofs
+               </h3>
+               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                 {proofFiles.map((f, i) => <FileCard key={i} file={f} />)}
+               </div>
+             </div>
+           )}
+
+           {/* 3. Bid Attachments */}
+           {bidFiles.length > 0 && (
+             <div className={(projFiles.length || proofFiles.length) ? 'pt-8 border-t' : ''}>
+               <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-purple-100 text-purple-600 rounded text-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                  </span>
+                  Bid Attachments
+               </h3>
+               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                 {bidFiles.map((f, i) => <FileCard key={i} file={f} />)}
+               </div>
+             </div>
+           )}
+        </>
+      );
+    })()}
   </section>
 )}
 
