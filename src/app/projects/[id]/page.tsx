@@ -951,83 +951,211 @@ const bidFiles = safeBids.flatMap((b: any) => {
       </div>
 
        {/* Overview */}
-      {tab === 'overview' && (
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 border rounded p-4">
-            <h3 className="font-semibold mb-3">Project Description</h3>
-            <p className="text-gray-700">{project.summary || '—'}</p>
+{tab === 'overview' && (
+  <section className="space-y-6">
+    {/* 1. Key Metrics Row */}
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Budget Card */}
+      <div className="p-4 bg-white border rounded-lg shadow-sm">
+        <div className="flex items-center gap-2 text-gray-500 mb-1">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <span className="text-xs font-medium uppercase tracking-wider">Budget</span>
+        </div>
+        <div className="text-xl font-bold text-gray-900">
+          {currency.format(Number(project.amountUSD || 0))}
+        </div>
+        {acceptedBid && (
+          <div className="text-xs text-emerald-600 font-medium mt-1">
+            Awarded at {currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))}
+          </div>
+        )}
+      </div>
 
-            <div className="mt-6">
-              <h4 className="text-sm text-gray-600 mb-1">Milestone progress</h4>
-              <Progress
-                value={
-                  acceptedMilestones.length
-                    ? Math.round((msCompleted / acceptedMilestones.length) * 100)
-                    : 0
-                }
-              />
-              <p className="text-xs text-gray-600 mt-1">
-                {msCompleted}/{acceptedMilestones.length} completed • {msPaid}/{acceptedMilestones.length} paid
-              </p>
+      {/* Bids Card */}
+      <div className="p-4 bg-white border rounded-lg shadow-sm">
+        <div className="flex items-center gap-2 text-gray-500 mb-1">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+          <span className="text-xs font-medium uppercase tracking-wider">Total Bids</span>
+        </div>
+        <div className="text-xl font-bold text-gray-900">{safeBids.length}</div>
+        <div className="text-xs text-gray-400 mt-1">
+          {safeBids.filter(b => b.status === 'rejected').length} rejected
+        </div>
+      </div>
+
+      {/* Status Card */}
+      <div className="p-4 bg-white border rounded-lg shadow-sm">
+        <div className="flex items-center gap-2 text-gray-500 mb-1">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <span className="text-xs font-medium uppercase tracking-wider">Status</span>
+        </div>
+        <div className="text-xl font-bold text-gray-900 capitalize">
+          {project.status || (isCompleted ? 'Completed' : 'Active')}
+        </div>
+        <div className="text-xs text-gray-400 mt-1">
+          Last updated {fmt(project.updatedAt).split(',')[0]}
+        </div>
+      </div>
+
+      {/* Completion Card */}
+      <div className="p-4 bg-white border rounded-lg shadow-sm">
+        <div className="flex items-center gap-2 text-gray-500 mb-1">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          <span className="text-xs font-medium uppercase tracking-wider">Progress</span>
+        </div>
+        <div className="text-xl font-bold text-gray-900">
+          {acceptedMilestones.length 
+            ? Math.round((msCompleted / acceptedMilestones.length) * 100) 
+            : 0}%
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2 overflow-hidden">
+           <div className="bg-blue-600 h-1.5 rounded-full" style={{ width: `${acceptedMilestones.length ? (msCompleted / acceptedMilestones.length) * 100 : 0}%` }}></div>
+        </div>
+      </div>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* 2. Main Content: Description & Context */}
+      <div className="lg:col-span-2 space-y-6">
+        
+        {/* Project Brief */}
+        <div className="bg-white border rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 border-b pb-2">Project Brief</h3>
+          <div className="prose prose-sm max-w-none text-gray-600 leading-relaxed">
+            {project.summary 
+              ? project.summary.split('\n').map((line: string, i: number) => <p key={i} className="mb-2">{line}</p>) 
+              : <p className="italic text-gray-400">No description provided.</p>}
+          </div>
+          
+          {/* Tags / Metadata footer if available */}
+          <div className="mt-6 pt-4 border-t flex flex-wrap gap-4 text-sm text-gray-500">
+            <div className="flex items-center gap-1">
+               <span className="font-medium">Owner:</span> {project.ownerWallet ? `${String(project.ownerWallet).slice(0,6)}...${String(project.ownerWallet).slice(-4)}` : 'Unknown'}
             </div>
-
-            <div className="mt-6">
-              <h4 className="font-semibold mb-2">Latest activity</h4>
-              {timeline.length ? (
-                <ul className="text-sm space-y-1">
-                  {timeline.slice(-5).reverse().map((e, i) => (
-                    <li key={i}>
-                      <b>{e.label}</b> • {fmt(e.at)}{' '}
-                      {e.meta ? (
-                        <>
-                          • <span className="opacity-70">{e.meta}</span>
-                        </>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500">No activity yet.</p>
-              )}
+            <div className="flex items-center gap-1">
+               <span className="font-medium">Created:</span> {fmt(project.createdAt).split(',')[0]}
             </div>
           </div>
+        </div>
 
- <div className="flex flex-col gap-6">
-  <div className="border rounded p-4">
-    <h3 className="font-semibold mb-3">Bids snapshot</h3>
-    {safeBids.length ? (
-      <ul className="space-y-2 text-sm">
-        {safeBids.slice(0, 5).map((b) => (
-          <li key={b.bidId} className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">{b.vendorName}</div>
-              <div className="opacity-70">
-                {currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}
-              </div>
+        {/* Recent Activity Feed */}
+        <div className="bg-white border rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Latest Activity</h3>
+          {timeline.length ? (
+            <div className="relative border-l-2 border-gray-200 ml-3 space-y-6">
+              {timeline.slice(-5).reverse().map((e, i) => (
+                <div key={i} className="relative pl-6">
+                  <div className="absolute -left-[9px] top-1.5 w-4 h-4 rounded-full border-2 border-white bg-blue-600 shadow-sm"></div>
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{e.label}</p>
+                      {e.meta && <p className="text-xs text-gray-500 mt-0.5">{e.meta}</p>}
+                    </div>
+                    <span className="text-xs text-gray-400 whitespace-nowrap mt-1 sm:mt-0">
+                      {fmt(e.at)}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-            <span
-              className={classNames(
-                'px-2 py-1 rounded text-xs',
-                b.status === 'approved'
-                  ? 'bg-green-100 text-green-800'
-                  : b.status === 'rejected'
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-yellow-100 text-yellow-800'
-              )}
+          ) : (
+            <p className="text-sm text-gray-500 italic">No activity recorded yet.</p>
+          )}
+          {timeline.length > 5 && (
+            <button 
+              onClick={() => setTab('timeline')}
+              className="mt-4 text-sm text-blue-600 hover:underline font-medium"
             >
-              {b.status}
-            </span>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p className="text-sm text-gray-500">No bids yet.</p>
-    )}
-  </div>
-</div>
-        </section>
-      )}
+              View full history →
+            </button>
+          )}
+        </div>
+      </div>
 
+      {/* 3. Right Sidebar: Vendor & Bids */}
+      <div className="space-y-6">
+        
+        {/* Active Vendor / Winning Bid */}
+        {acceptedBid ? (
+          <div className="bg-emerald-50 border border-emerald-100 rounded-lg shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 bg-emerald-200 rounded-full text-emerald-800">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <h3 className="font-semibold text-emerald-900">Awarded Vendor</h3>
+            </div>
+            <div className="text-lg font-bold text-gray-900">{acceptedBid.vendorName}</div>
+            <div className="text-sm text-gray-600 mb-4">
+              {currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0))} • {acceptedBid.days} days
+            </div>
+            <button 
+              onClick={() => setTab('milestones')}
+              className="w-full py-2 bg-white border border-emerald-200 text-emerald-700 rounded text-sm font-medium hover:bg-emerald-100 transition-colors"
+            >
+              View Payments & Milestones
+            </button>
+          </div>
+        ) : (
+          /* Call to Action if no vendor yet */
+          <div className="bg-blue-50 border border-blue-100 rounded-lg shadow-sm p-5 text-center">
+            <h3 className="font-semibold text-blue-900 mb-1">No Vendor Selected</h3>
+            <p className="text-xs text-blue-700 mb-3">Review bids to start the project.</p>
+            <button 
+              onClick={() => setTab('bids')}
+              className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 w-full"
+            >
+              Review {safeBids.length} Bids
+            </button>
+          </div>
+        )}
+
+        {/* Bids Snapshot List */}
+        <div className="bg-white border rounded-lg shadow-sm p-5">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-semibold text-gray-900">Bids Snapshot</h3>
+            <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{safeBids.length}</span>
+          </div>
+          
+          {safeBids.length ? (
+            <div className="space-y-3">
+              {safeBids.slice(0, 5).map((b) => (
+                <div key={b.bidId} className="flex items-center justify-between p-2 rounded hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all">
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate">{b.vendorName}</div>
+                    <div className="text-xs text-gray-500">{fmt(b.createdAt).split(',')[0]}</div>
+                  </div>
+                  <div className="text-right pl-2">
+                    <div className="font-medium text-sm">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                     <span className={classNames(
+                        'text-[10px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wide',
+                        b.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                        b.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-amber-100 text-amber-700'
+                     )}>
+                       {b.status}
+                     </span>
+                  </div>
+                </div>
+              ))}
+              {safeBids.length > 5 && (
+                <button 
+                  onClick={() => setTab('bids')}
+                  className="block w-full text-center text-xs text-gray-500 hover:text-gray-800 pt-2"
+                >
+                  + {safeBids.length - 5} more
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-gray-400 text-sm">
+              No bids submitted yet.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </section>
+)}
       {/* Timeline */}
       {tab === 'timeline' && (
         <section className="border rounded p-4">
