@@ -93,8 +93,9 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   // local paid latch so button disappears immediately after 200/409
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
 
-  // Collapsible state: key is milestone index, value is boolean (true = collapsed)
-  const [collapsedMilestones, setCollapsedMilestones] = useState<Record<number, boolean>>({});
+  // Collapsible state: key is milestone index, value is boolean (true = expanded)
+  // Defaults to empty {}, so all false (closed) initially.
+  const [expandedMilestones, setExpandedMilestones] = useState<Record<number, boolean>>({});
 
   // -------- helpers --------
   const setText = (i: number, v: string) =>
@@ -104,7 +105,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     setFilesByIndex((prev) => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
   const toggleMilestone = (i: number) => {
-    setCollapsedMilestones((prev) => ({ ...prev, [i]: !prev[i] }));
+    setExpandedMilestones((prev) => ({ ...prev, [i]: !prev[i] }));
   };
 
   const deriveProposalId = () => {
@@ -470,8 +471,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 ? 'Submitted'
                 : 'Pending';
 
-          // Check collapsed state
-          const isCollapsed = !!collapsedMilestones[i];
+          // Check expanded state (default is false/closed)
+          const isExpanded = !!expandedMilestones[i];
 
           return (
             <div
@@ -492,7 +493,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 <div className="flex items-center gap-3">
                   {/* Chevron Icon */}
                   <svg
-                    className={`w-4 h-4 transform transition-transform text-gray-500 ${isCollapsed ? '' : 'rotate-180'}`}
+                    className={`w-4 h-4 transform transition-transform text-gray-500 ${isExpanded ? 'rotate-180' : ''}`}
                     fill="none" stroke="currentColor" viewBox="0 0 24 24"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -526,8 +527,8 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                 </div>
               </div>
 
-              {/* Body Content - conditionally hidden */}
-              {!isCollapsed && (
+              {/* Body Content - conditionally visible */}
+              {isExpanded && (
                 <div className="px-4 pb-4 border-t border-gray-200/50 pt-4">
                   {/* Show admin change request (if any) */}
                   {renderChangeRequestBanner(i)}
