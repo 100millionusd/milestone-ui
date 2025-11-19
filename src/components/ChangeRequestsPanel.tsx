@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 
+// --- Types (Unchanged) ---
 type CRResponseFile = { url?: string; cid?: string; name?: string };
 type CRResponse = {
-  id: number; // proof id (or -1 if none)
-  createdAt: string; // first file time in the window
-  note?: string | null; // latest proof note if any
+  id: number;
+  createdAt: string;
+  note?: string | null;
   files: CRResponseFile[];
 };
 type ChangeRequestRow = {
@@ -15,10 +16,10 @@ type ChangeRequestRow = {
   milestoneIndex: number;
   status: "open" | "resolved" | string;
   comment: string | null;
-  checklist: string[]; // stored as string[] in Prisma
+  checklist: string[];
   createdAt: string;
   resolvedAt: string | null;
-  responses?: CRResponse[]; // ← from API when include=responses
+  responses?: CRResponse[];
 };
 
 const PINATA_GATEWAY =
@@ -44,12 +45,39 @@ function isImageHref(href: string) {
 type Props = {
   proposalId: number;
   initialMilestoneIndex?: number;
-  // hard scoping from parent:
   forceMilestoneIndex?: number;
   hideMilestoneTabs?: boolean;
 };
 
 type Draft = { message: string; files: File[]; sending?: boolean; error?: string };
+
+// --- Icons for UI Polish ---
+const Icons = {
+  Refresh: () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+  ),
+  CheckCircle: () => (
+    <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+  ),
+  Clock: () => (
+    <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+  ),
+  File: () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M13 2v7h7" /></svg>
+  ),
+  ExternalLink: () => (
+    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+  ),
+  Send: () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+  ),
+  Attachment: () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+  ),
+  AdminUser: () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+  )
+};
 
 export default function ChangeRequestsPanel(props: Props) {
   const {
@@ -59,10 +87,8 @@ export default function ChangeRequestsPanel(props: Props) {
     hideMilestoneTabs,
   } = props;
 
-  // keep local state for tabs when not forced
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
 
-  // Allow URL to set default milestone: ?ms=4 or ?milestone=4
   useEffect(() => {
     if (typeof forceMilestoneIndex === "number") return;
     try {
@@ -71,32 +97,26 @@ export default function ChangeRequestsPanel(props: Props) {
       const n = q ? Number(q) : NaN;
       if (Number.isFinite(n) && n >= 0) setActiveMilestoneIndex(n);
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // FINAL index used everywhere
   const idx = typeof forceMilestoneIndex === "number" ? forceMilestoneIndex : activeMilestoneIndex;
 
   const [rows, setRows] = useState<ChangeRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
-  // Draft replies per-CR
   const [drafts, setDrafts] = useState<Record<number, Draft>>({});
 
-  // Guards to prevent stampedes and event echo loops
   const loadingRef = useRef(false);
   const lastLoadTs = useRef(0);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(proposalId)) return;
-    if (loadingRef.current) return; // dedupe overlapping triggers
+    if (loadingRef.current) return;
 
     loadingRef.current = true;
     setLoading(true);
     setErr(null);
     try {
-      // Build URL and pass milestoneIndex ONLY when the parent forces it
       const url = new URL("/api/proofs/change-requests", window.location.origin);
       url.searchParams.set("proposalId", String(proposalId));
       url.searchParams.set("include", "responses");
@@ -112,7 +132,6 @@ export default function ChangeRequestsPanel(props: Props) {
 
       setRows(safeList);
 
-      // --- Auto-focus a milestone that actually has CRs (only if not forced) ---
       if (typeof forceMilestoneIndex !== "number") {
         const present = new Set<number>(
           safeList.map((row) => Number(row.milestoneIndex)).filter((x) => Number.isFinite(x))
@@ -132,12 +151,10 @@ export default function ChangeRequestsPanel(props: Props) {
     }
   }, [proposalId, forceMilestoneIndex, idx]);
 
-  // on mount & when proposal OR effective milestone index changes
   useEffect(() => {
     load();
   }, [load, proposalId, idx]);
 
-  // Listen for external updates; now ONLY reload on targeted events for this proposal
   useEffect(() => {
     const onAny = (ev: any) => {
       const pid = Number(ev?.detail?.proposalId);
@@ -155,13 +172,11 @@ export default function ChangeRequestsPanel(props: Props) {
     };
   }, [proposalId, load]);
 
-  // Narrow to the currently scoped milestone
   const filteredRows = useMemo(
     () => (rows || []).filter((cr) => (cr.milestoneIndex ?? (cr as any).milestone_index ?? 0) === idx),
     [rows, idx]
   );
 
-  // Optional tabs only when NOT forced and not hidden
   const allMilestones = useMemo(
     () => Array.from(new Set((rows || []).map((r) => r.milestoneIndex))).sort((a, b) => a - b),
     [rows]
@@ -169,12 +184,10 @@ export default function ChangeRequestsPanel(props: Props) {
 
   const showTabs = !hideMilestoneTabs && typeof forceMilestoneIndex !== "number" && allMilestones.length > 1;
 
-  // -------------------- helpers --------------------
   const setDraft = useCallback((crId: number, patch: Partial<Draft>) => {
     setDrafts((prev) => ({ ...prev, [crId]: { message: "", files: [], ...prev[crId], ...patch } }));
   }, []);
 
-  // Upload selected files to your existing Pinata-backed endpoint, return [{ name, cid, url }]
   const uploadFiles = useCallback(async (files: File[]) => {
     if (!files?.length) return [];
     const fd = new FormData();
@@ -237,110 +250,158 @@ export default function ChangeRequestsPanel(props: Props) {
   );
 
   // -------------------- render --------------------
-  if (loading) return <div className="mt-4 text-sm text-gray-500">Loading change requests…</div>;
-  if (err) return <div className="mt-4 text-sm text-rose-600">{err}</div>;
-
-  if (!filteredRows.length) {
+  
+  if (loading) {
     return (
-      <div className="mt-4 p-4 border rounded-xl bg-white text-sm text-gray-500 shadow-sm">
-        No change requests yet for <span className="font-medium">Milestone {idx + 1}</span>.
+      <div className="mt-8 flex flex-col items-center justify-center space-y-3 text-slate-400 animate-pulse">
+        <div className="h-2 w-1/3 bg-slate-200 rounded"></div>
+        <div className="h-2 w-1/4 bg-slate-200 rounded"></div>
+      </div>
+    );
+  }
+
+  if (err) {
+    return (
+      <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {err}
       </div>
     );
   }
 
   return (
-    <div className="mt-6">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-base font-semibold tracking-tight">Change Request Thread</h4>
+    <div className="mt-8">
+      {/* --- Header --- */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h4 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
+            Request History
+            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{filteredRows.length}</span>
+          </h4>
+          <p className="text-sm text-slate-500 mt-0.5">Communications regarding Milestone {idx + 1}</p>
+        </div>
         <button
           onClick={load}
-          className="px-3 py-1.5 rounded-lg text-sm bg-slate-900 text-white shadow-sm hover:opacity-95 active:opacity-90"
+          className="group p-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"
+          title="Refresh"
         >
-          Refresh
+          <div className="group-active:rotate-180 transition-transform duration-300">
+            <Icons.Refresh />
+          </div>
         </button>
       </div>
 
+      {/* --- Tabs --- */}
       {showTabs && (
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-6 flex overflow-x-auto pb-2 no-scrollbar gap-2 border-b border-slate-100">
           {allMilestones.map((mi) => (
             <button
               key={mi}
               onClick={() => setActiveMilestoneIndex(mi)}
               className={[
-                "px-3 py-1.5 rounded-full text-xs border transition",
+                "relative px-4 py-2 rounded-t-lg text-sm font-medium transition-all duration-200",
                 mi === idx
-                  ? "bg-slate-900 text-white border-slate-900 shadow-sm"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+                  ? "text-slate-900 bg-white border-x border-t border-slate-100 shadow-[0_-2px_6px_-2px_rgba(0,0,0,0.02)] z-10"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50",
               ].join(" ")}
             >
               Milestone {mi + 1}
+              {mi === idx && <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-white" />}
             </button>
           ))}
         </div>
       )}
 
-      <ol className="space-y-5">
+      {/* --- Empty State --- */}
+      {!filteredRows.length && (
+        <div className="py-12 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+          <div className="mx-auto w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center text-slate-300 mb-3">
+            <Icons.CheckCircle />
+          </div>
+          <p className="text-slate-500 text-sm">No change requests found for this milestone.</p>
+        </div>
+      )}
+
+      {/* --- List --- */}
+      <ol className="space-y-8">
         {filteredRows.map((cr) => {
           const responses = Array.isArray(cr.responses) ? cr.responses : [];
           const draft = drafts[cr.id];
           const sending = !!draft?.sending;
-
-          const statusClasses =
-            cr.status === "open"
-              ? "border-amber-400 bg-amber-50/60"
-              : "border-emerald-500 bg-emerald-50/60";
+          const isOpen = cr.status === "open";
 
           return (
-            <li key={cr.id} className={`group relative border rounded-xl p-4 ps-5 shadow-sm ${statusClasses} border-s-4`}>
-              {/* Header row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-gray-700">
-                  <span className="font-medium">Milestone {Number(cr.milestoneIndex) + 1}</span>
-                  <span className="opacity-50">•</span>
-                  <time className="tabular-nums">{new Date(cr.createdAt).toLocaleString()}</time>
+            <li key={cr.id} className="group relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all hover:shadow-md">
+              
+              {/* Card Header */}
+              <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                   {isOpen ? <Icons.Clock /> : <Icons.CheckCircle />}
+                  <div className="flex flex-col">
+                     <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
+                     <span className="text-xs text-slate-500 tabular-nums">
+                        {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
+                     </span>
+                  </div>
                 </div>
-                <span
-                  className={[
-                    "px-2.5 py-1 rounded-full text-xs font-medium border",
-                    cr.status === "open"
-                      ? "bg-amber-100 text-amber-900 border-amber-200"
-                      : "bg-emerald-100 text-emerald-900 border-emerald-200",
-                  ].join(" ")}
-                >
-                  {cr.status}
-                </span>
+                
+                <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                  isOpen 
+                  ? "bg-amber-50 text-amber-700 border-amber-200" 
+                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                }`}>
+                  {cr.status.toUpperCase()}
+                </div>
               </div>
 
-              {/* Admin request body */}
-              {(cr.comment || (cr.checklist && cr.checklist.length)) && (
-                <div className="mt-3 p-3 rounded-lg bg-white/70 border text-sm">
-                  {cr.comment && <p className="mb-2 whitespace-pre-wrap text-slate-800">{cr.comment}</p>}
-                  {cr.checklist?.length ? (
-                    <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                      {cr.checklist.map((c, i) => (
-                        <li key={i}>{c}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              )}
-
-              {/* Vendor replies */}
-              {responses.length > 0 ? (
-                <div className="mt-4">
-                  <div className="relative pl-4">
-                    <div className="absolute left-0 top-1.5 bottom-1.5 w-px bg-slate-300/70" />
-                    {responses.map((resp, idx) => (
-                      <div key={idx} className="relative ps-4 pb-4">
-                        <div className="absolute left-[-7px] top-1.5 h-3 w-3 rounded-full bg-slate-400" />
-                        <div className="text-xs text-gray-500">
-                          Vendor reply at {new Date(resp.createdAt).toLocaleString()}
+              <div className="p-6">
+                {/* Admin Original Request */}
+                <div className="flex gap-4 mb-8">
+                    <div className="flex-shrink-0 mt-1">
+                        <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                            <Icons.AdminUser />
                         </div>
+                    </div>
+                    <div className="flex-grow">
+                        <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-none p-4 text-sm text-slate-800 shadow-sm relative">
+                            {cr.comment && <p className="whitespace-pre-wrap leading-relaxed">{cr.comment}</p>}
+                            {cr.checklist?.length ? (
+                                <div className="mt-3 space-y-2">
+                                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Action Items</div>
+                                    <ul className="space-y-2">
+                                    {cr.checklist.map((c, i) => (
+                                        <li key={i} className="flex items-start gap-2 text-slate-700">
+                                            <input type="checkbox" disabled className="mt-1 rounded border-slate-300 text-slate-900 focus:ring-0" />
+                                            <span className="opacity-80">{c}</span>
+                                        </li>
+                                    ))}
+                                    </ul>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Thread / Timeline */}
+                {responses.length > 0 && (
+                  <div className="relative ml-4 pl-8 border-l-2 border-slate-100 space-y-8 mb-8">
+                    {responses.map((resp, idx) => (
+                      <div key={idx} className="relative group/item">
+                        <div className="absolute -left-[39px] top-0 w-5 h-5 rounded-full bg-white border-2 border-blue-500 ring-4 ring-white"></div>
+                        
+                        <div className="flex items-baseline justify-between mb-1">
+                            <span className="text-xs font-bold text-slate-900">Vendor Reply</span>
+                            <span className="text-xs text-slate-400 tabular-nums">{new Date(resp.createdAt).toLocaleString()}</span>
+                        </div>
+
                         {resp.note && (
-                          <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{resp.note}</div>
+                          <div className="text-sm text-slate-700 whitespace-pre-wrap bg-white mb-3">
+                            {resp.note}
+                          </div>
                         )}
-                        {resp.files?.length ? (
-                          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                        
+                        {resp.files?.length > 0 && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                             {resp.files.map((f, i) => {
                               const href = toUrl(f);
                               const img = isImageHref(href);
@@ -350,104 +411,113 @@ export default function ChangeRequestsPanel(props: Props) {
                                   href={href}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="group relative overflow-hidden rounded-lg border bg-white/60"
+                                  className="group/img relative block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={href}
                                     alt={f.name || "image"}
-                                    className="h-28 w-full object-cover group-hover:scale-[1.02] transition"
+                                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110"
                                   />
-                                  <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1.5 py-0.5 truncate">
-                                    {f.name || href.split("/").pop()}
-                                  </div>
+                                  <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors" />
                                 </a>
                               ) : (
-                                <div key={i} className="p-2 rounded-lg border bg-white/70 text-xs">
-                                  <div className="truncate mb-1">
-                                    {f.name || href.split("/").pop()}
+                                <a
+                                  key={i}
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex flex-col p-3 rounded-lg border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-colors group/file"
+                                >
+                                  <div className="flex items-center justify-between mb-2 text-slate-400 group-hover/file:text-blue-500">
+                                     <Icons.File />
+                                     <Icons.ExternalLink />
                                   </div>
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                                  >
-                                    Open
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="M18 13v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                      <path d="M15 3h6v6" />
-                                      <path d="M10 14 21 3" />
-                                    </svg>
-                                  </a>
-                                </div>
+                                  <span className="text-xs font-medium text-slate-700 truncate w-full">{f.name || "Attachment"}</span>
+                                </a>
                               );
                             })}
                           </div>
-                        ) : (
-                          <div className="mt-2 text-xs text-gray-500">No files in this reply.</div>
                         )}
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : (
-                <div className="mt-3 text-xs text-gray-500">No vendor reply yet.</div>
-              )}
+                )}
 
-              {/* Reply form (only when CR is open) */}
-              {cr.status === "open" && (
-                <div className="mt-4 p-4 border rounded-xl bg-white/80">
-                  <label className="block text-sm font-medium text-slate-800">Your answer</label>
-                  <textarea
-                    className="mt-1 w-full rounded-lg border p-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    rows={3}
-                    placeholder="Write your answer to the admin’s request…"
-                    value={draft?.message ?? ""}
-                    onChange={(e) => setDraft(cr.id, { message: e.target.value })}
-                    disabled={sending}
-                  />
-
-                  <div className="mt-2 flex items-center gap-3">
-                    <input
-                      type="file"
-                      multiple
-                      onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
-                      className="text-sm"
+                {/* Reply Input Area (Only if Open) */}
+                {isOpen && (
+                  <div className="mt-6 bg-slate-50 rounded-xl border border-slate-200 p-1">
+                    <textarea
+                      className="w-full bg-white rounded-lg border-0 p-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 min-h-[100px] resize-y"
+                      placeholder="Write your response here..."
+                      value={draft?.message ?? ""}
+                      onChange={(e) => setDraft(cr.id, { message: e.target.value })}
                       disabled={sending}
                     />
-                    {!!draft?.files?.length && (
-                      <div className="text-xs text-gray-600">{draft.files.length} file(s) selected</div>
+                    
+                    <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center">
+                            <label className="cursor-pointer inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
+                                <div className="relative">
+                                    <input
+                                        type="file"
+                                        multiple
+                                        onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
+                                        disabled={sending}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    />
+                                    <div className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-slate-200/50">
+                                        <Icons.Attachment />
+                                        <span>Attach Files</span>
+                                    </div>
+                                </div>
+                            </label>
+                             {!!draft?.files?.length && (
+                                <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                    {draft.files.length} file{draft.files.length > 1 ? 's' : ''}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                             <button
+                                type="button"
+                                onClick={() =>
+                                    setDrafts((prev) => {
+                                    const n = { ...prev };
+                                    delete n[cr.id];
+                                    return n;
+                                    })
+                                }
+                                disabled={sending || (!draft?.message && !draft?.files?.length)}
+                                className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
+                                >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => submitReply(cr)}
+                                disabled={sending}
+                                className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+                            >
+                                {sending ? (
+                                    <>Sending...</>
+                                ) : (
+                                    <>
+                                        <span>Send Reply</span>
+                                        <Icons.Send />
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                    {!!draft?.error && (
+                        <div className="mx-3 mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">
+                            {draft.error}
+                        </div>
                     )}
                   </div>
-
-                  {!!draft?.error && <div className="mt-2 text-xs text-rose-600">{draft.error}</div>}
-
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      onClick={() => submitReply(cr)}
-                      disabled={sending}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-sm shadow-sm disabled:opacity-60"
-                    >
-                      {sending ? "Sending…" : "Send answer"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDrafts((prev) => {
-                          const n = { ...prev };
-                          delete n[cr.id];
-                          return n;
-                        })
-                      }
-                      disabled={sending}
-                      className="px-3 py-1.5 rounded-lg border text-sm disabled:opacity-60"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </li>
           );
         })}
