@@ -386,11 +386,12 @@ export default function ProjectsPage() {
   const renderTabContent = () => {
     if (loading) return <div className="p-6 text-center text-gray-500">Loading projects...</div>;
 
-    if (activeTab === 'active') {
+ if (activeTab === 'active') {
       return (
         <div className="space-y-6">
           {activeProjects.map((p) =>
-            renderCard(p, { text: 'Active', cls: 'text-blue-700 bg-blue-50' })
+            // CHANGED: cls is now green text/bg
+            renderCard(p, { text: 'Active', cls: 'text-green-700 bg-green-50' })
           )}
           {activeProjects.length === 0 && (
             <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
@@ -407,9 +408,10 @@ export default function ProjectsPage() {
           {completedProjects.map((p) =>
             renderCard(
               p,
-              { text: 'Completed', cls: 'text-green-700 bg-green-50' },
+              // CHANGED: Swapped to Blue so it doesn't clash with Active
+              { text: 'Completed', cls: 'text-blue-700 bg-blue-50' },
               <div className="w-full flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-green-700 font-medium">
+                <div className="flex items-center gap-2 text-blue-700 font-medium">
                    <Icons.CheckCircle />
                    <span>Project fully completed</span>
                 </div>
