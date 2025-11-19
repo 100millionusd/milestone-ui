@@ -18,7 +18,7 @@ const getDisplayFiles = (bid: any) =>
 function CollapsibleSection({
   title,
   children,
-  defaultOpen = true,
+  defaultOpen = false, // CHANGED: Defaults to closed now
   action
 }: {
   title: React.ReactNode;
@@ -294,8 +294,8 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         </div>
       </div>
 
-      {/* 1. Collapsible Bid Summary */}
-      <CollapsibleSection title="Bid Summary & Milestones">
+      {/* 1. Collapsible Bid Summary (Closed by default) */}
+      <CollapsibleSection title="Bid Summary & Milestones" defaultOpen={false}>
         <div className="grid sm:grid-cols-2 gap-4">
           <Info label="Project" value={`#${bid.proposalId}`} />
           <Info label="Vendor" value={bid.vendorName} />
@@ -343,7 +343,7 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
           </div>
         )}
 
-        {/* Milestones - Now handles its own internal visibility too */}
+        {/* Milestones */}
         <div className="mt-6 border-t pt-4">
           <MilestonesSection
             bid={bid}
@@ -353,17 +353,17 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
         </div>
       </CollapsibleSection>
 
-      {/* 2. Collapsible Agent 2 Inline */}
+      {/* 2. Collapsible Agent 2 Inline (Closed by default) */}
       {proposal && (
         <CollapsibleSection title="Agent 2 Proposal Analysis" defaultOpen={false}>
           <Agent2Inline bid={bid} proposal={proposal as any} />
         </CollapsibleSection>
       )}
 
-      {/* 3. Collapsible Submitted Proofs */}
+      {/* 3. Collapsible Submitted Proofs (Closed by default) */}
       <CollapsibleSection
         title={`Submitted Proofs (${visibleProofs.length})`}
-        defaultOpen={true}
+        defaultOpen={false}
         action={
           <Link
             href={`/proposals/${bid.proposalId}/edit`}
@@ -477,9 +477,9 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
                     </div>
                   )}
 
-                  {/* Collapsible Analysis Body to save space */}
+                  {/* Collapsible Analysis Body - Defaulted to closed */}
                   {a ? (
-                    <AnalysisView a={a} collapsedDefault={false} />
+                    <AnalysisView a={a} collapsedDefault={true} />
                   ) : (
                     <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
                   )}
@@ -529,7 +529,6 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-// UPDATED: Added collapsedDefault support
 function AnalysisView({ a, collapsedDefault = false }: { a: any; collapsedDefault?: boolean }) {
   const [expanded, setExpanded] = useState(!collapsedDefault);
 
@@ -718,7 +717,7 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
   );
 }
 
-// UPDATED: MilestonesSection with visibility toggle and summary
+// UPDATED: MilestonesSection with visibility toggle (defaults to closed)
 function MilestonesSection({
   bid,
   canEdit,
@@ -729,8 +728,8 @@ function MilestonesSection({
   onUpdated: (b:any)=>void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  // New state to collapse the list
-  const [expanded, setExpanded] = useState(true);
+  // New state to collapse the list - CHANGED to false (closed)
+  const [expanded, setExpanded] = useState(false);
   const milestones = useMemo(() => (Array.isArray(bid.milestones) ? bid.milestones : []), [bid?.milestones]);
 
   // Simple progress calc
