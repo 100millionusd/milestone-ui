@@ -681,20 +681,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   }
 
-  async function pollUntilPaid(bidId: number, milestoneIndex: number) {
+   async function pollUntilPaid(bidId: number, milestoneIndex: number) {
     const key = mkKey(bidId, milestoneIndex);
     if (pollers.current.has(key)) return;
     pollers.current.add(key);
     try {
-      let executedStreak = 0; // need 2 consecutive executions
+      let executedStreak = 0; 
       for (let i = 0; i < 120; i++) {
         let bid: any | null = null;
-        try { bid = await getBid(bidId); } catch (err: any) {
+        try { 
+          // Fetch fresh bid data
+          bid = await getBid(bidId); 
+        } catch (err: any) {
           if (SAFE_DEBUG) console.error('Error fetching bid:', err);
           if (err?.status === 401 || err?.status === 403) { setError('Your session expired. Please sign in again.'); break; }
         }
+        
         const m = bid?.milestones?.[milestoneIndex];
-        if (m && msIsPaid(m)) {
+        
+        // FIX: Consider it paid if status is PAID *OR* if we have a payment transaction hash
+        const isActuallyPaid = m && (msIsPaid(m) || !!m.paymentTxHash || !!m.payment_tx_hash);
+
+        if (isActuallyPaid) {
           removePending(key);
           setPaidOverrideKey(key, false);
           setBids((prev) =>
@@ -711,6 +719,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           emitPayDone(bidId, milestoneIndex);
           return;
         }
+        
+        // Safe Multisig logic
         const safeHash = m ? readSafeTxHash(m) : null;
         if (safeHash) {
           const safeStatus = await fetchSafeTx(safeHash);
@@ -730,6 +740,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         }
         await new Promise((r) => setTimeout(r, 5000));
       }
+      // If we timed out, remove pending so the user can check/retry
       removePending(key);
     } finally {
       pollers.current.delete(key);
@@ -755,11 +766,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       const rows = Array.isArray(allBids) ? allBids : [];
       if (DEBUG_FILES) console.log('🔍 loadProofs: Raw bids data:', rows);
 
-      // clear local pending for server-paid
+// clear local pending for server-paid
       for (const bid of rows || []) {
         const ms: any[] = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          if (msIsPaid(ms[i])) {
+          // FIX: Check for hash here too
+          if (msIsPaid(ms[i]) || ms[i].paymentTxHash || ms[i].payment_tx_hash) {
             const key = mkKey(bid.bidId, i);
             removePending(key);
             setPaidOverrideKey(key, false);
