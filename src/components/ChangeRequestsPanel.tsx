@@ -79,6 +79,9 @@ const Icons = {
   ),
   ChevronDown: () => (
     <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+  ),
+  Alert: () => (
+    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
   )
 };
 
@@ -91,7 +94,6 @@ export default function ChangeRequestsPanel(props: Props) {
   } = props;
 
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
-  // CHANGED: Default is now false (closed)
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
@@ -182,6 +184,12 @@ export default function ChangeRequestsPanel(props: Props) {
     [rows, idx]
   );
 
+  // Calculate if any action is required (any open status)
+  const openCount = useMemo(
+    () => filteredRows.filter((r) => r.status === "open").length,
+    [filteredRows]
+  );
+
   const allMilestones = useMemo(
     () => Array.from(new Set((rows || []).map((r) => r.milestoneIndex))).sort((a, b) => a - b),
     [rows]
@@ -257,16 +265,25 @@ export default function ChangeRequestsPanel(props: Props) {
   // -------------------- render --------------------
   
   return (
-    <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden transition-all">
+    <div className={`mt-6 rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${
+        openCount > 0 && !isExpanded ? "border-red-200 shadow-red-50" : "border-slate-200"
+    }`}>
       {/* --- Collapsible Header --- */}
       <button 
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-6 py-4 bg-white hover:bg-slate-50/50 transition-colors text-left"
+        className="w-full flex items-center justify-between px-6 py-4 bg-white hover:bg-slate-50/50 transition-colors text-left group"
       >
-        <div className="flex flex-col">
+        <div className="flex flex-col items-start">
           <h4 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Request History
-            {!loading && (
+            {!loading && openCount > 0 ? (
+                // Action Required Badge (Red)
+                <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-bold animate-pulse">
+                   <Icons.Alert />
+                   Action Required
+                </span>
+            ) : !loading && (
+                // Normal Count Badge (Gray)
                 <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                     filteredRows.length > 0 ? "bg-slate-100 text-slate-600" : "bg-slate-100 text-slate-400"
                 }`}>
@@ -277,7 +294,7 @@ export default function ChangeRequestsPanel(props: Props) {
           <p className="text-sm text-slate-500 mt-1">Communications regarding Milestone {idx + 1}</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className={`transform transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}>
+          <div className={`transform transition-transform duration-300 text-slate-400 group-hover:text-slate-600 ${isExpanded ? "rotate-180" : ""}`}>
              <Icons.ChevronDown />
           </div>
         </div>
@@ -355,27 +372,42 @@ export default function ChangeRequestsPanel(props: Props) {
                   const isOpen = cr.status === "open";
 
                   return (
-                    <li key={cr.id} className="group relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all hover:shadow-md">
+                    <li key={cr.id} className={`group relative bg-white rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${
+                        isOpen ? "border-red-200 ring-1 ring-red-100" : "border-slate-200"
+                    }`}>
                       
                       {/* Card Header */}
-                      <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                      <div className={`px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3 ${
+                          isOpen ? "bg-red-50/30 border-red-100" : "bg-slate-50/50 border-slate-100"
+                      }`}>
                         <div className="flex items-center gap-3">
-                           {isOpen ? <Icons.Clock /> : <Icons.CheckCircle />}
+                           {isOpen ? (
+                                <div className="text-red-500 animate-pulse">
+                                     <Icons.Alert />
+                                </div>
+                           ) : (
+                                <Icons.CheckCircle />
+                           )}
                           <div className="flex flex-col">
-                             <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
+                             <div className="flex items-center gap-2">
+                                 <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
+                                 {isOpen && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />}
+                             </div>
                              <span className="text-xs text-slate-500 tabular-nums">
                                 {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
                              </span>
                           </div>
                         </div>
                         
-                        <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                          isOpen 
-                          ? "bg-amber-50 text-amber-700 border-amber-200" 
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        }`}>
-                          {cr.status.toUpperCase()}
-                        </div>
+                        {isOpen ? (
+                            <div className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
+                                ACTION REQUIRED
+                            </div>
+                        ) : (
+                            <div className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {cr.status.toUpperCase()}
+                            </div>
+                        )}
                       </div>
 
                       <div className="p-6">
