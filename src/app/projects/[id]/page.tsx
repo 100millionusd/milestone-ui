@@ -1234,19 +1234,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
           </div>
         </details>
 
-        {/* 3. Payment Actions (MOVED OUTSIDE DETAILS - Always Visible) */}
-        {(acceptedBid || safeBids[0]) && (
-          <div className="border rounded-lg bg-white shadow-sm p-6">
-             <h4 className="text-sm font-semibold text-gray-900 mb-3">Payment Actions</h4>
-            <MilestonePayments
-              bid={acceptedBid || safeBids[0]}
-              onUpdate={refreshProofs}
-              proposalId={projectIdNum}
-            />
-          </div>
-        )}
-
-        {/* 4. Change Requests (MOVED OUTSIDE DETAILS - Always Visible) */}
+        {/* 3. Change Requests (Manual Payment Processor <MilestonePayments> is REMOVED) */}
         <div className="border rounded-lg bg-white shadow-sm p-6">
           <h3 className="font-semibold mb-2 text-gray-900">Change Requests</h3>
           <p className="text-sm text-gray-500 mb-4">Manage negotiations between admin and vendor.</p>
