@@ -276,24 +276,29 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
 
   const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
 
-  return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Bid #{bidId}</h1>
-        <div className="flex items-center gap-2">
-          {/* Global bid-level chat button */}
-<div className="flex items-center gap-3"> {/* Added flex for alignment */}
-  <button
-    type="button"
-    onClick={() => setChatOpen(true)}
-    className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white shadow-sm hover:bg-blue-700"
-    title="Ask Agent 2 about this bid"
-  >
-    Ask Agent 2 (Chat)
-  </button>
-  
-  <Link href="/admin/bids" className="underline text-xs">← Back</Link>
-</div>
+return (
+  <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <div className="flex items-center justify-between">
+      {/* 1. Header made smaller (text-2xl -> text-xl) */}
+      <h1 className="text-xl font-semibold">Bid #{bidId}</h1>
+      
+      <div className="flex items-center gap-3">
+        {/* 2. Chat button made smaller (padding & text reduced) */}
+        <button
+          type="button"
+          onClick={() => setChatOpen(true)}
+          className="px-2.5 py-1 rounded bg-blue-600 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
+          title="Ask Agent 2 about this bid"
+        >
+          Ask Agent 2 (Chat)
+        </button>
+
+        {/* 3. Back link made smaller (text-sm -> text-xs) */}
+        <Link href="/admin/bids" className="underline text-xs">
+          ← Back
+        </Link>
+      </div>
+    </div>
 
       {/* 1. Collapsible Bid Summary (Closed by default) */}
       <CollapsibleSection title="Bid Summary & Milestones" defaultOpen={false}>
