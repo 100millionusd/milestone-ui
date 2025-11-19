@@ -91,8 +91,8 @@ export default function ChangeRequestsPanel(props: Props) {
   } = props;
 
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
-  // New state for collapsing the panel
-  const [isExpanded, setIsExpanded] = useState(true);
+  // CHANGED: Default is now false (closed)
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (typeof forceMilestoneIndex === "number") return;
