@@ -14,6 +14,40 @@ const getMilestoneDescription = (m: any) => m?.notes ?? m?.desc ?? m?.descriptio
 const getDisplayFiles = (bid: any) =>
   (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
 
+/* ——— NEW: Reusable Collapsible Wrapper ——— */
+function CollapsibleSection({
+  title,
+  children,
+  defaultOpen = true,
+  action
+}: {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  action?: React.ReactNode; // Optional extra button in header
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <section className="rounded border bg-white overflow-hidden shadow-sm">
+      <div
+        className="flex items-center justify-between p-4 bg-slate-50 border-b cursor-pointer select-none hover:bg-slate-100 transition-colors"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div className="flex items-center gap-2 font-semibold text-slate-800">
+          <span className={`transform transition-transform text-xs text-slate-500 ${isOpen ? 'rotate-90' : ''}`}>
+            ▶
+          </span>
+          {title}
+        </div>
+        {/* Prevent parent click when clicking the action */}
+        {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
+      </div>
+      {isOpen && <div className="p-4">{children}</div>}
+    </section>
+  );
+}
+
 export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   const routeParams = useParams();
   const bidId = Number((props.params as any)?.id ?? (routeParams as any)?.id);
@@ -66,13 +100,13 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
 
   // only show the latest proof card per milestone in the UI
   const visibleProofs = useMemo(() => {
-  const keep = new Set<number>(Object.values(latestIdByIdx));
-  return proofs.filter(p => {
-    const id = Number(p.proofId ?? p.id);
-    const status = String(p.status || '').toLowerCase();
-    return keep.has(id) && status !== 'rejected';
-  });
-}, [proofs, latestIdByIdx]);
+    const keep = new Set<number>(Object.values(latestIdByIdx));
+    return proofs.filter(p => {
+      const id = Number(p.proofId ?? p.id);
+      const status = String(p.status || '').toLowerCase();
+      return keep.has(id) && status !== 'rejected';
+    });
+  }, [proofs, latestIdByIdx]);
 
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
@@ -153,29 +187,29 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   }
 
   // refresh latest status map AND the proofs list (no stale cache)
-async function refreshLatest() {
-  if (!bidId) return;
-  try {
-    const [statusRes, proofsRes] = await Promise.all([
-      fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
-        credentials: 'include',
-        cache: 'no-store',
-      }),
-      fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
-        credentials: 'include',
-        cache: 'no-store',
-      }),
-    ]);
+  async function refreshLatest() {
+    if (!bidId) return;
+    try {
+      const [statusRes, proofsRes] = await Promise.all([
+        fetch(`${API_BASE}/bids/${bidId}/proofs/latest-status`, {
+          credentials: 'include',
+          cache: 'no-store',
+        }),
+        fetch(`${API_BASE}/proofs?bidId=${bidId}`, {
+          credentials: 'include',
+          cache: 'no-store',
+        }),
+      ]);
 
-    const statusJson = await statusRes.json();
-    const proofsJson = await proofsRes.json();
+      const statusJson = await statusRes.json();
+      const proofsJson = await proofsRes.json();
 
-    setProofStatusByIdx(statusJson?.byIndex || {});
-    setProofs(Array.isArray(proofsJson) ? proofsJson : []);
-  } catch {
-    /* ignore */
+      setProofStatusByIdx(statusJson?.byIndex || {});
+      setProofs(Array.isArray(proofsJson) ? proofsJson : []);
+    } catch {
+      /* ignore */
+    }
   }
-}
 
   // one-shot reject; disables button + persists lock + flips local status immediately
   async function onRejectOnce(idx: number) {
@@ -196,21 +230,21 @@ async function refreshLatest() {
     }
 
     // 2) remove the latest rejected proof from local state immediately
-setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
-setProofs(prev => {
-  let latestId = 0;
-  for (const q of prev) {
-    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-    const pid  = Number(q.proofId ?? q.id ?? 0);
-    if (qIdx === idx && pid > latestId) latestId = pid;
-  }
-  // drop that row entirely
-  return prev.filter(q => {
-    const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
-    const pid  = Number(q.proofId ?? q.id ?? 0);
-    return !(qIdx === idx && pid === latestId);
-  });
-});
+    setProofStatusByIdx(prev => ({ ...prev, [idx]: 'rejected' }));
+    setProofs(prev => {
+      let latestId = 0;
+      for (const q of prev) {
+        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+        const pid  = Number(q.proofId ?? q.id ?? 0);
+        if (qIdx === idx && pid > latestId) latestId = pid;
+      }
+      // drop that row entirely
+      return prev.filter(q => {
+        const qIdx = Number(q.milestoneIndex ?? q.milestone_index);
+        const pid  = Number(q.proofId ?? q.id ?? 0);
+        return !(qIdx === idx && pid === latestId);
+      });
+    });
 
     // 3) refresh server truth (won’t re-enable the button, local state already flipped)
     refreshLatest(); // fire-and-forget
@@ -251,17 +285,17 @@ setProofs(prev => {
           <button
             type="button"
             onClick={() => setChatOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white"
+            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700"
             title="Ask Agent 2 about this bid"
           >
             Ask Agent 2 (Chat)
           </button>
-          <Link href="/admin/bids" className="underline">← Back</Link>
+          <Link href="/admin/bids" className="underline text-sm">← Back</Link>
         </div>
       </div>
 
-      {/* Bid summary */}
-      <section className="rounded border p-4 bg-white">
+      {/* 1. Collapsible Bid Summary */}
+      <CollapsibleSection title="Bid Summary & Milestones">
         <div className="grid sm:grid-cols-2 gap-4">
           <Info label="Project" value={`#${bid.proposalId}`} />
           <Info label="Vendor" value={bid.vendorName} />
@@ -275,33 +309,33 @@ setProofs(prev => {
             <div className="font-medium whitespace-pre-wrap">{bid.notes || '—'}</div>
           </div>
         </div>
-        {/* Attachments (bid.files || bid.docs) */}
-{(() => {
-  const files =
-    (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
-  if (!files?.length) return null;
-  return (
-    <div className="mt-4">
-      <div className="text-sm text-gray-500 mb-1">Attachments</div>
-      <ul className="list-disc list-inside text-sm">
-        {files.map((f: any, i: number) => (
-          <li key={i}>
-            <a
-              className="text-blue-600 hover:underline"
-              href={f.url ?? f.href}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {f.name ?? f.filename ?? `File ${i + 1}`}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-})()}
+        {/* Attachments */}
+        {(() => {
+          const files =
+            (Array.isArray(bid?.files) && bid.files.length ? bid.files : (bid?.docs ?? []));
+          if (!files?.length) return null;
+          return (
+            <div className="mt-4">
+              <div className="text-sm text-gray-500 mb-1">Attachments</div>
+              <ul className="list-disc list-inside text-sm">
+                {files.map((f: any, i: number) => (
+                  <li key={i}>
+                    <a
+                      className="text-blue-600 hover:underline"
+                      href={f.url ?? f.href}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {f.name ?? f.filename ?? `File ${i + 1}`}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
 
-        {/* Admin-only quick edits (non-milestone fields) */}
+        {/* Admin-only quick edits */}
         {me.role === 'admin' && (
           <div className="mt-4 p-3 rounded-lg bg-slate-50 border">
             <div className="text-sm font-semibold mb-3">Admin: Quick Edit</div>
@@ -309,36 +343,39 @@ setProofs(prev => {
           </div>
         )}
 
-        {/* Milestones */}
-        <MilestonesSection
-          bid={bid}
-          canEdit={me.role === 'admin'}
-          onUpdated={(updatedBid) => setBid(updatedBid)}
-        />
-      </section>
+        {/* Milestones - Now handles its own internal visibility too */}
+        <div className="mt-6 border-t pt-4">
+          <MilestonesSection
+            bid={bid}
+            canEdit={me.role === 'admin'}
+            onUpdated={(updatedBid) => setBid(updatedBid)}
+          />
+        </div>
+      </CollapsibleSection>
 
-      {/* Agent 2 — inline analysis + run */}
+      {/* 2. Collapsible Agent 2 Inline */}
       {proposal && (
-        <section className="rounded border p-4 bg-white">
+        <CollapsibleSection title="Agent 2 Proposal Analysis" defaultOpen={false}>
           <Agent2Inline bid={bid} proposal={proposal as any} />
-        </section>
+        </CollapsibleSection>
       )}
 
-      {/* Proofs for this bid */}
-      <section className="rounded border p-4 bg-white">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold">Submitted Proofs</h2>
+      {/* 3. Collapsible Submitted Proofs */}
+      <CollapsibleSection
+        title={`Submitted Proofs (${visibleProofs.length})`}
+        defaultOpen={true}
+        action={
           <Link
             href={`/proposals/${bid.proposalId}/edit`}
-            className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
+            className="px-3 py-1 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-700"
           >
             Edit Proposal
           </Link>
-        </div>
-
+        }
+      >
         {visibleProofs.length === 0 && (
-  <div className="text-sm text-slate-500">No proofs submitted yet.</div>
-)}
+          <div className="text-sm text-slate-500 text-center py-4">No proofs submitted yet.</div>
+        )}
 
         {visibleProofs.map((p) => {
           const id = Number(p.proofId ?? p.id);
@@ -351,13 +388,17 @@ setProofs(prev => {
           const isLatestCard = id === latestIdByIdx[idx];
 
           return (
-            <div key={id} className="rounded-lg border border-slate-200 p-4 mb-4">
-              <div className="flex items-center justify-between">
-                <div className="font-medium">
-                  {p.title || `Proof #${id}`} · Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
+            <div key={id} className="rounded-lg border border-slate-200 bg-white mb-4 shadow-sm transition-shadow hover:shadow-md">
+              {/* Card Header - Always visible */}
+              <div className="p-4 border-b bg-slate-50/50 flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-lg">
+                    Milestone {Number(p.milestoneIndex ?? p.milestone_index) + 1}
+                  </div>
+                  <div className="text-sm text-slate-500">{p.title || `Proof #${id}`}</div>
                 </div>
                 <span
-                  className={`text-xs rounded px-2 py-0.5 border ${
+                  className={`text-xs rounded px-3 py-1 font-medium border ${
                     latestStatus === 'approved'
                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                       : latestStatus === 'rejected'
@@ -365,107 +406,108 @@ setProofs(prev => {
                       : 'bg-amber-100 text-amber-800 border-amber-200'
                   }`}
                 >
-                  {latestStatus}
+                  {latestStatus.toUpperCase()}
                 </span>
               </div>
 
-              {p.description && (
-                <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{p.description}</p>
-              )}
-
-              {Array.isArray(p.files) && p.files.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {p.files.map((f: any, i: number) => (
-                    <li key={i} className="text-sm">
-                      <a className="text-blue-600 hover:underline" href={f.url} target="_blank" rel="noreferrer">
-                        {f.name || f.url}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="mt-4 rounded-md bg-slate-50 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-semibold">Agent 2 Analysis</div>
-                  {/* Per-proof chat opens the same bid-level chat modal */}
-                  <button
-                    type="button"
-                    onClick={() => setChatOpen(true)}
-                    className="text-xs px-2 py-1 rounded bg-blue-600 text-white"
-                    title="Ask Agent 2 about this bid/proof"
-                  >
-                    Ask Agent 2 (Chat)
-                  </button>
-                </div>
-
-                {/* Actions — only on latest card, when status is pending, and not locally locked */}
-                {(isLatestCard && canReview && !rejectLocked) ? (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      className="px-4 py-2 rounded bg-amber-500 text-white"
-                      onClick={async () => {
-                        await api.approveProof(bidId, idx);   // <-- use api.*
-                        setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' })); // instant flip
-                        await refreshLatest();
-                      }}
-                    >
-                      Approve Proof
-                    </button>
-
-                    <button
-                      className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-                      onClick={() => onRejectOnce(idx)}
-                      disabled={rejectLocked}
-                      aria-disabled={rejectLocked}
-                      title={rejectLocked ? 'Already rejected' : 'Reject'}
-                    >
-                      {rejectLocked ? 'Rejected' : 'Reject'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-slate-500">
-                    Latest proof is <span className="font-medium">{latestStatus}</span>.
+              <div className="p-4">
+                {p.description && (
+                  <div className="mb-4">
+                    <div className="text-xs text-slate-400 uppercase font-bold mb-1">Description</div>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{p.description}</p>
                   </div>
                 )}
 
-                {a ? (
-                  <AnalysisView a={a} />
-                ) : (
-                  <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
+                {Array.isArray(p.files) && p.files.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs text-slate-400 uppercase font-bold mb-1">Files</div>
+                    <ul className="space-y-1">
+                      {p.files.map((f: any, i: number) => (
+                        <li key={i} className="text-sm">
+                          <a className="text-blue-600 hover:underline flex items-center gap-1" href={f.url} target="_blank" rel="noreferrer">
+                            📄 {f.name || f.url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
 
-                <div className="mt-3">
-                  <textarea
-                    value={promptById[id] || ''}
-                    onChange={(e) => setPromptById((prev) => ({ ...prev, [id]: e.target.value }))}
-                    className="w-full p-2 rounded border"
-                    rows={3}
-                    placeholder="Optional: add a prompt to re-run Agent 2 for this proof"
-                  />
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => runProofAnalysis(id)}
-                      disabled={!!busyById[id]}
-                      className="px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-                    >
-                      {busyById[id] ? 'Analyzing…' : 'Run Agent 2'}
-                    </button>
-                    {/* Secondary chat entry point beside the rerun button */}
+                <div className="rounded-md bg-slate-50 p-3 border border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-slate-800 flex items-center gap-2">
+                      🤖 Agent 2 Analysis
+                    </div>
                     <button
                       type="button"
                       onClick={() => setChatOpen(true)}
-                      className="px-3 py-2 rounded-lg bg-blue-600 text-white"
+                      className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
+                      title="Ask Agent 2 about this bid/proof"
                     >
-                      Ask Agent 2 (Chat)
+                      Discuss in Chat
                     </button>
+                  </div>
+
+                  {/* Actions Area */}
+                  {(isLatestCard && canReview && !rejectLocked) ? (
+                    <div className="mt-3 flex gap-2 mb-4 border-b pb-4 border-slate-200">
+                      <button
+                        className="px-4 py-2 rounded bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
+                        onClick={async () => {
+                          await api.approveProof(bidId, idx);
+                          setProofStatusByIdx(prev => ({ ...prev, [idx]: 'approved' }));
+                          await refreshLatest();
+                        }}
+                      >
+                        Approve Proof
+                      </button>
+
+                      <button
+                        className="px-4 py-2 rounded bg-rose-600 text-white hover:bg-rose-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => onRejectOnce(idx)}
+                        disabled={rejectLocked}
+                        title={rejectLocked ? 'Already rejected' : 'Reject'}
+                      >
+                        {rejectLocked ? 'Rejected' : 'Reject'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-slate-500 mb-3">
+                      Status: <span className="font-medium text-slate-700">{latestStatus}</span>
+                    </div>
+                  )}
+
+                  {/* Collapsible Analysis Body to save space */}
+                  {a ? (
+                    <AnalysisView a={a} collapsedDefault={false} />
+                  ) : (
+                    <div className="text-sm text-slate-600">No analysis yet for this proof.</div>
+                  )}
+
+                  <div className="mt-4 pt-3 border-t border-slate-200">
+                    <textarea
+                      value={promptById[id] || ''}
+                      onChange={(e) => setPromptById((prev) => ({ ...prev, [id]: e.target.value }))}
+                      className="w-full p-2 rounded border bg-white text-sm"
+                      rows={2}
+                      placeholder="Add instructions to re-run Agent 2..."
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => runProofAnalysis(id)}
+                        disabled={!!busyById[id]}
+                        className="px-3 py-1.5 rounded text-sm bg-slate-800 text-white disabled:opacity-50 hover:bg-slate-900"
+                      >
+                        {busyById[id] ? 'Analyzing…' : 'Re-run Agent 2'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           );
         })}
-      </section>
+      </CollapsibleSection>
 
       {/* One chat modal for the whole page */}
       <BidChatAgent
@@ -481,51 +523,67 @@ setProofs(prev => {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="font-medium">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="font-medium text-gray-900">{value}</div>
     </div>
   );
 }
 
-function AnalysisView({ a }: { a: any }) {
+// UPDATED: Added collapsedDefault support
+function AnalysisView({ a, collapsedDefault = false }: { a: any; collapsedDefault?: boolean }) {
+  const [expanded, setExpanded] = useState(!collapsedDefault);
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        {'fit' in a && (
-          <span>
-            Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b>
-          </span>
-        )}
-        {'confidence' in a && (
-          <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>
-        )}
-        {'pdfUsed' in a && (
-          <span className="text-slate-500">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></span>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+         <div className="flex gap-3">
+          {'fit' in a && (
+            <span>
+              Fit: <b className={fitColor(a.fit)}>{String(a.fit || '').toLowerCase() || '—'}</b>
+            </span>
+          )}
+          {'confidence' in a && (
+            <span>Confidence: <b>{Math.round((a.confidence ?? 0) * 100)}%</b></span>
+          )}
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-blue-600 hover:underline"
+        >
+          {expanded ? 'Hide Details' : 'Show Details'}
+        </button>
       </div>
 
-      {a.summary && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Summary</div>
-          <p className="whitespace-pre-line text-sm leading-relaxed">{a.summary}</p>
-        </div>
-      )}
+      {expanded && (
+        <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+           {'pdfUsed' in a && (
+            <div className="text-xs text-slate-400 mb-2">PDF parsed: <b>{a.pdfUsed ? 'Yes' : 'No'}</b></div>
+          )}
 
-      {Array.isArray(a.risks) && a.risks.length > 0 && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Risks</div>
-          <ul className="list-disc list-inside text-sm space-y-1">
-            {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
-          </ul>
-        </div>
-      )}
+          {a.summary && (
+            <div className="mb-3">
+              <div className="text-xs font-bold text-slate-500 uppercase mb-1">Summary</div>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-slate-800 bg-white p-2 rounded border border-slate-100">{a.summary}</p>
+            </div>
+          )}
 
-      {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
-        <div>
-          <div className="text-sm font-semibold mb-1">Milestone Notes</div>
-          <ul className="list-disc list-inside text-sm space-y-1">
-            {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
-          </ul>
+          {Array.isArray(a.risks) && a.risks.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs font-bold text-rose-600 uppercase mb-1">Risks Detected</div>
+              <ul className="list-disc list-inside text-sm space-y-1 bg-rose-50 p-2 rounded border border-rose-100 text-rose-800">
+                {a.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {Array.isArray(a.milestoneNotes) && a.milestoneNotes.length > 0 && (
+            <div>
+              <div className="text-xs font-bold text-slate-500 uppercase mb-1">Milestone Notes</div>
+              <ul className="list-disc list-inside text-sm space-y-1 text-slate-700">
+                {a.milestoneNotes.map((m: string, i: number) => <li key={i}>{m}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -660,7 +718,7 @@ function AdminBidEditor({ bid, onUpdated }: { bid: any; onUpdated: (b:any)=>void
   );
 }
 
-/** Milestones section with click-to-edit rows */
+// UPDATED: MilestonesSection with visibility toggle and summary
 function MilestonesSection({
   bid,
   canEdit,
@@ -671,48 +729,62 @@ function MilestonesSection({
   onUpdated: (b:any)=>void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // New state to collapse the list
+  const [expanded, setExpanded] = useState(true);
   const milestones = useMemo(() => (Array.isArray(bid.milestones) ? bid.milestones : []), [bid?.milestones]);
 
+  // Simple progress calc
+  const completedCount = milestones.filter((m: any) => m.completed).length;
+  const totalCount = milestones.length;
+
   return (
-    <div className="mt-4">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-sm text-gray-500">Milestones</div>
+    <div className="bg-white rounded">
+      <div className="flex items-center justify-between mb-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <div className="flex items-center gap-2">
+           <span className={`text-xs text-gray-400 transform transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+           <div className="text-sm font-bold text-gray-700">Milestones</div>
+           <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full text-slate-600">
+             {completedCount} / {totalCount} Completed
+           </span>
+        </div>
         {canEdit && editingIndex !== null && (
           <button
-            className="text-xs underline"
-            onClick={() => setEditingIndex(null)}
+            className="text-xs underline text-rose-600"
+            onClick={(e) => { e.stopPropagation(); setEditingIndex(null); }}
           >
             Cancel edit
           </button>
         )}
       </div>
 
-      {milestones.length === 0 ? (
-        <div className="text-sm text-slate-500">No milestones.</div>
-      ) : (
-        <ul className="space-y-2">
-          {milestones.map((m: any, i: number) => (
-            <li key={i} className="rounded border p-3">
-              {canEdit && editingIndex === i ? (
-                <MilestoneRowEditor
-                  bidId={bid.bidId}
-                  index={i}
-                  value={m}
-                  all={milestones}
-                  onDone={(updated) => { onUpdated(updated); setEditingIndex(null); }}
-                  onCancel={() => setEditingIndex(null)}
-                />
-              ) : (
-                <MilestoneRowDisplay
-                  m={m}
-                  index={i}
-                  canEdit={canEdit}
-                  onEdit={() => canEdit && setEditingIndex(i)}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
+      {expanded && (
+        milestones.length === 0 ? (
+          <div className="text-sm text-slate-500 pl-4">No milestones.</div>
+        ) : (
+          <ul className="space-y-2 pl-2 border-l-2 border-slate-100 ml-1">
+            {milestones.map((m: any, i: number) => (
+              <li key={i} className="rounded border p-3 bg-slate-50/50">
+                {canEdit && editingIndex === i ? (
+                  <MilestoneRowEditor
+                    bidId={bid.bidId}
+                    index={i}
+                    value={m}
+                    all={milestones}
+                    onDone={(updated) => { onUpdated(updated); setEditingIndex(null); }}
+                    onCancel={() => setEditingIndex(null)}
+                  />
+                ) : (
+                  <MilestoneRowDisplay
+                    m={m}
+                    index={i}
+                    canEdit={canEdit}
+                    onEdit={() => canEdit && setEditingIndex(i)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </div>
   );
@@ -728,15 +800,16 @@ function MilestoneRowDisplay({
   return (
     <div className="flex items-start justify-between gap-3">
       <div>
-        <div className="font-medium">
+        <div className="font-medium flex items-center gap-2">
+          <span className="text-slate-500 text-sm">#{index + 1}</span>
           {m.name || `Milestone ${index + 1}`}
-          {m.completed ? ' · ✅ Completed' : ''}
+          {m.completed && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">✅ Done</span>}
         </div>
-        <div className="text-sm text-gray-600">
-          Amount: ${Number(m.amount).toLocaleString()} · Due: {dateDisplay(m.dueDate)}
+        <div className="text-sm text-gray-600 mt-1">
+          <span className="font-mono">${Number(m.amount).toLocaleString()}</span> <span className="text-gray-400">|</span> Due: {dateDisplay(m.dueDate)}
         </div>
         {desc && (
-          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">
+          <p className="mt-2 text-xs text-slate-600 whitespace-pre-wrap border-l-2 pl-2 border-slate-200">
             {desc}
           </p>
         )}
@@ -745,7 +818,7 @@ function MilestoneRowDisplay({
         <button
           type="button"
           onClick={onEdit}
-          className="text-xs px-2 py-1 rounded bg-slate-900 text-white"
+          className="text-xs px-2 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
           title="Edit milestone"
         >
           Edit
