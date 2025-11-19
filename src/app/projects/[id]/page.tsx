@@ -1229,38 +1229,138 @@ const bidFiles = safeBids.flatMap((b: any) => {
   </section>
 )}
 
-      {/* Bids */}
-      {tab === 'bids' && (
-        <section className="border rounded p-4 overflow-x-auto">
-          <h3 className="font-semibold mb-3">All Bids</h3>
-          {safeBids.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-4">Vendor</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Days</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Submitted</th>
-                  <th className="py-2 pr-4">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {safeBids.map((b) => (
-                  <tr key={b.bidId} className="border-t">
-                    <td className="py-2 pr-4">{b.vendorName}</td>
-                    <td className="py-2 pr-4">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</td>
-                    <td className="py-2 pr-4">{b.days}</td>
-                    <td className="py-2 pr-4">{b.status}</td>
-                    <td className="py-2 pr-4">{fmt(b.createdAt)}</td>
-                    <td className="py-2 pr-4">{fmt(b.updatedAt)}</td>
+ {tab === 'bids' && (
+  <section className="space-y-6">
+    {/* 1. Market Stats Header */}
+    {safeBids.length > 0 && (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="p-4 bg-white border rounded-lg shadow-sm">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Bids</div>
+          <div className="text-2xl font-bold text-gray-900">{safeBids.length}</div>
+        </div>
+        <div className="p-4 bg-white border rounded-lg shadow-sm">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Lowest Price</div>
+          <div className="text-2xl font-bold text-gray-900">
+            {currency.format(Math.min(...safeBids.map(b => Number((b.priceUSD ?? b.priceUsd) || 0) || Infinity)) === Infinity ? 0 : Math.min(...safeBids.map(b => Number((b.priceUSD ?? b.priceUsd) || 0) || Infinity)))}
+          </div>
+        </div>
+        <div className="p-4 bg-white border rounded-lg shadow-sm">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Average Price</div>
+          <div className="text-2xl font-bold text-gray-900">
+            {(() => {
+              const valid = safeBids.map(b => Number((b.priceUSD ?? b.priceUsd) || 0)).filter(n => n > 0);
+              if (!valid.length) return currency.format(0);
+              return currency.format(valid.reduce((a, b) => a + b, 0) / valid.length);
+            })()}
+          </div>
+        </div>
+        <div className="p-4 bg-white border rounded-lg shadow-sm">
+           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Fastest Delivery</div>
+           <div className="text-2xl font-bold text-gray-900">
+             {Math.min(...safeBids.map(b => Number(b.days || 0) || Infinity)) === Infinity ? 0 : Math.min(...safeBids.map(b => Number(b.days || 0) || Infinity))} <span className="text-sm font-normal text-gray-500">days</span>
+           </div>
+        </div>
+      </div>
+    )}
+
+    {/* 2. Rich Bids Table */}
+    <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
+        <h3 className="font-semibold text-gray-900">Received Proposals</h3>
+        {acceptedBid && (
+           <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-medium rounded-full flex items-center gap-1">
+             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+             Bid Awarded
+           </span>
+        )}
+      </div>
+
+      {safeBids.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-gray-500 uppercase bg-gray-50/50 border-b">
+              <tr>
+                <th className="px-6 py-3 font-medium">Vendor</th>
+                <th className="px-6 py-3 font-medium">Bid Amount</th>
+                <th className="px-6 py-3 font-medium">Duration</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Submitted</th>
+                <th className="px-6 py-3 font-medium text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {safeBids.map((b) => {
+                const isApproved = b.status === 'approved';
+                const isRejected = b.status === 'rejected';
+                
+                return (
+                  <tr 
+                    key={b.bidId} 
+                    className={classNames(
+                      'transition-colors hover:bg-gray-50',
+                      isApproved ? 'bg-emerald-50/60 hover:bg-emerald-50' : ''
+                    )}
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        {/* Vendor Avatar/Initial */}
+                        <div className={classNames(
+                          "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border",
+                          isApproved ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-gray-100 text-gray-600 border-gray-200"
+                        )}>
+                          {b.vendorName ? b.vendorName.charAt(0).toUpperCase() : '?'}
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900">{b.vendorName || 'Unknown Vendor'}</div>
+                          {isApproved && <div className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide">Winning Bid</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-gray-900">{currency.format(Number((b.priceUSD ?? b.priceUsd) || 0))}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-gray-700">{b.days} days</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={classNames(
+                        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border',
+                        isApproved ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                        isRejected ? 'bg-red-100 text-red-800 border-red-200' :
+                        'bg-amber-100 text-amber-800 border-amber-200'
+                      )}>
+                        {b.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-gray-500 text-xs">
+                      {fmt(b.createdAt)}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Link 
+                        href={`/bids/${b.bidId}`} 
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
+                      >
+                        View Proposal
+                      </Link>
+                    </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="text-sm text-gray-500">No bids yet.</p>}
-        </section>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-12 text-center">
+           <div className="mx-auto h-12 w-12 text-gray-300 mb-3">
+             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+           </div>
+           <h3 className="text-gray-900 font-medium">No bids received yet</h3>
+           <p className="text-gray-500 text-sm mt-1">Share your project to attract vendors.</p>
+        </div>
       )}
+    </div>
+  </section>
+)}
 
  {tab === 'milestones' && (
   <section className="space-y-6">
