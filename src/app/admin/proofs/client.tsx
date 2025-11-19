@@ -1332,7 +1332,7 @@ const renderProof = (m: any) => {
                   return (
                     <div key={`${bid.bidId}:${origIdx}`} className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md ${archived ? 'border-slate-100 opacity-75 grayscale-[0.5]' : 'border-slate-200'}`}>
                       
-                      {/* 1. Card Header (Metadata) */}
+                      {/* 1. Card Header (Metadata & Archive) */}
                       <div className="bg-white px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                          <div>
                             <h3 className="font-bold text-slate-800 text-base">Milestone {origIdx + 1}: <span className="font-normal">{m.name}</span></h3>
@@ -1343,18 +1343,29 @@ const renderProof = (m: any) => {
                             </div>
                          </div>
 
-                         <div className="flex items-center gap-2">
-                            {archived && <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">Archived</span>}
-                            
+                         <div className="flex items-center gap-3">
+                            {/* Status Badges */}
                             {paid ? 
                                 <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 border border-blue-100 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>Paid</span> 
                             : showPendingChip ? 
                                 <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-100 flex items-center gap-1 animate-pulse"><span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Processing</span> 
                             : approved ? 
                                 <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Approved</span> 
-                            : 
-                                <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600 border border-slate-200">Pending Review</span>
-                            }
+                            : null}
+
+                            {/* Archive Button in Header */}
+                            {!archived ? (
+                               <button
+                                   onClick={() => handleArchive(bid.bidId, origIdx)}
+                                   disabled={processing === `archive-${bid.bidId}-${origIdx}`}
+                                   className="text-xs text-slate-400 hover:text-slate-600 font-medium px-2 py-1 hover:bg-slate-100 rounded transition"
+                                   title="Archive Milestone"
+                               >
+                                   {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
+                               </button>
+                            ) : (
+                               <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">Archived</span>
+                            )}
                          </div>
                       </div>
 
@@ -1409,42 +1420,35 @@ const renderProof = (m: any) => {
                         </div>
 
                         {/* Right: AI & Verification (4 cols) */}
-                        <div className="lg:col-span-4 p-6 bg-slate-50/30">
-                           <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
-                           
-                           {/* Blockchain Receipt */}
-                           {(m.paymentTxHash || m.safePaymentTxHash) && (
-                             <div className="mt-4 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
-                               <label className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide mb-1 block">Payment Executed</label>
-                               <p className="text-[10px] text-emerald-700 font-mono break-all leading-relaxed">
-                                 {m.paymentTxHash || m.safePaymentTxHash}
-                               </p>
-                             </div>
-                           )}
+                        <div className="lg:col-span-4 p-6 bg-slate-50/30 flex flex-col justify-between">
+                           <div>
+                               <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
+                               
+                               {/* Blockchain Receipt */}
+                               {(m.paymentTxHash || m.safePaymentTxHash) && (
+                                 <div className="mt-4 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
+                                   <label className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide mb-1 block">Payment Executed</label>
+                                   <p className="text-[10px] text-emerald-700 font-mono break-all leading-relaxed">
+                                     {m.paymentTxHash || m.safePaymentTxHash}
+                                   </p>
+                                 </div>
+                               )}
+                           </div>
                         </div>
                       </div>
 
-                      {/* 3. Action Footer (Sticky-ish) */}
+                      {/* 3. Action Footer (Reorganized) */}
                       {!archived && (
                           <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4">
                             
-                            {/* Negative Actions (Left) */}
+                            {/* Left: Negative/Feedback Actions */}
                             <div className="flex items-center gap-3">
-                                <button
-                                    onClick={() => handleArchive(bid.bidId, origIdx)}
-                                    disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                                    className="text-xs text-slate-400 hover:text-slate-600 font-medium px-2 py-1 transition"
-                                >
-                                    {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive Milestone'}
-                                </button>
-                                
                                 {tab !== 'archived' && hasSubmittedContent && !approved && !paid && (
-                                <div className="flex items-center gap-2">
-                                    <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                                <>
                                     <button
                                         onClick={() => handleReject(bid.bidId, origIdx)}
                                         disabled={processing === `reject-${bid.bidId}-${origIdx}` || rejectedLocal.has(key)}
-                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-100 border border-transparent hover:border-rose-200 transition disabled:opacity-50"
+                                        className="px-4 py-2 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200 hover:border-rose-300 transition disabled:opacity-50"
                                     >
                                         Reject
                                     </button>
@@ -1456,15 +1460,15 @@ const renderProof = (m: any) => {
                                             milestoneIndex: origIdx,
                                         })
                                         }
-                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-700 hover:bg-indigo-100 border border-transparent hover:border-indigo-200 transition"
+                                        className="px-4 py-2 rounded-lg text-xs font-semibold text-indigo-700 hover:bg-indigo-50 border border-indigo-200 hover:border-indigo-300 transition"
                                     >
                                         Request Changes
                                     </button>
-                                </div>
+                                </>
                                 )}
                             </div>
 
-                            {/* Positive Actions (Right) */}
+                            {/* Right: Positive Actions */}
                             <div className="flex items-center gap-3">
                                 {tab !== 'archived' && (
                                 <>
@@ -1472,7 +1476,7 @@ const renderProof = (m: any) => {
                                     <button
                                         onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
                                         disabled={processing === `approve-${bid.bidId}-${origIdx}`}
-                                        className="px-5 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wide rounded-lg shadow-sm hover:bg-slate-800 hover:shadow transition disabled:opacity-50"
+                                        className="px-6 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wide rounded-lg shadow-sm hover:bg-slate-800 hover:shadow-md transition disabled:opacity-50"
                                     >
                                         {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
                                     </button>
