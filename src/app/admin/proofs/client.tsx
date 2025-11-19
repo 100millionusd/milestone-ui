@@ -1344,24 +1344,28 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           <p className="text-slate-700">{tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}</p>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-12"> {/* Big Gap between Bids */}
           {filtered.map((bid: any) => (
-            <div key={bid.bidId} className="bg-white rounded-lg shadow overflow-hidden">
-              {/* Bid Header */}
-              <div className="px-6 pt-6 pb-2">
-                <div className="flex items-start justify-between gap-3 mb-2">
+            <div key={bid.bidId} className="border-b border-slate-200 pb-8 last:border-0 last:pb-0">
+              
+              {/* Bid Group Header */}
+              <div className="mb-4 px-2 flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold">{bid.vendorName} — Proposal #{bid.proposalId}</h2>
-                    <p className="text-gray-600 text-sm">Bid ID: {bid.bidId}</p>
+                    <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                       {bid.vendorName} 
+                       <span className="text-slate-400 font-normal text-base">— Proposal #{bid.proposalId}</span>
+                    </h2>
+                    <p className="text-slate-500 text-sm mt-1">Bid ID: {bid.bidId}</p>
                   </div>
-                  <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-sm text-blue-600 hover:underline">
-                    Manage →
+                  <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">
+                    Manage Proposal →
                   </Link>
-                </div>
-                <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
               </div>
+              
+              <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
 
-              <div className="divide-y divide-slate-100">
+              {/* Milestones Stack */}
+              <div className="space-y-6"> {/* Explicit spacing between milestone cards */}
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
 
@@ -1379,28 +1383,32 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                   const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
                   return (
-                    <div key={`${bid.bidId}:${origIdx}`} className="group">
-                      {/* MILESTONE CONTENT AREA */}
-                      <div className="px-6 py-6">
-                        <div className="flex justify-between items-start gap-4 mb-4">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="font-medium text-lg">{m.name}</p>
-                              {isArchived(bid.bidId, origIdx) && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border">Archived</span>
+                    <div key={`${bid.bidId}:${origIdx}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                      
+                      {/* MILESTONE HEADER STRIP */}
+                      <div className="bg-slate-50/50 border-b border-slate-100 px-6 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                             <span className="font-semibold text-slate-800">{m.name}</span>
+                             
+                             {/* Status Chips */}
+                             {isArchived(bid.bidId, origIdx) && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200 font-medium">Archived</span>
                               )}
                               {approved && !paid && !msHasSafeMarker(m) && !localPending && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700 border border-emerald-200">Approved</span>
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 font-medium">Approved</span>
                               )}
                               {showPendingChip && (
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 border border-amber-200">Payment Pending</span>
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100 font-medium">Payment Pending</span>
                               )}
-                              {paid && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">Paid</span>}
-                            </div>
-                            <p className="text-sm text-gray-500">Amount: <span className="font-medium text-slate-700">${m.amount}</span> | Due: <span className="font-medium text-slate-700">{m.dueDate}</span></p>
+                              {paid && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100 font-medium">Paid</span>}
                           </div>
-                        </div>
+                          <div className="text-sm text-slate-500">
+                             <span className="font-medium text-slate-900">${m.amount}</span> <span className="mx-1">·</span> Due: {m.dueDate}
+                          </div>
+                      </div>
 
+                      {/* MILESTONE CONTENT BODY */}
+                      <div className="px-6 py-6">
                         <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
                         <DebugPanel data={filesToShow} title={`Files to Show: ${origIdx}`} />
 
@@ -1450,7 +1458,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                       {/* ACTION DECK (TOOLBAR)      */}
                       {/* ========================== */}
                       {tab !== 'archived' && (
-                        <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                        <div className="bg-white border-t border-slate-100 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
                           
                           {/* LEFT: Admin / Secondary Actions */}
                           <div className="flex items-center gap-2">
