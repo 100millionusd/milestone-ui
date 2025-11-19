@@ -155,7 +155,7 @@ function FilesStrip({
               <button
                 key={i}
                 type="button"
-                className="shrink-0 snap-start group relative overflow-hidden rounded-lg border border-slate-200 cursor-pointer hover:shadow-md transition-all"
+                className="shrink-0 snap-start group relative overflow-hidden rounded-lg border border-slate-200 cursor-pointer hover:shadow-md transition-all bg-white"
                 onClick={() => {
                   if (onImageClick) {
                     const imageEntries = entries.filter(e => e.isImage);
@@ -196,16 +196,16 @@ function FilesStrip({
           return (
             <div
               key={i}
-              className="shrink-0 snap-start p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 min-w-[120px] flex flex-col justify-between"
+              className="shrink-0 snap-start p-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 min-w-[120px] flex flex-col justify-between hover:shadow-sm transition-shadow"
             >
-              <p className="truncate mb-1 font-medium" title={name}>
+              <p className="truncate mb-1 font-medium w-28" title={name}>
                 {name}
               </p>
               <a
                 href={href!}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline mt-1 block"
+                className="text-blue-600 hover:underline mt-1 block font-medium"
                 onClick={() => {
                   if (DEBUG_FILES) console.log('🔍 File link clicked:', { href, name });
                 }}
@@ -933,33 +933,33 @@ async function hydrateArchiveStatusesFallback(allBids: any[]) {
     const notes: string[] = Array.isArray(A.milestoneNotes) ? A.milestoneNotes : A.milestoneNotes ? [A.milestoneNotes] : [];
 
     return (
-      <div className="h-full bg-slate-50/50 rounded-lg border border-blue-100 p-4 flex flex-col">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="text-xs font-bold text-blue-900 uppercase tracking-wide">Agent 2 Analysis</div>
+      <div className="h-full rounded-lg border border-slate-200 bg-slate-50 p-4 flex flex-col">
+        <div className="flex items-center justify-between gap-3 mb-3 border-b border-slate-200 pb-2">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">AI Verification</div>
           <button
             onClick={rerun}
             disabled={!proofId}
-            className="px-2 py-1 rounded text-[10px] bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+            className="px-2 py-1 rounded text-[10px] bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200 transition disabled:opacity-50"
             title={proofId ? 'Re-run analysis' : 'No proof found for this milestone'}
           >
-             {analysis ? 'Re-run' : 'Run Analysis'}
+             {analysis ? '↻ Re-run' : '▶ Run Analysis'}
           </button>
         </div>
 
-        {loading && <div className="animate-pulse h-20 bg-slate-100 rounded-lg"></div>}
+        {loading && <div className="animate-pulse h-20 bg-slate-200/50 rounded-lg"></div>}
         {error && <div className="text-xs text-rose-600">{error}</div>}
 
-        {!loading && !analysis && !error && <div className="text-xs text-slate-400 italic">No analysis yet.</div>}
+        {!loading && !analysis && !error && <div className="text-xs text-slate-400 italic">Agent 2 has not analyzed this proof yet.</div>}
 
         {analysis && (
-          <div className="space-y-3 text-sm text-slate-700 flex-1">
+          <div className="space-y-4 text-sm text-slate-700 flex-1">
              {/* Scores */}
-             <div className="flex gap-2 flex-wrap">
+             <div className="flex gap-2">
               {typeof fit !== 'undefined' && (
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">Fit: {String(fit)}</span>
+                <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 rounded text-xs font-medium shadow-sm">Fit: {String(fit)}</span>
               )}
               {typeof confidence !== 'undefined' && (
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 rounded text-xs font-medium shadow-sm">
                   Conf: {String(confidence)}
                 </span>
               )}
@@ -967,19 +967,19 @@ async function hydrateArchiveStatusesFallback(allBids: any[]) {
             {summary && (
               <div>
                 <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Summary</div>
-                <div className="text-xs leading-relaxed">{summary}</div>
+                <div className="text-xs leading-relaxed text-slate-600">{summary}</div>
               </div>
             )}
             {risks.length > 0 && (
-              <div className="bg-rose-50 p-2 rounded border border-rose-100">
-                <div className="text-[10px] uppercase text-rose-700 font-bold mb-1">Risks</div>
+              <div className="bg-rose-50 p-3 rounded border border-rose-100">
+                <div className="text-[10px] uppercase text-rose-700 font-bold mb-1">Risks Detected</div>
                 <ul className="list-disc pl-4 mt-1 space-y-1 text-xs text-rose-800">{risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
               </div>
             )}
             {notes.length > 0 && (
               <div>
-                <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Milestone Notes</div>
-                <ul className="list-disc pl-4 mt-1 space-y-1 text-xs">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+                <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Notes</div>
+                <ul className="list-disc pl-4 mt-1 space-y-1 text-xs text-slate-600">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
               </div>
             )}
           </div>
@@ -1174,11 +1174,10 @@ const renderProof = (m: any) => {
 
       return (
         <div className="space-y-2">
-           <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Evidence Description</label>
+           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</label>
           {showDesc && (
             <p className="text-sm text-slate-800 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">{desc}</p>
           )}
-          {/* Files are rendered below via <FilesStrip files={extractFiles(m)} /> */}
         </div>
       );
     }
@@ -1199,7 +1198,7 @@ const renderProof = (m: any) => {
   if (urls.length === 0) {
       return (
         <div className="space-y-2">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Evidence Description</label>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</label>
             <p className="text-sm text-slate-800 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">{text}</p>
         </div>
       )
@@ -1207,7 +1206,7 @@ const renderProof = (m: any) => {
 
   return (
     <div className="space-y-2">
-       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Evidence Description</label>
+       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</label>
        <p className="text-sm text-slate-800 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">{text}</p>
     </div>
   );
@@ -1217,95 +1216,101 @@ const renderProof = (m: any) => {
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto py-12">
-        <h1 className="text-2xl font-bold mb-6">Submitted Proofs (Admin)</h1>
-        <div className="text-center text-slate-500">Loading submitted proofs…</div>
+        <h1 className="text-2xl font-bold mb-6 text-slate-900">Submitted Proofs (Admin)</h1>
+        <div className="text-center text-slate-500 animate-pulse">Loading submitted proofs…</div>
       </div>
     );
   }
   if (error) {
     return (
       <div className="max-w-7xl mx-auto py-12">
-        <h1 className="text-2xl font-bold mb-6">Submitted Proofs (Admin)</h1>
-        <div className="text-center text-red-600">{error}</div>
+        <h1 className="text-2xl font-bold mb-6 text-slate-900">Submitted Proofs (Admin)</h1>
+        <div className="p-4 bg-rose-50 text-rose-600 rounded-lg border border-rose-200 text-center">{error}</div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4">
+    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
       {/* Debug Controls */}
       {DEBUG_FILES && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-blue-800">🐛 Debug Mode Active</span>
+            <span className="text-xs font-bold text-blue-800 uppercase tracking-wide">🐛 Debug Mode</span>
             <button
               onClick={() => {
                 localStorage.removeItem('debug_files');
                 window.location.reload();
               }}
-              className="px-2 py-1 text-xs bg-blue-600 text-white rounded"
+              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition"
             >
-              Disable Debug
+              Disable
             </button>
           </div>
-          <p className="text-xs text-blue-600 mt-1">Check browser console for detailed file debugging information</p>
         </div>
       )}
 
       {/* Header + Tabs */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Proof Dashboard</h1>
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={[
-                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-                tab === t.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400',
-              ].join(' ')}
-            >
-              {t.label}
-              {t.key === 'archived' && archivedCount > 0 && (
-                <span className="ml-1 bg-slate-600 text-white rounded-full px-1.5 py-0.5 text-[10px] min-w-[20px]">{archivedCount}</span>
-              )}
-            </button>
-          ))}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-10">
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Proof Dashboard</h1>
+        
+        <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+             {/* Search */}
+            <div className="relative flex-grow lg:flex-grow-0 lg:w-72">
+                <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search vendors, proposals..."
+                className="w-full rounded-lg border border-slate-200 pl-3 pr-4 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                />
+            </div>
+            
+            {/* Tabs */}
+            <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-lg self-start">
+            {TABS.map((t) => (
+                <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={[
+                    'px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                    tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50',
+                ].join(' ')}
+                >
+                {t.label}
+                {t.key === 'archived' && archivedCount > 0 && (
+                    <span className="ml-1.5 bg-slate-200 text-slate-600 rounded-full px-1.5 py-0.5 text-[9px] min-w-[16px]">{archivedCount}</span>
+                )}
+                </button>
+            ))}
+            </div>
         </div>
-      </div>
-
-      {/* Search */}
-      <div className="mb-8">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by vendor, proposal ID, bid ID, milestone…"
-          className="w-full max-w-md rounded-xl border border-slate-200 px-4 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
       </div>
 
       {(filtered || []).length === 0 ? (
-        <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-20 text-center">
-          <div className="text-5xl mb-3 opacity-50">{tab === 'archived' ? '📁' : '🗂️'}</div>
-          <p className="text-slate-500">{tab === 'archived' ? 'No archived milestones.' : 'No items match this view.'}</p>
+        <div className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-20 text-center">
+          <div className="text-5xl mb-4 opacity-30 grayscale">{tab === 'archived' ? '📁' : '🗂️'}</div>
+          <p className="text-slate-500 font-medium">{tab === 'archived' ? 'No archived milestones found.' : 'No items match your filters.'}</p>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {filtered.map((bid: any) => (
-            <div key={bid.bidId} className="space-y-4">
-              {/* Bid Header Group */}
-              <div className="flex items-baseline justify-between gap-3 border-b border-slate-200 pb-2 mx-1">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-800">{bid.vendorName} <span className="font-normal text-slate-500">/ Proposal #{bid.proposalId}</span></h2>
+            <div key={bid.bidId} className="space-y-6">
+              
+              {/* Bid Group Header */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200 mx-1">
+                <div className="flex items-baseline gap-3">
+                   <h2 className="text-lg font-bold text-slate-900">{bid.vendorName}</h2>
+                   <span className="text-sm text-slate-400">/</span>
+                   <span className="text-sm font-medium text-slate-600">Proposal #{bid.proposalId}</span>
                 </div>
-                <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-xs text-blue-600 hover:underline">
-                  Manage Bid {bid.bidId} →
+                <Link href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`} className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline">
+                  View Contract →
                 </Link>
               </div>
 
               <DebugPanel data={bid} title={`Bid Data: ${bid.bidId}`} />
 
-              <div className="grid grid-cols-1 gap-6">
+              <div className="grid grid-cols-1 gap-8">
                 {(bid._withIdxVisible as Array<{ m: any; idx: number }>).map(({ m, idx: origIdx }) => {
                   const key = mkKey(bid.bidId, origIdx);
 
@@ -1314,73 +1319,84 @@ const renderProof = (m: any) => {
                   const localPending = pendingPay.has(key);
                   const hasRealSafeHash = !!readSafeTxHash(m);
                   const showPendingChip = !paid && (localPending || (hasRealSafeHash && msHasSafeMarker(m)));
-                  
                   const archived = isArchived(bid.bidId, origIdx);
 
-                  // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
+                  // 👉 Build file list
                   const lp = latestProofByKey[key];
                   const fromProofs = entriesFromProofFiles(lp?.files || []);
                   const fromMilestone = extractFilesFromMilestone(m);
                   const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
                   
-                  // Determine if we have submitted content (to show action buttons)
                   const hasSubmittedContent = filesToShow.length > 0 || hasProof(m) || (lp?.description);
 
                   return (
-                    <div key={`${bid.bidId}:${origIdx}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden group transition hover:shadow-md">
+                    <div key={`${bid.bidId}:${origIdx}`} className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md ${archived ? 'border-slate-100 opacity-75 grayscale-[0.5]' : 'border-slate-200'}`}>
                       
-                      {/* 1. Milestone Header Bar */}
-                      <div className="bg-slate-50/80 px-5 py-3 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2">
+                      {/* 1. Card Header (Metadata) */}
+                      <div className="bg-white px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                          <div>
-                            <h3 className="font-semibold text-slate-800 text-sm">Milestone {origIdx + 1}: <span className="font-normal">{m.name}</span></h3>
-                            <div className="text-xs text-slate-500 mt-0.5 flex gap-3">
-                               <span>${m.amount?.toLocaleString()}</span>
+                            <h3 className="font-bold text-slate-800 text-base">Milestone {origIdx + 1}: <span className="font-normal">{m.name}</span></h3>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-3">
+                               <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">${m.amount?.toLocaleString()}</span>
                                <span className="text-slate-300">|</span>
-                               <span>Due: {m.dueDate ? new Date(m.dueDate).toLocaleDateString() : 'N/A'}</span>
+                               <span>Due: {m.dueDate ? new Date(m.dueDate).toLocaleDateString() : 'No Date'}</span>
                             </div>
                          </div>
-                         <div className="flex gap-2">
-                            {archived && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border">ARCHIVED</span>}
-                            {paid ? <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">PAID</span> :
-                             showPendingChip ? <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 animate-pulse">PROCESSING</span> :
-                             approved ? <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">APPROVED</span> :
-                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500">PENDING REVIEW</span>
+
+                         <div className="flex items-center gap-2">
+                            {archived && <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">Archived</span>}
+                            
+                            {paid ? 
+                                <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 border border-blue-100 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>Paid</span> 
+                            : showPendingChip ? 
+                                <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-100 flex items-center gap-1 animate-pulse"><span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Processing</span> 
+                            : approved ? 
+                                <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Approved</span> 
+                            : 
+                                <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600 border border-slate-200">Pending Review</span>
                             }
                          </div>
                       </div>
 
-                      {/* 2. Main Content Grid */}
-                      <div className="grid grid-cols-1 lg:grid-cols-3">
+                      {/* 2. Card Body (Two Columns) */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12">
                         
-                        {/* Left: Proof & Files (Takes up 2 cols) */}
-                        <div className="p-5 lg:col-span-2 space-y-5 border-b lg:border-b-0 lg:border-r border-slate-100">
+                        {/* Left: Human Evidence (8 cols) */}
+                        <div className="lg:col-span-8 p-6 space-y-6 border-b lg:border-b-0 lg:border-r border-slate-100">
                           <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
                           
+                          {/* Section Label */}
+                          <div className="flex items-center justify-between mb-2">
+                             <label className="text-[10px] font-bold text-indigo-900/40 uppercase tracking-widest">Vendor Submission</label>
+                          </div>
+
                           {/* Proof Text */}
                           {renderProof(m)}
                           
-                          {/* Additional Description from Agent2 source if not in proof */}
+                          {/* Additional Description (Agent2 source) */}
                           {(!m?.proof || (typeof m.proof === 'string' && !/https?:\/\//i.test(m.proof))) && lp?.description && (
                              <div className="space-y-2">
-                                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Additional Notes</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Additional Notes</label>
                                 <p className="text-sm text-slate-800 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">{lp.description}</p>
                              </div>
                           )}
 
                           {/* Files */}
-                          <div>
-                             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Attachments</label>
+                          <div className="space-y-2">
+                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Attachments</label>
                              {filesToShow.length > 0 ? (
                                <FilesStrip files={filesToShow} onImageClick={(urls, index) => setLightbox({ urls, index })} />
                              ) : (
-                               <span className="text-sm text-slate-400 italic">No files attached.</span>
+                               <div className="p-4 bg-slate-50 rounded-lg border border-slate-100 border-dashed text-center text-sm text-slate-400">
+                                 No attachments provided.
+                               </div>
                              )}
                           </div>
 
-                          {/* Change Request Thread (scoped to THIS milestone) */}
+                          {/* Change Request Thread (Contextual) */}
                           {!isArchived(bid.bidId, origIdx) && (
-                            <div className="pt-4 border-t border-slate-100">
-                              <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Change Request History</h4>
+                            <div className="pt-6 mt-2 border-t border-slate-100">
+                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Communication History</h4>
                               <ChangeRequestsPanel
                                 key={`cr:${bid.proposalId}:${origIdx}`}           
                                 proposalId={Number(bid.proposalId)}              
@@ -1392,114 +1408,121 @@ const renderProof = (m: any) => {
                           )}
                         </div>
 
-                        {/* Right: Agent 2 & Analysis (Takes up 1 col) */}
-                        <div className="p-5 bg-slate-50/30">
+                        {/* Right: AI & Verification (4 cols) */}
+                        <div className="lg:col-span-4 p-6 bg-slate-50/30">
                            <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
                            
-                           {/* Tx Hash display */}
+                           {/* Blockchain Receipt */}
                            {(m.paymentTxHash || m.safePaymentTxHash) && (
-                             <div className="mt-3 p-2 bg-emerald-50 border border-emerald-100 rounded">
-                               <p className="text-[10px] text-emerald-800 font-mono break-all">
-                                 <span className="font-bold">TX:</span> {m.paymentTxHash || m.safePaymentTxHash}
+                             <div className="mt-4 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
+                               <label className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide mb-1 block">Payment Executed</label>
+                               <p className="text-[10px] text-emerald-700 font-mono break-all leading-relaxed">
+                                 {m.paymentTxHash || m.safePaymentTxHash}
                                </p>
                              </div>
                            )}
                         </div>
                       </div>
 
-                      {/* 3. Action Toolbar (Bottom) */}
-                      <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4">
-                        
-                         {/* Left: Negative/Neutral Actions */}
-                         <div className="flex items-center gap-2">
-                            {!isArchived(bid.bidId, origIdx) ? (
-                              <button
-                                onClick={() => handleArchive(bid.bidId, origIdx)}
-                                disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                                className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-slate-200 transition disabled:opacity-50"
-                              >
-                                {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
-                              </button>
-                            ) : (
+                      {/* 3. Action Footer (Sticky-ish) */}
+                      {!archived && (
+                          <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                            
+                            {/* Negative Actions (Left) */}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => handleArchive(bid.bidId, origIdx)}
+                                    disabled={processing === `archive-${bid.bidId}-${origIdx}`}
+                                    className="text-xs text-slate-400 hover:text-slate-600 font-medium px-2 py-1 transition"
+                                >
+                                    {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive Milestone'}
+                                </button>
+                                
+                                {tab !== 'archived' && hasSubmittedContent && !approved && !paid && (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                                    <button
+                                        onClick={() => handleReject(bid.bidId, origIdx)}
+                                        disabled={processing === `reject-${bid.bidId}-${origIdx}` || rejectedLocal.has(key)}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-100 border border-transparent hover:border-rose-200 transition disabled:opacity-50"
+                                    >
+                                        Reject
+                                    </button>
+                                    <button
+                                        onClick={() =>
+                                        setCrFor({
+                                            bidId: Number(bid.bidId),
+                                            proposalId: Number(bid.proposalId),
+                                            milestoneIndex: origIdx,
+                                        })
+                                        }
+                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-700 hover:bg-indigo-100 border border-transparent hover:border-indigo-200 transition"
+                                    >
+                                        Request Changes
+                                    </button>
+                                </div>
+                                )}
+                            </div>
+
+                            {/* Positive Actions (Right) */}
+                            <div className="flex items-center gap-3">
+                                {tab !== 'archived' && (
+                                <>
+                                    {hasSubmittedContent && !approved && !paid && (
+                                    <button
+                                        onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
+                                        disabled={processing === `approve-${bid.bidId}-${origIdx}`}
+                                        className="px-5 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wide rounded-lg shadow-sm hover:bg-slate-800 hover:shadow transition disabled:opacity-50"
+                                    >
+                                        {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
+                                    </button>
+                                    )}
+
+                                    {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
+                                    <div className="flex items-center gap-3 pl-3 border-l border-slate-300">
+                                        <button
+                                        type="button"
+                                        onClick={() => handlePay(bid.bidId, origIdx)}
+                                        disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                        className="text-xs font-semibold text-slate-600 hover:text-green-700 px-2 transition"
+                                        title="Release payment manually (EOA)"
+                                        >
+                                        {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Manual Pay'}
+                                        </button>
+
+                                        <SafePayButton
+                                        bidId={bid.bidId}
+                                        milestoneIndex={origIdx}
+                                        amountUSD={Number(m?.amount || 0)}
+                                        disabled={processing === `pay-${bid.bidId}-${origIdx}`}
+                                        onQueued={() => {
+                                            const k = mkKey(bid.bidId, origIdx);
+                                            addPending(k);
+                                            emitPayQueued(bid.bidId, origIdx);
+                                            pollUntilPaid(bid.bidId, origIdx).catch(() => {});
+                                            router.refresh();
+                                        }}
+                                        />
+                                    </div>
+                                    )}
+                                </>
+                                )}
+                            </div>
+                        </div>
+                      )}
+
+                      {/* Archived State Footer */}
+                      {archived && (
+                          <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex justify-center">
                               <button
                                 onClick={() => handleUnarchive(bid.bidId, origIdx)}
                                 disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
-                                className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50 transition disabled:opacity-50"
+                                className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
                               >
-                                {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
+                                {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive this milestone'}
                               </button>
-                            )}
-
-                            {tab !== 'archived' && hasSubmittedContent && !approved && !paid && (
-                               <>
-                                  <button
-                                    onClick={() => handleReject(bid.bidId, origIdx)}
-                                    disabled={processing === `reject-${bid.bidId}-${origIdx}` || rejectedLocal.has(key)}
-                                    className="text-xs font-medium text-rose-600 hover:text-rose-800 px-3 py-1.5 rounded hover:bg-rose-50 border border-transparent hover:border-rose-100 transition disabled:opacity-50"
-                                  >
-                                    Reject
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      setCrFor({
-                                        bidId: Number(bid.bidId),
-                                        proposalId: Number(bid.proposalId),
-                                        milestoneIndex: origIdx,
-                                      })
-                                    }
-                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition"
-                                  >
-                                    Request Changes
-                                  </button>
-                               </>
-                            )}
-                         </div>
-
-                         {/* Right: Positive Actions */}
-                         <div className="flex items-center gap-2">
-                            {tab !== 'archived' && (
-                              <>
-                                {hasSubmittedContent && !approved && !paid && (
-                                  <button
-                                    onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
-                                    disabled={processing === `approve-${bid.bidId}-${origIdx}`}
-                                    className="px-4 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded shadow-sm hover:bg-slate-700 transition disabled:opacity-50"
-                                  >
-                                    {processing === `approve-${bid.bidId}-${origIdx}` ? 'Approving...' : 'Approve Proof'}
-                                  </button>
-                                )}
-
-                                {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
-                                  <div className="flex items-center gap-2 pl-2 border-l border-slate-300">
-                                    <button
-                                      type="button"
-                                      onClick={() => handlePay(bid.bidId, origIdx)}
-                                      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                      className="text-xs font-medium text-slate-600 hover:text-green-700 px-3 py-1.5"
-                                      title="Release payment manually (EOA)"
-                                    >
-                                      {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Manual Pay'}
-                                    </button>
-
-                                    <SafePayButton
-                                      bidId={bid.bidId}
-                                      milestoneIndex={origIdx}
-                                      amountUSD={Number(m?.amount || 0)}
-                                      disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                      onQueued={() => {
-                                        const k = mkKey(bid.bidId, origIdx);
-                                        addPending(k);
-                                        emitPayQueued(bid.bidId, origIdx);
-                                        pollUntilPaid(bid.bidId, origIdx).catch(() => {});
-                                        router.refresh();
-                                      }}
-                                    />
-                                  </div>
-                                )}
-                              </>
-                            )}
-                         </div>
-                      </div>
+                          </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1512,32 +1535,32 @@ const renderProof = (m: any) => {
 {/* ===== Change Request Modal (Project-page style) ===== */}
 {crFor && (
   <div
-    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
     onClick={() => setCrFor(null)}
   >
     <div
-      className="w-full max-w-lg rounded-xl bg-white shadow-2xl overflow-hidden"
+      className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200"
       onClick={(e) => e.stopPropagation()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="cr-modal-title"
     >
       {/* Header */}
-      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-        <h3 id="cr-modal-title" className="text-sm font-bold text-slate-800">
-          Request Changes — Milestone #{crFor.milestoneIndex + 1}
+      <div className="bg-slate-50 px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 id="cr-modal-title" className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+          Request Changes
         </h3>
         <button
           onClick={() => setCrFor(null)}
-          className="rounded px-2 py-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+          className="rounded-full p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition"
           aria-label="Close"
         >
-          ✕
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
       </div>
 
       {/* Body (panel + composer) */}
-      <div className="p-4">
+      <div className="p-5">
         {/* Existing thread / list (same as project page) */}
          <ChangeRequestsPanel
           key={`cr:${crFor.proposalId}:${crFor.milestoneIndex}:${dataCache.lastUpdated}`}
@@ -1551,9 +1574,9 @@ const renderProof = (m: any) => {
         {(() => {
           const key = `${crFor.bidId}-${crFor.milestoneIndex}`;
           return (
-            <div className="border-t mt-4 pt-3">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                Instructions
+            <div className="border-t border-slate-100 mt-4 pt-4">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                Instructions for Vendor
               </label>
               <textarea
                 rows={4}
@@ -1561,18 +1584,18 @@ const renderProof = (m: any) => {
                 onChange={(e) =>
                   setCrText((prev) => ({ ...prev, [key]: e.target.value }))
                 }
-                className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                 placeholder="Describe exactly what needs to be fixed..."
                 autoFocus
               />
               {crErr[key] && (
-                <div className="text-xs text-rose-600 mt-1">{crErr[key]}</div>
+                <div className="text-xs text-rose-600 mt-2 font-medium">{crErr[key]}</div>
               )}
 
-              <div className="mt-3 flex items-center justify-end gap-2">
+              <div className="mt-4 flex items-center justify-end gap-3">
                 <button
                   type="button"
-                  className="px-3 py-2 rounded text-sm text-slate-600 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 font-medium transition"
                   onClick={() => setCrFor(null)}
                 >
                   Cancel
@@ -1583,7 +1606,7 @@ const renderProof = (m: any) => {
                     submitCR(crFor.proposalId, crFor.bidId, crFor.milestoneIndex)
                   }
                   disabled={!!crBusy[key]}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm hover:shadow transition disabled:opacity-50"
                 >
                   {crBusy[key] ? 'Sending…' : 'Send Request'}
                 </button>
@@ -1598,7 +1621,7 @@ const renderProof = (m: any) => {
 
       {/* Lightbox */}
       {lightbox && (
-        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+        <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightbox.urls[lightbox.index]}
@@ -1609,28 +1632,31 @@ const renderProof = (m: any) => {
           {lightbox.urls.length > 1 && (
             <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-4">
                 <button
-                  className="text-white text-3xl font-bold px-4 py-2 bg-black/20 rounded-full hover:bg-black/40"
+                  className="text-white text-2xl font-bold px-6 py-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
                   onClick={(e) => {
                     e.stopPropagation();
                     setLightbox({ ...lightbox, index: (lightbox.index - 1 + lightbox.urls.length) % lightbox.urls.length });
                   }}
                 >
-                  ‹
+                  ←
                 </button>
                 <button
-                  className="text-white text-3xl font-bold px-4 py-2 bg-black/20 rounded-full hover:bg-black/40"
+                  className="text-white text-2xl font-bold px-6 py-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
                   onClick={(e) => {
                     e.stopPropagation();
                     setLightbox({ ...lightbox, index: (lightbox.index + 1) % lightbox.urls.length });
                   }}
                 >
-                  ›
+                  →
                 </button>
             </div>
           )}
-          <button className="absolute top-5 right-5 text-white/50 hover:text-white text-4xl" onClick={() => setLightbox(null)}>
+          <button className="absolute top-6 right-6 text-white/70 hover:text-white text-4xl transition" onClick={() => setLightbox(null)}>
             ✕
           </button>
+          <div className="absolute top-6 left-6 px-3 py-1 bg-black/50 text-white text-xs rounded-full font-mono">
+             {lightbox.index + 1} / {lightbox.urls.length}
+          </div>
         </div>
       )}
     </div>
