@@ -441,7 +441,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
       <div className="overflow-x-auto border rounded-lg">
         <table className="min-w-full text-sm text-left text-gray-600">
-          {/* --- THEAD is now STRICTLY OUTSIDE the loop --- */}
+          {/* THEAD is strictly OUTSIDE the loop */}
           <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b">
             <tr>
               <th className="px-6 py-3">#</th>
@@ -455,7 +455,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
             </tr>
           </thead>
           
-          {/* --- TBODY contains the loop --- */}
+          {/* TBODY contains the loop */}
           <tbody>
             {bid.milestones.map((m: Milestone, i: number) => {
               const paidTruth =
