@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { API_BASE, getAuthRoleOnce, archiveBid, deleteBid } from '@/lib/api';
 
+// --- Types (Unchanged) ---
 type Role = 'admin' | 'vendor' | 'guest';
 
 type VendorLite = {
@@ -40,7 +41,7 @@ type VendorBid = {
 
 type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
 
-/** Contact deep links */
+// --- Helper Functions (Unchanged) ---
 function mailtoLink(email: string, subject?: string) {
   const s = subject ? `?subject=${encodeURIComponent(subject)}` : '';
   return `mailto:${email}${s}`;
@@ -326,8 +327,10 @@ export default function AdminVendorsPage() {
   if (role === null) {
     return (
       <main className="max-w-7xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold mb-4">Vendors</h1>
-        <div className="text-slate-500">Checking your permissions…</div>
+        <div className="animate-pulse space-y-4">
+            <div className="h-8 bg-slate-200 rounded w-1/4"></div>
+            <div className="h-24 bg-slate-100 rounded"></div>
+        </div>
       </main>
     );
   }
@@ -335,86 +338,95 @@ export default function AdminVendorsPage() {
   if (!isAdmin) {
     return (
       <main className="max-w-7xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold mb-4">Vendors</h1>
-        <div className="rounded border p-6 bg-white text-rose-700">403 — Admins only.</div>
+        <h1 className="text-2xl font-semibold mb-4 text-slate-900">Vendors</h1>
+        <div className="rounded-lg border border-rose-200 p-6 bg-rose-50 text-rose-700 flex items-center gap-2">
+           <span className="font-bold">403</span> Admins only.
+        </div>
       </main>
     );
   }
 
   return (
     <main className="max-w-7xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-semibold">Vendors</h1>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">Vendor Management</h1>
+        <p className="text-slate-500 text-sm mt-1">Manage onboarding, approvals, and monitor bid activity.</p>
+      </div>
+
+      {/* Controls Card */}
+      <div className="bg-white border rounded-lg shadow-sm p-4 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex-1 flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1 max-w-md">
+                <input
+                    value={q}
+                    onChange={(e) => { setPage(1); setQ(e.target.value); }}
+                    placeholder="Search by Name or Wallet..."
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                />
+            </div>
+            <select
+                value={status}
+                onChange={(e) => { setPage(1); setStatus(e.target.value); }}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                title="Filter Status"
+            >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="suspended">Suspended</option>
+                <option value="banned">Banned</option>
+            </select>
+            <select
+                value={kyc}
+                onChange={(e) => { setPage(1); setKyc(e.target.value); }}
+                className="border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                title="Filter KYC"
+            >
+                <option value="all">All KYC</option>
+                <option value="none">No KYC</option>
+                <option value="pending">Pending</option>
+                <option value="verified">Verified</option>
+                <option value="rejected">Rejected</option>
+            </select>
+        </div>
+        <div className="flex items-center gap-2 border-l pl-4 ml-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:text-slate-900">
             <input
-              type="checkbox"
-              checked={includeArchived}
-              onChange={(e) => { setPage(1); setIncludeArchived(e.target.checked); }}
+                type="checkbox"
+                checked={includeArchived}
+                onChange={(e) => { setPage(1); setIncludeArchived(e.target.checked); }}
+                className="rounded text-indigo-600 focus:ring-indigo-500"
             />
-            Show archived
-          </label>
-          <input
-            value={q}
-            onChange={(e) => { setPage(1); setQ(e.target.value); }}
-            placeholder="Search vendor or wallet…"
-            className="border rounded px-3 py-1.5 text-sm"
-          />
-          <select
-            value={status}
-            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
-            className="border rounded px-2 py-1.5 text-sm"
-            title="Status"
-          >
-            <option value="all">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="suspended">Suspended</option>
-            <option value="banned">Banned</option>
-          </select>
-          <select
-            value={kyc}
-            onChange={(e) => { setPage(1); setKyc(e.target.value); }}
-            className="border rounded px-2 py-1.5 text-sm"
-            title="KYC"
-          >
-            <option value="all">All KYC</option>
-            <option value="none">None</option>
-            <option value="pending">Pending</option>
-            <option value="verified">Verified</option>
-            <option value="rejected">Rejected</option>
-          </select>
+            Show Archived
+            </label>
         </div>
       </div>
 
-      {/* List */}
-      <section className="rounded border bg-white">
+      {/* Main Table */}
+      <section className="rounded-lg border bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left border-b bg-slate-50">
-                <th className="py-2 px-3">Vendor</th>
-                <th className="py-2 px-3">Wallet</th>
-                <th className="py-2 px-3">Status</th>
-                <th className="py-2 px-3">KYC</th>
-                <th className="py-2 px-3">Bids</th>
-                <th className="py-2 px-3">Contact</th>
-                <th className="py-2 px-3">Address</th>
-                <th className="py-2 px-3">Total Awarded</th>
-                <th className="py-2 px-3">Last Bid</th>
-                <th className="py-2 px-3 w-64">Actions</th>
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 tracking-wide font-semibold">
+              <tr>
+                <th className="py-3 px-4 w-64">Vendor Identity</th>
+                <th className="py-3 px-4 w-32">Status / KYC</th>
+                <th className="py-3 px-4 w-48">Contact</th>
+                <th className="py-3 px-4">Location</th>
+                <th className="py-3 px-4 text-right">Perf (USD)</th>
+                <th className="py-3 px-4 text-right">Bids</th>
+                <th className="py-3 px-4 w-72 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {loading && (
-                <tr><td colSpan={10} className="py-6 px-3 text-slate-500">Loading vendors…</td></tr>
+                <tr><td colSpan={7} className="py-12 text-center text-slate-500">Loading vendors...</td></tr>
               )}
               {err && !loading && (
-                <tr><td colSpan={10} className="py-6 px-3 text-rose-700">{err}</td></tr>
+                <tr><td colSpan={7} className="py-12 text-center text-rose-600 font-medium">{err}</td></tr>
               )}
               {!loading && !err && data.items.length === 0 && (
-                <tr><td colSpan={10} className="py-6 px-3 text-slate-500">No vendors found.</td></tr>
+                <tr><td colSpan={7} className="py-12 text-center text-slate-500">No vendors found matching criteria.</td></tr>
               )}
               {!loading && !err && data.items.map((v, idx) => {
                 const rowKey = (v?.id || v?.walletAddress || `row-${idx}`) as string;
@@ -430,200 +442,204 @@ export default function AdminVendorsPage() {
 
                 return (
                   <>
-                    <tr key={rowKey} className="border-b hover:bg-slate-50">
-                      <td className="py-2 px-3 font-medium">
-                        {v.vendorName || '—'}
-                        {v.archived && (
-                          <span className="ml-2 px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-700 align-middle">Archived</span>
-                        )}
+                    <tr key={rowKey} className={`hover:bg-slate-50 transition-colors ${open ? 'bg-slate-50/80' : ''}`}>
+                      {/* Identity Column */}
+                      <td className="py-3 px-4 align-top">
+                        <div className="font-semibold text-slate-900 text-base">
+                            {v.vendorName || 'Unknown Vendor'}
+                            {v.archived && (
+                                <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-500 border border-zinc-200 align-middle">
+                                    Archived
+                                </span>
+                            )}
+                        </div>
+                        <div className="mt-1 text-xs font-mono text-slate-400 truncate max-w-[200px]" title={v.walletAddress}>
+                            {v.walletAddress || 'No Wallet'}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">
+                             Last active: {v.lastBidAt ? new Date(v.lastBidAt).toLocaleDateString() : 'Never'}
+                        </div>
                       </td>
 
-                      {/* Wallet */}
-                      <td className="py-2 px-3 font-mono text-xs break-all">{v.walletAddress || '—'}</td>
-
-                      {/* Status */}
-                      <td className="py-2 px-3">
-                        <StatusChip value={isRejectedVisual ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
+                      {/* Status / KYC */}
+                      <td className="py-3 px-4 align-top">
+                        <div className="flex flex-col gap-1.5 items-start">
+                            <StatusChip value={isRejectedVisual ? 'rejected' : (isApprovedVisual ? 'approved' : v.status)} />
+                            <KycChip value={v.kycStatus} />
+                        </div>
                       </td>
-
-                      {/* KYC */}
-                      <td className="py-2 px-3"><KycChip value={v.kycStatus} /></td>
-
-                      {/* Bids */}
-                      <td className="py-2 px-3">{typeof v.bidsCount === 'number' ? v.bidsCount : '—'}</td>
 
                       {/* Contact */}
-                      <td className="py-2 px-3 text-xs leading-tight">
-                        <div>
-                          {v.email ? (
-                            <a href={toMailto(v.email)!} className="underline underline-offset-2 text-sky-600 hover:text-sky-700" title="Email vendor">
-                              {v.email}
-                            </a>
-                          ) : '—'}
+                      <td className="py-3 px-4 align-top text-xs">
+                        <div className="space-y-1">
+                            {v.email ? (
+                                <div className="truncate max-w-[180px]">
+                                    <span className="text-slate-400 mr-1">✉️</span>
+                                    <a href={toMailto(v.email)!} className="text-slate-700 hover:text-indigo-600 hover:underline underline-offset-2">
+                                        {v.email}
+                                    </a>
+                                </div>
+                            ) : <div className="text-slate-300">No Email</div>}
+
+                            {(v.phone || v.whatsapp) && (
+                                <div>
+                                    <span className="text-slate-400 mr-1">📞</span>
+                                    <a href={toWhatsAppLink(v.whatsapp || v.phone) || '#'} target="_blank" rel="noreferrer" className="text-slate-700 hover:text-green-600 hover:underline">
+                                        {v.phone || v.whatsapp}
+                                    </a>
+                                </div>
+                            )}
+
+                            {(v.telegramUsername || v.telegramChatId) && (
+                                <div>
+                                    <span className="text-slate-400 mr-1">✈️</span>
+                                    <a href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'} target="_blank" rel="noreferrer" className="text-slate-700 hover:text-sky-500 hover:underline">
+                                        {v.telegramUsername ? `@${String(v.telegramUsername).replace(/^@/, '')}` : 'Telegram'}
+                                    </a>
+                                </div>
+                            )}
                         </div>
-                        <div>
-                          {(v.telegramUsername || v.telegramChatId) ? (
-                            <a
-                              href={toTelegramLink(v.telegramUsername, v.telegramChatId) || '#'}
-                              className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
-                              title="Open in Telegram"
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {v.telegramUsername ? `@${String(v.telegramUsername).replace(/^@/, '')}` : `tg:${v.telegramChatId}`}
-                            </a>
-                          ) : '—'}
-                        </div>
-                        <div>
-                          {(v.whatsapp || v.phone) ? (
-                            <a
-                              href={toWhatsAppLink(v.whatsapp || v.phone) || '#'}
-                              className="underline underline-offset-2 text-sky-600 hover:text-sky-700"
-                              title="Open WhatsApp chat"
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {v.whatsapp || v.phone}
-                            </a>
-                          ) : '—'}
-                        </div>
-                        <div>{v.phone || '—'}</div>
                       </td>
 
-                      {/* Address */}
-                      <td className="py-2 px-3 text-xs break-words">
-                        {v.addressText || v.address || '—'}
+                      {/* Location */}
+                      <td className="py-3 px-4 align-top text-xs text-slate-600">
+                        <div className="line-clamp-3 max-w-[150px]" title={v.addressText || v.address || ''}>
+                            {v.addressText || v.address || '—'}
+                        </div>
                       </td>
 
-                      {/* Total Awarded */}
-                      <td className="py-2 px-3">${Number(v.totalAwardedUSD || 0).toLocaleString()}</td>
+                      {/* Perf USD */}
+                      <td className="py-3 px-4 align-top text-right font-medium text-slate-700">
+                        ${Number(v.totalAwardedUSD || 0).toLocaleString()}
+                      </td>
 
-                      {/* Last Bid */}
-                      <td className="py-2 px-3">{v.lastBidAt ? new Date(v.lastBidAt).toLocaleString() : '—'}</td>
+                      {/* Bids */}
+                      <td className="py-3 px-4 align-top text-right">
+                        {typeof v.bidsCount === 'number' ? (
+                            <span className="inline-block min-w-[1.5rem] text-center py-0.5 px-1 bg-slate-100 rounded text-slate-700 text-xs font-medium">
+                                {v.bidsCount}
+                            </span>
+                        ) : '—'}
+                      </td>
 
                       {/* Actions */}
-                      <td className="py-2 px-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => toggleOpen(rowKey, v.walletAddress)}
-                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-slate-900 text-white hover:bg-slate-950"
-                          >
-                            {open ? 'Hide' : 'Info-Bids'}
-                          </button>
-
-                          {isApprovedVisual ? (
-                            <span
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-                              title="Vendor is approved"
-                            >
-                              Approved
-                            </span>
-                          ) : isRejectedVisual ? (
-                            <>
-                              <button
-                                disabled
-                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
-                                title="Vendor is rejected"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                disabled
-                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-gray-300 text-gray-600 cursor-not-allowed"
-                                title="Vendor is rejected"
-                                data-testid="reject-btn"
-                              >
-                                Rejected
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => approveVendor(v.walletAddress)}
-                                disabled={!v.walletAddress || busy}
-                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Approve vendor"
-                              >
-                                {busy ? 'Working…' : 'Approve'}
-                              </button>
-
-                              <button
-                                onClick={() => rejectVendor(v.walletAddress)}
-                                disabled={!v.walletAddress || busy}
-                                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Reject vendor"
-                                data-testid="reject-btn"
-                              >
-                                {busy ? 'Working…' : 'Reject'}
-                              </button>
-                            </>
-                          )}
-
-                          {!v.archived ? (
+                      <td className="py-3 px-4 align-top text-right">
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center gap-2">
+                            {/* Main Action: Info/Bids */}
                             <button
-                              onClick={() => archiveVendor(v.walletAddress)}
-                              disabled={!v.walletAddress || busy}
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Archive vendor (soft hide)"
+                                onClick={() => toggleOpen(rowKey, v.walletAddress)}
+                                className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${open ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
                             >
-                              {busy ? 'Archiving…' : 'Archive'}
+                                {open ? 'Close Details' : 'View Bids'}
                             </button>
-                          ) : (
-                            <button
-                              onClick={() => unarchiveVendor(v.walletAddress)}
-                              disabled={!v.walletAddress || busy}
-                              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Unarchive vendor"
-                            >
-                              {busy ? 'Working…' : 'Unarchive'}
-                            </button>
-                          )}
 
-                          <button
-                            onClick={() => deleteVendor(v.walletAddress)}
-                            disabled={!v.walletAddress || busy}
-                            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Delete vendor profile (bids remain)"
-                          >
-                            {busy ? 'Deleting…' : 'Delete'}
-                          </button>
+                            {/* Approval Flow */}
+                            {isApprovedVisual ? (
+                                <span className="px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md cursor-default">
+                                    ✓ Active
+                                </span>
+                            ) : isRejectedVisual ? (
+                                <span className="px-2 py-1 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-100 rounded-md cursor-default">
+                                    ✖ Rejected
+                                </span>
+                            ) : (
+                                <div className="flex rounded-md shadow-sm" role="group">
+                                    <button
+                                        onClick={() => approveVendor(v.walletAddress)}
+                                        disabled={!v.walletAddress || busy}
+                                        className="px-2 py-1 text-xs font-medium bg-emerald-600 text-white border border-emerald-600 rounded-l-md hover:bg-emerald-700 disabled:opacity-50"
+                                        title="Approve"
+                                    >
+                                        Approve
+                                    </button>
+                                    <button
+                                        onClick={() => rejectVendor(v.walletAddress)}
+                                        disabled={!v.walletAddress || busy}
+                                        className="px-2 py-1 text-xs font-medium bg-white text-rose-600 border border-l-0 border-rose-200 rounded-r-md hover:bg-rose-50 disabled:opacity-50"
+                                        title="Reject"
+                                    >
+                                        Reject
+                                    </button>
+                                </div>
+                            )}
+                          </div>
+
+                          {/* Secondary Actions: Archive/Delete */}
+                          <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:opacity-100">
+                             {/* Note: Added group-hover logic if user wraps TR in group, otherwise simpler opacity handling below */}
+                             <div className="flex items-center gap-2">
+                                {!v.archived ? (
+                                    <button
+                                        onClick={() => archiveVendor(v.walletAddress)}
+                                        disabled={!v.walletAddress || busy}
+                                        className="text-xs text-slate-400 hover:text-amber-600 underline decoration-dotted underline-offset-2"
+                                    >
+                                        Archive
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => unarchiveVendor(v.walletAddress)}
+                                        disabled={!v.walletAddress || busy}
+                                        className="text-xs text-emerald-600 hover:text-emerald-800 underline decoration-dotted underline-offset-2"
+                                    >
+                                        Unarchive
+                                    </button>
+                                )}
+
+                                <span className="text-slate-300">|</span>
+
+                                <button
+                                    onClick={() => deleteVendor(v.walletAddress)}
+                                    disabled={!v.walletAddress || busy}
+                                    className="text-xs text-slate-400 hover:text-rose-600 underline decoration-dotted underline-offset-2"
+                                >
+                                    Delete
+                                </button>
+                            </div>
+                          </div>
                         </div>
                       </td>
                     </tr>
 
                     {open && (
-                      <tr key={`${rowKey}-details`} className="bg-slate-50 border-b">
-                        <td colSpan={10} className="px-3 py-3">
-                          <VendorBidsPanel
-                            state={bidsState}
-                            busyId={mutatingBidId}
-                            onArchive={async (bidId) => {
-                              if (!confirm('Archive this bid?')) return;
-                              try {
-                                setMutatingBidId(bidId);
-                                await archiveBid(Number(bidId));
-                                await refreshVendorRow(rowKey, v.walletAddress);
-                                await fetchList();
-                              } catch (e: any) {
-                                alert(e?.message || 'Failed to archive bid');
-                              } finally {
-                                setMutatingBidId(null);
-                              }
-                            }}
-                            onDelete={async (bidId) => {
-                              if (!confirm('PERMANENTLY delete this bid? This cannot be undone.')) return;
-                              try {
-                                setMutatingBidId(bidId);
-                                await deleteBid(Number(bidId));
-                                await refreshVendorRow(rowKey, v.walletAddress);
-                                await fetchList();
-                              } catch (e: any) {
-                                alert(e?.message || 'Failed to delete bid');
-                              } finally {
-                                setMutatingBidId(null);
-                              }
-                            }}
-                          />
+                      <tr key={`${rowKey}-details`} className="bg-slate-50/50 shadow-inner">
+                        <td colSpan={7} className="px-4 py-4 border-b border-slate-200">
+                          <div className="bg-white border rounded-lg p-4 shadow-sm">
+                             <div className="flex items-center justify-between mb-3 border-b pb-2">
+                                <h4 className="font-semibold text-sm text-slate-800">Bid History & Details</h4>
+                             </div>
+                             <VendorBidsPanel
+                                state={bidsState}
+                                busyId={mutatingBidId}
+                                onArchive={async (bidId) => {
+                                if (!confirm('Archive this bid?')) return;
+                                try {
+                                    setMutatingBidId(bidId);
+                                    await archiveBid(Number(bidId));
+                                    await refreshVendorRow(rowKey, v.walletAddress);
+                                    await fetchList();
+                                } catch (e: any) {
+                                    alert(e?.message || 'Failed to archive bid');
+                                } finally {
+                                    setMutatingBidId(null);
+                                }
+                                }}
+                                onDelete={async (bidId) => {
+                                if (!confirm('PERMANENTLY delete this bid? This cannot be undone.')) return;
+                                try {
+                                    setMutatingBidId(bidId);
+                                    await deleteBid(Number(bidId));
+                                    await refreshVendorRow(rowKey, v.walletAddress);
+                                    await fetchList();
+                                } catch (e: any) {
+                                    alert(e?.message || 'Failed to delete bid');
+                                } finally {
+                                    setMutatingBidId(null);
+                                }
+                                }}
+                            />
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -635,22 +651,22 @@ export default function AdminVendorsPage() {
         </div>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50">
+        <div className="flex items-center justify-between px-4 py-3 border-t bg-white">
           <div className="text-xs text-slate-500">
-            Page {data.page} of {totalPages} — {data.total} total
+            Showing page <span className="font-medium">{data.page}</span> of <span className="font-medium">{totalPages}</span> — <span className="font-medium">{data.total}</span> total items
           </div>
           <div className="flex items-center gap-2">
             <button
               disabled={page <= 1}
               onClick={() => setPage(p => Math.max(1, p - 1))}
-              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Prev
+              Previous
             </button>
             <button
               disabled={page >= totalPages}
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              className="px-2 py-1 text-xs rounded border disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next
             </button>
@@ -663,25 +679,28 @@ export default function AdminVendorsPage() {
 
 function StatusChip({ value }: { value?: VendorLite['status'] }) {
   const map: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-800',
-    approved: 'bg-emerald-100 text-emerald-800',
-    rejected: 'bg-rose-100 text-rose-800',
-    suspended: 'bg-rose-100 text-rose-800',
-    banned: 'bg-zinc-200 text-zinc-700',
+    pending: 'bg-amber-50 text-amber-700 border-amber-200 ring-amber-500/20',
+    approved: 'bg-emerald-50 text-emerald-700 border-emerald-200 ring-emerald-500/20',
+    rejected: 'bg-rose-50 text-rose-700 border-rose-200 ring-rose-500/20',
+    suspended: 'bg-purple-50 text-purple-700 border-purple-200 ring-purple-500/20',
+    banned: 'bg-zinc-100 text-zinc-700 border-zinc-200 ring-zinc-500/20',
   };
-  const cls = value ? (map[value] || 'bg-zinc-100 text-zinc-700') : 'bg-zinc-100 text-zinc-700';
-  return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
+  const base = "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium border ring-1 ring-inset";
+  const cls = value ? (map[value] || 'bg-zinc-50 text-zinc-600 border-zinc-200') : 'bg-zinc-50 text-zinc-600 border-zinc-200';
+  return <span className={`${base} ${cls} capitalize`}>{value || 'Unknown'}</span>;
 }
 
 function KycChip({ value }: { value?: VendorLite['kycStatus'] }) {
-  const map: Record<string, string> = {
-    none: 'bg-zinc-100 text-zinc-700',
-    pending: 'bg-amber-100 text-amber-800',
-    verified: 'bg-emerald-100 text-emerald-800',
-    rejected: 'bg-rose-100 text-rose-800',
-  };
-  const cls = value ? (map[value] || 'bg-zinc-100 text-zinc-700') : 'bg-zinc-100 text-zinc-700';
-  return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{value || '—'}</span>;
+    const map: Record<string, string> = {
+      none: 'text-slate-400',
+      pending: 'text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded',
+      verified: 'text-emerald-700 font-medium bg-emerald-50 px-1.5 py-0.5 rounded',
+      rejected: 'text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded',
+    };
+    const label = value === 'none' ? 'No KYC' : (value || 'No KYC');
+    const cls = value ? (map[value] || 'text-slate-400') : 'text-slate-400';
+    
+    return <span className={`text-[10px] uppercase tracking-wider ${cls}`}>{label}</span>;
 }
 
 function VendorBidsPanel({
@@ -695,61 +714,62 @@ function VendorBidsPanel({
   onArchive?: (bidId: string) => void;
   onDelete?: (bidId: string) => void;
 }) {
-  if (!state) return <div className="text-slate-500 text-sm">Loading bids…</div>;
-  if (state.loading) return <div className="text-slate-500 text-sm">Loading bids…</div>;
-  if (state.error) return <div className="text-rose-700 text-sm">{state.error}</div>;
-  if (state.bids.length === 0) return <div className="text-slate-500 text-sm">No bids for this vendor.</div>;
+  if (!state) return <div className="text-slate-500 text-sm italic p-2">Loading bids...</div>;
+  if (state.loading) return <div className="text-slate-500 text-sm italic p-2">Loading bids...</div>;
+  if (state.error) return <div className="text-rose-600 text-sm p-2 bg-rose-50 rounded border border-rose-100">{state.error}</div>;
+  if (state.bids.length === 0) return <div className="text-slate-400 text-sm p-2 text-center italic">No bids found for this vendor.</div>;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left border-b">
-            <th className="py-2 pr-3">Project</th>
-            <th className="py-2 pr-3">Amount (USD)</th>
-            <th className="py-2 pr-3">Status</th>
-            <th className="py-2 pr-3">Date</th>
-            <th className="py-2 pr-3">Open</th>
-            <th className="py-2 pr-3 text-right">Actions</th>
+    <div className="overflow-hidden border rounded-md">
+      <table className="w-full text-sm text-left">
+        <thead className="bg-slate-100 text-xs font-medium text-slate-500 uppercase">
+          <tr>
+            <th className="py-2 px-3">Project Title</th>
+            <th className="py-2 px-3 text-right">Amount</th>
+            <th className="py-2 px-3">Status</th>
+            <th className="py-2 px-3">Submitted</th>
+            <th className="py-2 px-3 text-right">Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-slate-100 bg-white">
           {state.bids.map((b) => {
             const busy = busyId === b.bidId;
             return (
-              <tr key={b.bidId} className="border-b last:border-0">
-                <td className="py-2 pr-3">{b.projectTitle || 'Untitled Project'}</td>
-                <td className="py-2 pr-3">${Number(b.amountUSD || 0).toLocaleString()}</td>
-                <td className="py-2 pr-3 capitalize">{b.status || 'submitted'}</td>
-                <td className="py-2 pr-3">{new Date(b.createdAt).toLocaleString()}</td>
-                <td className="py-2 pr-3">
-                  <Link
-                    href={`/projects/${encodeURIComponent(b.projectId)}`}
-                    className="px-2 py-1 rounded bg-slate-900 text-white text-xs"
-                  >
-                    Open project
-                  </Link>
+              <tr key={b.bidId} className="hover:bg-slate-50">
+                <td className="py-2 px-3">
+                    <Link href={`/projects/${encodeURIComponent(b.projectId)}`} className="font-medium text-indigo-600 hover:underline truncate block max-w-[200px]">
+                        {b.projectTitle || 'Untitled Project'}
+                    </Link>
+                    <div className="text-[10px] text-slate-400 font-mono">{b.bidId}</div>
                 </td>
-                <td className="py-2 pr-3">
+                <td className="py-2 px-3 text-right font-mono text-slate-700">${Number(b.amountUSD || 0).toLocaleString()}</td>
+                <td className="py-2 px-3">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize
+                        ${b.status === 'won' ? 'bg-green-100 text-green-700' : 
+                          b.status === 'lost' ? 'bg-gray-100 text-gray-600' : 
+                          'bg-blue-50 text-blue-700'}`}>
+                        {b.status || 'submitted'}
+                    </span>
+                </td>
+                <td className="py-2 px-3 text-slate-500 text-xs">{new Date(b.createdAt).toLocaleDateString()}</td>
+                <td className="py-2 px-3 text-right">
                   <div className="flex gap-2 justify-end">
                     {onArchive && (
                       <button
                         onClick={() => onArchive(b.bidId)}
                         disabled={busy}
-                        className="px-2 py-1 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
-                        title="Archive bid"
+                        className="text-xs text-amber-600 hover:text-amber-800 hover:underline disabled:opacity-50"
                       >
-                        {busy ? 'Working…' : 'Archive'}
+                        {busy ? '...' : 'Archive'}
                       </button>
                     )}
                     {onDelete && (
                       <button
                         onClick={() => onDelete(b.bidId)}
                         disabled={busy}
-                        className="px-2 py-1 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
-                        title="Delete bid"
+                        className="text-xs text-rose-600 hover:text-rose-800 hover:underline disabled:opacity-50"
                       >
-                        {busy ? 'Working…' : 'Delete'}
+                        {busy ? '...' : 'Delete'}
                       </button>
                     )}
                   </div>
