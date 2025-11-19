@@ -1121,29 +1121,29 @@ const bidFiles = safeBids.flatMap((b: any) => {
       </div>
     </div>
 
-    {/* 2. Collapsible Detailed List (Closed by default) */}
-    <details className="group border rounded-lg bg-white overflow-hidden shadow-sm">
-      <summary className="px-6 py-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors select-none list-none">
-        <div className="flex items-center gap-3">
-          {/* Chevron that rotates when expanded */}
-          <div className="p-1 rounded bg-gray-200 group-open:bg-blue-100 text-gray-500 group-open:text-blue-600 transition-colors">
-            <svg className="w-5 h-5 transform transition-transform duration-200 group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <h3 className="font-semibold text-gray-900">
-            Milestone Details {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
-          </h3>
-        </div>
-        <span className="text-xs bg-gray-200 px-2 py-1 rounded-full text-gray-600">
-          {acceptedMilestones.length} Milestones
-        </span>
-      </summary>
+    {acceptedMilestones.length ? (
+      <>
+        {/* 2. Collapsible Detailed List (Table Only - Closed by default) */}
+        <details className="group border rounded-lg bg-white overflow-hidden shadow-sm">
+          <summary className="px-6 py-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors select-none list-none">
+            <div className="flex items-center gap-3">
+              {/* Chevron */}
+              <div className="p-1 rounded bg-gray-200 group-open:bg-blue-100 text-gray-500 group-open:text-blue-600 transition-colors">
+                <svg className="w-5 h-5 transform transition-transform duration-200 group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              <h3 className="font-semibold text-gray-900">
+                Milestone Details {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+              </h3>
+            </div>
+            <span className="text-xs bg-gray-200 px-2 py-1 rounded-full text-gray-600">
+              {acceptedMilestones.length} Milestones
+            </span>
+          </summary>
 
-      {/* The content inside here is hidden until clicked */}
-      <div className="border-t border-gray-200">
-        {acceptedMilestones.length ? (
-          <>
+          {/* Hidden content: Just the Table */}
+          <div className="border-t border-gray-200">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-500 uppercase bg-gray-50/50 border-b">
@@ -1231,33 +1231,37 @@ const bidFiles = safeBids.flatMap((b: any) => {
                 </tbody>
               </table>
             </div>
+          </div>
+        </details>
 
-            {(acceptedBid || safeBids[0]) && (
-              <div className="p-6 bg-gray-50 border-t border-gray-100">
-                 <h4 className="text-sm font-semibold text-gray-900 mb-3">Actions</h4>
-                <MilestonePayments
-                  bid={acceptedBid || safeBids[0]}
-                  onUpdate={refreshProofs}
-                  proposalId={projectIdNum}
-                />
-              </div>
-            )}
-
-            <div className="border-t border-gray-200 p-6">
-              <h3 className="font-semibold mb-2 text-gray-900">Change Requests</h3>
-              <ChangeRequestsPanel proposalId={projectIdNum} />
-            </div>
-          </>
-        ) : (
-          <div className="p-12 text-center">
-              <div className="mx-auto h-12 w-12 text-gray-400">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-              </div>
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No milestones defined</h3>
+        {/* 3. Payment Actions (MOVED OUTSIDE DETAILS - Always Visible) */}
+        {(acceptedBid || safeBids[0]) && (
+          <div className="border rounded-lg bg-white shadow-sm p-6">
+             <h4 className="text-sm font-semibold text-gray-900 mb-3">Payment Actions</h4>
+            <MilestonePayments
+              bid={acceptedBid || safeBids[0]}
+              onUpdate={refreshProofs}
+              proposalId={projectIdNum}
+            />
           </div>
         )}
+
+        {/* 4. Change Requests (MOVED OUTSIDE DETAILS - Always Visible) */}
+        <div className="border rounded-lg bg-white shadow-sm p-6">
+          <h3 className="font-semibold mb-2 text-gray-900">Change Requests</h3>
+          <p className="text-sm text-gray-500 mb-4">Manage negotiations between admin and vendor.</p>
+          <ChangeRequestsPanel proposalId={projectIdNum} />
+        </div>
+      </>
+    ) : (
+      /* Empty State */
+      <div className="border rounded-lg bg-white shadow-sm p-12 text-center">
+          <div className="mx-auto h-12 w-12 text-gray-400">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+          </div>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No milestones defined</h3>
       </div>
-    </details>
+    )}
   </section>
 )}
 
