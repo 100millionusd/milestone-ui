@@ -1012,18 +1012,29 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     }
   };
 
-  const handlePay = async (bidId: number, milestoneIndex: number) => {
+ const handlePay = async (bidId: number, milestoneIndex: number) => {
     if (!confirm('Release payment for this milestone?')) return;
     try {
       setProcessing(`pay-${bidId}-${milestoneIndex}`);
       await payMilestone(bidId, milestoneIndex);
+      
       const key = mkKey(bidId, milestoneIndex);
-      addPending(key);
-      emitPayQueued(bidId, milestoneIndex);
-      pollUntilPaid(bidId, milestoneIndex).catch(() => {});
+
+      // FIX: Immediately mark as paid so buttons vanish and "Paid" chip appears
+      setPaidOverrideKey(key, true);
+      removePending(key); 
+
+      // Trigger immediate data refresh to get the official server state/TxHash
+      await loadProofs(true); 
+      router.refresh();
+      
+      emitPayDone(bidId, milestoneIndex);
     } catch (e: any) {
       alert(e?.message || 'Payment failed');
-      removePending(mkKey(bidId, milestoneIndex));
+      // On failure, ensure we clean up any optimistic state
+      const key = mkKey(bidId, milestoneIndex);
+      removePending(key);
+      setPaidOverrideKey(key, false);
     } finally {
       setProcessing(null);
     }
