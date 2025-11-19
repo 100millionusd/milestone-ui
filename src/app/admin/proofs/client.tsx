@@ -1466,7 +1466,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               <button
                                 onClick={() => handleArchive(bid.bidId, origIdx)}
                                 disabled={processing === `archive-${bid.bidId}-${origIdx}`}
-                                className="px-4 py-2 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 text-sm font-medium transition shadow-sm disabled:opacity-50"
+                                className="px-4 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 text-sm font-medium transition shadow-sm disabled:opacity-50"
                                 title="Hide this milestone"
                               >
                                 {processing === `archive-${bid.bidId}-${origIdx}` ? 'Archiving…' : 'Archive'}
@@ -1475,7 +1475,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               <button
                                 onClick={() => handleUnarchive(bid.bidId, origIdx)}
                                 disabled={processing === `unarchive-${bid.bidId}-${origIdx}`}
-                                className="px-4 py-2 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 text-sm font-medium transition shadow-sm disabled:opacity-50"
+                                className="px-4 py-2 rounded bg-slate-600 text-white hover:bg-slate-700 text-sm font-medium transition shadow-sm disabled:opacity-50"
                               >
                                 {processing === `unarchive-${bid.bidId}-${origIdx}` ? 'Unarchiving…' : 'Unarchive'}
                               </button>
@@ -1530,12 +1530,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                             {/* 3. Pay (Only shows if approved/completed) */}
                             {msCanShowPayButtons(m, { approved, localPending }) && !paid && (
-                              <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+                              <div className="flex items-center gap-2 pl-2 border-l border-slate-200 bg-emerald-50/50 p-1 rounded-lg">
                                 <button
                                   type="button"
                                   onClick={() => handlePay(bid.bidId, origIdx)}
                                   disabled={processing === `pay-${bid.bidId}-${origIdx}`}
-                                  className={`px-4 py-2 rounded text-white text-sm font-medium shadow-sm transition ${processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-green-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                                  className={`px-4 py-2 rounded text-white text-sm font-medium shadow-sm transition ${processing === `pay-${bid.bidId}-${origIdx}` ? 'bg-emerald-600 opacity-60 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                                   title="Release payment manually (EOA)"
                                 >
                                   {processing === `pay-${bid.bidId}-${origIdx}` ? 'Paying...' : 'Pay (Manual)'}
