@@ -43,7 +43,32 @@ type Bid = {
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
-// ---------- helpers ----------
+// ---------- Visual Helpers (UI Only) ----------
+const Icons = {
+  Dollar: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  Clock: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  CheckCircle: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  Briefcase: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+};
+
+const StatBox = ({ label, value, icon, subtext, children }: { label?: string, value?: React.ReactNode, icon?: React.ReactNode, subtext?: string, children?: React.ReactNode }) => (
+  <div className="flex flex-col justify-center p-3 bg-slate-50 rounded-lg border border-slate-100 h-full">
+    {children ? children : (
+      <>
+        <div className="flex items-center gap-2 text-slate-500 text-xs uppercase font-semibold tracking-wide mb-1">
+          {icon}
+          {label}
+        </div>
+        <div className="text-slate-900 font-medium text-base truncate">
+          {value}
+        </div>
+        {subtext && <div className="text-xs text-slate-400 mt-1">{subtext}</div>}
+      </>
+    )}
+  </div>
+);
+
+// ---------- Logic Helpers ----------
 function parseMilestones(raw: Bid['milestones']): Milestone[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -202,124 +227,175 @@ export default function ProjectsPage() {
 
   // --------- UI ---------
   const renderCard = (
-  project: Project,
-  badge: { text: string; cls: string },
-  extra?: React.ReactNode
-) => {
-  const projectBids = getBidsForProject(project.proposalId);
-  const bidsApproved = projectBids.filter(b => b.status === 'approved').length;
-  const accepted = projectBids.find(b => b.status === 'approved') || null;
+    project: Project,
+    badge: { text: string; cls: string },
+    extra?: React.ReactNode
+  ) => {
+    const projectBids = getBidsForProject(project.proposalId);
+    const bidsApproved = projectBids.filter(b => b.status === 'approved').length;
+    const accepted = projectBids.find(b => b.status === 'approved') || null;
 
-  // Aggregate milestones across ALL bids to mirror the overview design
-  const msAgg = projectBids.reduce(
-    (acc, b) => {
-      const { total, completed, paid } = bidMsStats(b);
-      acc.total += total;
-      acc.completed += completed;
-      acc.paid += paid;
-      return acc;
-    },
-    { total: 0, completed: 0, paid: 0 }
-  );
+    // Aggregate milestones across ALL bids
+    const msAgg = projectBids.reduce(
+      (acc, b) => {
+        const { total, completed, paid } = bidMsStats(b);
+        acc.total += total;
+        acc.completed += completed;
+        acc.paid += paid;
+        return acc;
+      },
+      { total: 0, completed: 0, paid: 0 }
+    );
 
-  const lastAct = projectLastActivity(project, projectBids);
+    const lastAct = projectLastActivity(project, projectBids);
+    const progressPct = msAgg.total > 0 ? Math.round((msAgg.completed / msAgg.total) * 100) : 0;
 
-  return (
-    <div
-      key={project.proposalId}
-      className="border rounded-lg p-6 hover:shadow-md transition bg-white"
-    >
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h2 className="font-semibold text-xl">{project.title}</h2>
-            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${badge.cls}`}>
-              {badge.text}
-            </span>
+    // Define status colors for the top stripe
+    const statusColor = badge.text === 'Active' ? 'bg-blue-500' : badge.text === 'Completed' ? 'bg-green-500' : 'bg-amber-500';
+
+    return (
+      <div
+        key={project.proposalId}
+        className="group relative bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:border-slate-300 transition-all duration-200 overflow-hidden"
+      >
+        {/* Top Status Stripe */}
+        <div className={`h-1 w-full ${statusColor}`} />
+
+        <div className="p-6">
+          {/* Header Section */}
+          <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-6">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 mb-2">
+                <span className={`px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded-md border ${badge.cls} border-opacity-20`}>
+                  {badge.text}
+                </span>
+                <span className="text-xs text-slate-400">#{project.proposalId}</span>
+              </div>
+              
+              <h2 className="text-xl font-bold text-slate-900 truncate pr-2" title={project.title}>
+                {project.title}
+              </h2>
+              
+              <div className="flex items-center gap-2 mt-1">
+                {project.orgName ? (
+                   <p className="text-slate-600 text-sm font-medium">{project.orgName}</p>
+                ) : <span className="text-slate-400 italic text-sm">No Organization</span>}
+                
+                <span className="text-slate-300">•</span>
+                
+                <p className="text-slate-500 text-sm">
+                  Created {project.createdAt ? new Date(project.createdAt).toLocaleDateString() : 'Unknown'}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-2 md:justify-end mt-2 md:mt-0 shrink-0">
+              <Link
+                href={`/projects/${project.proposalId}`}
+                className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition"
+              >
+                View Details
+              </Link>
+
+               {/* Primary Actions for Active Projects */}
+               {!accepted && badge.text === 'Active' && (
+                 <>
+                   <Link
+                     href={`/bids/new?proposalId=${project.proposalId}`}
+                     className="inline-flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition shadow-sm"
+                   >
+                     <span>Submit Bid</span>
+                   </Link>
+                   
+                   <Link
+                    href={`/templates?proposalId=${project.proposalId}`}
+                    className="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-600 hover:text-cyan-700 hover:bg-cyan-50 rounded-lg transition"
+                    title="Use a Template"
+                  >
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                    Template
+                  </Link>
+                 </>
+               )}
+            </div>
           </div>
-          {project.orgName && <p className="text-gray-600">{project.orgName}</p>}
-          {typeof project.amountUSD === 'number' && (
-            <p className="text-green-600 font-medium text-lg mt-2">
-              Budget: {currency.format(Number(project.amountUSD))}
-            </p>
+
+          {/* Dashboard Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            {/* 1. Budget */}
+            <StatBox 
+              label="Budget" 
+              icon={<Icons.Dollar />}
+              value={typeof project.amountUSD === 'number' ? currency.format(Number(project.amountUSD)) : '—'} 
+              subtext={badge.text === 'Active' ? 'Estimated' : 'Final'}
+            />
+
+            {/* 2. Bids Activity */}
+            <StatBox 
+              label="Activity" 
+              icon={<Icons.Briefcase />}
+              value={
+                <div className="flex items-baseline gap-1">
+                   <span>{projectBids.length}</span>
+                   <span className="text-xs font-normal text-slate-500">bids</span>
+                </div>
+              }
+              subtext={accepted ? 'Contract Awarded' : `${bidsApproved} approved`}
+            />
+
+            {/* 3. Milestones Progress */}
+            <StatBox>
+               <div className="flex items-center justify-between text-slate-500 text-xs uppercase font-semibold tracking-wide mb-2">
+                 <div className="flex items-center gap-2"><Icons.CheckCircle /> Milestones</div>
+                 <span>{progressPct}%</span>
+               </div>
+               {/* Progress Bar */}
+               <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                  <div 
+                    className={`h-2.5 rounded-full transition-all duration-500 ${progressPct === 100 ? 'bg-green-500' : 'bg-blue-500'}`} 
+                    style={{ width: `${progressPct}%` }}
+                  ></div>
+               </div>
+               <div className="flex justify-between mt-2 text-xs text-slate-400">
+                 <span>{msAgg.completed}/{msAgg.total} done</span>
+                 <span>{msAgg.paid} paid</span>
+               </div>
+            </StatBox>
+
+            {/* 4. Last Activity */}
+            <StatBox 
+              label="Last Update" 
+              icon={<Icons.Clock />}
+              value={lastAct ? lastAct.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}
+              subtext={lastAct ? lastAct.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
+            />
+          </div>
+
+          {/* Footer / Extra Content (Archive button etc) */}
+          {extra && (
+            <div className="mt-4 pt-4 border-t border-slate-100 bg-slate-50 -mx-6 -mb-6 px-6 py-3 flex items-center justify-between text-sm">
+              {extra}
+            </div>
           )}
         </div>
-
-        <div className="text-right">
-          {badge.text === 'Active' && (
-            <p className="text-sm text-gray-500 mb-3">
-              {projectBids.length} {projectBids.length === 1 ? 'bid' : 'bids'} •{' '}
-              {accepted ? 'Contract awarded' : 'Accepting bids'}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2 justify-end">
-            <Link
-              href={`/projects/${project.proposalId}`}
-              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
-            >
-              View Project
-            </Link>
-
-            {/* Submit Standard Bid */}
-            {!accepted && badge.text === 'Active' && (
-              <>
-                <Link
-                  href={`/bids/new?proposalId=${project.proposalId}`}
-                  className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
-                >
-                  Submit Standard Bid
-                </Link>
-
-                {/* NEW: Use a Template */}
-                <Link
-                  href={`/templates?proposalId=${project.proposalId}`}
-                  className="bg-cyan-600 text-white px-4 py-2 rounded text-sm hover:bg-cyan-700"
-                  title="Start your bid from a predefined template"
-                >
-                  Use a Template
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
       </div>
-
-      {/* rollups */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <div className="text-gray-500">Bids</div>
-          <div className="font-medium">{bidsApproved}/{projectBids.length || 0} approved</div>
-        </div>
-        <div>
-          <div className="text-gray-500">Milestones (completed)</div>
-          <div className="font-medium">{msAgg.completed}/{msAgg.total}</div>
-        </div>
-        <div>
-          <div className="text-gray-500">Milestones (paid)</div>
-          <div className="font-medium">{msAgg.paid}/{msAgg.total}</div>
-        </div>
-        <div className="md:text-right col-span-2 md:col-span-1">
-          <div className="text-gray-500">Last activity</div>
-          <div className="font-medium">{lastAct ? lastAct.toLocaleString() : '—'}</div>
-        </div>
-      </div>
-
-      {extra}
-    </div>
-  );
-};
+    );
+  };
 
   const renderTabContent = () => {
-    if (loading) return <div>Loading projects...</div>;
+    if (loading) return <div className="p-6 text-center text-gray-500">Loading projects...</div>;
 
     if (activeTab === 'active') {
       return (
         <div className="space-y-6">
           {activeProjects.map((p) =>
-            renderCard(p, { text: 'Active', cls: 'bg-yellow-100 text-yellow-800' })
+            renderCard(p, { text: 'Active', cls: 'text-blue-700 bg-blue-50' })
           )}
           {activeProjects.length === 0 && (
-            <p className="text-gray-500 italic">There are no active projects at the moment.</p>
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+               <p className="text-gray-500 italic">There are no active projects at the moment.</p>
+            </div>
           )}
         </div>
       );
@@ -331,23 +407,27 @@ export default function ProjectsPage() {
           {completedProjects.map((p) =>
             renderCard(
               p,
-              { text: 'Completed', cls: 'bg-green-100 text-green-800' },
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <p className="text-sm text-gray-600">✅ This project has been fully completed.</p>
-                {/* ✅ Archive button only on Completed tab */}
+              { text: 'Completed', cls: 'text-green-700 bg-green-50' },
+              <div className="w-full flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-green-700 font-medium">
+                   <Icons.CheckCircle />
+                   <span>Project fully completed</span>
+                </div>
                 <button
                   onClick={() => handleArchive(p.proposalId)}
                   disabled={!!archiving[p.proposalId]}
-                  className="text-sm px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-medium transition disabled:opacity-50"
                   title="Move this project to Archived"
                 >
-                  {archiving[p.proposalId] ? 'Archiving…' : 'Archive'}
+                  {archiving[p.proposalId] ? 'Archiving…' : 'Archive Project'}
                 </button>
               </div>
             )
           )}
           {completedProjects.length === 0 && (
-            <p className="text-gray-500 italic">No completed projects yet.</p>
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+              <p className="text-gray-500 italic">No completed projects yet.</p>
+            </div>
           )}
         </div>
       );
@@ -359,12 +439,17 @@ export default function ProjectsPage() {
         {archivedProjects.map((p) =>
           renderCard(
             p,
-            { text: 'Archived', cls: 'bg-amber-100 text-amber-800' },
-            <p className="mt-3 text-sm text-amber-800">🗄️ This project is archived.</p>
+            { text: 'Archived', cls: 'text-amber-700 bg-amber-50' },
+            <div className="flex items-center gap-2 text-amber-700">
+               <span className="text-lg">🗄️</span>
+               <span>This project is archived.</span>
+            </div>
           )
         )}
         {archivedProjects.length === 0 && (
-          <p className="text-gray-600 italic">No archived projects.</p>
+          <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+            <p className="text-gray-500 italic">No archived projects.</p>
+          </div>
         )}
       </div>
     );
@@ -372,7 +457,7 @@ export default function ProjectsPage() {
 
   // ---- Guarded early returns ----
   if (allowed === null) {
-    return <div className="max-w-6xl mx-auto p-6">Checking access…</div>;
+    return <div className="max-w-6xl mx-auto p-6 text-gray-500">Checking access…</div>;
   }
   if (allowed === false) {
     return null; // redirected already
@@ -381,8 +466,9 @@ export default function ProjectsPage() {
   return (
     <div className="max-w-6xl mx-auto p-6">
       {/* Tabs */}
-      <div className="mb-6">
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-slate-900 mb-6">Projects & Proposals</h1>
+        <div className="inline-flex rounded-lg bg-slate-100 p-1 shadow-inner">
           <TabButton
             current={activeTab}
             setCurrent={setActiveTab}
@@ -425,8 +511,8 @@ function TabButton({
     <button
       onClick={() => setCurrent(id)}
       className={[
-        'px-4 py-2 text-sm font-medium rounded-lg transition',
-        isActive ? 'bg-slate-900 text-white shadow' : 'text-slate-700 hover:bg-slate-100',
+        'px-5 py-2.5 text-sm font-medium rounded-md transition-all duration-200',
+        isActive ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50',
       ].join(' ')}
       aria-pressed={isActive}
     >
