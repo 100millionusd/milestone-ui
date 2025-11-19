@@ -1082,98 +1082,181 @@ const bidFiles = safeBids.flatMap((b: any) => {
       )}
 
  {tab === 'milestones' && (
-  <section className="border rounded p-4">
-    <h3 className="font-semibold mb-3">
-      Milestones {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
-    </h3>
-
-    {acceptedMilestones.length ? (
-      <>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-2 pr-4">#</th>
-                <th className="py-2 pr-4">Title</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Completed</th>
-                <th className="py-2 pr-4">Paid</th>
-                <th className="py-2 pr-4">Tx</th>
-              </tr>
-            </thead>
-            <tbody>
-              {acceptedMilestones.map((m, idx) => {
-                const src =
-                  (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
-
-                const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
-                const paid = msIsPaid(src);
-                const localPending = safePending.has(key);
-                const safeInFlight =
-                  msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
-
-                const completedRow = paid || !!(src as any)?.completed;
-                const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
-
-                const status = paid
-                  ? 'paid'
-                  : safeInFlight
-                  ? 'payment_pending'
-                  : completedRow
-                  ? 'completed'
-                  : hasProofNow
-                  ? 'submitted'
-                  : 'pending';
-
-                return (
-                  <tr key={idx} className="border-t">
-                    <td className="py-2 pr-4">M{idx + 1}</td>
-                    <td className="py-2 pr-4">{m.name || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {m.amount ? currency.format(Number(m.amount)) : '—'}
-                    </td>
-                    <td className="py-2 pr-4">{status}</td>
-                    <td className="py-2 pr-4">{fmt(m.completionDate) || '—'}</td>
-                    <td className="py-2 pr-4">
-                      {fmt(
-                        (m as any).paymentDate ||
-                          (paid ? (src as any).paidAt || (src as any).safeExecutedAt : null)
-                      ) || '—'}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {((src as any).paymentTxHash || (src as any).safePaymentTxHash)
-                        ? `${String(
-                            (src as any).paymentTxHash || (src as any).safePaymentTxHash
-                          ).slice(0, 10)}…`
-                        : '—'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+  <section className="space-y-6">
+    {/* 1. High Level Summary Cards */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="p-4 rounded-lg border bg-white shadow-sm">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Budget</div>
+        <div className="text-2xl font-bold text-gray-900">
+          {acceptedBid 
+            ? currency.format(Number((acceptedBid.priceUSD ?? acceptedBid.priceUsd) || 0)) 
+            : '—'}
         </div>
-
-        {(acceptedBid || safeBids[0]) && (
-          <div className="mt-6">
-            <MilestonePayments
-              bid={acceptedBid || safeBids[0]}
-              onUpdate={refreshProofs}
-              proposalId={projectIdNum}
+      </div>
+      <div className="p-4 rounded-lg border bg-white shadow-sm">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Amount Paid</div>
+        <div className="text-2xl font-bold text-emerald-600">
+          {currency.format(
+            acceptedMilestones
+              .filter((m) => msIsPaid(m))
+              .reduce((acc, m) => acc + Number(m.amount || 0), 0)
+          )}
+        </div>
+      </div>
+      <div className="p-4 rounded-lg border bg-white shadow-sm">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</div>
+        <div className="flex items-center gap-3 mt-1">
+          <div className="text-2xl font-bold text-gray-900">
+            {acceptedMilestones.length > 0 
+              ? Math.round((msCompleted / acceptedMilestones.length) * 100) 
+              : 0}%
+          </div>
+          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-blue-600 rounded-full" 
+              style={{ width: `${acceptedMilestones.length ? (msCompleted / acceptedMilestones.length) * 100 : 0}%` }} 
             />
           </div>
-        )}
-
-        {/* Moved here from Overview */}
-        <div className="mt-6 border rounded p-4">
-          <h3 className="font-semibold mb-2">Change Requests (admin ↔ vendor)</h3>
-          <ChangeRequestsPanel proposalId={projectIdNum} />
         </div>
-      </>
-    ) : (
-      <p className="text-sm text-gray-500">No milestones defined yet.</p>
-    )}
+      </div>
+    </div>
+
+    {/* 2. Detailed List */}
+    <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
+      <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
+        <h3 className="font-semibold text-gray-900">
+          Milestone Details {acceptedBid ? `— ${acceptedBid.vendorName}` : ''}
+        </h3>
+        <span className="text-xs bg-gray-200 px-2 py-1 rounded-full text-gray-600">
+          {acceptedMilestones.length} Milestones
+        </span>
+      </div>
+
+      {acceptedMilestones.length ? (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50/50 border-b">
+                <tr>
+                  <th className="px-6 py-3 font-medium">#</th>
+                  <th className="px-6 py-3 font-medium">Description</th>
+                  <th className="px-6 py-3 font-medium">Amount</th>
+                  <th className="px-6 py-3 font-medium">Status</th>
+                  <th className="px-6 py-3 font-medium">Dates</th>
+                  <th className="px-6 py-3 font-medium">Transaction</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {acceptedMilestones.map((m, idx) => {
+                  const src = (Array.isArray(approvedFull?.milestones) ? approvedFull.milestones[idx] : null) || m;
+                  const key = `${Number(acceptedBid?.bidId || 0)}-${idx}`;
+                  
+                  // Logic from original code
+                  const paid = msIsPaid(src);
+                  const localPending = safePending.has(key);
+                  const safeInFlight = msHasSafeMarker(src) || !!(src as any)?.paymentPending || localPending;
+                  const completedRow = paid || !!(src as any)?.completed;
+                  const hasProofNow = !!(src as any)?.proof || !!proofJustSent[key];
+
+                  // Determine Status & Style
+                  let statusLabel = 'Pending';
+                  let statusClass = 'bg-gray-100 text-gray-600 border-gray-200';
+
+                  if (paid) {
+                    statusLabel = 'Paid';
+                    statusClass = 'bg-green-100 text-green-700 border-green-200';
+                  } else if (safeInFlight) {
+                    statusLabel = 'Processing';
+                    statusClass = 'bg-amber-100 text-amber-700 border-amber-200';
+                  } else if (completedRow) {
+                    statusLabel = 'Completed';
+                    statusClass = 'bg-blue-100 text-blue-700 border-blue-200';
+                  } else if (hasProofNow) {
+                    statusLabel = 'Submitted';
+                    statusClass = 'bg-indigo-50 text-indigo-600 border-indigo-100';
+                  }
+
+                  return (
+                    <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-6 py-4 font-medium text-gray-500">
+                        {idx + 1}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-gray-900">{m.name || 'Untitled Milestone'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-bold text-gray-900">
+                          {m.amount ? currency.format(Number(m.amount)) : '—'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusClass}`}>
+                          {statusLabel}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-gray-500 text-xs space-y-1">
+                        {completedRow && (
+                          <div title="Completion Date">
+                            <span className="font-medium">Done:</span> {fmt(m.completionDate).split(',')[0]}
+                          </div>
+                        )}
+                        {paid && (
+                          <div title="Payment Date">
+                             <span className="font-medium">Paid:</span> {fmt((m as any).paymentDate || (src as any).paidAt || (src as any).safeExecutedAt).split(',')[0]}
+                          </div>
+                        )}
+                        {!completedRow && !paid && '—'}
+                      </td>
+                      <td className="px-6 py-4">
+                        {((src as any).paymentTxHash || (src as any).safePaymentTxHash) ? (
+                          <a 
+                            href={`https://etherscan.io/tx/${(src as any).paymentTxHash || (src as any).safePaymentTxHash}`} // Assuming ETH, adjust if different chain
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline text-xs"
+                          >
+                            <span>View Tx</span>
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                          </a>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {(acceptedBid || safeBids[0]) && (
+            <div className="p-6 bg-gray-50 border-t border-gray-100">
+               <h4 className="text-sm font-semibold text-gray-900 mb-3">Actions</h4>
+              <MilestonePayments
+                bid={acceptedBid || safeBids[0]}
+                onUpdate={refreshProofs}
+                proposalId={projectIdNum}
+              />
+            </div>
+          )}
+
+          {/* Change Requests moved here */}
+          <div className="border-t border-gray-200 p-6">
+            <h3 className="font-semibold mb-2 text-gray-900">Change Requests</h3>
+            <p className="text-sm text-gray-500 mb-4">Manage negotiations between admin and vendor.</p>
+            <ChangeRequestsPanel proposalId={projectIdNum} />
+          </div>
+        </>
+      ) : (
+        <div className="p-12 text-center">
+            <div className="mx-auto h-12 w-12 text-gray-400">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+            </div>
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No milestones defined</h3>
+            <p className="mt-1 text-sm text-gray-500">Get started by accepting a bid.</p>
+        </div>
+      )}
+    </div>
   </section>
 )}
 
