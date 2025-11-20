@@ -1628,7 +1628,7 @@ export async function uploadFilesSequentially(
 
   // 🚀 CONFIG: How many files to upload at once?
   // 3 is the sweet spot: 3x faster than before, but safe for Pinata limits.
-  const MAX_CONCURRENT = 3;
+  const MAX_CONCURRENT = 1;
 
   const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
     // This calls your existing helper that talks to Railway
