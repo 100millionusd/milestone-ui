@@ -1597,29 +1597,21 @@ export async function uploadProofFiles(
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f, f.name);
+  // We use Promise.all to upload files in parallel directly to Railway
+  // This uses your existing 'uploadFileToIPFS' function which bypasses the Netlify 10s limit
+  const results = await Promise.all(
+    files.map(async (file) => {
+      const response = await uploadFileToIPFS(file);
+      
+      return {
+        cid: String(response.cid || ''),
+        url: String(response.url || ''),
+        name: String(file.name || 'file'),
+      };
+    })
+  );
 
-  // IMPORTANT: relative fetch → hits Next /api route, not your external API_BASE
-  const res = await fetch(`/api/proofs/upload`, {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
-  });
-
-  if (!res.ok) {
-    let msg = `Upload HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
-    throw new Error(msg);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  const list = Array.isArray(json?.uploads) ? json.uploads : [];
-  return list.map((u: any) => ({
-    cid: String(u?.cid || ''),
-    url: String(u?.url || ''),
-    name: String(u?.name || (String(u?.url || '').split('/').pop() || 'file')),
-  }));
+  return results;
 }
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
