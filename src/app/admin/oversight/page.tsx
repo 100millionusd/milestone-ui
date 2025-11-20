@@ -62,6 +62,7 @@ function buildActivityLinks(doc: ActivityDoc): ActivityLink[] {
     L.push({ label: `Open Bid #${bid} · Milestone ${Number(mi) + 1}`, href: `/admin/bids/${bid}#milestone-${mi}` });
   }
   if (bid && prf) {
+    // If you add a proof detail route later, update this href:
     L.push({ label: `View Proofs for Bid #${bid}`, href: `/admin/proofs?bidId=${bid}` });
   }
   if (L.length === 0) L.push({ label: 'Open Proposals', href: `/admin/proposals` });
@@ -75,6 +76,9 @@ const pretty = (obj: any) => {
 // ------------------------------------------------------------
 // Admin Oversight — polished (modal-based Details viewer)
 // ------------------------------------------------------------
+
+// —— Types that match your /api/admin/oversight payload ——
+// (unchanged; mirror server output)
 
 type Oversight = {
   tiles: {
@@ -129,7 +133,7 @@ type Oversight = {
     changes: Record<string, any>;
   }>;
 };
-
+// ——— Lightweight rows for new tabs ———
 type ProposalRow = {
   id: number;
   title?: string;
@@ -151,6 +155,7 @@ type BidRow = {
   updated_at?: string;
 };
 
+// ——— Lightweight rows for Proofs tab ———
 type ProofRow = {
   id: number;
   bid_id?: number | string | null;
@@ -233,6 +238,19 @@ function normalizePending(p: any) {
   return { count, usd };
 }
 
+type ProofRow = {
+  id: number;
+  bid_id?: number | string | null;
+  milestone_index?: number | null;
+  vendor_name?: string | null;
+  wallet_address?: string | null;
+  title?: string | null;
+  status?: string | null;
+  submitted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 function normalizeProofs(rows: any[]): ProofRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.proof_id ?? r?.proofId),
@@ -248,6 +266,16 @@ function normalizeProofs(rows: any[]): ProofRow[] {
   }));
 }
 
+// ——— Normalizers for backend shape drift ———
+type ProposalRow = {
+  id: number;
+  title?: string;
+  status?: string;
+  owner_wallet?: string | null;
+  owner_email?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 function normalizeProposals(rows: any[]): ProposalRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.proposal_id ?? r?.proposalId),
@@ -260,6 +288,16 @@ function normalizeProposals(rows: any[]): ProposalRow[] {
   }));
 }
 
+type BidRow = {
+  id: number;
+  proposal_id?: number;
+  vendor_name?: string | null;
+  status?: string;
+  amount_usd?: number | string | null;
+  amount?: number | string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 function normalizeBids(rows: any[]): BidRow[] {
   return (rows || []).map((r: any) => ({
     id: Number(r?.id ?? r?.bid_id ?? r?.bidId),
@@ -284,7 +322,10 @@ function normalizeBids(rows: any[]): BidRow[] {
   }));
 }
 
+// Convenience formatters used in the table cells
 const getVendorName = (b: BidRow) => b.vendor_name ?? '—';
+const getProposalId = (b: BidRow) =>
+  (typeof b.proposal_id === 'number' && Number.isFinite(b.proposal_id)) ? `#${b.proposal_id}` : '—';
 
 // —— Tiny primitives ——
 function Progress({ value }: { value: number }) {
@@ -298,12 +339,12 @@ function Progress({ value }: { value: number }) {
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral"|"danger"|"warning"|"success" }) {
   const t = {
-    neutral: "bg-neutral-100 text-neutral-700 border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700",
-    danger: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800",
-    warning: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800",
-    success: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800",
+    neutral: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
+    danger: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+    warning: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
+    success: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
   }[tone];
-  return <span className={cls("inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border", t)}>{children}</span>;
+  return <span className={cls("inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium", t)}>{children}</span>;
 }
 
 function Card({ title, subtitle, right, children }: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode; }) {
@@ -311,7 +352,7 @@ function Card({ title, subtitle, right, children }: { title: string; subtitle?: 
     <section className="rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur" aria-label={title}>
       <header className="px-5 py-4 border-b border-neutral-200/60 dark:border-neutral-800 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</h2>
+          <h2 className="text-sm font-semibold">{title}</h2>
           {subtitle && <p className="text-xs text-neutral-500">{subtitle}</p>}
         </div>
         {right}
@@ -324,7 +365,7 @@ function Card({ title, subtitle, right, children }: { title: string; subtitle?: 
 function Th({ children, className, onClick, sorted, dir }: { children: React.ReactNode; className?: string; onClick?: () => void; sorted?: boolean; dir?: "asc"|"desc" }) {
   return (
     <th scope="col" aria-sort={sorted ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={cls("px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500 select-none", onClick ? "cursor-pointer hover:text-neutral-700 dark:hover:text-neutral-300" : "", className)}
+      className={cls("px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500 select-none", onClick ? "cursor-pointer" : "", className)}
       onClick={onClick}
     >
       <div className="flex items-center gap-1">{children}{sorted && <span className="text-[10px]">{dir === "asc" ? "▲" : "▼"}</span>}</div>
@@ -354,64 +395,45 @@ function StatCard({ label, value, sub, tone = "neutral", icon }: { label: string
     success: "ring-emerald-300/60 dark:ring-emerald-500/40",
     warning: "ring-amber-300/60 dark:ring-amber-500/40",
   }[tone];
-  const toneBg = {
-    neutral: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
-    danger: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200",
-    success: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200",
-    warning: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200",
-  }[tone];
   const toneGlow = {
     neutral: "",
-    danger: "shadow-[0_0_30px_-10px_rgba(244,63,94,0.2)]",
-    success: "shadow-[0_0_30px_-10px_rgba(16,185,129,0.2)]",
-    warning: "shadow-[0_0_30px_-10px_rgba(245,158,11,0.2)]",
+    danger: "shadow-[0_0_40px_-10px_rgba(244,63,94,0.35)]",
+    success: "shadow-[0_0_40px_-10px_rgba(16,185,129,0.35)]",
+    warning: "shadow-[0_0_40px_-10px_rgba(245,158,11,0.35)]",
   }[tone];
-  
   return (
-    <div className={cls("relative rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur p-4 ring-1", toneRing, toneGlow)}>
-      <div className="flex items-center gap-3">
-        {icon && <div className={cls("p-2 rounded-xl shrink-0", toneBg)}>{icon}</div>}
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
-          <div className="mt-0.5 font-semibold leading-tight">
-            <div className="text-xl sm:text-2xl whitespace-nowrap truncate tabular-nums tracking-tight">{value}</div>
-          </div>
-          {sub && <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>}
-        </div>
+ <div className={cls("relative rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white/70 dark:bg-neutral-900/60 backdrop-blur p-4 ring-1", toneRing, toneGlow)}>
+  <div className="flex items-center gap-3">
+    {icon && <div className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 shrink-0">{icon}</div>}
+    <div className="flex-1 min-w-0">
+      <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
+      <div className="mt-0.5 font-semibold leading-tight">
+        <div className="text-xl sm:text-2xl whitespace-nowrap truncate tabular-nums">{value}</div>
       </div>
+      {sub && <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>}
     </div>
+  </div>
+</div>
   );
 }
 
 function Tabs({ tabs, active, onChange }: { tabs: { key: string; label: React.ReactNode; count?: number }[]; active: string; onChange: (k: string) => void; }) {
   return (
-    <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1" aria-label="Admin sections">
-      {tabs.map(t => {
-        const isUrgent = (t.key === "queue" || t.key === "alerts") && (t.count || 0) > 0;
-        return (
-          <button key={t.key} onClick={() => onChange(t.key)}
-            className={cls(
-              "whitespace-nowrap inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300 dark:focus-visible:ring-neutral-700 transition-colors",
-              active === t.key
-                ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border-neutral-900/10 dark:border-white/10"
-                : "bg-white/70 dark:bg-neutral-900/50 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
-            )}>
-            <span>{t.label}</span>
-            {typeof t.count === "number" && (
-              <span className={cls(
-                "text-[10px] font-bold px-1.5 py-0.5 rounded-md min-w-[20px]",
-                active === t.key 
-                  ? "bg-white/20 text-current" 
-                  : isUrgent 
-                    ? "bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200"
-                    : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
-              )}>
-                {t.count}
-              </span>
-            )}
-          </button>
-        )
-      })}
+    <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar" aria-label="Admin sections">
+      {tabs.map(t => (
+        <button key={t.key} onClick={() => onChange(t.key)}
+          className={cls(
+            "whitespace-nowrap inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300 dark:focus-visible:ring-neutral-700",
+            active === t.key
+              ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border-neutral-900/10 dark:border-white/10"
+              : "bg-white/70 dark:bg-neutral-900/50 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+          )}>
+          <span>{t.label}</span>
+          {typeof t.count === "number" && (
+            <span className={cls("text-xs px-1.5 py-0.5 rounded", active === t.key ? "bg-black/20 dark:bg-white/20" : "bg-neutral-100 dark:bg-neutral-800")}>{t.count}</span>
+          )}
+        </button>
+      ))}
     </nav>
   );
 }
@@ -437,7 +459,7 @@ function useInterval(callback: () => void, delay: number | null) {
 
 function Spinner() {
   return (
-    <div role="status" aria-live="polite" className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600 dark:border-neutral-700 dark:border-t-neutral-300" />
+    <div role="status" aria-live="polite" className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-500" />
   );
 }
 
@@ -595,11 +617,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
             setBids(normalizeBids(bj));
           }
         }
+        // (intentionally NO direct /proofs prefetch — backend rejects it without bidId)
       } catch { /* ignore network errors here */ }
     })();
 
     return () => { aborted = true; };
-  }, [!!data]);
+  }, [!!data]); // run once after first /admin/oversight load
 
   // auto refresh
   useInterval(() => { if (!document.hidden) load(); }, autoRefresh ? 30000 : null);
@@ -922,38 +945,29 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
   const lastUpdatedLabel = lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "—";
 
   return (
-    <div className="min-h-screen w-full bg-neutral-50/50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-sans antialiased">
+    <div className="min-h-screen w-full bg-gradient-to-b from-neutral-50 to-white dark:from-neutral-950 dark:to-neutral-900 text-neutral-900 dark:text-neutral-100">
       {/* Top bar */}
-      <div className="sticky top-0 z-20 backdrop-blur-lg bg-white/80 dark:bg-neutral-900/70 border-b border-neutral-200/60 dark:border-neutral-800 supports-[backdrop-filter]:bg-white/60">
-        <div className="mx-auto max-w-[1400px] px-5 py-3 flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-neutral-900/60 border-b border-neutral-200/60 dark:border-neutral-800">
+        <div className="mx-auto max-w-[1400px] px-5 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 grid place-items-center font-bold shadow-sm" aria-hidden>LX</div>
+            <div className="h-9 w-9 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 grid place-items-center font-bold" aria-hidden>LX</div>
             <div>
-              <div className="text-base font-semibold leading-tight">Admin Oversight</div>
-              <div className="text-[11px] text-neutral-500 font-medium tracking-wide uppercase">Ops Cockpit</div>
+              <div className="text-lg font-semibold">Admin Oversight</div>
+              <div className="text-xs text-neutral-500">Ops cockpit • proofs, payouts, risk</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className="relative hidden md:block">
-              <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search (/)…"
-                className={cls(
-                  "text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent px-3 py-2 w-64 outline-none transition-all",
-                  "focus:bg-white dark:focus:bg-neutral-900 focus:border-blue-400/50 focus:ring-4 focus:ring-blue-400/10",
-                  query && "border-blue-400/30 bg-white dark:bg-neutral-900"
-                )}
-                aria-label="Search" />
-              {query && <button onClick={() => setQuery("")} className="absolute right-2 top-2.5 text-neutral-400 hover:text-neutral-600">×</button>}
-            </div>
-
-            <button onClick={() => load()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition-colors shadow-sm" aria-label="Refresh">
-              {loading ? <Spinner/> : <Icon.Refresh className="h-4 w-4 text-neutral-500" />}
-              <span className="hidden sm:inline">Refresh</span>
+            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search (/, alerts/activity/queue/vendors)…"
+              className="hidden md:block text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-700"
+              aria-label="Search" />
+            <button onClick={() => load()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm" aria-label="Refresh">
+              {loading ? <Spinner/> : <Icon.Refresh className="h-4 w-4" />} Refresh
             </button>
-            <button onClick={() => setAutoRefresh(!autoRefresh)} className={cls("inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-colors shadow-sm", autoRefresh ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-200" : "border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800")} aria-pressed={autoRefresh} aria-label="Toggle auto refresh">
+            <button onClick={() => setAutoRefresh(!autoRefresh)} className={cls("inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm", autoRefresh ? "border-emerald-400/70 bg-emerald-50/60 dark:bg-emerald-900/20" : "border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800")} aria-pressed={autoRefresh} aria-label="Toggle auto refresh">
               {autoRefresh ? <Icon.Stop className="h-4 w-4"/> : <Icon.Play className="h-4 w-4"/>}
-              <span className="hidden sm:inline">{autoRefresh ? "Auto" : "Manual"}</span>
+              {autoRefresh ? "Auto" : "Manual"}
             </button>
-            <div className="hidden lg:block text-xs text-neutral-400 tabular-nums">{lastUpdatedLabel}</div>
+            <div className="hidden md:block text-xs text-neutral-500">Updated {lastUpdatedLabel}</div>
           </div>
         </div>
       </div>
@@ -966,9 +980,9 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
       {/* Content */}
       <div className="relative mx-auto max-w-[1400px] px-5 py-6 space-y-8">
         {loading && (
-          <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-32 z-10">
-            <div className="rounded-full bg-white/90 dark:bg-neutral-800/90 backdrop-blur border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm font-medium shadow-xl flex items-center gap-3 animate-in fade-in zoom-in duration-200">
-              <Spinner/> Updating data…
+          <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-24">
+            <div className="rounded-xl bg-white/70 dark:bg-neutral-900/60 backdrop-blur border border-neutral-200/70 dark:border-neutral-800 px-4 py-3 text-sm flex items-center gap-2">
+              <Spinner/> Loading…
             </div>
           </div>
         )}
@@ -976,27 +990,23 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         {tab === "overview" && (
           <>
             {/* STAT TILES */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
-              <StatCard label="Open Proofs" value={loading?"—":fmtInt(tiles?.openProofs||0)} icon={<Icon.Proof className="h-5 w-5"/>} tone="neutral" />
-              <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "danger" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
-              
-              <div className="hidden xl:block w-px bg-neutral-200 dark:bg-neutral-800 mx-auto h-12 self-center" />
-
-              <StatCard label="Pending Payouts" value={loading ? "—" : fmtInt(pending.count)} icon={<Icon.Ticket className="h-5 w-5"/>} tone="warning" />
-              <StatCard label="Pending USD" value={<span title={fmtUSD0(pending.usd)} className="block whitespace-nowrap text-emerald-700 dark:text-emerald-400">{fmtUSDcompact(pending.usd)}</span>} icon={<Icon.Dollar className="h-5 w-5" />} tone="success" />
-              
-              <div className="hidden xl:block w-px bg-neutral-200 dark:bg-neutral-800 mx-auto h-12 self-center" />
-
-              <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} tone="neutral" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
+              <StatCard label="Open Proofs" value={loading?"—":fmtInt(tiles?.openProofs||0)} icon={<Icon.Proof className="h-5 w-5"/>} />
+              <StatCard label="Breaching SLA" value={loading?"—":fmtInt(tiles?.breachingSla||0)} tone={(tiles?.breachingSla||0) > 0 ? "warning" : "neutral"} icon={<Icon.Clock className="h-5 w-5"/>} />
+              <StatCard label="Pending Payouts" value={loading ? "—" : fmtInt(pending.count)} icon={<Icon.Ticket className="h-5 w-5"/>} />
+              <StatCard label="Pending USD" value={<span title={fmtUSD0(pending.usd)} className="block whitespace-nowrap">{fmtUSDcompact(pending.usd)}</span>} icon={<Icon.Dollar className="h-5 w-5" />} />
+              <StatCard label="Escrows Locked" value={loading?"—":fmtInt(tiles?.escrowsLocked||0)} icon={<Icon.Lock className="h-5 w-5"/>} />
+              <StatCard label="P50 Cycle (h)" value={loading?"—":fmtInt(tiles?.p50CycleHours||0)} icon={<Icon.Clock className="h-5 w-5"/>} />
+              <StatCard label="Revision Rate" value={loading?"—":fmtPct(tiles?.revisionRatePct||0)} icon={<Icon.Check className="h-5 w-5"/>} />
             </div>
 
             {/* Overview split: Queue & Vendors quick views */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <div className="xl:col-span-2">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="xl:col-span-3">
                 <Card title={`Queue (${data?.queue?.length ?? 0})`} subtitle="Oldest first">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                      <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                         <tr>
                           <Th onClick={() => toggleSort(queueSort, setQueueSort, "id")} sorted={queueSort.key === "id"} dir={queueSort.dir}>ID</Th>
                           <Th onClick={() => toggleSort(queueSort, setQueueSort, "vendor")} sorted={queueSort.key === "vendor"} dir={queueSort.dir}>Vendor</Th>
@@ -1009,37 +1019,25 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                       <tbody>
                         {loading && <RowPlaceholder cols={9} />}
                         {!loading && (sortedQueue?.length ?? 0) === 0 && (
-                          <tr><td className="p-12 text-center text-neutral-400" colSpan={9}>
-                            <div className="flex flex-col items-center gap-2">
-                              <Icon.Ticket className="h-8 w-8 opacity-20"/>
-                              <span>Queue is empty</span>
-                            </div>
-                          </td></tr>
+                          <tr><td className="p-6 text-center text-neutral-500" colSpan={9}>Nothing in the queue</td></tr>
                         )}
                         {sortedQueue?.slice(0, 8).map((q) => (
-                          <tr key={q.id} className={cls(
-                            "border-b transition-colors group",
-                            q.risk === "sla"
-                              ? "bg-rose-50/50 border-rose-100 dark:bg-rose-900/10 dark:border-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-900/20"
-                              : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40"
-                          )}> 
-                            <Td className="font-mono text-[11px] text-neutral-500">{q.id}</Td>
-                            <Td className="max-w-[220px] truncate font-medium text-neutral-700 dark:text-neutral-300" title={q.vendor}>{q.vendor}</Td>
+                          <tr key={q.id} className={cls("border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40", q.risk === "sla" && "outline outline-1 -outline-offset-0 outline-rose-300/40")}> 
+                            <Td>{q.id}</Td>
+                            <Td className="max-w-[220px] truncate" title={q.vendor}>{q.vendor}</Td>
                             <Td>{q.project}</Td>
                             <Td>{q.milestone}</Td>
-                            <Td className="text-right tabular-nums font-medium">{q.ageHours.toFixed(1)}</Td>
+                            <Td className="text-right tabular-nums">{q.ageHours.toFixed(1)}</Td>
                             <Td><Badge tone={q.status === "pending" ? "warning" : "neutral"}>{q.status}</Badge></Td>
                             <Td><Badge tone={q.risk === "sla" ? "danger" : q.risk ? "warning" : "neutral"}>{q.risk || "—"}</Badge></Td>
                             <Td>
                               {q.actions?.bidId ? (
-                                <button onClick={() => copy(String(q.actions!.bidId), () => setToast("Bid ID copied"))} className="font-mono text-[11px] bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700">
-                                  #{q.actions.bidId}
+                                <button onClick={() => copy(String(q.actions!.bidId), () => setToast("Bid ID copied"))} className="inline-flex items-center gap-1 text-xs underline decoration-dotted hover:opacity-80">
+                                  {q.actions.bidId} <Icon.Copy className="h-3.5 w-3.5"/>
                                 </button>
                               ) : "—"}
                             </Td>
-                            <Td>
-                              {q.actions?.proposalId ? <span className="font-mono text-[11px]">#{q.actions.proposalId}</span> : "—"}
-                            </Td>
+                            <Td>{q.actions?.proposalId ?? "—"}</Td>
                           </tr>
                         ))}
                       </tbody>
@@ -1048,7 +1046,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                 </Card>
               </div>
 
-              <div className="xl:col-span-2">
+              <div className="xl:col-span-3">
                 <Card title={`Vendors (${data?.vendors?.length ?? 0})`} subtitle="Performance" right={
                   <button onClick={() => downloadCSV(`vendors-${new Date().toISOString().slice(0,10)}.csv`, sortedVendors)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800">
                     <Icon.Download className="h-4 w-4"/> CSV
@@ -1056,7 +1054,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                 }>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                      <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                         <tr>
                           <Th onClick={() => toggleSort(vendorSort, setVendorSort, "vendor")} sorted={vendorSort.key === "vendor"} dir={vendorSort.dir}>Vendor</Th>
                           <Th>Wallet</Th>
@@ -1074,17 +1072,17 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                         )}
                         {sortedVendors.slice(0, 8).map((v) => (
                           <tr key={v.wallet} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                            <Td className="max-w-[220px] truncate font-medium" title={v.vendor}>{v.vendor}</Td>
+                            <Td className="max-w-[220px] truncate" title={v.vendor}>{v.vendor}</Td>
                             <Td title={v.wallet}>
-                              <button onClick={() => copy(v.wallet, () => setToast("Wallet copied"))} className="inline-flex items-center gap-1 font-mono text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-50 dark:bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-200 dark:border-neutral-800">
-                                {shortAddr(v.wallet)} <Icon.Copy className="h-3 w-3 opacity-50"/>
+                              <button onClick={() => copy(v.wallet, () => setToast("Wallet copied"))} className="inline-flex items-center gap-1 font-mono text-xs underline decoration-dotted hover:opacity-80">
+                                {shortAddr(v.wallet)} <Icon.Copy className="h-3.5 w-3.5"/>
                               </button>
                             </Td>
-                            <Td className="tabular-nums">{v.approved} <span className="text-neutral-400">/</span> {v.proofs}</Td>
-                            <Td className="tabular-nums">{v.cr}</Td>
-                            <Td className="min-w-[120px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums font-medium">{fmtPct(v.approvalPct)}</span></div></Td>
-                            <Td className="tabular-nums">{v.bids}</Td>
-                            <Td className="text-[11px] text-neutral-500">{humanTime(v.lastActivity)}</Td>
+                            <Td>{v.approved}/{v.proofs}</Td>
+                            <Td>{v.cr}</Td>
+                            <Td className="min-w-[120px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums">{fmtPct(v.approvalPct)}</span></div></Td>
+                            <Td>{v.bids}</Td>
+                            <Td>{humanTime(v.lastActivity)}</Td>
                           </tr>
                         ))}
                       </tbody>
@@ -1097,12 +1095,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         )}
 
         {tab === "queue" && (
-          <Card title={`Queue (${sortedQueue.length})`} subtitle="Action required items" right={<>
-            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter queue…" className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 focus:border-neutral-300 dark:focus:border-neutral-700 px-3 py-2 mr-2 outline-none transition-all"/>
+          <Card title={`Queue (${sortedQueue.length})`} subtitle="Oldest first" right={<>
+            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter queue…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"/>
           </>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th onClick={() => toggleSort(queueSort, setQueueSort, "id")} sorted={queueSort.key === "id"} dir={queueSort.dir}>ID</Th>
                     <Th onClick={() => toggleSort(queueSort, setQueueSort, "vendor")} sorted={queueSort.key === "vendor"} dir={queueSort.dir}>Vendor</Th>
@@ -1115,24 +1113,19 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                 <tbody>
                   {loading && <RowPlaceholder cols={9} />}
                   {!loading && sortedQueue.length === 0 && (
-                    <tr><td className="p-12 text-center text-neutral-400" colSpan={9}><Icon.Check className="h-8 w-8 mx-auto mb-2 opacity-20"/>All caught up!</td></tr>
+                    <tr><td className="p-6 text-center text-neutral-500" colSpan={9}>Nothing in the queue</td></tr>
                   )}
                   {sortedQueue.map((q) => (
-                    <tr key={q.id} className={cls(
-                      "border-b transition-colors",
-                      q.risk === "sla"
-                        ? "bg-rose-50/60 border-rose-100 dark:bg-rose-900/20 dark:border-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-900/30"
-                        : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40"
-                    )}>
-                      <Td className="font-mono text-[11px] text-neutral-500">{q.id}</Td>
-                      <Td className="max-w-[260px] truncate font-medium" title={q.vendor}>{q.vendor}</Td>
+                    <tr key={q.id} className={cls("border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40", q.risk === "sla" && "outline outline-1 -outline-offset-0 outline-rose-300/40")}>
+                      <Td>{q.id}</Td>
+                      <Td className="max-w-[260px] truncate" title={q.vendor}>{q.vendor}</Td>
                       <Td>{q.project}</Td>
                       <Td>{q.milestone}</Td>
-                      <Td className="text-right tabular-nums font-medium">{q.ageHours.toFixed(1)}</Td>
+                      <Td className="text-right tabular-nums">{q.ageHours.toFixed(1)}</Td>
                       <Td><Badge tone={q.status === "pending" ? "warning" : "neutral"}>{q.status}</Badge></Td>
                       <Td><Badge tone={q.risk === "sla" ? "danger" : q.risk ? "warning" : "neutral"}>{q.risk || "—"}</Badge></Td>
-                      <Td className="font-mono text-[11px]">{q.actions?.bidId ? `#${q.actions.bidId}` : "—"}</Td>
-                      <Td className="font-mono text-[11px]">{q.actions?.proposalId ? `#${q.actions.proposalId}` : "—"}</Td>
+                      <Td>{q.actions?.bidId ?? "—"}</Td>
+                      <Td>{q.actions?.proposalId ?? "—"}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1143,12 +1136,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
 
         {tab === "vendors" && (
           <Card title={`Vendors (${sortedVendors.length})`} subtitle="Performance" right={<>
-            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter vendors…" className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 mr-2 outline-none"/>
+            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter vendors…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"/>
             <button onClick={() => downloadCSV(`vendors-${new Date().toISOString().slice(0,10)}.csv`, sortedVendors)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800"><Icon.Download className="h-4 w-4"/> CSV</button>
           </>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th onClick={() => toggleSort(vendorSort, setVendorSort, "vendor")} sorted={vendorSort.key === "vendor"} dir={vendorSort.dir}>Vendor</Th>
                     <Th>Wallet</Th>
@@ -1166,13 +1159,13 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   )}
                   {sortedVendors.map((v) => (
                     <tr key={v.wallet} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                      <Td className="max-w-[260px] truncate font-medium" title={v.vendor}>{v.vendor}</Td>
-                      <Td title={v.wallet}><button onClick={() => copy(v.wallet, () => setToast("Wallet copied"))} className="inline-flex items-center gap-1 font-mono text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-50 dark:bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-200 dark:border-neutral-800">{shortAddr(v.wallet)} <Icon.Copy className="h-3 w-3 opacity-50"/></button></Td>
-                      <Td className="tabular-nums">{v.approved} <span className="text-neutral-400">/</span> {v.proofs}</Td>
-                      <Td className="tabular-nums">{v.cr}</Td>
-                      <Td className="min-w-[140px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums font-medium">{fmtPct(v.approvalPct)}</span></div></Td>
-                      <Td className="tabular-nums">{v.bids}</Td>
-                      <Td className="text-[11px] text-neutral-500">{humanTime(v.lastActivity)}</Td>
+                      <Td className="max-w-[260px] truncate" title={v.vendor}>{v.vendor}</Td>
+                      <Td title={v.wallet}><button onClick={() => copy(v.wallet, () => setToast("Wallet copied"))} className="inline-flex items-center gap-1 font-mono text-xs underline decoration-dotted hover:opacity-80">{shortAddr(v.wallet)} <Icon.Copy className="h-3.5 w-3.5"/></button></Td>
+                      <Td>{v.approved}/{v.proofs}</Td>
+                      <Td>{v.cr}</Td>
+                      <Td className="min-w-[140px]"><div className="flex items-center gap-2"><Progress value={v.approvalPct} /><span className="w-10 text-right tabular-nums">{fmtPct(v.approvalPct)}</span></div></Td>
+                      <Td>{v.bids}</Td>
+                      <Td>{humanTime(v.lastActivity)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1184,7 +1177,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         {tab === "proposals" && (
           <Card
             title={`Proposals (${proposals?.length ?? 0})`}
-            subtitle="Newest first"
+            subtitle="Newest first (click headers to sort)"
             right={
               <>
                 <input
@@ -1192,7 +1185,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter proposals…"
-                  className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 mr-2 outline-none"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
                 />
                 <button
                   onClick={() => sortedProposals && downloadCSV(`proposals-${new Date().toISOString().slice(0,10)}.csv`, sortedProposals)}
@@ -1205,7 +1198,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
           >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th onClick={() => toggleSort(proposalSort, setProposalSort, "id")} sorted={proposalSort.key==="id"} dir={proposalSort.dir}>ID</Th>
                     <Th onClick={() => toggleSort(proposalSort, setProposalSort, "title")} sorted={proposalSort.key==="title"} dir={proposalSort.dir}>Title</Th>
@@ -1224,11 +1217,11 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   )}
                   {sortedProposals.map(p => (
                     <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                      <Td className="font-mono text-[11px] text-neutral-500">#{p.id}</Td>
-                      <Td className="max-w-[360px] truncate font-medium" title={p.title || ""}>{p.title ?? "—"}</Td>
+                      <Td>#{p.id}</Td>
+                      <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
                       <Td><Badge tone={p.status === "approved" ? "success" : p.status === "pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
-                      <Td className="font-mono text-[11px] text-neutral-500">{shortAddr(p.owner_wallet ?? "") || (p.owner_email ?? "—")}</Td>
-                      <Td className="text-[11px] text-neutral-500">{p.created_at ? humanTime(p.created_at) : "—"}</Td>
+                      <Td className="font-mono text-xs">{shortAddr(p.owner_wallet ?? "") || (p.owner_email ?? "—")}</Td>
+                      <Td>{p.created_at ? humanTime(p.created_at) : "—"}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1240,7 +1233,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         {tab === "bids" && (
           <Card
             title={`Bids (${bids?.length ?? 0})`}
-            subtitle="Newest first"
+            subtitle="Newest first (click headers to sort)"
             right={
               <>
                 <input
@@ -1248,7 +1241,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter bids…"
-                  className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 mr-2 outline-none"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
                 />
                 <button
                   onClick={() => sortedBids && downloadCSV(`bids-${new Date().toISOString().slice(0,10)}.csv`, sortedBids)}
@@ -1261,7 +1254,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
           >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th onClick={() => toggleSort(bidSort, setBidSort, "id")} sorted={bidSort.key==="id"} dir={bidSort.dir}>ID</Th>
                     <Th onClick={() => toggleSort(bidSort, setBidSort, "proposal_id")} sorted={bidSort.key==="proposal_id"} dir={bidSort.dir}>Proposal</Th>
@@ -1283,12 +1276,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                     const amt = toNumber(b.amount_usd ?? b.amount);
                     return (
                       <tr key={b.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                        <Td className="font-mono text-[11px] text-neutral-500">#{b.id}</Td>
-                        <Td className="font-mono text-[11px]">#{b.proposal_id ?? "—"}</Td>
-                        <Td className="max-w-[260px] truncate font-medium" title={getVendorName(b)}>{getVendorName(b)}</Td>
+                        <Td>#{b.id}</Td>
+                        <Td>#{b.proposal_id ?? "—"}</Td>
+                        <Td className="max-w-[260px] truncate" title={getVendorName(b)}>{getVendorName(b)}</Td>
                         <Td><Badge tone={b.status === "approved" ? "success" : b.status === "pending" ? "warning" : "neutral"}>{b.status ?? "—"}</Badge></Td>
-                        <Td className="tabular-nums font-medium text-emerald-700 dark:text-emerald-400">{fmtUSD0(amt)}</Td>
-                        <Td className="text-[11px] text-neutral-500">{b.created_at ? humanTime(b.created_at) : "—"}</Td>
+                        <Td className="tabular-nums">{fmtUSD0(amt)}</Td>
+                        <Td>{b.created_at ? humanTime(b.created_at) : "—"}</Td>
                       </tr>
                     );
                   })}
@@ -1301,7 +1294,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         {tab === "proofs" && (
           <Card
             title={`Proofs (${sortedProofs.length})`}
-            subtitle="Newest first"
+            subtitle="Newest first (click headers to sort)"
             right={
               <>
                 <input
@@ -1309,7 +1302,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter proofs…"
-                  className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 mr-2 outline-none"
+                  className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2 mr-2"
                 />
                 <button
                   onClick={() => sortedProofs && downloadCSV(`proofs-${new Date().toISOString().slice(0,10)}.csv`, sortedProofs)}
@@ -1322,7 +1315,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
           >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th onClick={() => toggleSort(proofSort, setProofSort, "id")} sorted={proofSort.key==="id"} dir={proofSort.dir}>ID</Th>
                     <Th onClick={() => toggleSort(proofSort, setProofSort, "bid_id")} sorted={proofSort.key==="bid_id"} dir={proofSort.dir}>Bid</Th>
@@ -1343,12 +1336,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   )}
                   {sortedProofs.map((p) => (
                     <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                      <Td className="font-mono text-[11px] text-neutral-500">#{p.id}</Td>
-                      <Td className="font-mono text-[11px]">#{p.bid_id ?? "—"}</Td>
-                      <Td className="tabular-nums text-center pr-12">{p.milestone_index ?? "—"}</Td>
-                      <Td className="max-w-[240px] truncate font-medium" title={p.vendor_name || ""}>{p.vendor_name ?? "—"}</Td>
+                      <Td>#{p.id}</Td>
+                      <Td>{p.bid_id ?? "—"}</Td>
+                      <Td>{p.milestone_index ?? "—"}</Td>
+                      <Td className="max-w-[240px] truncate" title={p.vendor_name || ""}>{p.vendor_name ?? "—"}</Td>
                       <Td><Badge tone={p.status==="approved" ? "success" : p.status==="pending" ? "warning" : "neutral"}>{p.status ?? "—"}</Badge></Td>
-                      <Td className="text-[11px] text-neutral-500">{p.submitted_at ? humanTime(p.submitted_at) : (p.created_at ? humanTime(p.created_at) : "—")}</Td>
+                      <Td>{p.submitted_at ? humanTime(p.submitted_at) : (p.created_at ? humanTime(p.created_at) : "—")}</Td>
                       <Td className="max-w-[360px] truncate" title={p.title || ""}>{p.title ?? "—"}</Td>
                     </tr>
                   ))}
@@ -1359,10 +1352,10 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         )}
 
         {tab === "alerts" && (
-          <Card title={`Alerts (${filteredAlerts.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter alerts…" className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 outline-none"/>} subtitle="Newest first">
+          <Card title={`Alerts (${filteredAlerts.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter alerts…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2"/>} subtitle="Newest first">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th>Type</Th><Th>Created</Th><Th>Bid</Th><Th>File</Th><Th>Details</Th>
                   </tr>
@@ -1370,68 +1363,98 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                 <tbody>
                   {loading && <RowPlaceholder cols={5} />}
                   {!loading && filteredAlerts.length === 0 && (
-                    <tr><td className="p-12 text-center text-neutral-400" colSpan={5}><Icon.Check className="h-8 w-8 mx-auto mb-2 opacity-20"/>No alerts 🎉</td></tr>
+                    <tr><td className="p-6 text-center text-neutral-500" colSpan={4}>No alerts 🎉</td></tr>
                   )}
                   {filteredAlerts.map((a, i) => (
                     <tr key={`${a.type}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
                       <Td><Badge tone={a.type.includes("ipfs")?"danger":"neutral"}>{a.type}</Badge></Td>
-                      <Td className="text-[11px] text-neutral-500">{humanTime(a.createdAt)}</Td>
-                      <Td className="font-mono text-[11px]">{a.bidId ?? "—"}</Td>
-                      <Td>
-                        {(() => {
-                          const cid =
-                            a?.details?.cid ??
-                            a?.details?.file?.cid ??
-                            a?.details?.ipfs?.cid;
+                      <Td>{humanTime(a.createdAt)}</Td>
+ <Td>{a.bidId ?? "—"}</Td>
+<Td>
+  {(() => {
+    const cid =
+      a?.details?.cid ??
+      a?.details?.file?.cid ??
+      a?.details?.ipfs?.cid;
 
-                          if (!cid) return <span className="text-neutral-400">—</span>;
+    if (!cid) return <span className="text-neutral-400">—</span>;
 
-                          const src = a?.details?.source as string | undefined;
+    const src = a?.details?.source as string | undefined;
 
-                          return (
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {/* Primary link */}
-                              <a
-                                href={ipfsUrl(cid)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-mono text-[11px] text-blue-600 dark:text-blue-400 underline decoration-dotted"
-                                title={src ? `Source: ${src}` : "Open on gateway"}
-                              >
-                                {shortCid(cid)}
-                              </a>
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Primary link (your configured gateway, now robust) */}
+        <a
+          href={ipfsUrl(cid)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-xs underline decoration-dotted"
+          title={src ? `Source: ${src}` : "Open on gateway"}
+        >
+          {shortCid(cid)}
+        </a>
 
-                              {/* Show why it might fail (e.g., "unpinned") */}
-                              {src && (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200 uppercase tracking-wider">
-                                  {src.includes("unpinned") ? "unpinned" : src}
-                                </span>
-                              )}
+        {/* Show why it might fail (e.g., "unpinned") */}
+        {src && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+            {src.includes("unpinned") ? "unpinned" : src}
+          </span>
+        )}
 
-                              {/* Quick copy */}
-                              <button
-                                onClick={() => copy(cid, () => setToast("CID copied"))}
-                                className="text-[10px] opacity-50 hover:opacity-100"
-                                title="Copy CID"
-                              >
-                                <Icon.Copy className="h-3 w-3"/>
-                              </button>
-                            </div>
-                          );
-                        })()}
-                      </Td>
-                      <Td>
-                        <details className="max-w-[400px] text-xs text-neutral-600 dark:text-neutral-400 group">
-                          <summary className="cursor-pointer select-none list-none inline-flex items-center gap-1 hover:text-neutral-900 dark:hover:text-neutral-200">
-                            <span className="underline decoration-dotted">View payload</span>
-                          </summary>
-                          <div className="mt-2 p-3 bg-neutral-100 dark:bg-neutral-900 rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-800">
-                             <pre className="font-mono text-[10px] leading-relaxed whitespace-pre-wrap break-all text-neutral-600 dark:text-neutral-400">
-                               {JSON.stringify(a.details || {}, null, 2)}
-                             </pre>
-                          </div>
-                        </details>
-                      </Td>
+        {/* Quick copy */}
+        <button
+          onClick={() => copy(cid, () => setToast("CID copied"))}
+          className="text-[10px] underline decoration-dotted opacity-70 hover:opacity-100"
+          title="Copy CID"
+        >
+          copy
+        </button>
+
+        {/* Fallback gateways (helpful when Pinata shows 404 for unpinned) */}
+        <div className="hidden sm:flex items-center gap-1 text-[10px]">
+          <a
+            href={`https://ipfs.io/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via ipfs.io"
+          >
+            ipfs.io
+          </a>
+          <a
+            href={`https://cloudflare-ipfs.com/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via cf-ipfs"
+          >
+            cf-ipfs
+          </a>
+          <a
+            href={`https://dweb.link/ipfs/${cid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-dotted opacity-70 hover:opacity-100"
+            title="Open via dweb"
+          >
+            dweb
+          </a>
+        </div>
+
+        {/* Optional filename */}
+        {a?.details?.filename && (
+          <span className="text-neutral-500 text-[11px]">({a.details.filename})</span>
+        )}
+      </div>
+    );
+  })()}
+</Td>
+<Td>
+  <details className="max-w-[900px] text-xs text-neutral-600 dark:text-neutral-300">
+    <summary className="cursor-pointer select-none underline decoration-dotted">View</summary>
+    <pre className="whitespace-pre-wrap break-words">{JSON.stringify(a.details || {}, null, 2)}</pre>
+  </details>
+</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1446,7 +1469,7 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
           }>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
                     <Th>ID</Th><Th>Bid</Th><Th>Milestone</Th><Th>USD</Th><Th>Released At</Th>
                   </tr>
@@ -1458,11 +1481,11 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                   )}
                   {data?.payouts?.recent?.map((p) => (
                     <tr key={p.id} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
-                      <Td className="font-mono text-[11px] text-neutral-500">{p.id}</Td>
-                      <Td className="font-mono text-[11px]">#{p.bid_id}</Td>
-                      <Td className="tabular-nums text-center pr-12">{p.milestone_index}</Td>
-                      <Td className="tabular-nums font-medium text-emerald-700 dark:text-emerald-400">{fmtUSD0(Number(p.amount_usd || 0))}</Td>
-                      <Td className="text-[11px] text-neutral-500">{humanTime(p.released_at)}</Td>
+                      <Td>{p.id}</Td>
+                      <Td>{p.bid_id}</Td>
+                      <Td>{p.milestone_index}</Td>
+                      <Td className="tabular-nums">{fmtUSD0(Number(p.amount_usd || 0))}</Td>
+                      <Td>{humanTime(p.released_at)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1472,12 +1495,12 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         )}
 
         {tab === "activity" && (
-          <Card title={`Recent Activity (${filteredActivity.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter activity…" className="text-sm rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-transparent focus:bg-white dark:focus:bg-neutral-900 px-3 py-2 outline-none"/>}>
+          <Card title={`Recent Activity (${filteredActivity.length})`} right={<input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter activity…" className="text-sm rounded-xl bg-white/70 dark:bg-neutral-900/50 border border-neutral-300 dark:border-neutral-700 px-3 py-2"/>}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-left sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800 z-10">
+                <thead className="text-left sticky top-0 bg-white/80 dark:bg-neutral-900/70 backdrop-blur border-b border-neutral-200/60 dark:border-neutral-800">
                   <tr>
-                    <Th>Time</Th><Th>Actor</Th><Th>Bid</Th><Th>Change</Th><Th className="sticky right-0 bg-white dark:bg-neutral-900 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)]">Details</Th>
+                    <Th>Time</Th><Th>Actor</Th><Th>Bid</Th><Th>Change</Th><Th>Details</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1486,21 +1509,21 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
                     <tr><td className="p-6 text-center text-neutral-500" colSpan={5}>No activity</td></tr>
                   )}
                   {filteredActivity.slice(0, 200).map((r, i) => (
-                    <tr key={i} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 odd:bg-white even:bg-neutral-50/30 dark:even:bg-neutral-900/30">
-                      <Td className="text-[11px] text-neutral-500 tabular-nums">{humanTime(r.created_at)}</Td>
+                    <tr key={i} className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40">
+                      <Td>{humanTime(r.created_at)}</Td>
                       <Td className="max-w-[220px] truncate" title={`${r.actor_role} ${r.actor_wallet ?? ''}`}>
-                        <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 mr-2">{r.actor_role}</span>
-                        <button onClick={() => r.actor_wallet && copy(r.actor_wallet, () => setToast("Wallet copied"))} className="font-mono text-[11px] text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200">
+                        <span className="uppercase text-[11px] tracking-wide text-neutral-500">{r.actor_role}</span>{" "}
+                        <button onClick={() => r.actor_wallet && copy(r.actor_wallet, () => setToast("Wallet copied"))} className="font-mono text-xs underline decoration-dotted hover:opacity-80">
                           {r.actor_wallet ? shortAddr(r.actor_wallet) : ""}
                         </button>
                       </Td>
-                      <Td className="font-mono text-[11px] text-neutral-500">{r.bid_id ? `#${r.bid_id}` : "—"}</Td>
+                      <Td>{r.bid_id ?? "—"}</Td>
                       <Td><Badge>{changeLabel(r.changes)}</Badge></Td>
-                      <Td className="sticky right-0 bg-white/80 dark:bg-neutral-900/80 backdrop-blur shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.05)]">
+                      <Td>
                         <button
                           type="button"
                           onClick={() => openActivity(r)}
-                          className="px-2 py-1 rounded-md text-xs font-medium bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                          className="px-2 py-1 rounded text-xs bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
                         >
                           Details
                         </button>
@@ -1514,100 +1537,91 @@ const shortCid = (cid?: string) => (cid ? `${cid.slice(0,8)}…${cid.slice(-6)}`
         )}
 
         {error && (
-          <div className="rounded-2xl border border-rose-300/60 bg-rose-50/60 dark:bg-rose-950/30 dark:border-rose-800 p-4 text-rose-700 dark:text-rose-200 flex items-center gap-3">
-            <Icon.Alert className="h-5 w-5"/>
-            <span>Failed to load: {error}</span>
+          <div className="rounded-2xl border border-rose-300/60 bg-rose-50/60 dark:bg-rose-950/30 dark:border-rose-800 p-4 text-rose-700 dark:text-rose-200">
+            Failed to load: {error}
           </div>
         )}
 
         {/* Toast */}
         {toast && (
-          <div className="fixed right-6 bottom-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-800/60 dark:border-neutral-200/60 shadow-2xl px-4 py-3 text-sm font-medium flex items-center gap-2">
-              <Icon.Check className="h-4 w-4"/> {toast}
+          <div className="fixed right-4 bottom-4 z-50">
+            <div className="rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-800/60 dark:border-neutral-200/60 shadow-lg px-3 py-2 text-sm">
+              {toast}
             </div>
             {setTimeout(() => setToast(null), 1400) && null}
           </div>
         )}
       </div>
 
-      {/* === Activity Details Modal === */}
+      {/* === Activity Details Modal (NEW) === */}
       {activityOpen && activityDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <div className="fixed inset-0 z-50">
           {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={closeActivity} aria-hidden="true" />
+          <div className="absolute inset-0 bg-black/50" onClick={closeActivity} aria-hidden="true" />
           {/* Panel */}
-          <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-neutral-900 shadow-2xl ring-1 ring-black/10 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/20">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 flex items-center justify-center">
-                  <Icon.Ticket className="h-5 w-5"/>
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                    Activity Details
-                  </h3>
-                  <div className="text-xs text-neutral-500 font-mono mt-0.5">
-                    ID: {activityDoc.meta?.id ?? "—"}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeActivity}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-neutral-900">
-              {/* Quick facts grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-                <div>
-                   <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1">Type</div>
-                   <div className="font-medium text-neutral-900 dark:text-neutral-100 text-lg">{String(activityDoc.meta?.type ?? "—")}</div>
-                </div>
-                <div>
-                   <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1">Timestamp</div>
-                   <div className="text-neutral-900 dark:text-neutral-100">{String(activityDoc.meta?.when ? humanTime(activityDoc.meta.when) : "—")}</div>
-                </div>
-                <div>
-                   <div className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1">Actor</div>
-                   <div className="font-mono text-xs bg-neutral-100 dark:bg-neutral-800 px-2 py-1 rounded inline-block break-all">{String(activityDoc.meta?.actor ?? "—")}</div>
-                </div>
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-4xl rounded-xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <h3 className="text-sm font-semibold text-slate-800">
+                  {activityTitle || "Activity Details"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeActivity}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-slate-100"
+                  aria-label="Close"
+                  title="Close"
+                >
+                  ×
+                </button>
               </div>
 
-              {/* Actions */}
-              {activityLinks.length > 0 && (
-                <div className="mb-8">
-                  <div className="text-sm font-medium text-neutral-900 dark:text-neutral-200 mb-3">Related Actions</div>
-                  <div className="flex flex-wrap gap-2">
-                    {activityLinks.map((l, i) => (
-                      <a
-                        key={i}
-                        href={l.href}
-                        className="inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium bg-neutral-100 text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-                      >
-                        {l.label} <span className="ml-2 opacity-50">→</span>
-                      </a>
-                    ))}
+              {/* Body */}
+              <div className="max-h-[70vh] overflow-auto p-4 bg-slate-50">
+                {/* Quick facts */}
+                <div className="mb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="text-sm">
+                    <div className="text-slate-500">Type</div>
+                    <div className="font-medium">{String(activityDoc.meta?.type ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">When</div>
+                    <div className="font-medium">{String(activityDoc.meta?.when ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">Actor</div>
+                    <div className="font-medium break-all">{String(activityDoc.meta?.actor ?? "—")}</div>
+                  </div>
+                  <div className="text-sm">
+                    <div className="text-slate-500">Activity ID</div>
+                    <div className="font-medium">{String(activityDoc.meta?.id ?? "—")}</div>
                   </div>
                 </div>
-              )}
 
-              {/* Payload Viewer */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Payload Data</div>
-                  <button onClick={() => copy(pretty(activityDoc.payload), () => setToast("JSON copied"))} className="text-xs text-blue-600 hover:underline">Copy JSON</button>
-                </div>
-                <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 p-4 overflow-auto max-h-[400px] shadow-inner">
-                  <pre className="font-mono text-[11px] leading-relaxed text-neutral-700 dark:text-neutral-300">
-                    {pretty(activityDoc.payload)}
+                {/* Target links */}
+                {activityLinks.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-sm text-slate-600 mb-1">Go to:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {activityLinks.map((l, i) => (
+                        <a
+                          key={i}
+                          href={l.href}
+                          className="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          {l.label}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pretty JSON payload */}
+                <div className="rounded-lg overflow-hidden ring-1 ring-slate-200">
+                  <div className="px-3 py-2 bg-slate-100 text-xs font-semibold text-slate-700">Payload</div>
+                  <pre className="p-3 text-xs bg-white text-slate-900 overflow-auto">
+{pretty(activityDoc.payload)}
                   </pre>
                 </div>
               </div>
