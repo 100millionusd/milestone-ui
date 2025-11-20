@@ -131,6 +131,7 @@ export default function NewProposalPage() {
         city: formData.city,
         country: formData.country,
         amountUSD: Number.isFinite(amount) ? amount : 0,
+        budget: finalAmount,
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
