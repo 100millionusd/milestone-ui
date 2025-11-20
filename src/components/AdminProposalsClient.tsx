@@ -466,7 +466,7 @@ export default function AdminProposalsClient({
 
             {/* List Grid */}
             <div className="space-y-6">
-              {filtered.map((p) => (
+{filtered.map((p) => (
                 <div
                   key={p.proposalId}
                   className="group bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
@@ -543,10 +543,11 @@ export default function AdminProposalsClient({
                           />
                         )}
 
-                        {/* Agent / Automation */}
-                        <div className="mt-6 bg-indigo-50/50 border border-indigo-100 rounded-xl p-1">
+                        {/* Agent / Automation - DISABLED to prevent auto-approval */}
+                        {/* <div className="mt-6 bg-indigo-50/50 border border-indigo-100 rounded-xl p-1">
                           <ProposalAgent proposal={p} />
-                        </div>
+                        </div> 
+                        */}
                       </div>
 
                       {/* Sidebar: Stats & Actions */}
@@ -569,9 +570,8 @@ export default function AdminProposalsClient({
                         </div>
 
                         <div className="mt-auto space-y-3">
-                          {p.status === 'pending' && (
-                            <>
-                           <button
+                          {/* BUTTONS FIXED: Always visible, using disabled state instead of hiding */}
+                          <button
                             onClick={() => handleApprove(p.proposalId)}
                             disabled={p.status === 'approved'}
                             className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:cursor-not-allowed"
@@ -605,15 +605,15 @@ export default function AdminProposalsClient({
                               onClick={() => handleDelete(p.proposalId)}
                               className="px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                             >
-                            Delete
-                          </button>
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
 
               {filtered.length === 0 && (
                 <div className="text-center py-20 bg-white border border-slate-200 rounded-2xl border-dashed">
