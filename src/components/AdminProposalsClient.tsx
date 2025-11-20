@@ -571,22 +571,27 @@ export default function AdminProposalsClient({
                         <div className="mt-auto space-y-3">
                           {p.status === 'pending' && (
                             <>
-                              <button
-                                onClick={() => handleApprove(p.proposalId)}
-                                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => handleReject(p.proposalId)}
-                                className="w-full py-2.5 px-4 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                Reject
-                              </button>
-                            </>
-                          )}
+                           <button
+                            onClick={() => handleApprove(p.proposalId)}
+                            disabled={p.status === 'approved'}
+                            className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Approve
+                          </button>
+                          
+                          <button
+                            onClick={() => handleReject(p.proposalId)}
+                            disabled={p.status === 'rejected'}
+                            className="w-full py-2.5 px-4 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Reject
+                          </button>
 
                           <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-100">
                             <button
@@ -608,7 +613,6 @@ export default function AdminProposalsClient({
                     </div>
                   </div>
                 </div>
-              ))}
 
               {filtered.length === 0 && (
                 <div className="text-center py-20 bg-white border border-slate-200 rounded-2xl border-dashed">
