@@ -1,7 +1,7 @@
 // src/components/MilestonePayments.tsx
 'use client';
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   completeMilestone,
   payMilestone,
@@ -10,15 +10,15 @@ import {
   type Bid,
   type Milestone,
   getAuthRoleOnce,
+  uploadProofFiles, // ✅ IMPORT ADDED: Uses the safe Railway upload
 } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
 
-// ---- upload helpers (shrink big images, retry on 504) ----
+// ---- upload helpers (shrink big images) ----
 async function shrinkImageIfNeeded(file: File): Promise<File> {
   if (!/^image\//.test(file.type) || file.size < 3_000_000) return file; // only >~3MB
 
-  // FIX: Wrap in try/catch for older browsers
   try {
     const bitmap = await createImageBitmap(file);
     const maxSide = 2000;
@@ -36,7 +36,7 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
     canvas.height = height;
     const ctx = canvas.getContext('2d')!;
     
-    // FIX: Handle transparency for PNGs to prevent black backgrounds
+    // Handle transparency for PNGs
     if (!file.type.includes('png')) {
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
@@ -48,7 +48,6 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
       canvas.toBlob(resolve as any, file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85)
     );
     
-    // Keep extension consistent with type
     const ext = file.type === 'image/png' ? '.png' : '.jpg';
     return new File([blob!], (file.name || 'image').replace(/\.(png|webp|jpeg|jpg)$/i, '') + ext, {
       type: file.type === 'image/png' ? 'image/png' : 'image/jpeg',
@@ -57,22 +56,6 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
   } catch (e) {
     console.warn("Image shrinking failed, using original", e);
     return file;
-  }
-}
-
-// FIX: Added maxRetries to prevent infinite loops on 504 errors
-async function postWithRetry(url: string, fd: FormData, retries = 3): Promise<any> {
-  try {
-    const r = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
-    if (!r.ok) throw new Error(`Upload HTTP ${r.status}`);
-    return r.json();
-  } catch (e: any) {
-    // Stop if we run out of retries OR if it's not a 504
-    if (retries <= 0 || !/504/.test(String(e?.message))) throw e;
-    
-    await new Promise((r) => setTimeout(r, 1500));
-    // Decrement retries
-    return await postWithRetry(url, fd, retries - 1);
   }
 }
 
@@ -105,7 +88,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [isAdmin, setIsAdmin] = useState(false);
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
   
-  // FIX: Move ID resolution to state to avoid side-effects in render
   const [activeProposalId, setActiveProposalId] = useState<number | undefined>(undefined);
 
   // State for collapsible sections
@@ -125,7 +107,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const setFiles = (i: number, files: FileList | null) =>
     setFilesByIndex((prev) => ({ ...prev, [i]: files ? Array.from(files) : [] }));
 
-  // FIX: Correctly derive Proposal ID inside useEffect to prevent hydration mismatches
   useEffect(() => {
     let pid: number | undefined = undefined;
 
@@ -136,18 +117,13 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       if (Number.isFinite(fromBid)) {
         pid = Number(fromBid);
       } else if (typeof window !== 'undefined') {
-        // Safe to check window here
         const parts = window.location.pathname.split('/');
-        // Scan parts for a valid number (more robust than hardcoded index)
         for (const p of parts) {
              const val = parseInt(p);
-             if (!isNaN(val) && val > 0) { // Assuming IDs are positive
+             if (!isNaN(val) && val > 0) {
                  pid = val; 
-                 // We take the last valid number or first? Usually logic dictates specific position, 
-                 // but this fallback is safer than parts[length-1] which might be empty string
              }
         }
-        // Fallback to legacy logic if scan fails but we need specific index behavior
         if (!pid) {
              const validParts = parts.filter(Boolean);
              const last = Number(validParts[validParts.length - 1]);
@@ -191,7 +167,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   function pickOpenCrId(msIndex: number): number | null {
     const list = crByMs[msIndex] || [];
     if (!list.length) return null;
-    // Sort explicitly just in case
     const sorted = [...list].sort(
       (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
     );
@@ -225,7 +200,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
   }
 
-  // Load CRs only when activeProposalId is resolved
   useEffect(() => {
     if (!Number.isFinite(activeProposalId)) return;
     const pid = activeProposalId!;
@@ -268,21 +242,15 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
       const localFiles: File[] = filesByIndex[index] || [];
 
-      const uploaded: Array<{ name: string; cid: string; url: string }> = [];
+      // 1. Pre-process: Shrink images if needed
+      const filesToUpload: File[] = [];
       for (const original of localFiles) {
-        const file = await shrinkImageIfNeeded(original);
-        const fd = new FormData();
-        fd.append('files', file, file.name || 'file');
-
-        // This now has a retry limit
-        const json = await postWithRetry('/api/proofs/upload', fd);
-        
-        if (json?.uploads?.length) {
-          uploaded.push(...json.uploads);
-        } else if (json?.cid && json?.url) {
-          uploaded.push({ cid: json.cid, url: json.url, name: file.name || 'file' });
-        }
+        filesToUpload.push(await shrinkImageIfNeeded(original));
       }
+
+      // 2. Upload: Use the robust helper from api.ts (Direct to Railway)
+      // ✅ This is the fix: It bypasses Netlify limits and uses your server's retry logic
+      const uploaded = await uploadProofFiles(filesToUpload);
 
       const filesToSave = uploaded.map((u) => ({ url: u.url, name: u.name, cid: u.cid }));
 
@@ -391,7 +359,6 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       Array.isArray(raw?.items) ? raw.items :
       [];
     
-    // Safe mapping
     const items = (itemsArr as any[]).map((x) => ({
         text: typeof x === 'string' ? x : String(x?.text ?? x?.title ?? ''), 
         done: !!(x?.done ?? x?.checked)
