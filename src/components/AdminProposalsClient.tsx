@@ -543,11 +543,10 @@ export default function AdminProposalsClient({
                           />
                         )}
 
-                        {/* Agent / Automation - DISABLED to prevent auto-approval */}
-                        {/* <div className="mt-6 bg-indigo-50/50 border border-indigo-100 rounded-xl p-1">
+                        {/* Agent / Automation - RESTORED */}
+                        <div className="mt-6 bg-indigo-50/50 border border-indigo-100 rounded-xl p-1">
                           <ProposalAgent proposal={p} />
-                        </div> 
-                        */}
+                        </div>
                       </div>
 
                       {/* Sidebar: Stats & Actions */}
@@ -570,7 +569,7 @@ export default function AdminProposalsClient({
                         </div>
 
                         <div className="mt-auto space-y-3">
-                          {/* BUTTONS FIXED: Always visible, using disabled state instead of hiding */}
+                          {/* BUTTONS: Visible even if approved (Status check removed) */}
                           <button
                             onClick={() => handleApprove(p.proposalId)}
                             disabled={p.status === 'approved'}
