@@ -1592,18 +1592,18 @@ export async function uploadFileToIPFS(file: File) {
 // ========= Proof uploads (Pinata via our Next API) =========
 // 1) Upload <input type="file"> files to /api/proofs/upload
 //    Returns: [{ cid, url, name }]
-// src/lib/api.ts
 
-export async function uploadProofFiles(
+// 1. ✅ Add the delay helper (if not already at the top of file)
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 2. ✅ RENAME to 'uploadFilesSequentially' so it's generic
+export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
   const results: Array<{ cid: string; url: string; name: string }> = [];
 
-  // ✅ CHANGED: Use a standard 'for' loop instead of Promise.all
-  // This uploads file 1, waits for it to finish, then uploads file 2...
-  // It prevents hitting Pinata's rate limit.
   for (const file of files) {
     const response = await uploadFileToIPFS(file);
     
@@ -1612,10 +1612,19 @@ export async function uploadProofFiles(
       url: String(response.url || ''),
       name: String(file.name || 'file'),
     });
+
+    // 3. ✅ CRITICAL: Wait 2 seconds between files
+    // This ensures Pinata's rate limiter resets before we send the next file.
+    if (files.length > 1) {
+      await delay(2000); 
+    }
   }
 
   return results;
 }
+
+// 4. ✅ ALIAS: Keep 'uploadProofFiles' working for your existing components
+export const uploadProofFiles = uploadFilesSequentially;
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
 //    (this is what makes them appear in the Project “Files” tab automatically)
