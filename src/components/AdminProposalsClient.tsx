@@ -521,7 +521,7 @@ export default function AdminProposalsClient({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs border-t border-slate-100 pt-4 mb-4">
                           <div>
                             <span className="block font-semibold text-slate-800 mb-1">
-                              Contact Person
+                              Contact
                             </span>
                             <span className="text-slate-600 break-all">{p.contact}</span>
                           </div>
