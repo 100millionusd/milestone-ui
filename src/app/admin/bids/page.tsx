@@ -70,10 +70,10 @@ export default function AdminBidsPage() {
 
   // --- Derived Metrics for Dashboard ---
   const stats = useMemo(() => {
-    const totalVol = bids.reduce((acc, b) => acc + (Number(b.priceUSD) || 0), 0);
+    // Volume removed as requested
     const pendingCount = bids.filter((b) => b.status === 'pending').length;
     const approvedCount = bids.filter((b) => b.status === 'approved').length;
-    return { totalVol, pendingCount, approvedCount };
+    return { pendingCount, approvedCount };
   }, [bids]);
 
   const getProposalTitle = (proposalId: number) => {
@@ -119,7 +119,7 @@ export default function AdminBidsPage() {
         return withSearch.filter((b) => b.status === 'archived');
       default:
         return withSearch;
-    }
+      }
   }, [bids, proposals, tab, query]);
 
   const handleApprove = async (bidId: number) => {
@@ -251,7 +251,8 @@ export default function AdminBidsPage() {
         </div>
       </div>
 
-      {/* Metrics Dashboard */}
+      {/* Metrics Dashboard - Adjusted Grid for 2 items */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
         <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Pending Action</span>
@@ -347,9 +348,9 @@ export default function AdminBidsPage() {
             <div className="pt-4 border-t border-slate-100 flex flex-wrap gap-2 items-center">
               <Link
                 href={`/admin/bids/${bid.bidId}`}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-300 text-slate-700 hover:bg-slate-50"
+                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
               >
-                Edit
+                Edit Bid
               </Link>
 
               {bid.status === 'pending' && (
@@ -505,7 +506,7 @@ export default function AdminBidsPage() {
                   <div className="flex flex-col gap-2">
                     <Link
                       href={`/admin/bids/${bid.bidId}`}
-                      className="text-center px-2 py-1 rounded text-xs font-medium border border-slate-200 text-slate-600 hover:bg-white hover:border-indigo-300 hover:text-indigo-600 transition-colors"
+                      className="text-center px-2 py-1 rounded text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
                     >
                       Edit
                     </Link>
