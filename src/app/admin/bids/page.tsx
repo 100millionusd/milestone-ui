@@ -252,11 +252,6 @@ export default function AdminBidsPage() {
       </div>
 
       {/* Metrics Dashboard */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Volume</span>
-          <span className="text-2xl font-bold text-slate-800">${stats.totalVol.toLocaleString()}</span>
-        </div>
         <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Pending Action</span>
