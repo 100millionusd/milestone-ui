@@ -1592,24 +1592,27 @@ export async function uploadFileToIPFS(file: File) {
 // ========= Proof uploads (Pinata via our Next API) =========
 // 1) Upload <input type="file"> files to /api/proofs/upload
 //    Returns: [{ cid, url, name }]
+// src/lib/api.ts
+
 export async function uploadProofFiles(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // We use Promise.all to upload files in parallel directly to Railway
-  // This uses your existing 'uploadFileToIPFS' function which bypasses the Netlify 10s limit
-  const results = await Promise.all(
-    files.map(async (file) => {
-      const response = await uploadFileToIPFS(file);
-      
-      return {
-        cid: String(response.cid || ''),
-        url: String(response.url || ''),
-        name: String(file.name || 'file'),
-      };
-    })
-  );
+  const results: Array<{ cid: string; url: string; name: string }> = [];
+
+  // ✅ CHANGED: Use a standard 'for' loop instead of Promise.all
+  // This uploads file 1, waits for it to finish, then uploads file 2...
+  // It prevents hitting Pinata's rate limit.
+  for (const file of files) {
+    const response = await uploadFileToIPFS(file);
+    
+    results.push({
+      cid: String(response.cid || ''),
+      url: String(response.url || ''),
+      name: String(file.name || 'file'),
+    });
+  }
 
   return results;
 }
