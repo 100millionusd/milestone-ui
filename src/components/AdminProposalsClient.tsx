@@ -605,14 +605,15 @@ export default function AdminProposalsClient({
                               onClick={() => handleDelete(p.proposalId)}
                               className="px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                             >
-                              Delete
-                            </button>
-                          </div>
+                            Delete
+                          </button>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
+              </div>
+            ))}
 
               {filtered.length === 0 && (
                 <div className="text-center py-20 bg-white border border-slate-200 rounded-2xl border-dashed">
