@@ -1593,37 +1593,58 @@ export async function uploadFileToIPFS(file: File) {
 // 1) Upload <input type="file"> files to /api/proofs/upload
 //    Returns: [{ cid, url, name }]
 
-// 1. ✅ Add the delay helper (if not already at the top of file)
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function runConcurrent<T>(
+  items: T[], 
+  concurrency: number, 
+  fn: (item: T) => Promise<any>
+): Promise<any[]> {
+  const results: any[] = [];
+  const queue = [...items]; // Copy array to avoid mutating original
+  
+  // Worker function: keeps picking items from the queue until empty
+  const worker = async () => {
+    while (queue.length > 0) {
+      const item = queue.shift(); // Get next item
+      if (item) {
+        const res = await fn(item); // Process it
+        results.push(res);
+      }
+    }
+  };
 
-// 2. ✅ RENAME to 'uploadFilesSequentially' so it's generic
+  // Create a pool of workers (max 3 workers for 3 parallel uploads)
+  const workers = Array.from({ length: Math.min(items.length, concurrency) }, () => worker());
+  
+  // Wait for all workers to finish
+  await Promise.all(workers);
+  return results;
+}
+
+// The Main Upload Function
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  const results: Array<{ cid: string; url: string; name: string }> = [];
+  // 🚀 CONFIG: How many files to upload at once?
+  // 3 is the sweet spot: 3x faster than before, but safe for Pinata limits.
+  const MAX_CONCURRENT = 3;
 
-  for (const file of files) {
+  const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
+    // This calls your existing helper that talks to Railway
     const response = await uploadFileToIPFS(file);
     
-    results.push({
+    return {
       cid: String(response.cid || ''),
       url: String(response.url || ''),
       name: String(file.name || 'file'),
-    });
+    };
+  });
 
-    // 3. ✅ CRITICAL: Wait 2 seconds between files
-    // This ensures Pinata's rate limiter resets before we send the next file.
-    if (files.length > 1) {
-      await delay(3500); 
-    }
-  }
-
-  return results;
+  return rawResults;
 }
 
-// 4. ✅ ALIAS: Keep 'uploadProofFiles' working for your existing components
+// ✅ Keep this ALIAS so your other files (MilestonePayments, etc.) don't break
 export const uploadProofFiles = uploadFilesSequentially;
 
 // 2) Save the uploaded file URLs into your proofs table via /api/proofs
