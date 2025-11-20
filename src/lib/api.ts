@@ -1616,7 +1616,7 @@ export async function uploadFilesSequentially(
     // 3. ✅ CRITICAL: Wait 2 seconds between files
     // This ensures Pinata's rate limiter resets before we send the next file.
     if (files.length > 1) {
-      await delay(2000); 
+      await delay(3500); 
     }
   }
 
