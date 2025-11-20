@@ -399,7 +399,7 @@ export default function AdminBidsPage() {
                         href={`/admin/bids/${bid.bidId}`}
                         className="px-3 py-1 rounded text-sm border border-cyan-600 text-cyan-700 hover:bg-cyan-50 text-center"
                       >
-                        View
+                        Edit
                       </Link>
 
                       {bid.status === 'pending' && (
@@ -430,7 +430,7 @@ export default function AdminBidsPage() {
                           href={`/admin/proposals/${bid.proposalId}/bids/${bid.bidId}`}
                           className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 text-center"
                         >
-                          Manage
+                          M-stones
                         </Link>
                       )}
 
