@@ -508,7 +508,7 @@ export default function AdminBidsPage() {
                       href={`/admin/bids/${bid.bidId}`}
                       className="text-center px-2 py-1 rounded text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
                     >
-                      Edit
+                      INFO
                     </Link>
 
                     {bid.status === 'pending' && (
