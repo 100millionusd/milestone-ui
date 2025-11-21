@@ -96,20 +96,19 @@ export default function NewProposalPage() {
     return () => { alive = false; };
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+ const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault(); // 🛑 STOP PAGE RELOAD
     setLoading(true);
 
     if (!profileReady) {
-      alert('Please complete your profile first (email, phone/WhatsApp, or Telegram).');
+      alert('Please complete your profile first.');
       setLoading(false);
       return;
     }
 
     try {
-      // 1. Upload files (supports PDFs via /api/proofs/upload)
+      // 1. Upload files
       let docs: Array<{ cid: string; url: string; name: string; size: number }> = [];
-      
       if (files.length > 0) {
         const uploaded = await uploadProofFiles(files);
         docs = uploaded.map((u, i) => ({
@@ -120,8 +119,12 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. Create Proposal
-      const amount = parseFloat(formData.amountUSD);
+      // 2. Clean the budget number (Remove commas)
+      // "75,000.00" -> "75000.00"
+      const cleanAmount = formData.amountUSD.replace(/,/g, ''); 
+      const amount = parseFloat(cleanAmount);
+      const finalAmount = Number.isFinite(amount) ? amount : 0;
+
       const body = {
         orgName: formData.orgName,
         title: formData.title,
@@ -130,8 +133,11 @@ export default function NewProposalPage() {
         address: formData.address,
         city: formData.city,
         country: formData.country,
-        amountUSD: Number.isFinite(amount) ? amount : 0,
+        
+        // Send both keys to be safe
+        amountUSD: finalAmount,
         budget: finalAmount,
+        
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
@@ -145,7 +151,7 @@ export default function NewProposalPage() {
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
-      alert('Failed to create proposal: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      alert('Failed to create proposal. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -190,14 +196,13 @@ export default function NewProposalPage() {
         </div>
       )}
 
-      <form
-        onSubmit={(e) => {
-          allowOnlyExplicitSubmit(e);
-          if (e.defaultPrevented) return;
-          handleSubmit(e);
-        }}
-        className="space-y-6"
-      >
+ <form
+  onSubmit={(e) => {
+    e.preventDefault(); // 🛑 Always stop reload immediately
+    handleSubmit(e);
+  }}
+  className="space-y-6"
+>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Organization Name *</label>
@@ -244,13 +249,20 @@ export default function NewProposalPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
+ <div>
             <label className="block text-sm font-medium mb-1">Budget (USD)</label>
             <input
-              type="number"
-              step="0.01"
+              type="text" 
+              inputMode="decimal" // Opens number pad on mobile
+              placeholder="e.g. 75000"
               value={formData.amountUSD}
-              onChange={(e) => setFormData({...formData, amountUSD: e.target.value})}
+              onChange={(e) => {
+                 // Allow only numbers, commas, and dots while typing
+                 const val = e.target.value;
+                 if (/^[0-9.,]*$/.test(val)) {
+                   setFormData({...formData, amountUSD: val});
+                 }
+              }}
               className="w-full p-2 border rounded"
             />
           </div>
