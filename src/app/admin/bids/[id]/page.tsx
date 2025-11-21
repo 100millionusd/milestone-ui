@@ -359,6 +359,14 @@ return (
         </div>
       </CollapsibleSection>
 
+{/* ——— NEW SECTION START: Agent 2 Bid Analysis ——— */}
+      {/* Checks for aiAnalysis or analysis on the bid object */}
+      {(bid.aiAnalysis || bid.analysis) && (
+        <CollapsibleSection title="Agent 2 Bid Analysis" defaultOpen={false}>
+          <AnalysisView a={bid.aiAnalysis || bid.analysis} />
+        </CollapsibleSection>
+      )}
+      
       {/* 2. Collapsible Agent 2 Inline (Closed by default) */}
       {proposal && (
         <CollapsibleSection title="Agent 2 Proposal Analysis" defaultOpen={false}>
