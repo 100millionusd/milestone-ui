@@ -688,7 +688,10 @@ function toProposal(p: any): Proposal {
     address: p?.address ?? null,
     city: p?.city ?? null,
     country: p?.country ?? null,
-    amountUSD: Number(p?.amountUSD ?? p?.amount_usd ?? p?.amount) || 0,
+
+    // ✅ THE FIX: Add 'p?.amountUsd' to this list
+    amountUSD: Number(p?.amountUSD ?? p?.amountUsd ?? p?.amount_usd ?? p?.amount) || 0,
+    
     docs: Array.isArray(p?.docs) ? p.docs : [],
     cid: p?.cid ?? null,
     status: (p?.status as Proposal["status"]) ?? "pending",
