@@ -761,7 +761,7 @@ function toMilestones(raw: any): Milestone[] {
     bidId: Number(bidId),
     proposalId: Number(proposalId),
     vendorName: b?.vendorName ?? b?.vendor_name ?? "",
-    priceUSD: Number(b?.priceUSD ?? b?.price_usd ?? b?.price) || 0,
+    priceUSD: Number(b?.priceUSD ?? b?.priceUsd ?? b?.price_usd ?? b?.price) || 0,
     days: Number(b?.days) || 0,
     notes: b?.notes ?? "",
     walletAddress: b?.walletAddress ?? b?.wallet_address ?? "",
