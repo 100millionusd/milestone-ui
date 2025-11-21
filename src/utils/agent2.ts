@@ -1,3 +1,4 @@
+// src/utils/agent2.ts
 
 // Normalization + readiness helpers for Agent2 analysis objects
 
