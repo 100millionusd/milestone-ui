@@ -97,7 +97,7 @@ export default function NewProposalPage() {
   }, []);
 
  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); 
+    e.preventDefault();
     setLoading(true);
 
     if (!profileReady) {
@@ -119,12 +119,13 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. THE FIX: Clean the number and use "amount"
-      const rawAmount = formData.amountUSD.toString().replace(/,/g, ''); // Remove commas
-      const amountNumber = parseFloat(rawAmount);
-      const finalAmount = Number.isFinite(amountNumber) ? amountNumber : 0;
+      // 2. Clean and Format the Amount
+      // Remove commas and ensure it is a plain number
+      const rawString = formData.amountUSD.toString().replace(/,/g, ''); 
+      const amountNum = parseFloat(rawString);
+      const finalAmount = Number.isFinite(amountNum) ? amountNum : 0;
 
-      // Force "any" type to allow sending extra fields like "amount"
+      // 3. Construct Body with snake_case key
       const body: any = {
         orgName: formData.orgName,
         title: formData.title,
@@ -133,18 +134,19 @@ export default function NewProposalPage() {
         address: formData.address,
         city: formData.city,
         country: formData.country,
-
-        // ✅ SEND AS NUMBER (Crucial)
-        // ✅ SEND AS "amount" (Likely what backend wants)
-        amount: finalAmount,     
-        amountUSD: finalAmount,  
-        budget: finalAmount,     
-
+        
+        // ✅ THE FIX: Send 'amount_usd' (snake_case)
+        // The api.ts 'toProposal' function references 'amount_usd', 
+        // so the backend definitely uses this key.
+        amount_usd: finalAmount, 
+        amountUSD: finalAmount,   // Keep this as backup
+        amount: finalAmount,      // Keep this as backup
+        
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
 
-      console.log("Submitting Payload:", body);
+      console.log("Submitting Proposal Payload:", body); // Debug log
 
       const res = await createProposal(body);
 
@@ -155,7 +157,7 @@ export default function NewProposalPage() {
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
-      alert('Failed to create proposal. Please try again.');
+      alert('Failed to create proposal. Please check your inputs.');
     } finally {
       setLoading(false);
     }
