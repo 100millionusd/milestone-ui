@@ -111,6 +111,25 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
 
+  // ——— NEW: State for the "Run Agent 2" button on the Bid ———
+const [analyzingBid, setAnalyzingBid] = useState(false);
+
+async function runBidAnalysis() {
+  if (!bidId) return;
+  try {
+    setAnalyzingBid(true);
+    // Ensure 'analyzeBid' exists in your '@/lib/api' file. 
+    // If it is named differently (e.g. runBidAi), update it here.
+    const updated = await api.analyzeBid(bidId); 
+    setBid(updated);
+  } catch (e: any) {
+    console.error(e);
+    alert(e?.message || 'Failed to run Agent 2 on bid');
+  } finally {
+    setAnalyzingBid(false);
+  }
+}
+
   // Initial load
   useEffect(() => {
     (async () => {
