@@ -186,6 +186,20 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
     }
   }
 
+  async function runBidAnalysis() {
+  try {
+    setAnalyzingBid(true);
+    // Assuming api.analyzeBid(bidId) exists in your library matching api.analyzeProof pattern
+    // If not, you might need to check your api.ts file.
+    const updatedBid = await api.analyzeBid(bidId); 
+    setBid(updatedBid);
+  } catch (e: any) {
+    alert(e?.message || 'Failed to run Agent 2 on bid');
+  } finally {
+    setAnalyzingBid(false);
+  }
+}
+
   // refresh latest status map AND the proofs list (no stale cache)
   async function refreshLatest() {
     if (!bidId) return;
@@ -359,14 +373,49 @@ return (
         </div>
       </CollapsibleSection>
 
-{/* ——— NEW SECTION START: Agent 2 Bid Analysis ——— */}
-      {/* Checks for aiAnalysis or analysis on the bid object */}
-      {(bid.aiAnalysis || bid.analysis) && (
-        <CollapsibleSection title="Agent 2 Bid Analysis" defaultOpen={false}>
-          <AnalysisView a={bid.aiAnalysis || bid.analysis} />
-        </CollapsibleSection>
-      )}
-      
+{/* ——— NEW: Agent 2 Bid Analysis with Buttons ——— */}
+<CollapsibleSection
+  title="Agent 2 Bid Analysis"
+  defaultOpen={!!(bid.aiAnalysis || bid.analysis)} // Auto-open if analysis exists
+  action={
+    <div className="flex items-center gap-2">
+      {/* Button 1: Run Agent 2 */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent toggling the accordion
+          runBidAnalysis();
+        }}
+        disabled={analyzingBid}
+        className="px-3 py-1 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50 shadow-sm transition-colors"
+      >
+        {analyzingBid ? 'Running...' : 'Run Agent 2'}
+      </button>
+
+      {/* Button 2: Ask Agent 2 (Chat) */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setChatOpen(true);
+        }}
+        className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-700 shadow-sm transition-colors"
+      >
+        Ask Agent 2 (Chat)
+      </button>
+    </div>
+  }
+>
+  {/* Section Content */}
+  {(bid.aiAnalysis || bid.analysis) ? (
+    <AnalysisView a={bid.aiAnalysis || bid.analysis} />
+  ) : (
+    <div className="text-sm text-slate-500 py-2">
+      No AI analysis found for this bid yet. Click "Run Agent 2" to generate one.
+    </div>
+  )}
+</CollapsibleSection>
+
       {/* 2. Collapsible Agent 2 Inline (Closed by default) */}
       {proposal && (
         <CollapsibleSection title="Agent 2 Proposal Analysis" defaultOpen={false}>
