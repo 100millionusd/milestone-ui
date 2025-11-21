@@ -1,3 +1,4 @@
+
 // Normalization + readiness helpers for Agent2 analysis objects
 
 export type Agent2V1 = {
@@ -35,4 +36,35 @@ export const getAnalysisStatus = (a: Agent2): "ready" | "pending" | "waiting_for
   if (s === "waiting_for_file") return "waiting_for_file";
   if (s === "error") return "error";
   return "ready";
+};
+
+// ——— URL Sanitization Helpers (Fixes "Dot at end of URL" error) ———
+
+/**
+ * Removes trailing punctuation (.,;) from a URL string
+ * Example: "https://site.com/file.pdf." -> "https://site.com/file.pdf"
+ */
+export const cleanUrl = (url: string | null | undefined): string => {
+  if (!url) return "";
+  return url.trim().replace(/[.,;]+$/, "");
+};
+
+/**
+ * Takes a full Bid object, sanitizes the URLs in its files/docs list,
+ * and returns the cleaned object. Use this immediately after fetching a bid.
+ */
+export const cleanBidData = (bid: any) => {
+  if (!bid) return bid;
+
+  // Handle both 'files' and legacy 'docs' arrays
+  const rawFiles = Array.isArray(bid.files) ? bid.files : (bid.docs ?? []);
+
+  // Map over files and clean their URLs
+  const cleanedFiles = rawFiles.map((f: any) => ({
+    ...f,
+    url: cleanUrl(f.url ?? f.href)
+  }));
+
+  // Return new bid object with the cleaned files array
+  return { ...bid, files: cleanedFiles };
 };

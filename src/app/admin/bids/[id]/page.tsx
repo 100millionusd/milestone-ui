@@ -8,6 +8,7 @@ import * as api from '@/lib/api';
 import { API_BASE } from '@/lib/api';
 import Agent2Inline from '@/components/Agent2Inline';
 import BidChatAgent from '@/components/BidChatAgent';
+import { getAnalysis, cleanBidData } from '@/utils/agent2'; // Add cleanBidData
 
 /* ——— Template/Normal compatibility helpers ——— */
 const getMilestoneDescription = (m: any) => m?.notes ?? m?.desc ?? m?.description ?? '';
@@ -130,23 +131,28 @@ async function runBidAnalysis() {
   }
 }
 
-  // Initial load
+ // Initial load
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         setErr(null);
 
-        // load role early to gate UI
+        // load role early
         api.getAuthRoleOnce().then(setMe).catch(() => {});
 
-        const b = await api.getBid(bidId);
+        const rawBid = await api.getBid(bidId);
+        
+        // ——— FIX: Clean the dot from URLs immediately ———
+        const b = cleanBidData(rawBid); 
+        // ——— END FIX ———
+
         setBid(b);
 
         const p = await api.getProposal(b.proposalId);
         setProposal(p);
 
-        const pf = await api.getProofs(bidId); // admin-only
+        const pf = await api.getProofs(bidId);
         setProofs(pf);
       } catch (e: any) {
         setErr(e?.message || 'Failed to load bid');
