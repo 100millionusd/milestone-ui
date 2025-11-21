@@ -97,7 +97,7 @@ export default function NewProposalPage() {
   }, []);
 
  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); // 🛑 STOP PAGE RELOAD
+    e.preventDefault(); // Stop page reload
     setLoading(true);
 
     if (!profileReady) {
@@ -119,11 +119,11 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. Clean the budget number (Remove commas)
-      // "75,000.00" -> "75000.00"
-      const cleanAmount = formData.amountUSD.replace(/,/g, ''); 
-      const amount = parseFloat(cleanAmount);
-      const finalAmount = Number.isFinite(amount) ? amount : 0;
+      // 2. Clean and Format the Budget
+      // Remove commas (e.g. "75,000" -> "75000")
+      const cleanVal = formData.amountUSD.toString().replace(/,/g, '');
+      const valNum = parseFloat(cleanVal);
+      const finalAmount = Number.isFinite(valNum) ? valNum : 0;
 
       const body = {
         orgName: formData.orgName,
@@ -133,30 +133,33 @@ export default function NewProposalPage() {
         address: formData.address,
         city: formData.city,
         country: formData.country,
-        
-        // Send both keys to be safe
-        amountUSD: finalAmount,
-        budget: finalAmount,
+
+        // ✅ THE FIX: Send ALL variations to ensure the backend catches it
+        amount: finalAmount,     // Most likely what the DB column is named
+        budget: finalAmount,     // Second most likely
+        amountUSD: finalAmount,  // What the Admin page reads (Frontend name)
         
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
+
+      console.log("Sending Proposal:", body); // Debug: Check console to ensure 'amount' is there
 
       const res = await createProposal(body);
 
       if (res?.proposalId) {
         router.push(`/admin/proposals/${res.proposalId}`);
       } else {
-        alert('Proposal created, but no proposalId returned.');
+        alert('Proposal created, but no ID returned.');
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
-      alert('Failed to create proposal. Please try again.');
+      alert('Failed to create proposal.');
     } finally {
       setLoading(false);
     }
   };
-
+  
   // ✅ Add new files to the list (instead of replacing)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
