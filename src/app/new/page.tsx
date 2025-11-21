@@ -119,13 +119,13 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. Clean and Format the Amount
-      // Remove commas and ensure it is a plain number
-      const rawString = formData.amountUSD.toString().replace(/,/g, ''); 
-      const amountNum = parseFloat(rawString);
+      // 2. Prepare Money Values (Number AND String)
+      const rawStr = formData.amountUSD.toString().replace(/,/g, ''); 
+      const amountNum = parseFloat(rawStr);
       const finalAmount = Number.isFinite(amountNum) ? amountNum : 0;
+      const finalString = finalAmount.toString(); // e.g. "75000"
 
-      // 3. Construct Body with snake_case key
+      // 3. Send EVERY possible combination
       const body: any = {
         orgName: formData.orgName,
         title: formData.title,
@@ -135,29 +135,41 @@ export default function NewProposalPage() {
         city: formData.city,
         country: formData.country,
         
-        // ✅ THE FIX: Send 'amount_usd' (snake_case)
-        // The api.ts 'toProposal' function references 'amount_usd', 
-        // so the backend definitely uses this key.
-        amount_usd: finalAmount, 
-        amountUSD: finalAmount,   // Keep this as backup
-        amount: finalAmount,      // Keep this as backup
+        // --- MONEY SHOTGUN ---
+        // 1. Standard Numbers
+        amount: finalAmount,
+        amountUSD: finalAmount,
+        amount_usd: finalAmount,
+        price: finalAmount,
+        budget: finalAmount,
+
+        // 2. Strings (Some backends require this for currency)
+        amountStr: finalString,
+        budgetStr: finalString,
+        
+        // 3. Field found in your api.ts "ProposerSummary"
+        totalBudgetUSD: finalAmount, 
         
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
 
-      console.log("Submitting Proposal Payload:", body); // Debug log
+      console.log("🚀 Sending Proposal Body:", body); 
 
       const res = await createProposal(body);
 
+      // 🔍 DEBUG: Log what the server actually sent back
+      console.log("✅ Server Response:", res);
+
       if (res?.proposalId) {
-        router.push(`/admin/proposals/${res.proposalId}`);
+        // Force a hard reload to ensure admin page fetches fresh data
+        window.location.href = `/admin/proposals/${res.proposalId}`;
       } else {
         alert('Proposal created, but no ID returned.');
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
-      alert('Failed to create proposal. Please check your inputs.');
+      alert('Failed to create proposal.');
     } finally {
       setLoading(false);
     }
