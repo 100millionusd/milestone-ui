@@ -97,7 +97,7 @@ export default function NewProposalPage() {
   }, []);
 
  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); // Stop page reload
+    e.preventDefault(); 
     setLoading(true);
 
     if (!profileReady) {
@@ -119,13 +119,13 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. Clean and Format the Budget
-      // Remove commas (e.g. "75,000" -> "75000")
-      const cleanVal = formData.amountUSD.toString().replace(/,/g, '');
-      const valNum = parseFloat(cleanVal);
-      const finalAmount = Number.isFinite(valNum) ? valNum : 0;
+      // 2. THE FIX: Clean the number and use "amount"
+      const rawAmount = formData.amountUSD.toString().replace(/,/g, ''); // Remove commas
+      const amountNumber = parseFloat(rawAmount);
+      const finalAmount = Number.isFinite(amountNumber) ? amountNumber : 0;
 
-      const body = {
+      // Force "any" type to allow sending extra fields like "amount"
+      const body: any = {
         orgName: formData.orgName,
         title: formData.title,
         summary: formData.summary,
@@ -134,16 +134,17 @@ export default function NewProposalPage() {
         city: formData.city,
         country: formData.country,
 
-        // ✅ THE FIX: Send ALL variations to ensure the backend catches it
-        amount: finalAmount,     // Most likely what the DB column is named
-        budget: finalAmount,     // Second most likely
-        amountUSD: finalAmount,  // What the Admin page reads (Frontend name)
-        
+        // ✅ SEND AS NUMBER (Crucial)
+        // ✅ SEND AS "amount" (Likely what backend wants)
+        amount: finalAmount,     
+        amountUSD: finalAmount,  
+        budget: finalAmount,     
+
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
       };
 
-      console.log("Sending Proposal:", body); // Debug: Check console to ensure 'amount' is there
+      console.log("Submitting Payload:", body);
 
       const res = await createProposal(body);
 
@@ -154,7 +155,7 @@ export default function NewProposalPage() {
       }
     } catch (error) {
       console.error('Error creating proposal:', error);
-      alert('Failed to create proposal.');
+      alert('Failed to create proposal. Please try again.');
     } finally {
       setLoading(false);
     }
