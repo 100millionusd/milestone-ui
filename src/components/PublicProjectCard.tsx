@@ -12,14 +12,6 @@ function usd(n: number) {
   }
 }
 
-// 👇 FIX: Use Cloudflare (Public) instead of Sapphire (Private) for the Browser
-function toFastLink(url?: string | null) {
-  if (!url) return '';
-  // Swap the slow Pinata link for the fast, free Cloudflare link
-  // This avoids 401 errors because Cloudflare requires no keys.
-  return url.replace('gateway.pinata.cloud', 'cf-ipfs.com');
-}
-
 type Bid = {
   bidId: number;
   vendorName: string;
@@ -64,10 +56,9 @@ type AuditRow = {
 
 // ----- ENV (client-safe) -----
 const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
-// FIX: Use Cloudflare here too, so users can click audit links without 401s
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  'https://cf-ipfs.com/ipfs';
+  'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
 
 // --- maps + taken-at helpers ---
 function mapsLink(
@@ -195,8 +186,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
       async function fetchGpsViaRange(url: string) {
         try {
-          // Cloudflare doesn't block Range requests, so this works fine
-          const r = await fetch(toFastLink(url), { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
+          const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
           if (!r.ok) return null;
           const cl = Number(r.headers.get('content-length') || '0');
           if (r.status === 200 && cl > MAX_RANGE_BYTES) return null;
@@ -415,18 +405,18 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // ---------- FILES TAB RENDERER ----------
   function renderFilesTab() {
-    const uiStatus = (p: any) => {
-      const s = getProofStatus(p);
-      if (
-        s === 'submitted' &&
-        !(p?.status || p?.proof_status || p?.proofStatus) &&
-        (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
-      ) {
-        return 'approved';
-      }
-      if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
-      return s;
-    };
+const uiStatus = (p: any) => {
+  const s = getProofStatus(p);
+  if (
+    s === 'submitted' &&
+    !(p?.status || p?.proof_status || p?.proofStatus) &&
+    (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
+  ) {
+    return 'approved';
+  }
+  if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+  return s;
+};
 
     const proofsToShow = approvedOnly ? files.filter((p) => uiStatus(p) === 'approved') : files;
 
@@ -588,12 +578,11 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={toFastLink(String(f.url))} // 🚀 UPDATED: Uses Cloudflare
+                                  src={String(f.url)}
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                                   style={{ objectFit: 'cover' }}
-                                  unoptimized={true}
                                 />
                               </div>
                             ) : (
@@ -633,13 +622,12 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={toFastLink(project.coverImage)} // 🚀 UPDATED: Uses Cloudflare
+              src={project.coverImage}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
               style={{ objectFit: 'cover' }}
               priority
-              unoptimized={true}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
@@ -761,12 +749,11 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={toFastLink(u)} // 🚀 UPDATED: Uses Cloudflare
+                            src={u}
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                             style={{ objectFit: 'cover' }}
-                            unoptimized={true}
                           />
                         </div>
                       ))}
@@ -872,13 +859,12 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={toFastLink(lightboxUrl)} // 🚀 UPDATED: Uses Cloudflare
+              src={lightboxUrl}
               alt="Zoomed image"
               fill
               sizes="100vw"
               style={{ objectFit: 'contain' }}
               priority
-              unoptimized={true}
             />
           </div>
           <button
