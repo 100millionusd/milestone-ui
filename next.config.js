@@ -17,6 +17,12 @@ const nextConfig = {
         hostname: 'gateway.pinata.cloud',
         pathname: '/ipfs/**',
       },
+      // 👇 FIX: Allowed the Cloudflare IPFS gateway (Safety net)
+      {
+        protocol: 'https',
+        hostname: 'cf-ipfs.com',
+        pathname: '/ipfs/**',
+      },
     ],
     formats: ['image/avif', 'image/webp'],
     deviceSizes: [360, 640, 768, 1024, 1280, 1536],
