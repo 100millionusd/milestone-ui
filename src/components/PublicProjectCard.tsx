@@ -560,7 +560,19 @@ const uiStatus = (p: any) => {
                         const hasGPS = !!gps;
                         const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
                         const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
-                        const isImg = /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(String(f.url || ''));
+                        const isImg = (() => {
+  const mime = String(f.mimeType || f.contentType || '').toLowerCase();
+  if (mime.startsWith('image/')) return true;
+
+  const hasImageExt = (val: string | undefined | null) =>
+    /\.(png|jpe?g|webp|gif|heic|heif|avif)(\?|#|$)/i.test(String(val || ''));
+
+  if (hasImageExt(f.name)) return true;
+  if (hasImageExt(f.url)) return true;
+
+  return false;
+})();
+
 
                         return (
                           <div
