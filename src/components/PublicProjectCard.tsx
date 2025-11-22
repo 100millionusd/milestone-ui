@@ -12,6 +12,12 @@ function usd(n: number) {
   }
 }
 
+// 👇 NEW HELPER: Swaps slow Pinata links for fast Cloudflare links
+function toFastLink(url?: string | null) {
+  if (!url) return '';
+  return url.replace('gateway.pinata.cloud', 'cf-ipfs.com');
+}
+
 type Bid = {
   bidId: number;
   vendorName: string;
@@ -405,18 +411,18 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // ---------- FILES TAB RENDERER ----------
   function renderFilesTab() {
-const uiStatus = (p: any) => {
-  const s = getProofStatus(p);
-  if (
-    s === 'submitted' &&
-    !(p?.status || p?.proof_status || p?.proofStatus) &&
-    (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
-  ) {
-    return 'approved';
-  }
-  if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
-  return s;
-};
+    const uiStatus = (p: any) => {
+      const s = getProofStatus(p);
+      if (
+        s === 'submitted' &&
+        !(p?.status || p?.proof_status || p?.proofStatus) &&
+        (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
+      ) {
+        return 'approved';
+      }
+      if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+      return s;
+    };
 
     const proofsToShow = approvedOnly ? files.filter((p) => uiStatus(p) === 'approved') : files;
 
@@ -578,12 +584,13 @@ const uiStatus = (p: any) => {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={String(f.url)}
+                                  src={toFastLink(String(f.url))} // 🚀 UPDATED: Uses Fast Link
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                                   style={{ objectFit: 'cover' }}
-                                  unoptimized={String(f.url).includes('gateway.pinata.cloud')}
+                                  // ✅ KEEPS direct access (unoptimized)
+                                  unoptimized={true}
                                 />
                               </div>
                             ) : (
@@ -623,13 +630,14 @@ const uiStatus = (p: any) => {
         >
           {project.coverImage ? (
             <Image
-              src={project.coverImage}
+              src={toFastLink(project.coverImage)} // 🚀 UPDATED: Uses Fast Link
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
               style={{ objectFit: 'cover' }}
               priority
-              unoptimized={(project.coverImage || '').includes('gateway.pinata.cloud')}
+              // ✅ KEEPS direct access (unoptimized)
+              unoptimized={true}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
@@ -751,12 +759,13 @@ const uiStatus = (p: any) => {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={u}
+                            src={toFastLink(u)} // 🚀 UPDATED: Uses Fast Link
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                             style={{ objectFit: 'cover' }}
-                            unoptimized={u.includes('gateway.pinata.cloud')}
+                            // ✅ KEEPS direct access (unoptimized)
+                            unoptimized={true}
                           />
                         </div>
                       ))}
@@ -862,13 +871,14 @@ const uiStatus = (p: any) => {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={lightboxUrl}
+              src={toFastLink(lightboxUrl)} // 🚀 UPDATED: Uses Fast Link
               alt="Zoomed image"
               fill
               sizes="100vw"
               style={{ objectFit: 'contain' }}
               priority
-              unoptimized={(lightboxUrl || '').includes('gateway.pinata.cloud')}
+              // ✅ KEEPS direct access (unoptimized)
+              unoptimized={true}
             />
           </div>
           <button
