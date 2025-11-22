@@ -45,43 +45,29 @@ function isImg(s?: string) {
 }
 
 // Build a safe https URL for any combination of {url, cid}
-// Use YOUR Dedicated Gateway (Fast & Correct)
-const MY_GATEWAY = 'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
-
 function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
   if (!file) return '';
 
-  let u = (file as any)?.url ? String((file as any).url).trim() : '';
-  const cid = (file as any)?.cid ? String((file as any).cid).trim() : '';
+  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
+  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
 
-  // 1. 🛡️ SANITIZE: Remove trailing dots (Fixes the 400 Timeout crash)
-  u = u.replace(/[.,;]+$/, "");
+  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
+  if (!rawUrl) return '';
 
-  // 2. Handle bare CID -> Use Your Gateway
-  if ((!u || /^\s*$/.test(u)) && cid) return `${MY_GATEWAY}/${cid}`;
-  if (!u) return '';
+  let u = rawUrl;
 
-  // 3. Cleanup prefixes (ipfs://, etc.)
+  // bare CID (optionally with query)
+  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
+
+  // ipfs://, leading slashes, repeated ipfs/ segments
   u = u.replace(/^ipfs:\/\//i, '');
   u = u.replace(/^\/+/, '');
   u = u.replace(/^(?:ipfs\/)+/i, '');
 
-  // 4. ⚡ FORCE YOUR GATEWAY:
-  // If the URL uses the slow public gateway, swap it to your fast one.
-  if (u.includes('gateway.pinata.cloud')) {
-    u = u.replace('gateway.pinata.cloud', 'sapphire-given-snake-741.mypinata.cloud');
-  } 
-  // If it uses some other public gateway (like ipfs.io), swap it too
-  else if (u.includes('ipfs.io/ipfs')) {
-    u = u.replace('ipfs.io/ipfs', 'sapphire-given-snake-741.mypinata.cloud/ipfs');
-  }
-
-  // 5. Ensure protocol
-  if (!/^https?:\/\//i.test(u)) {
-    // If it looks like a bare CID, prepend your gateway
-    const isCid = /^[a-zA-Z0-9]{46,}/.test(u);
-    u = isCid ? `${MY_GATEWAY}/${u}` : `https://${u}`;
-  }
+  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
 
   return u;
 }
