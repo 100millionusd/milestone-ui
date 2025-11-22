@@ -12,11 +12,10 @@ function usd(n: number) {
   }
 }
 
-// 👇 NEW HELPER: Use your PREMIUM gateway (sapphire) instead of public ones
+// 👇 UPDATED: Just return the URL as-is. 
+// Since we use unoptimized={true} below, the standard link will work fine!
 function toFastLink(url?: string | null) {
-  if (!url) return '';
-  // Replace the slow public gateway with your dedicated one
-  return url.replace('gateway.pinata.cloud', 'sapphire-given-snake-741.mypinata.cloud');
+  return url || '';
 }
 
 type Bid = {
@@ -585,7 +584,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={toFastLink(String(f.url))} // 🚀 UPDATED: Uses Premium Gateway
+                                  src={toFastLink(String(f.url))} // 🚀 UPDATED: Uses URL as-is
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -630,7 +629,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={toFastLink(project.coverImage)} // 🚀 UPDATED: Uses Premium Gateway
+              src={toFastLink(project.coverImage)} // 🚀 UPDATED: Uses URL as-is
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -758,7 +757,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={toFastLink(u)} // 🚀 UPDATED: Uses Premium Gateway
+                            src={toFastLink(u)} // 🚀 UPDATED: Uses URL as-is
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -869,7 +868,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={toFastLink(lightboxUrl)} // 🚀 UPDATED: Uses Premium Gateway
+              src={toFastLink(lightboxUrl)} // 🚀 UPDATED: Uses URL as-is
               alt="Zoomed image"
               fill
               sizes="100vw"
