@@ -583,6 +583,7 @@ const uiStatus = (p: any) => {
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                                   style={{ objectFit: 'cover' }}
+                                  unoptimized={String(f.url).includes('gateway.pinata.cloud')}
                                 />
                               </div>
                             ) : (
@@ -865,6 +866,7 @@ const uiStatus = (p: any) => {
               sizes="100vw"
               style={{ objectFit: 'contain' }}
               priority
+              unoptimized={(lightboxUrl || '').includes('gateway.pinata.cloud')}
             />
           </div>
           <button
