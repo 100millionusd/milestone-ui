@@ -383,7 +383,7 @@ return (
 
       {/* 2. Collapsible Agent 2 Inline (Closed by default) */}
       {proposal && (
-        <CollapsibleSection title="Agent 2 Proposal Analysis" defaultOpen={false}>
+        <CollapsibleSection title="Agent 2 Bid Analysis" defaultOpen={false}>
           <Agent2Inline bid={bid} proposal={proposal as any} />
         </CollapsibleSection>
       )}
