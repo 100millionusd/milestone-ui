@@ -12,10 +12,11 @@ function usd(n: number) {
   }
 }
 
-// 👇 UPDATED: Just return the URL as-is. 
-// Since we use unoptimized={true} below, the standard link will work fine!
+// 👇 UPDATE: Use the Sapphire gateway
 function toFastLink(url?: string | null) {
-  return url || '';
+  if (!url) return '';
+  // Swap the slow public link for your fast premium link
+  return url.replace('gateway.pinata.cloud', 'sapphire-given-snake-741.mypinata.cloud');
 }
 
 type Bid = {
