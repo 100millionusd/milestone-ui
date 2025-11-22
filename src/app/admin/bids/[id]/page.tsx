@@ -112,24 +112,6 @@ export default function AdminBidDetailPage(props: { params?: { id: string } }) {
   // chat modal state (bid-level; opened from header or any proof)
   const [chatOpen, setChatOpen] = useState(false);
 
-  // ——— NEW: State for the "Run Agent 2" button on the Bid ———
-const [analyzingBid, setAnalyzingBid] = useState(false);
-
-async function runBidAnalysis() {
-  if (!bidId) return;
-  try {
-    setAnalyzingBid(true);
-    // Ensure 'analyzeBid' exists in your '@/lib/api' file. 
-    // If it is named differently (e.g. runBidAi), update it here.
-    const updated = await api.analyzeBid(bidId); 
-    setBid(updated);
-  } catch (e: any) {
-    console.error(e);
-    alert(e?.message || 'Failed to run Agent 2 on bid');
-  } finally {
-    setAnalyzingBid(false);
-  }
-}
 
  // Initial load
   useEffect(() => {
@@ -398,48 +380,6 @@ return (
         </div>
       </CollapsibleSection>
 
-{/* ——— NEW: Agent 2 Bid Analysis with Buttons ——— */}
-<CollapsibleSection
-  title="Agent 2 Bid Analysis"
-  defaultOpen={!!(bid.aiAnalysis || bid.analysis)} // Auto-open if analysis exists
-  action={
-    <div className="flex items-center gap-2">
-      {/* Button 1: Run Agent 2 */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation(); // Prevent toggling the accordion
-          runBidAnalysis();
-        }}
-        disabled={analyzingBid}
-        className="px-3 py-1 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50 shadow-sm transition-colors"
-      >
-        {analyzingBid ? 'Running...' : 'Run Agent 2'}
-      </button>
-
-      {/* Button 2: Ask Agent 2 (Chat) */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setChatOpen(true);
-        }}
-        className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-700 shadow-sm transition-colors"
-      >
-        Ask Agent 2 (Chat)
-      </button>
-    </div>
-  }
->
-  {/* Section Content */}
-  {(bid.aiAnalysis || bid.analysis) ? (
-    <AnalysisView a={bid.aiAnalysis || bid.analysis} />
-  ) : (
-    <div className="text-sm text-slate-500 py-2">
-      No AI analysis found for this bid yet. Click "Run Agent 2" to generate one.
-    </div>
-  )}
-</CollapsibleSection>
 
       {/* 2. Collapsible Agent 2 Inline (Closed by default) */}
       {proposal && (
