@@ -11,6 +11,12 @@ const nextConfig = {
         hostname: 'sapphire-given-snake-741.mypinata.cloud',
         pathname: '/ipfs/**',
       },
+      // 👇 FIX: Allowed the public Pinata gateway
+      {
+        protocol: 'https',
+        hostname: 'gateway.pinata.cloud',
+        pathname: '/ipfs/**',
+      },
     ],
     formats: ['image/avif', 'image/webp'],
     deviceSizes: [360, 640, 768, 1024, 1280, 1536],
