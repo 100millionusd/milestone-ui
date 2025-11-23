@@ -3,6 +3,10 @@ const nextConfig = {
   // 👇 turn off auto-trailing slashes (this is what was causing /api/... and /api.../ duplicates)
   trailingSlash: false,
 
+  images: {
+    // 👇 ADD THIS LINE (60 seconds * 60 minutes * 24 hours * 365 days)
+    minimumCacheTTL: 31536000,
+
   // ✅ enable Next/Image optimization for Pinata IPFS images
   images: {
     remotePatterns: [
