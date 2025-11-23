@@ -19,18 +19,9 @@ function usd(n: number) {
   }
 }
 
-// Add cache at module level (outside components)
-const proofsCache = new Map();
-
 async function fetchProofsClient(proposalId: number) {
-  const cacheKey = `proofs-${proposalId}`;
-  
-  // Return cached data if available (except when force refresh needed)
-  if (proofsCache.has(cacheKey)) {
-    return proofsCache.get(cacheKey);
-  }
-  
   try {
+    // Always fetch fresh data using the timestamp
     const r = await fetch(
       `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
       {
@@ -40,11 +31,7 @@ async function fetchProofsClient(proposalId: number) {
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
-    const result = Array.isArray(list) ? list : [];
-    
-    // Cache the result
-    proofsCache.set(cacheKey, result);
-    return result;
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
