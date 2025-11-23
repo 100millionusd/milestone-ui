@@ -232,11 +232,36 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
         throw new Error(msg);
       }
-      const list = await res.json();
-      const arr = Array.isArray(list) ? list : [];
+      
+      const rawList = await res.json();
+      const list = Array.isArray(rawList) ? rawList : [];
 
-      setProofs(arr);
-      await hydrateArchiveStatuses(arr);
+      // ===========================================================================
+      // 🛡️ SANITIZE ON LOAD: Clean URLs immediately (Strip dots & Fix Gateway)
+      // This matches the "cleanBidData" approach from page.tsx
+      // ===========================================================================
+      const cleanList = list.map((p: any) => {
+        if (Array.isArray(p.files)) {
+          p.files = p.files.map((f: any) => {
+            let u = f.url || "";
+            
+            // 1. Remove trailing dot/punctuation
+            u = u.trim().replace(/[.,;]+$/, "");
+
+            // 2. Swap to Cloudflare (Fixes 401 & Timeouts)
+            // Even if DB has "sapphire", we switch it to public here so the UI works
+            u = u.replace('gateway.pinata.cloud', 'cf-ipfs.com')
+                 .replace('sapphire-given-snake-741.mypinata.cloud', 'cf-ipfs.com');
+
+            return { ...f, url: u };
+          });
+        }
+        return p;
+      });
+
+      setProofs(cleanList);
+      await hydrateArchiveStatuses(cleanList);
+
     } catch (err: any) {
       setError(err?.message || 'Failed to load proofs');
     } finally {
