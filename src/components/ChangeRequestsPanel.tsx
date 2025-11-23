@@ -22,19 +22,36 @@ type ChangeRequestRow = {
   responses?: CRResponse[];
 };
 
+// ... imports
+
 const PINATA_GATEWAY =
   typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String((process as any).env.NEXT_PUBLIC_PINATA_GATEWAY)
         .replace(/^https?:\/\//, "")
         .replace(/\/+$/, "")}/ipfs`
-    : typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY
-    ? String((process as any).env?.NEXT_PUBLIC_IPFS_GATEWAY).replace(/\/+$/, "")
     : "https://gateway.pinata.cloud/ipfs";
 
+// 1. Grab the token from the environment
+const GATEWAY_TOKEN = 
+  typeof process !== "undefined" ? (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY_TOKEN : "";
+
 function toUrl(f: CRResponseFile) {
+  // If it's already a full HTTP URL, return it
   if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
+  
+  // If it's a URL without protocol, add https
   if (f?.url) return `https://${f.url.replace(/^https?:\/\//, "")}`;
-  if (f?.cid) return `${PINATA_GATEWAY}/${f.cid}`;
+
+  // If it is a CID (IPFS Hash)
+  if (f?.cid) {
+    const baseUrl = `${PINATA_GATEWAY}/${f.cid}`;
+    
+    // 2. Append the token if we have it
+    // This turns "https://.../ipfs/QmHash" into "https://.../ipfs/QmHash?pinataGatewayToken=xyz"
+    return GATEWAY_TOKEN 
+      ? `${baseUrl}?pinataGatewayToken=${GATEWAY_TOKEN}` 
+      : baseUrl;
+  }
   return "#";
 }
 
