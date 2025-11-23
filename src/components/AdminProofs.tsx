@@ -796,7 +796,7 @@ function ProofCard(props: ProofCardProps) {
                         </div>
                     </div>
 
-                    {/* Attachments */}
+ {/* Attachments */}
                     <div>
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                             Attachments {Array.isArray(proof.files) && `(${proof.files.length})`}
@@ -813,6 +813,7 @@ function ProofCard(props: ProofCardProps) {
                                     href={href}
                                     target="_blank"
                                     rel="noopener noreferrer"
+                                    title={file.name} // Added title for hover visibility
                                     className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
                                     >
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -821,9 +822,7 @@ function ProofCard(props: ProofCardProps) {
                                         alt={file.name}
                                         className="h-full w-full object-cover group-hover:scale-105 transition duration-500"
                                     />
-                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                                        <p className="text-[10px] text-white truncate">{file.name}</p>
-                                    </div>
+                                    {/* REMOVED: The bottom gradient text overlay div was here */}
                                     </a>
                                 );
                                 }
