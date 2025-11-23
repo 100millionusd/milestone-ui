@@ -226,17 +226,51 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       const url = `${API_BASE}/proofs${params.toString() ? `?${params}` : ''}`;
 
       // 3) Fetch directly from JSON API
+// ... inside loadProofs function ...
+
+      // 3) Fetch directly from JSON API
       const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
         throw new Error(msg);
       }
-      const list = await res.json();
-      const arr = Array.isArray(list) ? list : [];
+      
+      const rawList = await res.json();
+      const list = Array.isArray(rawList) ? rawList : [];
 
-      setProofs(arr);
-      await hydrateArchiveStatuses(arr);
+      // =========================================================================
+      // 🛡️ DATA SANITIZATION (Like in page.tsx)
+      // 1. Strip trailing dots (Fixes Timeout crash)
+      // 2. Swap private gateway -> Cloudflare (Fixes 401 Unauthorized)
+      // =========================================================================
+      const cleanList = list.map((p: any) => {
+        // Ensure files is an array
+        let files = Array.isArray(p.files) 
+          ? p.files 
+          : (typeof p.files === 'string' ? JSON.parse(p.files || '[]') : []);
+
+        // Map over files and clean the URL
+        files = files.map((f: any) => {
+          let u = f.url || "";
+          
+          // 1. Remove trailing dot/punctuation
+          u = u.trim().replace(/[.,;]+$/, "");
+
+          // 2. Force Cloudflare (Public & Fast)
+          // This ensures the Browser never sees the Sapphire link that causes 401s
+          u = u.replace('gateway.pinata.cloud', 'cf-ipfs.com')
+               .replace('sapphire-given-snake-741.mypinata.cloud', 'cf-ipfs.com');
+
+          return { ...f, url: u };
+        });
+
+        return { ...p, files };
+      });
+
+      setProofs(cleanList); // <--- Set clean data
+      await hydrateArchiveStatuses(cleanList);
+
     } catch (err: any) {
       setError(err?.message || 'Failed to load proofs');
     } finally {
