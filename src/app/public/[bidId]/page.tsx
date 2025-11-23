@@ -112,7 +112,7 @@ export default function PublicProjectDetailClient() {
   const [proofs, setProofs] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
 
-  // ADD THIS: Image preloading useEffect
+  // Image preloading useEffect
   useEffect(() => {
     if (!project) return;
 
@@ -258,7 +258,7 @@ export default function PublicProjectDetailClient() {
                 alt={project.proposalTitle || 'cover'}
                 width={1600}
                 height={900}
-                unoptimized={true} // 👈 ADDED
+                unoptimized={true}
                 sizes="(max-width: 768px) 100vw, 1024px"
                 style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
                 priority
@@ -313,7 +313,7 @@ export default function PublicProjectDetailClient() {
                             src={u}
                             alt={`image ${i + 1}`}
                             fill
-                            unoptimized={true} // 👈 ADDED
+                            unoptimized={true}
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                             style={{ objectFit: 'cover' }}
                             loading="lazy"
@@ -396,9 +396,10 @@ export default function PublicProjectDetailClient() {
                   <p className="text-gray-500">No public milestones/proofs yet.</p>
                 )}
                 {Array.isArray(proofs) &&
-                  proofs.map((p: any) => (
+                  // UPDATED: Added 'i' index to handle duplicate/missing proofIds
+                  proofs.map((p: any, i: number) => (
                     <div
-                      key={p.proofId || `${p.milestoneIndex}-p`}
+                      key={p.proofId ? `proof-${p.proofId}` : `idx-${i}`}
                       className="rounded-lg border p-4"
                     >
                       <div className="text-sm font-medium">
@@ -431,7 +432,7 @@ export default function PublicProjectDetailClient() {
                                       src={url}
                                       alt={f.name || `file ${idx + 1}`}
                                       fill
-                                      unoptimized={true} // 👈 ADDED
+                                      unoptimized={true}
                                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                                       style={{ objectFit: 'cover' }}
                                       loading="lazy"
