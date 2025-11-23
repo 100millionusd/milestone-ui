@@ -22,10 +22,6 @@ type ChangeRequestRow = {
   responses?: CRResponse[];
 };
 
-// ... imports
-
-// 1. Get Token and Gateway
-// ChangeRequestsPanel.tsx
 
 // 1. Get the Gateway Domain and Token
 const PINATA_GATEWAY =
@@ -510,23 +506,26 @@ export default function ChangeRequestsPanel(props: Props) {
                                       const href = toUrl(f);
                                       // Check the filename first, as the URL might be an opaque IPFS hash
                                       const img = isImageHref(f.name || href);
-                                      return img ? (
-                                        <a
-                                          key={i}
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="group/img relative block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
-                                        >
-                                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                                          <img
-                                            src={href}
-                                            alt={f.name || "image"}
-                                            className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110"
-                                          />
-                                          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors" />
-                                        </a>
-                                      ) : (
+ return img ? (
+  <a
+    key={i}
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    // UPDATED: Removed 'aspect-square'. Kept 'block w-full'.
+    className="group/img relative block w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
+  >
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img
+      src={href}
+      alt={f.name || "image"}
+      // UPDATED: Removed 'absolute inset-0 h-full'. Added 'h-auto'.
+      className="w-full h-auto object-cover transition-transform duration-500 group-hover/img:scale-105"
+    />
+    {/* Hover Overlay */}
+    <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors" />
+  </a>
+) : (
                                         <a
                                           key={i}
                                           href={href}
