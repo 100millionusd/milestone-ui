@@ -796,13 +796,14 @@ function ProofCard(props: ProofCardProps) {
                         </div>
                     </div>
 
- {/* Attachments */}
+{/* Attachments */}
                     <div>
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                             Attachments {Array.isArray(proof.files) && `(${proof.files.length})`}
                         </h4>
                         {Array.isArray(proof.files) && proof.files.length > 0 ? (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            // UPDATED: Added 'items-start' to prevent grid items from stretching and creating empty space
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
                             {proof.files.map((file, i) => {
                                 const href = toGatewayUrl(file);
                                 const imgish = isImg(href) || isImg(file.name);
@@ -813,16 +814,17 @@ function ProofCard(props: ProofCardProps) {
                                     href={href}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    title={file.name} // Added title for hover visibility
-                                    className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                                    title={file.name}
+                                    // UPDATED: Removed 'aspect-square', added 'block w-full'
+                                    className="group relative block w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
                                     >
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                         src={href}
                                         alt={file.name}
-                                        className="h-full w-full object-cover group-hover:scale-105 transition duration-500"
+                                        // UPDATED: Changed 'h-full' to 'h-auto' to respect image ratio
+                                        className="w-full h-auto object-cover group-hover:scale-105 transition duration-500"
                                     />
-                                    {/* REMOVED: The bottom gradient text overlay div was here */}
                                     </a>
                                 );
                                 }
