@@ -594,6 +594,7 @@ const uiStatus = (p: any) => {
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                                   style={{ objectFit: 'cover' }}
+                                  unoptimized={true}
                                 />
                               </div>
                             ) : (
@@ -639,6 +640,7 @@ const uiStatus = (p: any) => {
               sizes="(max-width: 768px) 100vw, 33vw"
               style={{ objectFit: 'cover' }}
               priority
+              unoptimized={true}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No image</div>
@@ -765,6 +767,7 @@ const uiStatus = (p: any) => {
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
                             style={{ objectFit: 'cover' }}
+                            unoptimized={true}
                           />
                         </div>
                       ))}
