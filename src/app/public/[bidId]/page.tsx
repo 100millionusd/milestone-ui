@@ -19,31 +19,32 @@ function usd(n: number) {
   }
 }
 
-// 1. RESTORED CACHE FOR SPEED
+// Add cache at module level (outside components)
 const proofsCache = new Map();
 
 async function fetchProofsClient(proposalId: number) {
+  const cacheKey = `proofs-${proposalId}`;
+  
+  // Return cached data if available (except when force refresh needed)
+  if (proofsCache.has(cacheKey)) {
+    return proofsCache.get(cacheKey);
+  }
+  
   try {
-    // 2. FORCE FRESH DATA (Background Update)
-    // We keep the cache variable above for speed, but this fetch 
-    // forces a network call to get the missing Milestone 3.
-    const uniqueId = Math.random().toString(36).substring(7);
-    
     const r = await fetch(
-      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&cb=${uniqueId}`,
+      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
       {
         cache: 'no-store',
-        next: { revalidate: 0 }, 
-        headers: {
-          'Pragma': 'no-cache',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-        },
         credentials: 'include',
-      }
+      },
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
-    return Array.isArray(list) ? list : [];
+    const result = Array.isArray(list) ? list : [];
+    
+    // Cache the result
+    proofsCache.set(cacheKey, result);
+    return result;
   } catch {
     return [];
   }
@@ -115,9 +116,11 @@ export default function PublicProjectDetailClient() {
   const [proofs, setProofs] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
 
+  // ADD THIS: Image preloading useEffect
   useEffect(() => {
     if (!project) return;
 
+    // Preload cover image
     if (project.coverImage) {
       const link = document.createElement('link');
       link.rel = 'preload';
@@ -126,6 +129,7 @@ export default function PublicProjectDetailClient() {
       document.head.appendChild(link);
     }
 
+    // Preload first few proof images
     const proofImages = proofs
       .flatMap((p: any) => p.files || [])
       .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
@@ -155,25 +159,11 @@ export default function PublicProjectDetailClient() {
 
       if (p) {
         const proposalIdNum = Number(p.proposalId ?? 0);
-        
-        // 3. INSTANT LOAD (OPTIMISTIC UI)
-        // If we have data in cache, show it IMMEDIATELY while we fetch fresh data
-        if (proofsCache.has(proposalIdNum)) {
-          setProofs(proofsCache.get(proposalIdNum));
-        }
-
         const [proofRows, auditRows] = await Promise.all([
           proposalIdNum ? fetchProofsClient(proposalIdNum) : Promise.resolve([]),
           proposalIdNum ? fetchAuditClient(proposalIdNum) : Promise.resolve([]),
         ]);
-        
-        // 4. UPDATE WITH FRESH DATA
-        // Once the network request finishes, update the UI with Milestone 3
         setProofs(proofRows);
-        if (proposalIdNum) {
-          proofsCache.set(proposalIdNum, proofRows);
-        }
-
         const rawAudit = Array.isArray(auditRows) && auditRows.length ? auditRows : (p as any).audit || [];
         setEvents(normalizeAudit(rawAudit));
       } else {
@@ -237,7 +227,7 @@ export default function PublicProjectDetailClient() {
         ← Back to Projects
       </Link>
 
-      {loading && !project && <div className="mt-6 text-gray-600">Loading…</div>}
+      {loading && <div className="mt-6 text-gray-600">Loading…</div>}
 
       {!loading && err && (
         <div className="mt-6">
@@ -256,7 +246,7 @@ export default function PublicProjectDetailClient() {
         </div>
       )}
 
-      {project && (
+      {!loading && !err && project && (
         <>
           {/* header */}
           <div className="mt-4">
@@ -267,18 +257,17 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
-              <Image
-                src={project.coverImage}
-                alt={project.proposalTitle || 'cover'}
-                width={1600}
-                height={900}
-                unoptimized={true}
-                sizes="(max-width: 768px) 100vw, 1024px"
-                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
-                priority
-                placeholder="blur"
-                blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-              />
+ <Image
+  src={project.coverImage}
+  alt={project.proposalTitle || 'cover'}
+  width={1600}
+  height={900}
+  sizes="(max-width: 768px) 100vw, 1024px"
+  style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+  priority
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
             ) : (
               <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
             )}
@@ -323,17 +312,16 @@ export default function PublicProjectDetailClient() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
                         <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
-                          <Image
-                            src={u}
-                            alt={`image ${i + 1}`}
-                            fill
-                            unoptimized={true}
-                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                            style={{ objectFit: 'cover' }}
-                            loading="lazy"
-                            placeholder="blur"
-                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-                          />
+ <Image
+  src={u}
+  alt={`image ${i + 1}`}
+  fill
+  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+  style={{ objectFit: 'cover' }}
+  loading="lazy"
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
                         </div>
                       ))}
                     </div>
@@ -410,10 +398,9 @@ export default function PublicProjectDetailClient() {
                   <p className="text-gray-500">No public milestones/proofs yet.</p>
                 )}
                 {Array.isArray(proofs) &&
-                  // 5. RENDERING FIX: Use 'i' index to ensure React renders duplicates
-                  proofs.map((p: any, i: number) => (
+                  proofs.map((p: any) => (
                     <div
-                      key={p.proofId ? `proof-${p.proofId}` : `idx-${i}`}
+                      key={p.proofId || `${p.milestoneIndex}-p`}
                       className="rounded-lg border p-4"
                     >
                       <div className="text-sm font-medium">
@@ -442,17 +429,16 @@ export default function PublicProjectDetailClient() {
                               >
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
-                                    <Image
-                                      src={url}
-                                      alt={f.name || `file ${idx + 1}`}
-                                      fill
-                                      unoptimized={true}
-                                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                                      style={{ objectFit: 'cover' }}
-                                      loading="lazy"
-                                      placeholder="blur"
-                                      blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-                                    />
+ <Image
+  src={url}
+  alt={f.name || `file ${idx + 1}`}
+  fill
+  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+  style={{ objectFit: 'cover' }}
+  loading="lazy"
+  placeholder="blur"
+  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+/>
                                   </div>
                                 ) : (
                                   <div className="h-24 flex items-center justify-center text-xs text-gray-500">
