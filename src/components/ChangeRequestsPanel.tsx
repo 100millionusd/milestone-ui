@@ -25,6 +25,9 @@ type ChangeRequestRow = {
 // ... imports
 
 // 1. Get Token and Gateway
+// ChangeRequestsPanel.tsx
+
+// 1. Get the Gateway Domain and Token
 const PINATA_GATEWAY =
   typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String((process as any).env.NEXT_PUBLIC_PINATA_GATEWAY)
@@ -35,10 +38,10 @@ const PINATA_GATEWAY =
 const GATEWAY_TOKEN = 
   typeof process !== "undefined" ? (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY_TOKEN : "";
 
-// 2. Updated Function
+// 2. The Fixed Function
 function toUrl(f: CRResponseFile) {
-  // PRIORITY 1: If we have a CID, always reconstruct the URL to ensure the token is attached.
-  // This overrides any "stale" or token-less URL stored in f.url
+  // PRIORITY 1: If we have a CID, construct a fresh URL with the token.
+  // We ignore f.url because it might be the old public link or missing the token.
   if (f?.cid) {
     const baseUrl = `${PINATA_GATEWAY}/${f.cid}`;
     return GATEWAY_TOKEN 
@@ -46,12 +49,8 @@ function toUrl(f: CRResponseFile) {
       : baseUrl;
   }
 
-  // PRIORITY 2: Fallback to the stored URL if no CID exists (e.g. non-IPFS links)
-  if (f?.url && /^https?:\/\//i.test(f.url)) {
-    // Optional: If the stored URL happens to be your private gateway but lacks a token,
-    // you could try to append it here. But Priority 1 usually covers this.
-    return f.url;
-  }
+  // PRIORITY 2: Fallback to stored URL (e.g. if it's an external link)
+  if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
   
   if (f?.url) return `https://${f.url.replace(/^https?:\/\//, "")}`;
 
