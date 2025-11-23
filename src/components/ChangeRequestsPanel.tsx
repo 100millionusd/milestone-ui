@@ -24,6 +24,7 @@ type ChangeRequestRow = {
 
 // ... imports
 
+// 1. Get Token and Gateway
 const PINATA_GATEWAY =
   typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String((process as any).env.NEXT_PUBLIC_PINATA_GATEWAY)
@@ -31,27 +32,29 @@ const PINATA_GATEWAY =
         .replace(/\/+$/, "")}/ipfs`
     : "https://gateway.pinata.cloud/ipfs";
 
-// 1. Grab the token from the environment
 const GATEWAY_TOKEN = 
   typeof process !== "undefined" ? (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY_TOKEN : "";
 
+// 2. Updated Function
 function toUrl(f: CRResponseFile) {
-  // If it's already a full HTTP URL, return it
-  if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
-  
-  // If it's a URL without protocol, add https
-  if (f?.url) return `https://${f.url.replace(/^https?:\/\//, "")}`;
-
-  // If it is a CID (IPFS Hash)
+  // PRIORITY 1: If we have a CID, always reconstruct the URL to ensure the token is attached.
+  // This overrides any "stale" or token-less URL stored in f.url
   if (f?.cid) {
     const baseUrl = `${PINATA_GATEWAY}/${f.cid}`;
-    
-    // 2. Append the token if we have it
-    // This turns "https://.../ipfs/QmHash" into "https://.../ipfs/QmHash?pinataGatewayToken=xyz"
     return GATEWAY_TOKEN 
       ? `${baseUrl}?pinataGatewayToken=${GATEWAY_TOKEN}` 
       : baseUrl;
   }
+
+  // PRIORITY 2: Fallback to the stored URL if no CID exists (e.g. non-IPFS links)
+  if (f?.url && /^https?:\/\//i.test(f.url)) {
+    // Optional: If the stored URL happens to be your private gateway but lacks a token,
+    // you could try to append it here. But Priority 1 usually covers this.
+    return f.url;
+  }
+  
+  if (f?.url) return `https://${f.url.replace(/^https?:\/\//, "")}`;
+
   return "#";
 }
 
