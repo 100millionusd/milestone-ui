@@ -19,18 +19,21 @@ function usd(n: number) {
   }
 }
 
+// 1. RESTORED CACHE FOR SPEED
+const proofsCache = new Map();
+
 async function fetchProofsClient(proposalId: number) {
   try {
-    // 1. Force unique URL with random string to bypass ALL browser/CDN caches
+    // 2. FORCE FRESH DATA (Background Update)
+    // We keep the cache variable above for speed, but this fetch 
+    // forces a network call to get the missing Milestone 3.
     const uniqueId = Math.random().toString(36).substring(7);
     
     const r = await fetch(
       `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&cb=${uniqueId}`,
       {
         cache: 'no-store',
-        // 2. Tell Next.js to never cache this request
         next: { revalidate: 0 }, 
-        // 3. Tell the browser/proxy to never cache this response
         headers: {
           'Pragma': 'no-cache',
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -112,11 +115,9 @@ export default function PublicProjectDetailClient() {
   const [proofs, setProofs] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
 
-  // Image preloading useEffect
   useEffect(() => {
     if (!project) return;
 
-    // Preload cover image
     if (project.coverImage) {
       const link = document.createElement('link');
       link.rel = 'preload';
@@ -125,7 +126,6 @@ export default function PublicProjectDetailClient() {
       document.head.appendChild(link);
     }
 
-    // Preload first few proof images
     const proofImages = proofs
       .flatMap((p: any) => p.files || [])
       .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
@@ -155,11 +155,25 @@ export default function PublicProjectDetailClient() {
 
       if (p) {
         const proposalIdNum = Number(p.proposalId ?? 0);
+        
+        // 3. INSTANT LOAD (OPTIMISTIC UI)
+        // If we have data in cache, show it IMMEDIATELY while we fetch fresh data
+        if (proofsCache.has(proposalIdNum)) {
+          setProofs(proofsCache.get(proposalIdNum));
+        }
+
         const [proofRows, auditRows] = await Promise.all([
           proposalIdNum ? fetchProofsClient(proposalIdNum) : Promise.resolve([]),
           proposalIdNum ? fetchAuditClient(proposalIdNum) : Promise.resolve([]),
         ]);
+        
+        // 4. UPDATE WITH FRESH DATA
+        // Once the network request finishes, update the UI with Milestone 3
         setProofs(proofRows);
+        if (proposalIdNum) {
+          proofsCache.set(proposalIdNum, proofRows);
+        }
+
         const rawAudit = Array.isArray(auditRows) && auditRows.length ? auditRows : (p as any).audit || [];
         setEvents(normalizeAudit(rawAudit));
       } else {
@@ -223,7 +237,7 @@ export default function PublicProjectDetailClient() {
         ← Back to Projects
       </Link>
 
-      {loading && <div className="mt-6 text-gray-600">Loading…</div>}
+      {loading && !project && <div className="mt-6 text-gray-600">Loading…</div>}
 
       {!loading && err && (
         <div className="mt-6">
@@ -242,7 +256,7 @@ export default function PublicProjectDetailClient() {
         </div>
       )}
 
-      {!loading && !err && project && (
+      {project && (
         <>
           {/* header */}
           <div className="mt-4">
@@ -396,7 +410,7 @@ export default function PublicProjectDetailClient() {
                   <p className="text-gray-500">No public milestones/proofs yet.</p>
                 )}
                 {Array.isArray(proofs) &&
-                  // UPDATED: Added 'i' index to handle duplicate/missing proofIds
+                  // 5. RENDERING FIX: Use 'i' index to ensure React renders duplicates
                   proofs.map((p: any, i: number) => (
                     <div
                       key={p.proofId ? `proof-${p.proofId}` : `idx-${i}`}
