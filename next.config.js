@@ -1,27 +1,26 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 👇 turn off auto-trailing slashes (this is what was causing /api/... and /api.../ duplicates)
+  // 👇 turn off auto-trailing slashes
   trailingSlash: false,
 
+  // ✅ Unified images configuration
   images: {
-    // 👇 ADD THIS LINE (60 seconds * 60 minutes * 24 hours * 365 days)
+    // 👇 ADDED: Cache images for 1 year to stop Pinata rate limiting
     minimumCacheTTL: 31536000,
 
-  // ✅ enable Next/Image optimization for Pinata IPFS images
-  images: {
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'sapphire-given-snake-741.mypinata.cloud',
         pathname: '/ipfs/**',
       },
-      // 👇 FIX: Allowed the public Pinata gateway
+      // Allowed the public Pinata gateway
       {
         protocol: 'https',
         hostname: 'gateway.pinata.cloud',
         pathname: '/ipfs/**',
       },
-      // 👇 FIX: Allowed the Cloudflare IPFS gateway (Safety net)
+      // Allowed the Cloudflare IPFS gateway
       {
         protocol: 'https',
         hostname: 'cf-ipfs.com',
@@ -47,7 +46,7 @@ const nextConfig = {
     ];
   },
 
-  // ✅ cache public API responses so /public doesn’t block on fresh fetches every time
+  // ✅ cache public API responses
   async headers() {
     return [
       {
@@ -59,7 +58,6 @@ const nextConfig = {
     ];
   },
 
-  // Keep this if you want readable prod stack traces (slightly larger build)
   productionBrowserSourceMaps: true,
 };
 
