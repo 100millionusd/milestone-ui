@@ -19,32 +19,28 @@ function usd(n: number) {
   }
 }
 
-// Add cache at module level (outside components)
-const proofsCache = new Map();
-
 async function fetchProofsClient(proposalId: number) {
-  const cacheKey = `proofs-${proposalId}`;
-  
-  // Return cached data if available (except when force refresh needed)
-  if (proofsCache.has(cacheKey)) {
-    return proofsCache.get(cacheKey);
-  }
-  
   try {
+    // 1. Force unique URL with random string to bypass ALL browser/CDN caches
+    const uniqueId = Math.random().toString(36).substring(7);
+    
     const r = await fetch(
-      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
+      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&cb=${uniqueId}`,
       {
         cache: 'no-store',
+        // 2. Tell Next.js to never cache this request
+        next: { revalidate: 0 }, 
+        // 3. Tell the browser/proxy to never cache this response
+        headers: {
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
         credentials: 'include',
-      },
+      }
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
-    const result = Array.isArray(list) ? list : [];
-    
-    // Cache the result
-    proofsCache.set(cacheKey, result);
-    return result;
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
