@@ -1449,10 +1449,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                         <div className="px-6 py-6">
                           <DebugPanel data={m} title={`Milestone Data: ${origIdx}`} />
                           
-                          {/* Proof text/description */}
-                          {renderProof(m)}
- {(!m?.proof || (typeof m.proof === 'string' && !m.proof.trim().startsWith('{') && !/https?:\/\//i.test(m.proof))) && lp?.description && (
-  <p className="text-sm text-gray-700 mt-2 bg-white p-3 rounded border border-slate-100 shadow-sm">{lp.description}</p>
+ {/* Proof text/description */}
+{renderProof(m)}
+
+{/* FIX: Remove the '!' and use a strict start/end anchor regex to check if it IS a URL */}
+{(!m?.proof || (typeof m.proof === 'string' && /^(https?:\/\/[^\s]+)$/i.test(m.proof.trim()))) && lp?.description && (
+  <p className="text-sm text-gray-700 mt-2 bg-white p-3 rounded border border-slate-100 shadow-sm">
+    {lp.description}
+  </p>
 )}
 
                           {/* Files */}
