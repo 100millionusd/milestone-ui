@@ -411,7 +411,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // --- State: Caching & Local Tracking ---
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
-  const [latestProofByKey, setLatestProofByKey] = useState<Record<string, { description?: string; files?: any[] }>>({});
+  const [latestProofByKey, setLatestProofByKey] = useState<Record<string, { description?: string; files?: any[]; status?: string }>>({});
   const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({ bids: [], lastUpdated: 0 });
 
   // --- State: Payment Persistence ---
@@ -846,6 +846,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                 mine?.ai_analysis?.files ||
                 mine?.aiAnalysis?.files ||
                 [],
+                status: mine?.status,
             };
           }
         }
@@ -1379,6 +1380,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                 const fromProofs = entriesFromProofFiles(lp?.files || []);
                 const fromMilestone = extractFilesFromMilestone(m);
                 const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
+                const isRejectedServer = m?.status === 'rejected' || lp?.status === 'rejected'; 
+                const rejected = isRejectedServer || rejectedLocal.has(key);
 
                 return (
                   <div key={`${bid.bidId}:${origIdx}`} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all">
@@ -1390,13 +1393,14 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                     >
                         <div className="flex items-center gap-4">
                            {/* Status Icon Circle */}
-                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0 ${
-                              approved ? 'bg-emerald-100 text-emerald-600' : 
-                              hasProof(m) ? 'bg-amber-100 text-amber-600' : 
-                              'bg-slate-100 text-slate-400'
-                           }`}>
-                              {approved ? '✓' : hasProof(m) ? '!' : '○'}
-                           </div>
+<div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0 ${
+   approved ? 'bg-emerald-100 text-emerald-600' : 
+   rejected ? 'bg-rose-100 text-rose-600' : // Add this check
+   hasProof(m) ? 'bg-amber-100 text-amber-600' : 
+   'bg-slate-100 text-slate-400'
+}`}>
+   {approved ? '✓' : rejected ? '✕' : hasProof(m) ? '!' : '○'} {/* Add rejected check */}
+</div>
 
                            <div>
                               <h3 className="font-bold text-slate-900">{m.name}</h3>
