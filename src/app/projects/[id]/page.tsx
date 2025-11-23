@@ -1582,9 +1582,9 @@ const bidFiles = safeBids.flatMap((b: any) => {
                         key={`${section.id}-${i}`} 
                         className="group relative flex flex-col bg-white border rounded-lg shadow-sm hover:shadow-md transition-all overflow-hidden"
                       >
-                        {/* Preview Area - Clickable Container */}
+                        {/* Preview Area - Modified to be taller and borderless if it is an image */}
                         <div 
-                          className={`h-32 bg-gray-100 flex items-center justify-center overflow-hidden relative border-b border-gray-50 ${isImg ? 'cursor-pointer' : ''}`}
+                          className={`${isImg ? 'h-48' : 'h-32 border-b border-gray-50'} bg-gray-100 flex items-center justify-center overflow-hidden relative ${isImg ? 'cursor-pointer' : ''}`}
                           onClick={() => isImg && setLightbox(href)}
                         >
                           {isImg && baseUrl ? (
@@ -1600,7 +1600,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
                             </div>
                           )}
                           
-                          {/* Overlay Actions (Now passes clicks through to parent or handles its own) */}
+                          {/* Overlay Actions */}
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-start justify-end p-2 opacity-0 group-hover:opacity-100 pointer-events-none">
                             <a 
                               href={href} 
@@ -1615,15 +1615,17 @@ const bidFiles = safeBids.flatMap((b: any) => {
                           </div>
                         </div>
 
-                        {/* Metadata Area */}
-                        <div className="p-3 flex flex-col flex-1 bg-white">
-                          <div className="font-medium text-sm text-gray-900 truncate mb-1" title={name}>
-                            {name}
+                        {/* Metadata Area - HIDDEN IF isImg IS TRUE */}
+                        {!isImg && (
+                          <div className="p-3 flex flex-col flex-1 bg-white">
+                            <div className="font-medium text-sm text-gray-900 truncate mb-1" title={name}>
+                              {name}
+                            </div>
+                            <div className="text-[11px] text-gray-400 uppercase tracking-wide truncate" title={file.scope}>
+                              {file.scope}
+                            </div>
                           </div>
-                          <div className="text-[11px] text-gray-400 uppercase tracking-wide truncate" title={file.scope}>
-                            {file.scope}
-                          </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1636,7 +1638,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
     })()}
   </section>
 )}
-
 
       {/* Admin */}
    {tab === 'admin' && me.role === 'admin' && (
