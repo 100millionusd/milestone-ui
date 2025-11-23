@@ -19,32 +19,28 @@ function usd(n: number) {
   }
 }
 
-// Add cache at module level (outside components)
-const proofsCache = new Map();
-
 async function fetchProofsClient(proposalId: number) {
-  const cacheKey = `proofs-${proposalId}`;
-  
-  // Return cached data if available (except when force refresh needed)
-  if (proofsCache.has(cacheKey)) {
-    return proofsCache.get(cacheKey);
-  }
-  
   try {
+    // 1. Force unique URL with random string to bypass ALL browser/CDN caches
+    const uniqueId = Math.random().toString(36).substring(7);
+    
     const r = await fetch(
-      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
+      `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&cb=${uniqueId}`,
       {
         cache: 'no-store',
+        // 2. Tell Next.js to never cache this request
+        next: { revalidate: 0 }, 
+        // 3. Tell the browser/proxy to never cache this response
+        headers: {
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
         credentials: 'include',
-      },
+      }
     );
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
-    const result = Array.isArray(list) ? list : [];
-    
-    // Cache the result
-    proofsCache.set(cacheKey, result);
-    return result;
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
@@ -257,17 +253,18 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
- <Image
-  src={project.coverImage}
-  alt={project.proposalTitle || 'cover'}
-  width={1600}
-  height={900}
-  sizes="(max-width: 768px) 100vw, 1024px"
-  style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
-  priority
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+              <Image
+                src={project.coverImage}
+                alt={project.proposalTitle || 'cover'}
+                width={1600}
+                height={900}
+                unoptimized={true} // 👈 ADDED
+                sizes="(max-width: 768px) 100vw, 1024px"
+                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+                priority
+                placeholder="blur"
+                blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+              />
             ) : (
               <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
             )}
@@ -312,16 +309,17 @@ export default function PublicProjectDetailClient() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
                         <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
- <Image
-  src={u}
-  alt={`image ${i + 1}`}
-  fill
-  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-  style={{ objectFit: 'cover' }}
-  loading="lazy"
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+                          <Image
+                            src={u}
+                            alt={`image ${i + 1}`}
+                            fill
+                            unoptimized={true} // 👈 ADDED
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                            style={{ objectFit: 'cover' }}
+                            loading="lazy"
+                            placeholder="blur"
+                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+                          />
                         </div>
                       ))}
                     </div>
@@ -429,16 +427,17 @@ export default function PublicProjectDetailClient() {
                               >
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
- <Image
-  src={url}
-  alt={f.name || `file ${idx + 1}`}
-  fill
-  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-  style={{ objectFit: 'cover' }}
-  loading="lazy"
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+                                    <Image
+                                      src={url}
+                                      alt={f.name || `file ${idx + 1}`}
+                                      fill
+                                      unoptimized={true} // 👈 ADDED
+                                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                                      style={{ objectFit: 'cover' }}
+                                      loading="lazy"
+                                      placeholder="blur"
+                                      blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+                                    />
                                   </div>
                                 ) : (
                                   <div className="h-24 flex items-center justify-center text-xs text-gray-500">
