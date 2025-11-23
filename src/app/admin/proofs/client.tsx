@@ -1451,9 +1451,9 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           
                           {/* Proof text/description */}
                           {renderProof(m)}
-                          {(!m?.proof || (typeof m.proof === 'string' && !/https?:\/\//i.test(m.proof))) && lp?.description && (
-                            <p className="text-sm text-gray-700 mt-2 bg-white p-3 rounded border border-slate-100 shadow-sm">{lp.description}</p>
-                          )}
+ {(!m?.proof || (typeof m.proof === 'string' && !m.proof.trim().startsWith('{') && !/https?:\/\//i.test(m.proof))) && lp?.description && (
+  <p className="text-sm text-gray-700 mt-2 bg-white p-3 rounded border border-slate-100 shadow-sm">{lp.description}</p>
+)}
 
                           {/* Files */}
                           <div className="mt-4">
