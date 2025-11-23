@@ -1422,7 +1422,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                  APPROVED
                               </span>
                            )}
-                           {!approved && hasProof(m) && (
+                           {!approved && !rejected && hasProof(m) && (
                               <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
                                  NEEDS REVIEW
                               </span>
@@ -1516,7 +1516,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 </button>
                               )}
 
-                               {hasProof(m) && !approved && (() => {
+                               {hasProof(m) && !approved && !rejected && (() => {
                                   const rKey = mkKey(bid.bidId, origIdx);
                                   const isProcessing = processing === `reject-${bid.bidId}-${origIdx}`;
                                   const isLocked = rejectedLocal.has(rKey);
@@ -1550,7 +1550,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                                 </button>
                               )}
 
-                              {hasProof(m) && !approved && (
+                              {hasProof(m) && !approved && !rejected && (
                                 <button
                                   onClick={() => handleApprove(bid.bidId, origIdx, m.proof)}
                                   disabled={processing === `approve-${bid.bidId}-${origIdx}`}
