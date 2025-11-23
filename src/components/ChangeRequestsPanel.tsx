@@ -508,7 +508,8 @@ export default function ChangeRequestsPanel(props: Props) {
                                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {resp.files.map((f, i) => {
                                       const href = toUrl(f);
-                                      const img = isImageHref(href);
+                                      // Check the filename first, as the URL might be an opaque IPFS hash
+                                      const img = isImageHref(f.name || href);
                                       return img ? (
                                         <a
                                           key={i}
