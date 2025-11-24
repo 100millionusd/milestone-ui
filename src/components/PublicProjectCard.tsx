@@ -91,6 +91,16 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   return s || 'submitted';
 }
 
+// Add this helper function at the top of the file
+function useDedicatedGateway(url: string | null | undefined) {
+  if (!url) return '';
+  // Force the URL to use your fast dedicated gateway
+  return url.replace(
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//, 
+    'https://sapphire-given-snake-741.mypinata.cloud/ipfs/'
+  );
+}
+
 // Per-file GPS detector
 function fileCoords(f: any): { lat: number; lon: number; label?: string | null } | null {
   const loc = f?.location ?? f?.geoApprox ?? f?.geo_approx ?? null;
@@ -589,7 +599,7 @@ const uiStatus = (p: any) => {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={String(f.url)}
+                                  src={useDedicatedGateway(String(f.url))}
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -634,7 +644,7 @@ const uiStatus = (p: any) => {
         >
           {project.coverImage ? (
             <Image
-              src={project.coverImage}
+              src={useDedicatedGateway(project.coverImage)}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -762,7 +772,7 @@ const uiStatus = (p: any) => {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={u}
+                            src={useDedicatedGateway(u)}
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
