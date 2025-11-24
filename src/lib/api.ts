@@ -1557,8 +1557,34 @@ export async function chatProofOnce(proofId: number, question: string): Promise<
 }
 
 // ---- IPFS ----
-export function uploadJsonToIPFS(data: any) {
-  return apiFetch(`/ipfs/upload-json`, { method: "POST", body: JSON.stringify(data) });
+// ✅ NEW: Client-Side JSON Upload (Crash-Proof)
+export async function uploadJsonToIPFS(data: any) {
+  // 1. Get Token
+  const keys = await apiFetch("/auth/pinata-token");
+
+  // 2. Upload Direct to Pinata
+  const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${keys.JWT}`
+    },
+    body: JSON.stringify({
+      pinataContent: data,
+      pinataMetadata: { name: data.title || "proposal_metadata" }
+    })
+  });
+
+  if (!res.ok) throw new Error("Pinata JSON upload failed");
+  const result = await res.json();
+
+  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+
+  return {
+    cid: result.IpfsHash,
+    url: `https://${gateway}/ipfs/${result.IpfsHash}`,
+    timestamp: result.Timestamp
+  };
 }
 
 export async function uploadFileToIPFS(file: File) {
