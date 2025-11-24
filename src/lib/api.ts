@@ -1562,34 +1562,34 @@ export function uploadJsonToIPFS(data: any) {
 }
 
 export async function uploadFileToIPFS(file: File) {
+  // 1. Get Temp Key from your server
+  // (This requires the /auth/pinata-token route in server.js!)
+  const keys = await apiFetch("/auth/pinata-token");
+  
   const fd = new FormData();
   fd.append("file", file);
-  const token = getJwt();
 
-  const init: RequestInit = {
+  // 2. Upload DIRECTLY to Pinata (Bypassing your server completely)
+  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
-    body: fd,
-    mode: "cors",
-    redirect: "follow",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    credentials: "include",
+    headers: {
+      "Authorization": `Bearer ${keys.JWT}` // Use the temp key
+    },
+    body: fd
+  });
+
+  if (!res.ok) throw new Error("Pinata upload failed");
+  
+  const result = await res.json();
+  
+  // 3. Return formatted result
+  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+  
+  return {
+    cid: result.IpfsHash,
+    url: `https://${gateway}/ipfs/${result.IpfsHash}`, 
+    name: file.name
   };
-
-  const r = await fetchWithFallback(`/ipfs/upload-file`, init);
-
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
-    throw new Error(j?.error || `HTTP ${r.status}`);
-  }
-  const result = await r.json();
-  if (result?.cid && !result?.url) {
-    const gateway =
-      (typeof process !== "undefined" &&
-        (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
-      "gateway.pinata.cloud";
-    result.url = `https://${gateway}/ipfs/${result.cid}`;
-  }
-  return result;
 }
 
 // ========= Proof uploads (Pinata via our Next API) =========
