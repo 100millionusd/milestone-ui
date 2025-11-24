@@ -351,11 +351,11 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
 
     const st = (p.status || 'pending').toLowerCase();
 
-    // --- LOGIC FIX START ---
+    // FIX: Count synonyms like funded/completed as approved
     if (['approved', 'funded', 'completed'].includes(st)) {
       row.approvedCount += 1;
     }
-    else if (['rejected', 'failed', 'defeated'].includes(st)) {
+    else if (['rejected', 'failed'].includes(st)) {
       row.rejectedCount += 1;
     }
     else if (st === 'archived') {
@@ -364,7 +364,6 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     else {
       row.pendingCount += 1;
     }
-    // --- LOGIC FIX END ---
 
     const prev = row.lastActivity ? new Date(row.lastActivity).getTime() : 0;
     const cand = new Date(p.updatedAt || p.createdAt).getTime();
