@@ -1674,14 +1674,15 @@ async function runConcurrent<T>(
 }
 
 
-// ✅ NEW: Uploads all files in 1 Request (Batch/Folder mode)
-// This is 10x faster and prevents Rate Limits.
+// src/lib/api.ts
+
+// ✅ NEW: Uploads all files in 1 Request (Batch/Folder mode) - FIXED
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // 1. Optimization: If only 1 file, use the simple path
+  // 1. Optimization: If only 1 file, use the simple path (Faster)
   if (files.length === 1) {
     const res = await uploadFileToIPFS(files[0]);
     return [res];
@@ -1689,29 +1690,28 @@ export async function uploadFilesSequentially(
 
   console.log(`🚀 Batch uploading ${files.length} files as a folder...`);
 
-  // 2. Get ONE Permission Slip for the whole folder
+  // 2. Get ONE Permission Slip
   const keys = await apiFetch("/auth/pinata-token");
   
   if (!keys?.JWT) throw new Error("No upload token received");
 
-  // 3. Build the Folder Payload
   const fd = new FormData();
-  
-  // Append all files. Pinata detects multiple 'file' keys + wrapWithDirectory
-  files.forEach(f => {
-    fd.append('file', f); 
-  });
+  const folderName = `proposal_assets_${Date.now()}`; // Unique folder name
 
-  const folderName = `proposal_assets_${Date.now()}`;
+  // 3. Build the Folder Payload
+  files.forEach(f => {
+    // ✅ CRITICAL FIX: Prepend the folder name to the file name
+    // This tells Pinata: "These files belong inside 'proposal_assets_123/image.jpg'"
+    fd.append('file', f, `${folderName}/${f.name}`); 
+  });
 
   fd.append('pinataMetadata', JSON.stringify({
     name: folderName
   }));
 
-  // THIS IS THE MAGIC: Wraps them in a folder so it counts as 1 Upload
   fd.append('pinataOptions', JSON.stringify({
     cidVersion: 1,
-    wrapWithDirectory: true 
+    // wrapWithDirectory: false // Not needed because we manually created the folder path above
   }));
 
   // 4. Upload (One single HTTP request)
@@ -1734,11 +1734,11 @@ export async function uploadFilesSequentially(
   const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
 
   // 5. Map back to your expected format
-  // URL format: https://gateway/ipfs/<FOLDER_CID>/<FILENAME>
   console.log("✅ Batch upload success. Folder CID:", folderCid);
 
   return files.map(f => ({
     cid: folderCid,
+    // URL format: https://gateway/ipfs/<FOLDER_CID>/<FILENAME>
     url: `https://${gateway}/ipfs/${folderCid}/${f.name}`,
     name: f.name
   }));
