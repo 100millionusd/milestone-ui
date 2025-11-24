@@ -1589,26 +1589,36 @@ export async function uploadJsonToIPFS(data: any) {
 
 export async function uploadFileToIPFS(file: File) {
   // 1. Get Temp Key from your server
-  // (This requires the /auth/pinata-token route in server.js!)
   const keys = await apiFetch("/auth/pinata-token");
+  
+  // 🔍 DEBUG: Check if we actually got a key!
+  console.log("🔑 Pinata Temp Key received:", keys); 
+
+  if (!keys || !keys.JWT) {
+    throw new Error("Failed to get upload token from server");
+  }
   
   const fd = new FormData();
   fd.append("file", file);
 
-  // 2. Upload DIRECTLY to Pinata (Bypassing your server completely)
+  // 2. Upload DIRECTLY to Pinata
   const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${keys.JWT}` // Use the temp key
+      "Authorization": `Bearer ${keys.JWT}` 
     },
     body: fd
   });
 
-  if (!res.ok) throw new Error("Pinata upload failed");
+  if (!res.ok) {
+    // 🔍 DEBUG: Log the actual error text from Pinata
+    const errText = await res.text(); 
+    console.error("❌ Pinata Upload Error:", res.status, errText);
+    throw new Error(`Pinata upload failed: ${res.status} ${errText}`);
+  }
   
   const result = await res.json();
   
-  // 3. Return formatted result
   const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
   
   return {
