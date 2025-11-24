@@ -91,25 +91,14 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   return s || 'submitted';
 }
 
-// Add this helper function at the top of the file
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
   
-  // Your actual Access Token
-  const accessToken = 'hyHJRs1r3anio2zHflcUYr9h_q4d4SeAwIZj6qTpWazW5bAYOrwxkb39OPhoIBvQ'; 
-  
-  // 1. Check if it's a Pinata/IPFS URL
-  if (/https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//.test(url)) {
-    // 2. Switch to your dedicated gateway
-    const newUrl = url.replace(
-      /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//, 
-      'https://sapphire-given-snake-741.mypinata.cloud/ipfs/'
-    );
-    // 3. Append the token
-    return `${newUrl}?accessToken=${accessToken}`;
-  }
-  
-  return url;
+  // Switch to Cloudflare (Free, Fast, No Tokens needed)
+  return url.replace(
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//, 
+    'https://cf-ipfs.com/ipfs/' 
+  );
 }
 
 // Per-file GPS detector
