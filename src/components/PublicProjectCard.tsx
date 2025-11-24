@@ -895,6 +895,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
               sizes="100vw"
               style={{ objectFit: 'contain' }}
               priority
+              unoptimized={true}
             />
           </div>
           <button
