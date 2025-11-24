@@ -1674,32 +1674,74 @@ async function runConcurrent<T>(
 }
 
 
+// ✅ NEW: Uploads all files in 1 Request (Batch/Folder mode)
+// This is 10x faster and prevents Rate Limits.
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  console.log("🔑 Fetching single batch token...");
-  const batchToken = await apiFetch("/auth/pinata-token");
+  // 1. Optimization: If only 1 file, use the simple path
+  if (files.length === 1) {
+    const res = await uploadFileToIPFS(files[0]);
+    return [res];
+  }
 
-  // ✅ FIX: Force strict sequential uploads (1 at a time)
-  const MAX_CONCURRENT = 1; 
+  console.log(`🚀 Batch uploading ${files.length} files as a folder...`);
 
-  const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
-    const response = await uploadFileToIPFS(file, batchToken);
-    
-    // ✅ FIX: Add a small "Cool Down" delay between files
-    // This keeps Pinata happy and prevents the 429 error
-    await delay(1000); 
-    
-    return {
-      cid: String(response.cid || ''),
-      url: String(response.url || ''),
-      name: String(file.name || 'file'),
-    };
+  // 2. Get ONE Permission Slip for the whole folder
+  const keys = await apiFetch("/auth/pinata-token");
+  
+  if (!keys?.JWT) throw new Error("No upload token received");
+
+  // 3. Build the Folder Payload
+  const fd = new FormData();
+  
+  // Append all files. Pinata detects multiple 'file' keys + wrapWithDirectory
+  files.forEach(f => {
+    fd.append('file', f); 
   });
 
-  return rawResults;
+  const folderName = `proposal_assets_${Date.now()}`;
+
+  fd.append('pinataMetadata', JSON.stringify({
+    name: folderName
+  }));
+
+  // THIS IS THE MAGIC: Wraps them in a folder so it counts as 1 Upload
+  fd.append('pinataOptions', JSON.stringify({
+    cidVersion: 1,
+    wrapWithDirectory: true 
+  }));
+
+  // 4. Upload (One single HTTP request)
+  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${keys.JWT}`
+    },
+    body: fd
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Pinata Batch Upload Failed: ${txt}`);
+  }
+
+  const json = await res.json();
+  const folderCid = json.IpfsHash;
+  
+  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+
+  // 5. Map back to your expected format
+  // URL format: https://gateway/ipfs/<FOLDER_CID>/<FILENAME>
+  console.log("✅ Batch upload success. Folder CID:", folderCid);
+
+  return files.map(f => ({
+    cid: folderCid,
+    url: `https://${gateway}/ipfs/${folderCid}/${f.name}`,
+    name: f.name
+  }));
 }
 
 // ✅ Keep this ALIAS so your other files (MilestonePayments, etc.) don't break
