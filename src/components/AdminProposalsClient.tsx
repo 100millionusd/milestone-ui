@@ -53,7 +53,6 @@ function AttachmentGrid({
   const list = (Array.isArray(items) ? items : [])
     .map((d) => {
       const url = resolveUrl(d);
-      // specific logic to get a clean name
       const name =
         String(d?.name || d?.filename || d?.title || '').trim() ||
         (url ? url.split('/').pop() || 'file' : 'file');
@@ -84,7 +83,6 @@ function AttachmentGrid({
       
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {list.map((f, i) => {
-          // KEY FIX: Check both URL and Name for image extension
           const isImg = isImageUrl(f.url) || isImageUrl(f.name);
           const isPdf = isPdfUrl(f.url) || isPdfUrl(f.name);
 
@@ -95,7 +93,7 @@ function AttachmentGrid({
                 type="button"
                 onClick={() => onOpenLightbox(f.url)}
                 className="group relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
-                title={f.name}
+                title={f.name} // Name is still visible on hover tooltip
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img 
@@ -103,20 +101,18 @@ function AttachmentGrid({
                   alt={f.name} 
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
                 />
+                
+                {/* Hover overlay with Icon (No text) */}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                    <svg className="w-6 h-6 text-white drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                    </svg>
                 </div>
-                {/* Filename Overlay at bottom */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                   <p className="text-[10px] text-white truncate text-center">{f.name}</p>
-                </div>
               </button>
             );
           }
 
-          // Fallback for PDF or other files
+          // Fallback for PDF or other files (Name kept here for identification)
           return (
             <a
               key={i}
