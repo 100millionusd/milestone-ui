@@ -1588,36 +1588,58 @@ export async function uploadJsonToIPFS(data: any) {
 }
 
 
-// src/lib/api.ts
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function uploadFileToIPFS(file: File, existingToken?: any) {
-  // ✅ FIX: Use the existing token if passed, otherwise ask server for one
   const keys = existingToken || await apiFetch("/auth/pinata-token");
-
-  // Debug: Verify we have a key
+  
   if (!keys?.JWT) throw new Error("No upload token received");
 
   const fd = new FormData();
   fd.append("file", file);
 
-  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${keys.JWT}`
-    },
-    body: fd
-  });
+  // ✅ RETRY LOGIC: Try up to 3 times
+  let attempt = 0;
+  const maxRetries = 3;
 
-  if (!res.ok) throw new Error("Pinata upload failed");
+  while (attempt < maxRetries) {
+    try {
+      const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${keys.JWT}` },
+        body: fd
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+        return {
+          cid: result.IpfsHash,
+          url: `https://${gateway}/ipfs/${result.IpfsHash}`, 
+          name: file.name
+        };
+      }
+
+      // If rate limited (429), wait and retry
+      if (res.status === 429) {
+        console.warn(`[Client] Upload rate limited. Retrying in 2s... (Attempt ${attempt + 1})`);
+        await delay(2000 * (attempt + 1));
+        attempt++;
+        continue;
+      }
+
+      throw new Error(`Pinata Error: ${res.status} ${await res.text()}`);
+
+    } catch (e: any) {
+      // Network errors also trigger retry
+      if (attempt === maxRetries - 1) throw e;
+      console.warn(`[Client] Upload network error. Retrying...`, e);
+      await delay(2000);
+      attempt++;
+    }
+  }
   
-  const result = await res.json();
-  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
-  
-  return {
-    cid: result.IpfsHash,
-    url: `https://${gateway}/ipfs/${result.IpfsHash}`, 
-    name: file.name
-  };
+  throw new Error("Upload failed after max retries");
 }
 
 // ========= Proof uploads (Pinata via our Next API) =========
@@ -1652,22 +1674,23 @@ async function runConcurrent<T>(
 }
 
 
-// src/lib/api.ts
-
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // ✅ FIX: Get ONE "Permission Slip" for all 4 files
   console.log("🔑 Fetching single batch token...");
   const batchToken = await apiFetch("/auth/pinata-token");
 
-  const MAX_CONCURRENT = 3; // Now safe to increase speed since we have the key!
+  // ✅ FIX: Force strict sequential uploads (1 at a time)
+  const MAX_CONCURRENT = 1; 
 
   const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
-    // ✅ Pass the token so we don't hit the server again
     const response = await uploadFileToIPFS(file, batchToken);
+    
+    // ✅ FIX: Add a small "Cool Down" delay between files
+    // This keeps Pinata happy and prevents the 429 error
+    await delay(1000); 
     
     return {
       cid: String(response.cid || ''),
