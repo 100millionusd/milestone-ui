@@ -452,12 +452,10 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
           includeArchived: showArchived,
         });
         
-        // ======= THE FIX IS HERE =======
-        // 1. Check if response is an object with 'items' (like { items: [...], total: ... })
-        // 2. Or if it's already an array (old backend behavior)
-        const rawItems = resp.items || resp; 
+        // ✅ THE FIX START: Handle both { items: [...] } object and [...] array
+        const rawItems = resp?.items || resp; 
         const arr: any[] = Array.isArray(rawItems) ? rawItems : [];
-        // ===============================
+        // ✅ THE FIX END
 
         let data = arr.map(normalizeRow);
 
