@@ -156,16 +156,6 @@ function normalizeRow(r: any): ProposerAgg {
 
   const proposalsCount = Number(r.proposalsCount ?? r.proposals_count ?? sc.total ?? (approvedCount + pendingCount + rejectedCount + archivedCount));
 
-  // --- Debugging ---
-  if (r.entity?.includes('Potosi') || r.orgName?.includes('Potosi') || r.entityName?.includes('Potosi')) {
-     console.log('🔍 ROW DEBUG:', { 
-         entity: r.entity || r.orgName, 
-         approved: approvedCount, 
-         rawKeys: Object.keys(r) 
-     });
-  }
-  // -----------------
-
   const rawAddr = r.addr_display ?? r.addressText ?? r.address_text ?? r.address ?? r.profile?.address ?? r.profile?.addressText ?? r.profile?.address_text ?? null;
   const addrDisplay = addressToDisplay(rawAddr);
 
