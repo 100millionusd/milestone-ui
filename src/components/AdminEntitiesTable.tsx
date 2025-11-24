@@ -232,12 +232,37 @@ function normalizeRow(r: any): ProposerAgg {
     r.profile?.connections?.telegram?.connected
   );
 
-  // Status counts
+  // Status counts - AGGRESSIVE LOOKUP
   const sc = r.statusCounts || r.status_counts || {};
-  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
-  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? r.proposals?.rejected ?? 0);
-  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? r.proposals?.archived ?? 0);
+  const approvedCount = Number(
+    r.approvedCount ?? 
+    r.approved_count ?? 
+    r.ApprovedCount ?? 
+    sc.approved ?? 
+    r.proposals?.approved ?? 
+    0
+  );
+  const pendingCount = Number(
+    r.pendingCount ?? 
+    r.pending_count ?? 
+    sc.pending ?? 
+    r.proposals?.pending ?? 
+    0
+  );
+  const rejectedCount = Number(
+    r.rejectedCount ?? 
+    r.rejected_count ?? 
+    sc.rejected ?? 
+    r.proposals?.rejected ?? 
+    0
+  );
+  const archivedCount = Number(
+    r.archivedCount ?? 
+    r.archived_count ?? 
+    sc.archived ?? 
+    r.proposals?.archived ?? 
+    0
+  );
 
   const proposalsCount = Number(
     r.proposalsCount ??
@@ -245,6 +270,16 @@ function normalizeRow(r: any): ProposerAgg {
       sc.total ??
       approvedCount + pendingCount + rejectedCount + archivedCount
   );
+
+  // ---- Debug Log: Check browser console to see if this logs "1" ----
+  if (r.entityName?.includes('Potosi') || r.orgName?.includes('Potosi') || r.entity?.includes('Potosi')) {
+    console.log('🔍 ROW DEBUG:', { 
+        entity: r.entityName || r.orgName, 
+        approved: approvedCount, 
+        rawKeys: Object.keys(r) 
+    });
+  }
+  // -----------------------------------------------------------------
 
   // ---- Address normalization ----
   const rawAddr =
@@ -452,10 +487,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
           includeArchived: showArchived,
         });
         
-        // ✅ THE FIX START: Handle both { items: [...] } object and [...] array
-        const rawItems = resp?.items || resp; 
+        // FIX: Correctly extract array from { items: [...] } or raw [...]
+        const rawItems = resp?.items || resp;
         const arr: any[] = Array.isArray(rawItems) ? rawItems : [];
-        // ✅ THE FIX END
 
         let data = arr.map(normalizeRow);
 
