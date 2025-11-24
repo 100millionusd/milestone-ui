@@ -1648,19 +1648,21 @@ async function runConcurrent<T>(
   return results;
 }
 
-// The Main Upload Function
+
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // 🚀 CONFIG: How many files to upload at once?
-  // 3 is the sweet spot: 3x faster than before, but safe for Pinata limits.
+  // ✅ FIX: Fetch ONE token for the entire batch (maxUses: 10 handles this)
+  console.log("🔑 Fetching single upload token for batch...");
+  const batchToken = await apiFetch("/auth/pinata-token");
+
   const MAX_CONCURRENT = 1;
 
   const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
-    // This calls your existing helper that talks to Railway
-    const response = await uploadFileToIPFS(file);
+    // ✅ Pass the batchToken to reuse it
+    const response = await uploadFileToIPFS(file, batchToken);
     
     return {
       cid: String(response.cid || ''),
