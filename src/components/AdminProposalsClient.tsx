@@ -13,7 +13,7 @@ import {
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
-// ---- Attachments helpers (images + pdfs) ----
+// ---- HELPER: Resolve IPFS/Pinata URLs ----
 const PINATA_GATEWAY =
   (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
   'gateway.pinata.cloud';
@@ -31,16 +31,124 @@ function resolveUrl(d: any): string | null {
   return null;
 }
 
-// Updated helper: Checks for extension and allows query params (e.g. .jpg?token=...)
 function isImageUrl(u: string) {
   if (!u) return false;
   return /\.(png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i.test(u);
 }
 
-// Updated helper: Checks for PDF extension or mime type in string
 function isPdfUrl(u: string) {
   if (!u) return false;
   return /\.pdf(?:\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
+}
+
+// ---- HELPER: Maps Link (From PublicProjectCard.tsx) ----
+function mapsLink(lat: number, lon: number): string {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isIOS = /iPad|iPhone|iPod/i.test(ua);
+  const qLabel = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+  return isIOS
+    ? `https://maps.apple.com/?ll=${lat},${lon}&q=${qLabel}&z=16`
+    : `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+// ---- HELPER: Efficient GPS Fetcher (From PublicProjectCard.tsx) ----
+// Fetches only the first 512KB to extract EXIF without downloading the whole image
+async function fetchGpsViaRange(url: string) {
+  try {
+    // Dynamic import to match your existing pattern
+    const exifr = (await import('exifr')).default as any;
+    const MAX_RANGE_BYTES = 524_287; // ~512 KB
+
+    const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
+    if (!r.ok) return null;
+    
+    // Check if server accepted range (status 206) or sent full file (200)
+    // If it's a huge file sent with 200, we might want to abort, but here we process it.
+    const buf = await r.arrayBuffer();
+    
+    const g = await exifr.gps(buf).catch(() => null);
+    if (g?.latitude != null && g?.longitude != null) {
+      return { lat: Number(g.latitude), lon: Number(g.longitude) };
+    }
+    return null;
+  } catch (e) {
+    console.error("GPS fetch error", e);
+    return null;
+  }
+}
+
+/** * THUMBNAIL COMPONENT 
+ * Handles its own GPS fetching state
+ */
+function ThumbnailItem({ 
+  item, 
+  onOpenLightbox 
+}: { 
+  item: { url: string; name: string }; 
+  onOpenLightbox: (src: string) => void 
+}) {
+  const [gps, setGps] = useState<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    // Only attempt GPS fetch for JPEGs/HEIC as png/gif rarely have EXIF
+    if (!/\.(jpe?g|heic|heif|webp)/i.test(item.url)) return;
+
+    let active = true;
+    fetchGpsViaRange(item.url).then((coords) => {
+      if (active && coords) setGps(coords);
+    });
+
+    return () => { active = false; };
+  }, [item.url]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenLightbox(item.url)}
+      className="group relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+      title={item.name}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={item.url}
+        alt={item.name}
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+      />
+      
+      {/* GPS BADGE */}
+      {gps && (
+        <div 
+            className="absolute top-2 right-2 bg-white/90 text-emerald-600 p-1.5 rounded-md shadow-sm z-10 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer"
+            title={`GPS Found: ${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}`}
+            onClick={(e) => {
+                e.stopPropagation();
+                window.open(mapsLink(gps.lat, gps.lon), '_blank');
+            }}
+        >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+            </svg>
+        </div>
+      )}
+
+      {/* Hover overlay with Zoom Icon (No text) */}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+        <svg
+          className="w-6 h-6 text-white drop-shadow-md"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
+        </svg>
+      </div>
+    </button>
+  );
 }
 
 function AttachmentGrid({
@@ -80,7 +188,7 @@ function AttachmentGrid({
         </svg>
         Attachments ({list.length})
       </h4>
-      
+
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {list.map((f, i) => {
           const isImg = isImageUrl(f.url) || isImageUrl(f.name);
@@ -88,31 +196,11 @@ function AttachmentGrid({
 
           if (isImg) {
             return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onOpenLightbox(f.url)}
-                className="group relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
-                title={f.name} // Name is still visible on hover tooltip
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={f.url} 
-                  alt={f.name} 
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
-                />
-                
-                {/* Hover overlay with Icon (No text) */}
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                   <svg className="w-6 h-6 text-white drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                   </svg>
-                </div>
-              </button>
+               <ThumbnailItem key={i} item={f} onOpenLightbox={onOpenLightbox} />
             );
           }
 
-          // Fallback for PDF or other files (Name kept here for identification)
+          // Fallback for PDF or other files
           return (
             <a
               key={i}
@@ -123,12 +211,32 @@ function AttachmentGrid({
               title={f.name}
             >
               {isPdf ? (
-                <svg className="w-8 h-8 text-rose-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                <svg
+                  className="w-8 h-8 text-rose-500 mb-2"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  />
                 </svg>
               ) : (
-                <svg className="w-8 h-8 text-slate-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <svg
+                  className="w-8 h-8 text-slate-400 mb-2"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
                 </svg>
               )}
               <span className="text-[10px] text-slate-600 font-medium break-all line-clamp-2 leading-tight">
@@ -141,6 +249,9 @@ function AttachmentGrid({
     </div>
   );
 }
+
+// ... Rest of your component (Entities types, Main component) remains exactly the same ...
+// I will include the rest of the file structure below for completeness to ensure no errors.
 
 /** =======================
  * Entities (proposers) types
@@ -491,7 +602,7 @@ export default function AdminProposalsClient({
 
             {/* List Grid */}
             <div className="space-y-6">
-{filtered.map((p) => (
+              {filtered.map((p) => (
                 <div
                   key={p.proposalId}
                   className="group bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
@@ -568,7 +679,7 @@ export default function AdminProposalsClient({
                           />
                         )}
 
-                        {/* Agent / Automation - RESTORED */}
+                        {/* Agent / Automation */}
                         <div className="mt-6 bg-indigo-50/50 border border-indigo-100 rounded-xl p-1">
                           <ProposalAgent proposal={p} />
                         </div>
@@ -576,25 +687,23 @@ export default function AdminProposalsClient({
 
                       {/* Sidebar: Stats & Actions */}
                       <div className="w-full md:w-64 flex-shrink-0 flex flex-col border-t md:border-t-0 md:border-l border-slate-100 md:pl-6 md:pt-0 pt-6">
-                        
                         <div className="mb-6">
-                            <div className="text-xs font-semibold text-slate-400 uppercase mb-1">
-                                Requested Budget
-                            </div>
-                            <div className="text-3xl font-bold text-slate-900 tracking-tight">
-                                {Number(p.amountUSD).toLocaleString('en-US', {
-                                style: 'currency',
-                                currency: 'USD',
-                                maximumFractionDigits: 0,
-                                })}
-                            </div>
-                            <div className="mt-3">
-                                <StatusPill status={p.status} />
-                            </div>
+                          <div className="text-xs font-semibold text-slate-400 uppercase mb-1">
+                            Requested Budget
+                          </div>
+                          <div className="text-3xl font-bold text-slate-900 tracking-tight">
+                            {Number(p.amountUSD).toLocaleString('en-US', {
+                              style: 'currency',
+                              currency: 'USD',
+                              maximumFractionDigits: 0,
+                            })}
+                          </div>
+                          <div className="mt-3">
+                            <StatusPill status={p.status} />
+                          </div>
                         </div>
 
                         <div className="mt-auto space-y-3">
-                          {/* BUTTONS: Visible even if approved (Status check removed) */}
                           <button
                             onClick={() => handleApprove(p.proposalId)}
                             disabled={p.status === 'approved'}
@@ -803,7 +912,7 @@ export default function AdminProposalsClient({
                     <button
                         className="px-3 py-1 rounded border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100"
                         onClick={() => setEntitiesPage((p) => p + 1)}
-                        disabled={entities.items.length < 50} // primitive check, ideally utilize total/pages
+                        disabled={entities.items.length < 50}
                     >
                         Next
                     </button>
