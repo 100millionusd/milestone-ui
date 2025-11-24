@@ -448,11 +448,16 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
         setLoading(true);
         setError(null);
 
-        const resp = await listProposers({
+        const resp: any = await listProposers({
           includeArchived: showArchived,
         });
         
-        const arr: any[] = Array.isArray(resp) ? resp : [];
+        // ======= THE FIX IS HERE =======
+        // 1. Check if response is an object with 'items' (like { items: [...], total: ... })
+        // 2. Or if it's already an array (old backend behavior)
+        const rawItems = resp.items || resp; 
+        const arr: any[] = Array.isArray(rawItems) ? rawItems : [];
+        // ===============================
 
         let data = arr.map(normalizeRow);
 
