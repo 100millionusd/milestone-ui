@@ -1625,7 +1625,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
     {file.scope}
   </div>
 </div>
-                        )}
                       </div>
                     );
                   })}
