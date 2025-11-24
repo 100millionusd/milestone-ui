@@ -1673,75 +1673,93 @@ async function runConcurrent<T>(
   return results;
 }
 
-
 // src/lib/api.ts
 
-// ✅ NEW: Uploads all files in 1 Request (Batch/Folder mode) - FIXED
+// Helper for delays
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // 1. Optimization: If only 1 file, use the simple path (Faster)
+  // 1. Optimization: If only 1 file, use the simple path
   if (files.length === 1) {
-    const res = await uploadFileToIPFS(files[0]);
-    return [res];
+    return [await uploadFileToIPFS(files[0])];
   }
 
   console.log(`🚀 Batch uploading ${files.length} files as a folder...`);
 
-  // 2. Get ONE Permission Slip
+  // 2. Get Token
   const keys = await apiFetch("/auth/pinata-token");
-  
   if (!keys?.JWT) throw new Error("No upload token received");
 
+  // 3. Prepare the Folder Payload
   const fd = new FormData();
-  const folderName = `proposal_assets_${Date.now()}`; // Unique folder name
-
-  // 3. Build the Folder Payload
+  const folderName = `proposal_assets_${Date.now()}`;
+  
   files.forEach(f => {
-    // ✅ CRITICAL FIX: Prepend the folder name to the file name
-    // This tells Pinata: "These files belong inside 'proposal_assets_123/image.jpg'"
-    fd.append('file', f, `${folderName}/${f.name}`); 
+    // Critical: "folder/filename" structure triggers the folder mode in Pinata
+    fd.append('file', f, `${folderName}/${f.name}`);
   });
 
-  fd.append('pinataMetadata', JSON.stringify({
-    name: folderName
-  }));
+  fd.append('pinataMetadata', JSON.stringify({ name: folderName }));
+  fd.append('pinataOptions', JSON.stringify({ cidVersion: 1, wrapWithDirectory: true }));
 
-  fd.append('pinataOptions', JSON.stringify({
-    cidVersion: 1,
-    // wrapWithDirectory: false // Not needed because we manually created the folder path above
-  }));
+  // 4. Upload with SMART RETRY Logic
+  let attempt = 0;
+  const maxRetries = 5;
 
-  // 4. Upload (One single HTTP request)
-  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${keys.JWT}`
-    },
-    body: fd
-  });
+  while (attempt < maxRetries) {
+    try {
+      const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${keys.JWT}` },
+        body: fd
+      });
 
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Pinata Batch Upload Failed: ${txt}`);
+      if (res.ok) {
+        const json = await res.json();
+        const folderCid = json.IpfsHash;
+        const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+
+        console.log("✅ Batch upload success. Folder CID:", folderCid);
+
+        return files.map(f => ({
+          cid: folderCid,
+          url: `https://${gateway}/ipfs/${folderCid}/${f.name}`,
+          name: f.name
+        }));
+      }
+
+      // ⚠️ Handle Rate Limit (429)
+      if (res.status === 429) {
+        // Wait 3s -> 6s -> 12s...
+        const waitTime = 3000 * Math.pow(2, attempt); 
+        console.warn(`[Batch Upload] Rate limited. Retrying in ${waitTime / 1000}s... (Attempt ${attempt + 1})`);
+        await delay(waitTime);
+        attempt++;
+        continue; // Try again
+      }
+
+      // Other Errors -> Fail
+      const txt = await res.text();
+      throw new Error(`Pinata Upload Failed: ${txt}`);
+
+    } catch (e) {
+      console.error(`[Batch Upload] Attempt ${attempt + 1} failed:`, e);
+      
+      // If it's a network error (not a 4xx/5xx response), wait and retry
+      if (attempt < maxRetries - 1) {
+        await delay(2000);
+        attempt++;
+      } else {
+        throw e; // Give up after max retries
+      }
+    }
   }
 
-  const json = await res.json();
-  const folderCid = json.IpfsHash;
-  
-  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
-
-  // 5. Map back to your expected format
-  console.log("✅ Batch upload success. Folder CID:", folderCid);
-
-  return files.map(f => ({
-    cid: folderCid,
-    // URL format: https://gateway/ipfs/<FOLDER_CID>/<FILENAME>
-    url: `https://${gateway}/ipfs/${folderCid}/${f.name}`,
-    name: f.name
-  }));
+  throw new Error("Batch upload failed after max retries");
 }
 
 // ✅ Keep this ALIAS so your other files (MilestonePayments, etc.) don't break
