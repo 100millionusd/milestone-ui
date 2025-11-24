@@ -350,6 +350,9 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     row.totalBudgetUSD += Number(p.amountUSD) || 0;
 
     const st = (p.status || 'pending').toLowerCase();
+    if (['approved', 'funded', 'completed'].includes(st)) {
+      row.approvedCount += 1;
+    }
     if (st === 'approved') row.approvedCount += 1;
     else if (st === 'rejected') row.rejectedCount += 1;
     else if (st === 'archived') row.archivedCount = (row.archivedCount || 0) + 1;
