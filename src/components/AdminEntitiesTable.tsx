@@ -232,18 +232,48 @@ function normalizeRow(r: any): ProposerAgg {
     r.profile?.connections?.telegram?.connected
   );
 
+
   // Status counts
   const sc = r.statusCounts || r.status_counts || {};
-  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
-  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? r.proposals?.rejected ?? 0);
-  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? r.proposals?.archived ?? 0);
+  
+  // STRICT FIX: Check if r.proposals is an Array (list) or an Object (summary)
+  let derivedApproved = 0;
+  let derivedPending = 0;
+  let derivedRejected = 0;
+  let derivedArchived = 0;
+  let derivedTotal = 0;
+
+  if (Array.isArray(r.proposals)) {
+    // It is an array: we must count them manually
+    r.proposals.forEach((p: any) => {
+      derivedTotal++;
+      const s = String(p.status || '').toLowerCase().trim();
+      if (s === 'approved') derivedApproved++;
+      else if (s === 'rejected') derivedRejected++;
+      else if (s === 'archived') derivedArchived++;
+      else derivedPending++;
+    });
+  } else if (r.proposals && typeof r.proposals === 'object') {
+    // It is a summary object: read properties directly
+    derivedApproved = Number(r.proposals.approved || 0);
+    derivedPending = Number(r.proposals.pending || 0);
+    derivedRejected = Number(r.proposals.rejected || 0);
+    derivedArchived = Number(r.proposals.archived || 0);
+    derivedTotal = Number(r.proposals.total || (derivedApproved + derivedPending + derivedRejected + derivedArchived));
+  }
+
+  // Apply precedence: explicit counts > statusCounts object > derived from proposals
+  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? derivedApproved ?? 0);
+  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? derivedPending ?? 0);
+  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? derivedRejected ?? 0);
+  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? derivedArchived ?? 0);
 
   const proposalsCount = Number(
     r.proposalsCount ??
       r.proposals_count ??
       sc.total ??
-      approvedCount + pendingCount + rejectedCount + archivedCount
+      derivedTotal ??
+      (approvedCount + pendingCount + rejectedCount + archivedCount)
   );
 
   // ---- Address normalization ----
