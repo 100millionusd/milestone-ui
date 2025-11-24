@@ -13,27 +13,31 @@ import {
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
-// ---- HELPER: Resolve IPFS/Pinata URLs ----
+// ---- 1. IPFS / GATEWAY HELPERS (Adapted from PublicProjectCard) ----
 const PINATA_GATEWAY =
   (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
   'gateway.pinata.cloud';
 
-function resolveUrl(d: any): string | null {
+function useDedicatedGateway(url: string | null | undefined) {
+  if (!url) return '';
+  const cleanUrl = url.split('?')[0]; // strip tokens
+  return cleanUrl.replace(
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
+    `https://${PINATA_GATEWAY}/ipfs/` 
+  );
+}
+
+function resolveUrl(d: any): string {
   const url = String(d?.url || d?.href || '').trim();
-  if (url) return url;
+  if (url) return useDedicatedGateway(url);
   const cid = String(d?.cid || '').trim();
   if (cid) return `https://${PINATA_GATEWAY}/ipfs/${cid}`;
-  if (typeof d === 'string' && d.startsWith('ipfs://')) {
-    const cidOnly = d.replace(/^ipfs:\/\//, '');
-    return `https://${PINATA_GATEWAY}/ipfs/${cidOnly}`;
-  }
-  if (typeof d === 'string' && /^https?:\/\//i.test(d)) return d;
-  return null;
+  return '';
 }
 
 function isImageUrl(u: string) {
   if (!u) return false;
-  return /\.(png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i.test(u);
+  return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)(?:\?.*)?$/i.test(u);
 }
 
 function isPdfUrl(u: string) {
@@ -41,116 +45,56 @@ function isPdfUrl(u: string) {
   return /\.pdf(?:\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
 }
 
-// ---- HELPER: Maps Link (From PublicProjectCard.tsx) ----
+// ---- 2. MAPS & TIME HELPERS (From PublicProjectCard) ----
 function mapsLink(lat: number, lon: number): string {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isIOS = /iPad|iPhone|iPod/i.test(ua);
   const qLabel = `${lat.toFixed(5)},${lon.toFixed(5)}`;
   return isIOS
     ? `https://maps.apple.com/?ll=${lat},${lon}&q=${qLabel}&z=16`
-    : `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+    : `http://googleusercontent.com/maps.google.com/maps?q=${lat},${lon}`;
 }
 
-// ---- HELPER: Efficient GPS Fetcher (From PublicProjectCard.tsx) ----
-// Fetches only the first 512KB to extract EXIF without downloading the whole image
-async function fetchGpsViaRange(url: string) {
+function fmtTakenAt(date?: Date | null): string | null {
+  if (!date) return null;
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// ---- 3. EFFICIENT EXIF FETCHER (Range Request Pattern) ----
+async function fetchMetaViaRange(url: string) {
   try {
-    // Dynamic import to match your existing pattern
+    // Dynamic import to avoid SSR issues
     const exifr = (await import('exifr')).default as any;
     const MAX_RANGE_BYTES = 524_287; // ~512 KB
 
     const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
     if (!r.ok) return null;
-    
-    // Check if server accepted range (status 206) or sent full file (200)
-    // If it's a huge file sent with 200, we might want to abort, but here we process it.
+
     const buf = await r.arrayBuffer();
     
-    const g = await exifr.gps(buf).catch(() => null);
-    if (g?.latitude != null && g?.longitude != null) {
-      return { lat: Number(g.latitude), lon: Number(g.longitude) };
+    // Parse GPS and TIFF (for Date)
+    const data = await exifr.parse(buf, { gps: true, tiff: true }).catch(() => null);
+    if (!data) return null;
+
+    const lat = data.latitude;
+    const lon = data.longitude;
+    // Try multiple date fields (DateTimeOriginal is most reliable for camera photos)
+    const date = data.DateTimeOriginal || data.CreateDate || data.ModifyDate;
+
+    if (lat != null && lon != null) {
+      return { 
+        lat: Number(lat), 
+        lon: Number(lon),
+        date: date ? new Date(date) : null 
+      };
     }
     return null;
   } catch (e) {
-    console.error("GPS fetch error", e);
     return null;
   }
 }
 
-/** * THUMBNAIL COMPONENT 
- * Handles its own GPS fetching state
- */
-function ThumbnailItem({ 
-  item, 
-  onOpenLightbox 
-}: { 
-  item: { url: string; name: string }; 
-  onOpenLightbox: (src: string) => void 
-}) {
-  const [gps, setGps] = useState<{ lat: number; lon: number } | null>(null);
-
-  useEffect(() => {
-    // Only attempt GPS fetch for JPEGs/HEIC as png/gif rarely have EXIF
-    if (!/\.(jpe?g|heic|heif|webp)/i.test(item.url)) return;
-
-    let active = true;
-    fetchGpsViaRange(item.url).then((coords) => {
-      if (active && coords) setGps(coords);
-    });
-
-    return () => { active = false; };
-  }, [item.url]);
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenLightbox(item.url)}
-      className="group relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
-      title={item.name}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={item.url}
-        alt={item.name}
-        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-      />
-      
-      {/* GPS BADGE */}
-      {gps && (
-        <div 
-            className="absolute top-2 right-2 bg-white/90 text-emerald-600 p-1.5 rounded-md shadow-sm z-10 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer"
-            title={`GPS Found: ${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}`}
-            onClick={(e) => {
-                e.stopPropagation();
-                window.open(mapsLink(gps.lat, gps.lon), '_blank');
-            }}
-        >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-        </div>
-      )}
-
-      {/* Hover overlay with Zoom Icon (No text) */}
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-        <svg
-          className="w-6 h-6 text-white drop-shadow-md"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
-      </div>
-    </button>
-  );
-}
-
+// ---- 4. ATTACHMENT GRID COMPONENT ----
 function AttachmentGrid({
   items,
   onOpenLightbox,
@@ -158,37 +102,72 @@ function AttachmentGrid({
   items: any[];
   onOpenLightbox: (src: string) => void;
 }) {
-  const list = (Array.isArray(items) ? items : [])
+  const [headerInfo, setHeaderInfo] = useState<{ lat: number; lon: number; date?: Date | null } | null>(null);
+
+  const list = useMemo(() => (Array.isArray(items) ? items : [])
     .map((d) => {
       const url = resolveUrl(d);
-      const name =
-        String(d?.name || d?.filename || d?.title || '').trim() ||
-        (url ? url.split('/').pop() || 'file' : 'file');
+      const name = String(d?.name || d?.filename || d?.title || '').trim() || 'file';
       return { url, name };
     })
-    .filter((x) => !!x.url) as { url: string; name: string }[];
+    .filter((x) => !!x.url), [items]);
+
+  // Effect: Find the first image with GPS to populate the "Group Header"
+  useEffect(() => {
+    let active = true;
+    const loadHeaderInfo = async () => {
+      // We only look at the first few images to find a location for the header
+      // This mimics the 'Representative' location logic
+      for (const item of list) {
+        if (!active) break;
+        if (/\.(jpe?g|heic|heif|webp)/i.test(item.url)) {
+          const meta = await fetchMetaViaRange(item.url);
+          if (active && meta) {
+            setHeaderInfo(meta);
+            return; // Found our header info, stop scanning
+          }
+        }
+      }
+    };
+    loadHeaderInfo();
+    return () => { active = false; };
+  }, [list]);
 
   if (list.length === 0) return null;
 
   return (
     <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-2">
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-          />
-        </svg>
-        Attachments ({list.length})
-      </h4>
+      
+      {/* HEADER ROW (Like Screenshot) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            Attachments ({list.length})
+        </h4>
 
+        {/* Dynamic Location/Date Badge */}
+        {headerInfo && (
+            <div className="flex items-center gap-2 text-xs text-slate-600 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
+                <a 
+                    href={mapsLink(headerInfo.lat, headerInfo.lon)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 hover:text-emerald-600 hover:underline decoration-emerald-500/30 underline-offset-2 font-medium"
+                >
+                    <span className="text-emerald-500 text-sm">📍</span>
+                    {/* Fallback label since we don't have Geocoding API here */}
+                    {headerInfo.lat.toFixed(4)}, {headerInfo.lon.toFixed(4)}
+                </a>
+                
+                {headerInfo.date && (
+                    <span className="flex items-center gap-1 text-slate-400 pl-2 border-l border-slate-200">
+                       Taken {fmtTakenAt(headerInfo.date)}
+                    </span>
+                )}
+            </div>
+        )}
+      </div>
+      
+      {/* THUMBNAILS GRID */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {list.map((f, i) => {
           const isImg = isImageUrl(f.url) || isImageUrl(f.name);
@@ -196,52 +175,43 @@ function AttachmentGrid({
 
           if (isImg) {
             return (
-               <ThumbnailItem key={i} item={f} onOpenLightbox={onOpenLightbox} />
+              <button
+                key={i}
+                type="button"
+                onClick={() => onOpenLightbox(f.url)}
+                className="group relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                title={f.name}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={f.url} 
+                  alt={f.name} 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+                />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+              </button>
             );
           }
 
-          // Fallback for PDF or other files
           return (
             <a
               key={i}
               href={f.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center p-3 aspect-square rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors group text-center"
+              className="flex flex-col items-center justify-center p-3 aspect-video rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors group text-center"
               title={f.name}
             >
               {isPdf ? (
-                <svg
-                  className="w-8 h-8 text-rose-500 mb-2"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                  />
-                </svg>
+                <div className="flex flex-col items-center gap-1">
+                   <svg className="w-6 h-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                   </svg>
+                   <span className="text-[10px] text-slate-500 font-medium">PDF</span>
+                </div>
               ) : (
-                <svg
-                  className="w-8 h-8 text-slate-400 mb-2"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
+                <span className="text-[10px] text-slate-400 font-medium">FILE</span>
               )}
-              <span className="text-[10px] text-slate-600 font-medium break-all line-clamp-2 leading-tight">
-                {f.name}
-              </span>
             </a>
           );
         })}
@@ -250,14 +220,14 @@ function AttachmentGrid({
   );
 }
 
-// ... Rest of your component (Entities types, Main component) remains exactly the same ...
-// I will include the rest of the file structure below for completeness to ensure no errors.
+// ... (Rest of the file types, loadProposers, AdminProposalsClient main component remains identical) ...
+// Including the rest below to ensure a complete file replacement.
 
 /** =======================
  * Entities (proposers) types
  * ======================= */
 type ProposerRow = {
-  id: string; // entity_key
+  id: string; 
   orgName: string;
   address: string | null;
   walletAddress: string | null;
