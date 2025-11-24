@@ -56,9 +56,11 @@ type AuditRow = {
 
 // ----- ENV (client-safe) -----
 const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
+
+// FIX 1: Default to a public gateway if env is missing, to avoid ERR_ID:00024
 const IPFS_GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  'https://sapphire-given-snake-741.mypinata.cloud/ipfs';
+  'https://gateway.pinata.cloud/ipfs';
 
 // --- maps + taken-at helpers ---
 function mapsLink(
@@ -91,13 +93,17 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   return s || 'submitted';
 }
 
+// FIX 2: Updated helper to strip tokens and enforce public gateway
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
   
-  // Updated Regex: Matches Pinata Public, IPFS.io, AND your Dedicated Gateway
-  return url.replace(
+  // 1. Remove the query string (this removes the ?accessToken=... which causes the error)
+  const cleanUrl = url.split('?')[0];
+
+  // 2. Replace restricted or generic gateways with a reliable public one
+  return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
-    'https://cf-ipfs.com/ipfs/' 
+    'https://gateway.pinata.cloud/ipfs/' 
   );
 }
 
@@ -415,18 +421,18 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   // ---------- FILES TAB RENDERER ----------
   function renderFilesTab() {
-const uiStatus = (p: any) => {
-  const s = getProofStatus(p);
-  if (
-    s === 'submitted' &&
-    !(p?.status || p?.proof_status || p?.proofStatus) &&
-    (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
-  ) {
-    return 'approved';
-  }
-  if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
-  return s;
-};
+    const uiStatus = (p: any) => {
+      const s = getProofStatus(p);
+      if (
+        s === 'submitted' &&
+        !(p?.status || p?.proof_status || p?.proofStatus) &&
+        (p?.approved === true || p?.approvedAt || p?.approved_at || true) // ← restore this guard
+      ) {
+        return 'approved';
+      }
+      if (p?.approved === true || p?.approvedAt || p?.approved_at) return 'approved';
+      return s;
+    };
 
     const proofsToShow = approvedOnly ? files.filter((p) => uiStatus(p) === 'approved') : files;
 
@@ -571,17 +577,17 @@ const uiStatus = (p: any) => {
                         const label = hasGPS ? (gps!.label || `${gps!.lat.toFixed(4)}, ${gps!.lon.toFixed(4)}`) : null;
                         const hoverTitle = hasGPS ? `GPS: ${label}` : 'Click to zoom';
                         const isImg = (() => {
-  const mime = String(f.mimeType || f.contentType || '').toLowerCase();
-  if (mime.startsWith('image/')) return true;
+                          const mime = String(f.mimeType || f.contentType || '').toLowerCase();
+                          if (mime.startsWith('image/')) return true;
 
-  const hasImageExt = (val: string | undefined | null) =>
-    /\.(png|jpe?g|webp|gif|heic|heif|avif)(\?|#|$)/i.test(String(val || ''));
+                          const hasImageExt = (val: string | undefined | null) =>
+                            /\.(png|jpe?g|webp|gif|heic|heif|avif)(\?|#|$)/i.test(String(val || ''));
 
-  if (hasImageExt(f.name)) return true;
-  if (hasImageExt(f.url)) return true;
+                          if (hasImageExt(f.name)) return true;
+                          if (hasImageExt(f.url)) return true;
 
-  return false;
-})();
+                          return false;
+                        })();
 
                         return (
                           <div
@@ -883,7 +889,7 @@ const uiStatus = (p: any) => {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={lightboxUrl}
+              src={useDedicatedGateway(lightboxUrl)}
               alt="Zoomed image"
               fill
               sizes="100vw"
