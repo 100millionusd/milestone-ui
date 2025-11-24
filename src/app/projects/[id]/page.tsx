@@ -1615,16 +1615,13 @@ const bidFiles = safeBids.flatMap((b: any) => {
                           </div>
                         </div>
 
- {/* Metadata Area - ALWAYS VISIBLE (Restores Milestone association visibility) */}
-<div className="p-3 flex flex-col flex-1 bg-white border-t border-gray-50">
-  <div className="font-medium text-sm text-gray-900 truncate mb-1" title={name}>
-    {name}
-  </div>
-  {/* This displays "Milestone 1 proof", "Project", etc. */}
-  <div className="text-[11px] text-blue-600 font-medium uppercase tracking-wide truncate" title={file.scope}>
-    {file.scope}
-  </div>
-</div>
+{/* Metadata Area - ONLY MILESTONE (Name hidden) */}
+                        <div className="p-3 flex items-center justify-center bg-white border-t border-gray-50">
+                          <div className="text-xs text-blue-600 font-semibold uppercase tracking-wide truncate" title={file.scope}>
+                            {file.scope}
+                          </div>
+                        </div>
+
                       </div>
                     );
                   })}
