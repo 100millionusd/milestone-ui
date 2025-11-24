@@ -1588,10 +1588,14 @@ export async function uploadJsonToIPFS(data: any) {
 }
 
 
+// src/lib/api.ts
+
 export async function uploadFileToIPFS(file: File, existingToken?: any) {
-  
-  // ✅ FIX: Use the existing token if provided, otherwise fetch a new one
+  // ✅ FIX: Use the existing token if passed, otherwise ask server for one
   const keys = existingToken || await apiFetch("/auth/pinata-token");
+
+  // Debug: Verify we have a key
+  if (!keys?.JWT) throw new Error("No upload token received");
 
   const fd = new FormData();
   fd.append("file", file);
@@ -1607,7 +1611,6 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
   if (!res.ok) throw new Error("Pinata upload failed");
   
   const result = await res.json();
-  
   const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
   
   return {
@@ -1649,19 +1652,21 @@ async function runConcurrent<T>(
 }
 
 
+// src/lib/api.ts
+
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
   if (!files || files.length === 0) return [];
 
-  // ✅ FIX: Fetch ONE token for the entire batch (maxUses: 10 handles this)
-  console.log("🔑 Fetching single upload token for batch...");
+  // ✅ FIX: Get ONE "Permission Slip" for all 4 files
+  console.log("🔑 Fetching single batch token...");
   const batchToken = await apiFetch("/auth/pinata-token");
 
-  const MAX_CONCURRENT = 1;
+  const MAX_CONCURRENT = 3; // Now safe to increase speed since we have the key!
 
   const rawResults = await runConcurrent(files, MAX_CONCURRENT, async (file) => {
-    // ✅ Pass the batchToken to reuse it
+    // ✅ Pass the token so we don't hit the server again
     const response = await uploadFileToIPFS(file, batchToken);
     
     return {
