@@ -94,9 +94,9 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
   
-  // Switch to Cloudflare (Free, Fast, No Tokens needed)
+  // Updated Regex: Matches Pinata Public, IPFS.io, AND your Dedicated Gateway
   return url.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//, 
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
     'https://cf-ipfs.com/ipfs/' 
   );
 }
