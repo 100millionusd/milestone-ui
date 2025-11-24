@@ -164,158 +164,99 @@ function addressToDisplay(addr: any): string | null {
 }
 
 function normalizeRow(r: any): ProposerAgg {
-  // prefer any non-empty value for email
+  // 1. Contact / Email normalization
   const contactEmail = pickNonEmpty(
-    r.email, // backend alias
-    r.primaryEmail,
-    r.primary_email,
-    r.contactEmail,
-    r.contact_email,
-    r.ownerEmail,
-    r.owner_email,
-    r.contact // some backends send `contact`
+    r.email, r.primaryEmail, r.primary_email,
+    r.contactEmail, r.contact_email,
+    r.ownerEmail, r.owner_email, r.contact
   );
-
   const ownerEmail = pickNonEmpty(r.ownerEmail, r.owner_email);
   const email = contactEmail || ownerEmail || guessEmail(r) || null;
 
-  // Phone / WhatsApp (also look into profile)
-  const ownerPhone = pickNonEmpty(
-    r.ownerPhone,
-    r.owner_phone,
-    r.profile?.ownerPhone,
-    r.profile?.owner_phone
-  );
-  const phone = pickNonEmpty(
-    r.phone,
-    r.whatsapp,
-    r.profile?.phone,
-    r.profile?.whatsapp,
-    ownerPhone
-  );
-
-  // Telegram (top-level and profile, both owner and generic)
-  const ownerTelegramUsername = pickNonEmpty(
-    r.ownerTelegramUsername,
-    r.owner_telegram_username,
-    r.profile?.ownerTelegramUsername,
-    r.profile?.owner_telegram_username
-  );
-  const ownerTelegramChatId = pickNonEmpty(
-    r.ownerTelegramChatId,
-    r.owner_telegram_chat_id,
-    r.profile?.ownerTelegramChatId,
-    r.profile?.owner_telegram_chat_id
-  );
-  // Map owner → generic so the UI can rely on telegramUsername/telegramChatId
-  const telegramUsername = pickNonEmpty(
-    r.telegramUsername,
-    r.telegram_username,
-    ownerTelegramUsername, // ← add owner
-    r.profile?.telegramUsername,
-    r.profile?.telegram_username
-  );
-  const telegramChatId = pickNonEmpty(
-    r.telegramChatId,
-    r.telegram_chat_id,
-    ownerTelegramChatId, // ← add owner
-    r.profile?.telegramChatId,
-    r.profile?.telegram_chat_id
-  );
-
-  // Telegram "connected" flag (entities/proposers often only have this boolean)
+  // 2. Phone / Socials
+  const ownerPhone = pickNonEmpty(r.ownerPhone, r.owner_phone, r.profile?.ownerPhone, r.profile?.owner_phone);
+  const phone = pickNonEmpty(r.phone, r.whatsapp, r.profile?.phone, r.profile?.whatsapp, ownerPhone);
+  
+  const ownerTelegramUsername = pickNonEmpty(r.ownerTelegramUsername, r.owner_telegram_username, r.profile?.ownerTelegramUsername, r.profile?.owner_telegram_username);
+  const ownerTelegramChatId = pickNonEmpty(r.ownerTelegramChatId, r.owner_telegram_chat_id, r.profile?.ownerTelegramChatId, r.profile?.owner_telegram_chat_id);
+  const telegramUsername = pickNonEmpty(r.telegramUsername, r.telegram_username, ownerTelegramUsername, r.profile?.telegramUsername, r.profile?.telegram_username);
+  const telegramChatId = pickNonEmpty(r.telegramChatId, r.telegram_chat_id, ownerTelegramChatId, r.profile?.telegramChatId, r.profile?.telegram_chat_id);
+  
   const telegramConnected = !!(
-    r.telegramConnected ??
-    r.profile?.telegramConnected ??
-    r.profile?.telegram?.connected ??
-    r.profile?.social?.telegram?.connected ??
+    r.telegramConnected ?? r.profile?.telegramConnected ??
+    r.profile?.telegram?.connected ?? r.profile?.social?.telegram?.connected ??
     r.profile?.connections?.telegram?.connected
   );
 
+  // 3. STATS CALCULATION (PRIORITY FIX)
+  // Determine if we have a list to count manually
+  let manualCounts = { approved: 0, pending: 0, rejected: 0, archived: 0, total: 0 };
+  let hasProposalsList = false;
 
-  // Status counts
-  const sc = r.statusCounts || r.status_counts || {};
-  
-  // STRICT FIX: Check if r.proposals is an Array (list) or an Object (summary)
-  let derivedApproved = 0;
-  let derivedPending = 0;
-  let derivedRejected = 0;
-  let derivedArchived = 0;
-  let derivedTotal = 0;
-
-  if (Array.isArray(r.proposals)) {
-    // It is an array: we must count them manually
+  if (Array.isArray(r.proposals) && r.proposals.length > 0) {
+    hasProposalsList = true;
     r.proposals.forEach((p: any) => {
-      derivedTotal++;
-      const s = String(p.status || '').toLowerCase().trim();
-      if (s === 'approved') derivedApproved++;
-      else if (s === 'rejected') derivedRejected++;
-      else if (s === 'archived') derivedArchived++;
-      else derivedPending++;
+      manualCounts.total++;
+      // Normalize status string
+      const s = String(p.status || p.state || 'pending').toLowerCase().trim();
+
+      // Check for synonyms
+      if (['approved', 'passed', 'succeeded', 'executed', 'active'].includes(s)) {
+        manualCounts.approved++;
+      } else if (['rejected', 'failed', 'defeated'].includes(s)) {
+        manualCounts.rejected++;
+      } else if (s === 'archived') {
+        manualCounts.archived++;
+      } else {
+        manualCounts.pending++;
+      }
     });
-  } else if (r.proposals && typeof r.proposals === 'object') {
-    // It is a summary object: read properties directly
-    derivedApproved = Number(r.proposals.approved || 0);
-    derivedPending = Number(r.proposals.pending || 0);
-    derivedRejected = Number(r.proposals.rejected || 0);
-    derivedArchived = Number(r.proposals.archived || 0);
-    derivedTotal = Number(r.proposals.total || (derivedApproved + derivedPending + derivedRejected + derivedArchived));
   }
 
-  // Apply precedence: explicit counts > statusCounts object > derived from proposals
-  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? derivedApproved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? derivedPending ?? 0);
-  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? derivedRejected ?? 0);
-  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? derivedArchived ?? 0);
+  // Fallback to backend object if list doesn't exist
+  const sc = r.statusCounts || r.status_counts || {};
+  
+  // LOGIC FIX: If hasProposalsList is true, we USE it. We do NOT fallback to r.approvedCount.
+  const approvedCount = hasProposalsList 
+    ? manualCounts.approved 
+    : Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
 
-  const proposalsCount = Number(
-    r.proposalsCount ??
-      r.proposals_count ??
-      sc.total ??
-      derivedTotal ??
-      (approvedCount + pendingCount + rejectedCount + archivedCount)
-  );
+  const pendingCount = hasProposalsList 
+    ? manualCounts.pending
+    : Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
 
-  // ---- Address normalization ----
-  const rawAddr =
-    r.addr_display ??
-    r.addressText ??
-    r.address_text ??
-    r.address ??
-    r.profile?.address ??
-    r.profile?.addressText ??
-    r.profile?.address_text ??
-    null;
+  const rejectedCount = hasProposalsList 
+    ? manualCounts.rejected 
+    : Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? r.proposals?.rejected ?? 0);
 
+  const archivedCount = hasProposalsList 
+    ? manualCounts.archived 
+    : Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? r.proposals?.archived ?? 0);
+
+  const proposalsCount = hasProposalsList 
+    ? manualCounts.total
+    : Number(r.proposalsCount ?? r.proposals_count ?? sc.total ?? (approvedCount + pendingCount + rejectedCount + archivedCount));
+
+  // 4. Address normalization
+  const rawAddr = r.addr_display ?? r.addressText ?? r.address_text ?? r.address ?? r.profile?.address ?? r.profile?.addressText ?? r.profile?.address_text ?? null;
   const addrDisplay = addressToDisplay(rawAddr);
 
-  // City / Country: prefer explicit fields, otherwise derive from object
   let city = pickNonEmpty(r.city, r.town);
   let country = pickNonEmpty(r.country);
-
-  if (!city || !country) {
-    if (rawAddr && typeof rawAddr === 'object') {
-      city = city || pickNonEmpty(rawAddr.city, rawAddr.town);
-      country = country || pickNonEmpty(rawAddr.country);
-    }
+  if ((!city || !country) && rawAddr && typeof rawAddr === 'object') {
+    city = city || pickNonEmpty(rawAddr.city, rawAddr.town);
+    country = country || pickNonEmpty(rawAddr.country);
   }
 
   return {
     id: r.id ?? r.entityId ?? r.proposerId ?? null,
-
-    // include entity_name from backend
     entity: pickNonEmpty(r.entityName, r.entity_name, r.orgName, r.entity, r.organization) || null,
-
-    // display-only address string
     address: addrDisplay,
     city: city || null,
     country: country || null,
-
-    // store email on the row in addition to contactEmail/ownerEmail
     email,
     contactEmail,
     ownerEmail,
-
     phone,
     whatsapp: phone,
     telegramUsername,
@@ -323,27 +264,17 @@ function normalizeRow(r: any): ProposerAgg {
     ownerTelegramUsername,
     ownerTelegramChatId,
     telegramConnected,
-
     wallet: r.wallet ?? r.walletAddress ?? r.wallet_address ?? r.ownerWallet ?? r.owner_wallet ?? null,
+    
+    // Use the counts calculated above
     proposalsCount,
     approvedCount,
     pendingCount,
     rejectedCount,
     archivedCount,
-    totalBudgetUSD: Number(
-      r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
-    ),
-    lastActivity:
-      r.lastActivityAt ??
-      r.last_activity_at ??
-      r.lastProposalAt ??
-      r.updatedAt ??
-      r.updated_at ??
-      r.createdAt ??
-      r.created_at ??
-      null,
     
-    // Trust the 'archived' flag
+    totalBudgetUSD: Number(r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0),
+    lastActivity: r.lastActivityAt ?? r.last_activity_at ?? r.lastProposalAt ?? r.updatedAt ?? r.updated_at ?? r.createdAt ?? r.created_at ?? null,
     archived: !!r.archived,
   };
 }
