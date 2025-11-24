@@ -13,7 +13,7 @@ import {
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
-// ---- 1. IPFS / GATEWAY HELPERS (Adapted from PublicProjectCard) ----
+// ---- 1. IPFS / GATEWAY HELPERS ----
 const PINATA_GATEWAY =
   (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
   'gateway.pinata.cloud';
@@ -45,7 +45,7 @@ function isPdfUrl(u: string) {
   return /\.pdf(?:\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
 }
 
-// ---- 2. MAPS & TIME HELPERS (From PublicProjectCard) ----
+// ---- 2. MAPS & TIME HELPERS ----
 function mapsLink(lat: number, lon: number): string {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isIOS = /iPad|iPhone|iPod/i.test(ua);
@@ -57,28 +57,59 @@ function mapsLink(lat: number, lon: number): string {
 
 function fmtTakenAt(date?: Date | null): string | null {
   if (!date) return null;
-  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return date.toLocaleString('en-GB', { 
+    day: 'numeric', 
+    month: 'short', 
+    year: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
 }
 
-// ---- 3. EFFICIENT EXIF FETCHER (Range Request Pattern) ----
+// ---- 3. CLIENT-SIDE REVERSE GEOCODING (To get "Potosí, Bolivia") ----
+async function getPlaceName(lat: number, lon: number): Promise<string | null> {
+  try {
+    // Uses OpenStreetMap Nominatim (Free, no key required for low volume)
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`,
+      { headers: { 'User-Agent': 'AdminProposalsClient/1.0' } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    
+    // Construct simplified address: "City, Country" or "State, Country"
+    const addr = data.address || {};
+    const city = addr.city || addr.town || addr.village || addr.county;
+    const state = addr.state;
+    const country = addr.country;
+
+    const parts = [city, state, country].filter(Boolean);
+    // Remove duplicates (e.g. if city name equals state name)
+    const uniqueParts = [...new Set(parts)];
+    
+    return uniqueParts.slice(0, 3).join(', ');
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---- 4. EFFICIENT EXIF FETCHER ----
 async function fetchMetaViaRange(url: string) {
   try {
-    // Dynamic import to avoid SSR issues
     const exifr = (await import('exifr')).default as any;
-    const MAX_RANGE_BYTES = 524_287; // ~512 KB
+    // ~512 KB usually enough for header
+    const MAX_RANGE_BYTES = 524_287; 
 
     const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
     if (!r.ok) return null;
 
     const buf = await r.arrayBuffer();
-    
-    // Parse GPS and TIFF (for Date)
     const data = await exifr.parse(buf, { gps: true, tiff: true }).catch(() => null);
+    
     if (!data) return null;
 
     const lat = data.latitude;
     const lon = data.longitude;
-    // Try multiple date fields (DateTimeOriginal is most reliable for camera photos)
     const date = data.DateTimeOriginal || data.CreateDate || data.ModifyDate;
 
     if (lat != null && lon != null) {
@@ -94,7 +125,7 @@ async function fetchMetaViaRange(url: string) {
   }
 }
 
-// ---- 4. ATTACHMENT GRID COMPONENT ----
+// ---- 5. ATTACHMENT GRID COMPONENT ----
 function AttachmentGrid({
   items,
   onOpenLightbox,
@@ -102,7 +133,12 @@ function AttachmentGrid({
   items: any[];
   onOpenLightbox: (src: string) => void;
 }) {
-  const [headerInfo, setHeaderInfo] = useState<{ lat: number; lon: number; date?: Date | null } | null>(null);
+  const [headerInfo, setHeaderInfo] = useState<{ 
+    lat: number; 
+    lon: number; 
+    label: string; 
+    date?: Date | null 
+  } | null>(null);
 
   const list = useMemo(() => (Array.isArray(items) ? items : [])
     .map((d) => {
@@ -112,19 +148,22 @@ function AttachmentGrid({
     })
     .filter((x) => !!x.url), [items]);
 
-  // Effect: Find the first image with GPS to populate the "Group Header"
   useEffect(() => {
     let active = true;
     const loadHeaderInfo = async () => {
-      // We only look at the first few images to find a location for the header
-      // This mimics the 'Representative' location logic
       for (const item of list) {
         if (!active) break;
+        // Only scan images for GPS
         if (/\.(jpe?g|heic|heif|webp)/i.test(item.url)) {
           const meta = await fetchMetaViaRange(item.url);
           if (active && meta) {
-            setHeaderInfo(meta);
-            return; // Found our header info, stop scanning
+            // Found GPS! Now get the pretty name
+            const placeName = await getPlaceName(meta.lat, meta.lon);
+            setHeaderInfo({
+                ...meta,
+                label: placeName || `${meta.lat.toFixed(4)}, ${meta.lon.toFixed(4)}`
+            });
+            return; // Found one representative location, stop scanning.
           }
         }
       }
@@ -138,28 +177,29 @@ function AttachmentGrid({
   return (
     <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
       
-      {/* HEADER ROW (Like Screenshot) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+      {/* HEADER ROW (Matches Screenshot Style) */}
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3 mb-4">
+        <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
             Attachments ({list.length})
         </h4>
 
-        {/* Dynamic Location/Date Badge */}
         {headerInfo && (
-            <div className="flex items-center gap-2 text-xs text-slate-600 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
                 <a 
                     href={mapsLink(headerInfo.lat, headerInfo.lon)}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-1 hover:text-emerald-600 hover:underline decoration-emerald-500/30 underline-offset-2 font-medium"
+                    className="flex items-center gap-1 text-slate-800 hover:text-emerald-600 hover:underline decoration-emerald-500/30 underline-offset-2 font-medium transition-colors"
                 >
-                    <span className="text-emerald-500 text-sm">📍</span>
-                    {/* Fallback label since we don't have Geocoding API here */}
-                    {headerInfo.lat.toFixed(4)}, {headerInfo.lon.toFixed(4)}
+                    <span className="text-red-500 text-base">📍</span>
+                    <span className="border-b border-dotted border-slate-400 hover:border-emerald-500">
+                        {headerInfo.label}
+                    </span>
                 </a>
                 
                 {headerInfo.date && (
-                    <span className="flex items-center gap-1 text-slate-400 pl-2 border-l border-slate-200">
+                    <span className="flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-300">
+                       <span>•</span>
                        Taken {fmtTakenAt(headerInfo.date)}
                     </span>
                 )}
@@ -179,7 +219,7 @@ function AttachmentGrid({
                 key={i}
                 type="button"
                 onClick={() => onOpenLightbox(f.url)}
-                className="group relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                className="group relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100 hover:shadow-md transition-all"
                 title={f.name}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -188,7 +228,6 @@ function AttachmentGrid({
                   alt={f.name} 
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
                 />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
               </button>
             );
           }
@@ -204,10 +243,10 @@ function AttachmentGrid({
             >
               {isPdf ? (
                 <div className="flex flex-col items-center gap-1">
-                   <svg className="w-6 h-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <svg className="w-8 h-8 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                    </svg>
-                   <span className="text-[10px] text-slate-500 font-medium">PDF</span>
+                   <span className="text-[10px] text-slate-500 font-medium mt-1">PDF Document</span>
                 </div>
               ) : (
                 <span className="text-[10px] text-slate-400 font-medium">FILE</span>
@@ -220,8 +259,8 @@ function AttachmentGrid({
   );
 }
 
-// ... (Rest of the file types, loadProposers, AdminProposalsClient main component remains identical) ...
-// Including the rest below to ensure a complete file replacement.
+// ... Rest of the file (loadProposers, AdminProposalsClient, types, etc.) ...
+// Including standard definitions below to ensure the file is copy-paste ready.
 
 /** =======================
  * Entities (proposers) types
@@ -294,19 +333,13 @@ export default function AdminProposalsClient({
   initialProposals = [],
   defaultMode = 'proposals',
 }: AdminProposalsClientProps) {
-  // ====== top-level mode: proposals vs entities ======
   const [mode, setMode] = useState<'proposals' | 'entities'>(defaultMode);
-
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [loading, setLoading] = useState(initialProposals.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
-
-  // Tabs + search (for proposals)
   const [tab, setTab] = useState<TabKey>('all');
   const [query, setQuery] = useState('');
-
-  // Entities filters
   const [includeArchived, setIncludeArchived] = useState(false);
 
   useEffect(() => {
@@ -547,18 +580,8 @@ export default function AdminProposalsClient({
 
               <div className="relative w-full lg:w-80">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg
-                    className="h-4 w-4 text-slate-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
+                  <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                 </div>
                 <input
@@ -577,7 +600,6 @@ export default function AdminProposalsClient({
                   key={p.proposalId}
                   className="group bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
                 >
-                  {/* Status Indicator Line */}
                   <div
                     className={`h-1 w-full ${
                       p.status === 'approved'
@@ -592,9 +614,7 @@ export default function AdminProposalsClient({
 
                   <div className="p-6">
                     <div className="flex flex-col md:flex-row gap-6">
-                      {/* Main Content Area */}
                       <div className="flex-1 min-w-0">
-                        {/* Header Meta */}
                         <div className="flex items-center gap-3 mb-2 text-xs text-slate-400 font-medium uppercase tracking-wider">
                           <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
                             ID: #{p.proposalId}
@@ -602,7 +622,6 @@ export default function AdminProposalsClient({
                           <span>{new Date(p.createdAt).toLocaleDateString()}</span>
                         </div>
 
-                        {/* Title & Org */}
                         <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">
                           {p.title}
                         </h3>
@@ -618,12 +637,10 @@ export default function AdminProposalsClient({
                           )}
                         </div>
 
-                        {/* Summary */}
                         <p className="text-slate-600 text-sm leading-relaxed mb-6 max-w-3xl">
                           {p.summary}
                         </p>
 
-                        {/* Contact Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs border-t border-slate-100 pt-4 mb-4">
                           <div>
                             <span className="block font-semibold text-slate-800 mb-1">
@@ -738,7 +755,6 @@ export default function AdminProposalsClient({
            =========================== */}
         {mode === 'entities' && (
           <div className="space-y-6">
-            {/* Filters */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <div className="relative w-full sm:w-96">
                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -770,7 +786,6 @@ export default function AdminProposalsClient({
               </label>
             </div>
 
-            {/* Table Card */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm text-left">
@@ -802,13 +817,6 @@ export default function AdminProposalsClient({
                         </td>
                       </tr>
                     )}
-                    {!entitiesLoading && !entitiesError && entities.items.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-12 text-center text-slate-500 italic">
-                          No entities found.
-                        </td>
-                      </tr>
-                    )}
                     {!entitiesLoading &&
                       !entitiesError &&
                       entities.items.map((r) => (
@@ -820,20 +828,17 @@ export default function AdminProposalsClient({
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">Proposals: {r.proposalsCount}</div>
                           </td>
-                          
                           <td className="px-4 py-3 align-top max-w-[200px]">
                              <div className="text-slate-600 text-xs leading-snug line-clamp-3" title={formatEntityAddress(r.address)}>
                                 {formatEntityAddress(r.address)}
                              </div>
                           </td>
-                          
                           <td className="px-4 py-3 align-top">
                              <div className="text-slate-700 text-xs">{r.contactEmail}</div>
                              {r.ownerEmail && r.ownerEmail !== r.contactEmail && (
                                  <div className="text-slate-400 text-[10px] mt-0.5">{r.ownerEmail}</div>
                              )}
                           </td>
-                          
                           <td className="px-4 py-3 align-middle text-center">
                              <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
                                 <span className="flex items-center gap-1 text-xs font-medium text-emerald-700" title="Approved">
@@ -852,7 +857,6 @@ export default function AdminProposalsClient({
                                 </span>
                              </div>
                           </td>
-                          
                           <td className="px-4 py-3 align-top text-right font-mono text-slate-700">
                              {fmtUSD(r.totalBudgetUSD)}
                           </td>
@@ -865,7 +869,6 @@ export default function AdminProposalsClient({
                 </table>
               </div>
 
-              {/* Pagination */}
               <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between">
                  <div className="text-xs text-slate-500">
                     Total: <span className="font-medium text-slate-700">{entities.total}</span> entities
@@ -915,8 +918,7 @@ export default function AdminProposalsClient({
   );
 }
 
-/* ---------------- helpers ---------------- */
-
+// Helpers
 function StatusPill({ status }: { status: string }) {
   const styles = {
     approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -925,10 +927,8 @@ function StatusPill({ status }: { status: string }) {
     archived: 'bg-slate-100 text-slate-600 border-slate-200',
     pending: 'bg-amber-100 text-amber-800 border-amber-200',
   };
-
   const s = (status || 'pending') as keyof typeof styles;
   const activeClass = styles[s] || styles.pending;
-
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${activeClass} capitalize shadow-sm`}>
       {status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5 animate-pulse"/>}
@@ -941,32 +941,16 @@ function StatusPill({ status }: { status: string }) {
 function formatEntityAddress(raw: string | null): string {
   if (!raw) return '—';
   let result = raw;
-
-  // Detect and parse JSON blobs like {"line1":"..."}
   const jsonRegex = /\{.*?\}/g;
-
   result = result.replace(jsonRegex, (match) => {
     try {
       const parsed = JSON.parse(match);
-      const parts = [
-        parsed.line1,
-        parsed.line2,
-        parsed.city,
-        parsed.state,
-        parsed.postalCode,
-        parsed.country,
-      ].filter(Boolean);
+      const parts = [parsed.line1, parsed.line2, parsed.city, parsed.state, parsed.postalCode, parsed.country].filter(Boolean);
       if (parts.length > 0) return parts.join(', ');
       return '';
     } catch {
-      // If parsing failed, keep the original blob text or clear it
       return match;
     }
   });
-
-  // Cleanup double commas or leading/trailing messy separators
-  return result
-    .replace(/,\s*,/g, ', ') // "part1, , part2" -> "part1, part2"
-    .replace(/^[\s,]+|[\s,]+$/g, '') // remove leading/trailing commas/spaces
-    .trim();
+  return result.replace(/,\s*,/g, ', ').replace(/^[\s,]+|[\s,]+$/g, '').trim();
 }
