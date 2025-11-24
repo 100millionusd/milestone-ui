@@ -232,19 +232,18 @@ function normalizeRow(r: any): ProposerAgg {
     r.profile?.connections?.telegram?.connected
   );
 
-  // Status counts
-  const sc = r.statusCounts || r.status_counts || {};
-  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
-  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
-  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? sc.rejected ?? r.proposals?.rejected ?? 0);
-  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? sc.archived ?? r.proposals?.archived ?? 0);
+  // --- FIX START: Use Backend Counts ---
+  const approvedCount = Number(r.approvedCount ?? r.approved_count ?? 0);
+  const pendingCount = Number(r.pendingCount ?? r.pending_count ?? 0);
+  const rejectedCount = Number(r.rejectedCount ?? r.rejected_count ?? 0);
+  const archivedCount = Number(r.archivedCount ?? r.archived_count ?? 0);
 
   const proposalsCount = Number(
     r.proposalsCount ??
-      r.proposals_count ??
-      sc.total ??
-      approvedCount + pendingCount + rejectedCount + archivedCount
+    r.proposals_count ??
+    (approvedCount + pendingCount + rejectedCount + archivedCount)
   );
+  // --- FIX END ---
 
   // ---- Address normalization ----
   const rawAddr =
