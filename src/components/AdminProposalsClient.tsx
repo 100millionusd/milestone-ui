@@ -31,11 +31,16 @@ function resolveUrl(d: any): string | null {
   return null;
 }
 
+// Updated helper: Checks for extension and allows query params (e.g. .jpg?token=...)
 function isImageUrl(u: string) {
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u);
+  if (!u) return false;
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i.test(u);
 }
+
+// Updated helper: Checks for PDF extension or mime type in string
 function isPdfUrl(u: string) {
-  return /\.pdf(\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
+  if (!u) return false;
+  return /\.pdf(?:\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
 }
 
 function AttachmentGrid({
@@ -48,6 +53,7 @@ function AttachmentGrid({
   const list = (Array.isArray(items) ? items : [])
     .map((d) => {
       const url = resolveUrl(d);
+      // specific logic to get a clean name
       const name =
         String(d?.name || d?.filename || d?.title || '').trim() ||
         (url ? url.split('/').pop() || 'file' : 'file');
@@ -58,8 +64,8 @@ function AttachmentGrid({
   if (list.length === 0) return null;
 
   return (
-    <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
-      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+    <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-2">
         <svg
           className="w-4 h-4"
           fill="none"
@@ -70,45 +76,68 @@ function AttachmentGrid({
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
-            d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
           />
         </svg>
         Attachments ({list.length})
       </h4>
-      <div className="flex flex-wrap gap-3">
+      
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {list.map((f, i) => {
-          const img = isImageUrl(f.url);
-          const pdf = isPdfUrl(f.url);
-          if (img) {
+          // KEY FIX: Check both URL and Name for image extension
+          const isImg = isImageUrl(f.url) || isImageUrl(f.name);
+          const isPdf = isPdfUrl(f.url) || isPdfUrl(f.name);
+
+          if (isImg) {
             return (
               <button
                 key={i}
                 type="button"
                 onClick={() => onOpenLightbox(f.url)}
-                className="group relative w-20 h-20 overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                className="group relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
                 title={f.name}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt={f.name} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                <img 
+                  src={f.url} 
+                  alt={f.name} 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                   <svg className="w-6 h-6 text-white drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                   </svg>
+                </div>
+                {/* Filename Overlay at bottom */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                   <p className="text-[10px] text-white truncate text-center">{f.name}</p>
+                </div>
               </button>
             );
           }
+
+          // Fallback for PDF or other files
           return (
             <a
               key={i}
               href={f.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-xs font-medium transition-colors"
+              className="flex flex-col items-center justify-center p-3 aspect-square rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors group text-center"
               title={f.name}
             >
-              {pdf ? (
-                <span className="flex-shrink-0 w-2 h-2 rounded-full bg-rose-500" />
+              {isPdf ? (
+                <svg className="w-8 h-8 text-rose-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
               ) : (
-                <span className="flex-shrink-0 w-2 h-2 rounded-full bg-slate-400" />
+                <svg className="w-8 h-8 text-slate-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
               )}
-              <span className="truncate max-w-[140px]">{f.name}</span>
+              <span className="text-[10px] text-slate-600 font-medium break-all line-clamp-2 leading-tight">
+                {f.name}
+              </span>
             </a>
           );
         })}
