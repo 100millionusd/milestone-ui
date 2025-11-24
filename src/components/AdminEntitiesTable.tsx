@@ -349,11 +349,21 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     row.proposalsCount += 1;
     row.totalBudgetUSD += Number(p.amountUSD) || 0;
 
-    const st = (p.status || 'pending').toLowerCase();
-    if (st === 'approved') row.approvedCount += 1;
-    else if (st === 'rejected') row.rejectedCount += 1;
-    else if (st === 'archived') row.archivedCount = (row.archivedCount || 0) + 1;
-    else row.pendingCount += 1;
+    // FIX: Handle casing, whitespace, and alternate 'approved' statuses (funded/completed)
+    const st = (p.status || 'pending').toLowerCase().trim();
+    
+    if (['approved', 'funded', 'completed'].includes(st)) {
+        row.approvedCount += 1;
+    }
+    else if (st === 'rejected') {
+        row.rejectedCount += 1;
+    }
+    else if (st === 'archived') {
+        row.archivedCount = (row.archivedCount || 0) + 1;
+    }
+    else {
+        row.pendingCount += 1;
+    }
 
     const prev = row.lastActivity ? new Date(row.lastActivity).getTime() : 0;
     const cand = new Date(p.updatedAt || p.createdAt).getTime();
