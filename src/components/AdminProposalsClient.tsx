@@ -14,13 +14,14 @@ import {
 import ProposalAgent from './ProposalAgent';
 
 // ---- 1. IPFS / GATEWAY HELPERS ----
-const PINATA_GATEWAY =
-  (typeof process !== 'undefined' && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) ||
-  'gateway.pinata.cloud';
+// ✅ FIX: Force your Dedicated Gateway to prevent 429/CORS errors
+const PINATA_GATEWAY = 'sapphire-given-snake-741.mypinata.cloud';
 
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
   const cleanUrl = url.split('?')[0]; // strip tokens
+  
+  // Replace public gateways (or self) with the dedicated gateway constant
   return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
     `https://${PINATA_GATEWAY}/ipfs/` 
