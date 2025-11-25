@@ -1336,12 +1336,35 @@ const bidFiles = safeBids.flatMap((b: any) => {
                       {fmt(b.createdAt)}
                     </td>
 <td className="px-6 py-4 text-right">
-  <Link 
-    href={`/proposals/${projectIdNum}/bids/${b.bidId}`} 
-    className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
-  >
-    View Bid
-  </Link>
+  {(() => {
+    // 1. Extract the first available document object from the bid
+    const docsArr = Array.isArray(b?.docs) ? b.docs : (b?.docs ? [b.docs] : (b?.doc ? [b.doc] : []));
+    const filesArr = Array.isArray(b?.files) ? b.files : [];
+    const mainDoc = docsArr[0] || filesArr[0];
+
+    // 2. Resolve the IPFS/Gateway URL
+    // (using the helper functions already defined in your file)
+    const rawUrl = mainDoc?.url || mainDoc?.cid;
+    const resolvedUrl = rawUrl ? normalizeIpfsUrl(rawUrl, mainDoc?.cid) : null;
+
+    if (!resolvedUrl) {
+      return <span className="text-gray-400 text-xs italic">No doc</span>;
+    }
+
+    // 3. Add filename param for cleaner downloading
+    const finalHref = withFilename(resolvedUrl, mainDoc?.name || 'proposal-doc');
+
+    return (
+      <a 
+        href={finalHref}
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
+      >
+        View Document
+      </a>
+    );
+  })()}
 </td>
                   </tr>
                 );
