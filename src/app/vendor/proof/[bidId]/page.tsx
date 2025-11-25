@@ -6,7 +6,6 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getBid,
   uploadFileToIPFS,
-  uploadProofFiles, // ✅ Correct import for Batch Upload
   submitProof,
   analyzeProof,
   Proof,
@@ -73,11 +72,6 @@ export default function VendorProofPage() {
     if (!e.target.files) return;
     const newFiles = Array.from(e.target.files);
     setProofFiles(prev => [...prev, ...newFiles]);
-    
-    // Initialize progress
-    const newProgress = { ...uploadProgress };
-    newFiles.forEach((f) => (newProgress[f.name] = 0));
-    setUploadProgress(newProgress);
   };
 
   const removeFile = (index: number) => {
@@ -95,32 +89,23 @@ export default function VendorProofPage() {
     setSubmitting(true);
     setError('');
     setLastProof(null);
-    setUploadProgress({}); // Reset progress visual
+    setUploadProgress({});
 
     try {
-      // 1) Upload files to IPFS (Batch Mode)
-      let structuredFiles: { name: string; url: string }[] = [];
-      
-      if (proofFiles.length > 0) {
-        // Set progress for all files to 50% (Simulated, since batch is 1 request)
-        proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 50 })));
-
+      // 1) Upload files to IPFS (if any)
+      const structuredFiles: { name: string; url: string }[] = [];
+      for (const file of proofFiles) {
+        setUploadProgress(prev => ({ ...prev, [file.name]: 1 }));
         try {
-          // ✅ FIX: Use the single-request batch uploader
-          // This prevents the "429 Rate Limited" crash you were seeing
-          const uploaded = await uploadProofFiles(proofFiles);
-          
-          structuredFiles = uploaded.map(u => ({ name: u.name, url: u.url }));
-          
-          // Set progress to 100%
-          proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 100 })));
-          
+          const up = await uploadFileToIPFS(file);
+          structuredFiles.push({ name: file.name, url: up.url });
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
         } catch (e) {
-          console.error('Proof batch upload failed', e);
-          throw e; // Stop execution so we don't submit an empty proof
+          console.error('Upload failed for', file.name, e);
+          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
         }
       }
-      
+
       // 2) Submit proof (sends both new JSON and legacy "proof" internally)
       const res = await submitProof({
         bidId,
@@ -141,13 +126,6 @@ export default function VendorProofPage() {
         // Legacy fallback (no proofId) – analysis not available for this submission
         alert('Proof submitted successfully! (Legacy mode). Admin will review and release payment.');
       }
-      
-      // Clear files after success
-      setProofFiles([]);
-      setProofTitle('');
-      setProofDescription('');
-      setAgentPrompt('');
-
     } catch (e: any) {
       console.error(e);
       setError(e?.message || 'Failed to submit proof. Please try again.');
@@ -170,15 +148,15 @@ export default function VendorProofPage() {
   }
 
   async function archiveCurrentProof() {
-    if (!lastProof?.proofId) return;
-    try {
-      const updated = await archiveProof(lastProof.proofId);
-      setLastProof(updated);                  // reflect new status
-      alert('Proof archived.');
-    } catch (e: any) {
-      alert(e?.message || 'Archive failed');
-    }
+  if (!lastProof?.proofId) return;
+  try {
+    const updated = await archiveProof(lastProof.proofId);
+    setLastProof(updated);                  // reflect new status
+    alert('Proof archived.');
+  } catch (e: any) {
+    alert(e?.message || 'Archive failed');
   }
+}
 
   if (loading) {
     return (
@@ -269,16 +247,16 @@ export default function VendorProofPage() {
               </select>
             </div>
 
-            {/* Change Requests Panel */}
-            <div className="mb-6 rounded-lg border border-slate-200">
-              <ChangeRequestsPanel
-                proposalId={bid.proposalId}
-                initialMilestoneIndex={selectedOriginalIndex}
-                // Key forces re-mount when the admin/vendor switches milestone,
-                // so the thread always matches the dropdown selection.
-                key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
-              />
-            </div>
+ {/* Change Requests (history & replies for the selected milestone) */}
+<div className="mb-6 rounded-lg border border-slate-200">
+  <ChangeRequestsPanel
+    proposalId={bid.proposalId}
+    initialMilestoneIndex={selectedOriginalIndex}
+    // Key forces re-mount when the admin/vendor switches milestone,
+    // so the thread always matches the dropdown selection.
+    key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
+  />
+</div>
 
             {/* Title (optional) */}
             <div className="mb-4">
