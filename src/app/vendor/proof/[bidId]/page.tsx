@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getBid,
   uploadFileToIPFS,
-  uploadProofFiles,
+  uploadProofFiles, // ✅ Correct import for Batch Upload
   submitProof,
   analyzeProof,
   Proof,
@@ -73,6 +73,11 @@ export default function VendorProofPage() {
     if (!e.target.files) return;
     const newFiles = Array.from(e.target.files);
     setProofFiles(prev => [...prev, ...newFiles]);
+    
+    // Initialize progress
+    const newProgress = { ...uploadProgress };
+    newFiles.forEach((f) => (newProgress[f.name] = 0));
+    setUploadProgress(newProgress);
   };
 
   const removeFile = (index: number) => {
@@ -90,9 +95,10 @@ export default function VendorProofPage() {
     setSubmitting(true);
     setError('');
     setLastProof(null);
-    setUploadProgress({});
+    setUploadProgress({}); // Reset progress visual
 
-    // 1) Upload files to IPFS (Batch Mode)
+    try {
+      // 1) Upload files to IPFS (Batch Mode)
       let structuredFiles: { name: string; url: string }[] = [];
       
       if (proofFiles.length > 0) {
@@ -101,6 +107,7 @@ export default function VendorProofPage() {
 
         try {
           // ✅ FIX: Use the single-request batch uploader
+          // This prevents the "429 Rate Limited" crash you were seeing
           const uploaded = await uploadProofFiles(proofFiles);
           
           structuredFiles = uploaded.map(u => ({ name: u.name, url: u.url }));
@@ -134,6 +141,13 @@ export default function VendorProofPage() {
         // Legacy fallback (no proofId) – analysis not available for this submission
         alert('Proof submitted successfully! (Legacy mode). Admin will review and release payment.');
       }
+      
+      // Clear files after success
+      setProofFiles([]);
+      setProofTitle('');
+      setProofDescription('');
+      setAgentPrompt('');
+
     } catch (e: any) {
       console.error(e);
       setError(e?.message || 'Failed to submit proof. Please try again.');
@@ -156,15 +170,15 @@ export default function VendorProofPage() {
   }
 
   async function archiveCurrentProof() {
-  if (!lastProof?.proofId) return;
-  try {
-    const updated = await archiveProof(lastProof.proofId);
-    setLastProof(updated);                  // reflect new status
-    alert('Proof archived.');
-  } catch (e: any) {
-    alert(e?.message || 'Archive failed');
+    if (!lastProof?.proofId) return;
+    try {
+      const updated = await archiveProof(lastProof.proofId);
+      setLastProof(updated);                  // reflect new status
+      alert('Proof archived.');
+    } catch (e: any) {
+      alert(e?.message || 'Archive failed');
+    }
   }
-}
 
   if (loading) {
     return (
@@ -255,16 +269,16 @@ export default function VendorProofPage() {
               </select>
             </div>
 
- {/* Change Requests (history & replies for the selected milestone) */}
-<div className="mb-6 rounded-lg border border-slate-200">
-  <ChangeRequestsPanel
-    proposalId={bid.proposalId}
-    initialMilestoneIndex={selectedOriginalIndex}
-    // Key forces re-mount when the admin/vendor switches milestone,
-    // so the thread always matches the dropdown selection.
-    key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
-  />
-</div>
+            {/* Change Requests Panel */}
+            <div className="mb-6 rounded-lg border border-slate-200">
+              <ChangeRequestsPanel
+                proposalId={bid.proposalId}
+                initialMilestoneIndex={selectedOriginalIndex}
+                // Key forces re-mount when the admin/vendor switches milestone,
+                // so the thread always matches the dropdown selection.
+                key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
+              />
+            </div>
 
             {/* Title (optional) */}
             <div className="mb-4">
