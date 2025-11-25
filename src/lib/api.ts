@@ -1673,6 +1673,9 @@ async function runConcurrent<T>(
   return results;
 }
 
+// Helper for delays
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function uploadFilesSequentially(
   files: File[]
 ): Promise<Array<{ cid: string; url: string; name: string }>> {
