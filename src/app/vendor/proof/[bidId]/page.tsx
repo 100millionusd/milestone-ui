@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getBid,
   uploadFileToIPFS,
+  uploadProofFiles,
   submitProof,
   analyzeProof,
   Proof,
@@ -91,21 +92,28 @@ export default function VendorProofPage() {
     setLastProof(null);
     setUploadProgress({});
 
-    try {
-      // 1) Upload files to IPFS (if any)
-      const structuredFiles: { name: string; url: string }[] = [];
-      for (const file of proofFiles) {
-        setUploadProgress(prev => ({ ...prev, [file.name]: 1 }));
+    // 1) Upload files to IPFS (Batch Mode)
+      let structuredFiles: { name: string; url: string }[] = [];
+      
+      if (proofFiles.length > 0) {
+        // Set progress for all files to 50% (Simulated, since batch is 1 request)
+        proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 50 })));
+
         try {
-          const up = await uploadFileToIPFS(file);
-          structuredFiles.push({ name: file.name, url: up.url });
-          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+          // ✅ FIX: Use the single-request batch uploader
+          const uploaded = await uploadProofFiles(proofFiles);
+          
+          structuredFiles = uploaded.map(u => ({ name: u.name, url: u.url }));
+          
+          // Set progress to 100%
+          proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 100 })));
+          
         } catch (e) {
-          console.error('Upload failed for', file.name, e);
-          setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+          console.error('Proof batch upload failed', e);
+          throw e; // Stop execution so we don't submit an empty proof
         }
       }
-
+      
       // 2) Submit proof (sends both new JSON and legacy "proof" internally)
       const res = await submitProof({
         bidId,
