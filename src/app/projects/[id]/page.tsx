@@ -1338,10 +1338,6 @@ const bidFiles = safeBids.flatMap((b: any) => {
 
 <<td className="px-6 py-4 text-right">
   <Link 
-    /* CORRECTION: 
-      Matching the "Edit" pattern found at line 663 ('/proposals/${projectIdNum}/edit').
-      The route likely lives under 'proposals', not 'projects'.
-    */
     href={`/proposals/${projectIdNum}/bids/${b.bidId}`} 
     className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
   >
