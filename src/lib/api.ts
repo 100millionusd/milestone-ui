@@ -1716,20 +1716,24 @@ export async function uploadFilesSequentially(
       if (res.ok) {
         const json = await res.json();
         const folderCid = json.IpfsHash;
+        
+        // ✅ Force Dedicated Gateway
         const gateway = "sapphire-given-snake-741.mypinata.cloud";
 
         console.log("✅ Batch upload success. Folder CID:", folderCid);
 
         return files.map(f => ({
           cid: folderCid,
-          url: `https://${gateway}/ipfs/${folderCid}/${f.name}`,
+          // ✅ FIX: Add 'folderName' to the URL so it points to the correct location
+          // Format: https://gateway/ipfs/<CID>/<FOLDER_NAME>/<FILENAME>
+          url: `https://${gateway}/ipfs/${folderCid}/${folderName}/${f.name}`,
           name: f.name
         }));
       }
 
       // ⚠️ Handle Rate Limit (429)
       if (res.status === 429) {
-        // Wait 3s -> 6s -> 12s...
+        // Wait 3s -> 6s -> 12s... (Aggressive backoff)
         const waitTime = 3000 * Math.pow(2, attempt); 
         console.warn(`[Batch Upload] Rate limited. Retrying in ${waitTime / 1000}s... (Attempt ${attempt + 1})`);
         await delay(waitTime);
