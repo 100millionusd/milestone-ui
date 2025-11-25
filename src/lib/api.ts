@@ -1578,7 +1578,7 @@ export async function uploadJsonToIPFS(data: any) {
   if (!res.ok) throw new Error("Pinata JSON upload failed");
   const result = await res.json();
 
-  const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+  const gateway = "sapphire-given-snake-741.mypinata.cloud";
 
   return {
     cid: result.IpfsHash,
@@ -1716,7 +1716,7 @@ export async function uploadFilesSequentially(
       if (res.ok) {
         const json = await res.json();
         const folderCid = json.IpfsHash;
-        const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+        const gateway = "sapphire-given-snake-741.mypinata.cloud";
 
         console.log("✅ Batch upload success. Folder CID:", folderCid);
 
