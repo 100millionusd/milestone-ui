@@ -1335,8 +1335,7 @@ const bidFiles = safeBids.flatMap((b: any) => {
                     <td className="px-6 py-4 text-gray-500 text-xs">
                       {fmt(b.createdAt)}
                     </td>
-
-<<td className="px-6 py-4 text-right">
+<td className="px-6 py-4 text-right">
   <Link 
     href={`/proposals/${projectIdNum}/bids/${b.bidId}`} 
     className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
