@@ -13,19 +13,24 @@ type Address = {
   country: string;
 };
 
-// This form uses "vendorName" as the field name for "Organization Name"
-// to make it compatible with ProfileRoleButtons.
+// [UPDATED] Add location type
+type LocationData = {
+  lat: number;
+  lng: number;
+  display_name?: string;
+};
+
 type ProfileForm = {
   walletAddress: string;
-  vendorName: string; // This will hold the Proposer's 'orgName'
-  email: string;      // This will hold the 'contactEmail'
+  vendorName: string;
+  email: string;
   phone: string;
   website: string;
   address: Address;
+  location?: LocationData | null; // [UPDATED] Added location field
   telegramConnected?: boolean;
 };
 
-// This is the same button from the vendor page
 function ConnectTelegramButton({ wallet }: { wallet: string }) {
   if (!wallet) {
     return (
@@ -48,7 +53,6 @@ function ConnectTelegramButton({ wallet }: { wallet: string }) {
   );
 }
 
-
 export default function ProposerProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -62,13 +66,13 @@ export default function ProposerProfilePage() {
     phone: '',
     website: '',
     address: { line1: '', city: '', postalCode: '', country: '' },
+    location: null, // [UPDATED] Init location
     telegramConnected: false,
   });
 
   useEffect(() => {
     let alive = true;
 
-    // 1. Moved load logic into a reusable function
     async function loadProfile() {
       try {
         const auth = await apiFetch('/auth/role').catch(() => ({} as any));
@@ -79,7 +83,6 @@ export default function ProposerProfilePage() {
           return;
         }
 
-        // Get fresh data
         const j = await getProposerProfile(); 
         if (!alive) return;
 
@@ -96,7 +99,7 @@ export default function ProposerProfilePage() {
 
         const wallet = j?.walletAddress || auth?.address || '';
 
-        setP((prev) => ({ // Use functional update
+        setP((prev) => ({
           ...prev,
           walletAddress: wallet,
           vendorName: j?.vendorName || '',
@@ -104,7 +107,7 @@ export default function ProposerProfilePage() {
           phone: j?.phone || '',
           website: j?.website || '',
           address,
-          // 2. [FIX] Check for username OR chat id to turn button green
+          location: j?.location || null, // [UPDATED] Load existing location
           telegramConnected: !!(
             j?.telegram_chat_id || 
             j?.telegramChatId || 
@@ -119,15 +122,10 @@ export default function ProposerProfilePage() {
       }
     }
 
-    // 3. Load data immediately on mount
     loadProfile();
-
-    // 4. [FIX] AND load data again every time the user clicks back to this tab
     window.addEventListener('focus', loadProfile);
-
     return () => {
       alive = false;
-      // 5. [FIX] Clean up the listener
       window.removeEventListener('focus', loadProfile);
     };
   }, [router]);
@@ -138,6 +136,35 @@ export default function ProposerProfilePage() {
     return /^https?:\/\//i.test(s) ? s : `https://${s}`;
   }
 
+  // [ADDED] Helper to fetch coordinates from OpenStreetMap (Nominatim)
+  async function geocodeAddress(addr: Address): Promise<LocationData | null> {
+    const query = [addr.line1, addr.city, addr.postalCode, addr.country]
+      .filter((part) => part && part.trim().length > 0)
+      .join(', ');
+
+    if (!query || query.length < 5) return null;
+
+    try {
+      // Using generic User-Agent to comply with Nominatim policy
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+        { headers: { 'User-Agent': 'ProposerProfileApp/1.0' } }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && data.length > 0) {
+        return {
+          lat: parseFloat(data[0].lat),
+          lng: parseFloat(data[0].lon),
+          display_name: data[0].display_name,
+        };
+      }
+    } catch (error) {
+      console.warn('Geocoding failed', error);
+    }
+    return null;
+  }
+
   async function onSave(e?: React.FormEvent) {
     if (e) e.preventDefault();
     if (saving) return;
@@ -145,17 +172,34 @@ export default function ProposerProfilePage() {
     setErr(null);
 
     try {
+      // 1. Prepare basic payload
+      const addressData = {
+        line1: (p.address.line1 || '').trim(),
+        city: (p.address.city || '').trim(),
+        postalCode: (p.address.postalCode || '').trim(),
+        country: (p.address.country || '').trim(),
+      };
+
+      // [UPDATED] 2. Automatically Geocode before saving
+      let locationData = p.location;
+      
+      // Only geocode if we have address data
+      if (addressData.line1 || addressData.city) {
+         const found = await geocodeAddress(addressData);
+         if (found) {
+           locationData = found;
+           // Update local state to reflect the new coordinates immediately
+           setP((prev) => ({ ...prev, location: found }));
+         }
+      }
+
       const payload = {
-        vendorName: (p.vendorName || '').trim(), // This is the Org Name
-        email: (p.email || '').trim(),      // This is the Contact Email
+        vendorName: (p.vendorName || '').trim(),
+        email: (p.email || '').trim(),
         phone: (p.phone || '').trim(),
         website: normalizeWebsite(p.website || ''),
-        address: {
-          line1: (p.address.line1 || '').trim(),
-          city: (p.address.city || '').trim(),
-          postalCode: (p.address.postalCode || '').trim(),
-          country: (p.address.country || '').trim(),
-        },
+        address: addressData,
+        location: locationData, // [UPDATED] Send the auto-detected location
       };
 
       if (payload.vendorName.length < 2) {
@@ -164,9 +208,9 @@ export default function ProposerProfilePage() {
         return;
       }
       
-      // Use the correct save function
       await saveProposerProfile(payload);
 
+      // Reload fresh data to confirm save
       try {
         const fresh = await getProposerProfile();
         setP((prev) => ({
@@ -179,7 +223,7 @@ export default function ProposerProfilePage() {
             typeof fresh.address === 'object'
               ? fresh.address
               : { ...prev.address, line1: fresh.address || prev.address.line1 },
-          // [FIX] Also update telegram status on save
+          location: fresh.location || prev.location, // [UPDATED]
           telegramConnected: !!(
             fresh?.telegram_chat_id || 
             fresh?.telegramChatId || 
@@ -216,6 +260,7 @@ export default function ProposerProfilePage() {
       )}
 
       <form onSubmit={onSave} className="space-y-4" data-proposer-profile-form>
+        {/* ... (Existing Organization Name / Wallet inputs) ... */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Organization Name</div>
@@ -236,6 +281,7 @@ export default function ProposerProfilePage() {
           </label>
         </div>
 
+        {/* ... (Existing Contact inputs) ... */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="block">
             <div className="text-sm text-slate-600">Contact Email</div>
@@ -252,7 +298,6 @@ export default function ProposerProfilePage() {
               className="border rounded px-3 py-2 w-full"
               value={p.phone}
               onChange={(e) => setP({ ...p, phone: e.target.value })}
-              placeholder="+34600111222"
             />
           </label>
           <label className="block">
@@ -261,7 +306,6 @@ export default function ProposerProfilePage() {
               className="border rounded px-3 py-2 w-full"
               value={p.website}
               onChange={(e) => setP({ ...p, website: e.target.value })}
-              placeholder="https://yourdomain.com"
             />
           </label>
         </div>
@@ -273,18 +317,15 @@ export default function ProposerProfilePage() {
             {p.telegramConnected ? (
               <div className="inline-flex items-center gap-2">
                 <span className="text-green-600">Connected</span>
-                {/* Allow re-link just in case */}
                 <ConnectTelegramButton wallet={p.walletAddress} />
               </div>
             ) : (
               <ConnectTelegramButton wallet={p.walletAddress} />
             )}
-            <p className="text-xs text-slate-500 mt-1">
-              Opens Telegram to link this wallet to your account.
-            </p>
           </div>
         </div>
 
+        {/* Address Fields */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <label className="block md:col-span-2">
             <div className="text-sm text-slate-600">Address</div>
@@ -333,21 +374,35 @@ export default function ProposerProfilePage() {
               }
             />
           </label>
+          
+          {/* [UPDATED] Auto-detected Location Feedback */}
+          <div className="block">
+             <div className="text-sm text-slate-600">GPS Location</div>
+             <div className="text-xs text-slate-500 py-2.5">
+               {p.location ? (
+                 <span className="text-emerald-600 font-medium">
+                   ✓ Auto-detected: {p.location.lat.toFixed(4)}, {p.location.lng.toFixed(4)}
+                 </span>
+               ) : (
+                 <span className="text-slate-400">
+                   (Will be calculated automatically on save)
+                 </span>
+               )}
+             </div>
+          </div>
         </div>
 
-        {/* Optional explicit Save button (role buttons also save) */}
         <div className="pt-2">
           <button
             type="submit"
             disabled={saving}
             className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl disabled:opacity-60"
           >
-            {saving ? 'Saving…' : 'Save changes'}
+            {saving ? 'Saving & Locating…' : 'Save changes'}
           </button>
         </div>
       </form>
 
-      {/* Role selection buttons under the form (both paths save profile) */}
       <div className="pt-4 border-t">
         <h2 className="text-lg font-semibold mb-2">Choose how you want to continue</h2>
         <p className="text-sm text-slate-600 mb-3">
