@@ -127,6 +127,7 @@ if (backendRole === 'admin') {
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/entities', label: 'Entities' },
           { href: '/admin/vendors', label: 'Vendors' },
+          { href: '/admin/analyst', label: 'Analyst' },
         ],
       },
       { href: '/vendor/dashboard', label: 'MyDesk' },
