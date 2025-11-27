@@ -1,4 +1,4 @@
-"use client"; // <--- THIS IS REQUIRED FOR NEXT.JS
+"use client"; 
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
@@ -20,55 +20,6 @@ import {
 // --- Configuration ---
 // Replace this with your actual Railway server URL
 const API_BASE_URL = "https://milestone-api-production.up.railway.app"; 
-
-// --- Mock Data (Fallback when API is not reachable) ---
-const MOCK_REPORTS = [
-  {
-    report_id: "101",
-    school_name: "Lincoln High",
-    description: "The lasagna from FreshBites was served cold again. Several students complained.",
-    rating: 2,
-    wallet_address: "0x123...abc",
-    created_at: new Date(Date.now() - 10000000).toISOString(),
-    ai_analysis: {
-      sentiment: "negative",
-      vendor: "FreshBites Catering",
-      issues: ["temperature", "food quality"],
-      confidence: 0.95
-    },
-    location: { lat: 40.7128, lon: -74.0060 }
-  },
-  {
-    report_id: "102",
-    school_name: "Roosevelt Elementary",
-    description: "Healthy Kids Co provided excellent fruit cups today. Very fresh!",
-    rating: 5,
-    wallet_address: "0x456...def",
-    created_at: new Date(Date.now() - 5000000).toISOString(),
-    ai_analysis: {
-      sentiment: "positive",
-      vendor: "Healthy Kids Co.",
-      highlights: ["freshness", "healthy options"],
-      confidence: 0.98
-    },
-    location: { lat: 40.7138, lon: -74.0070 }
-  },
-  {
-    report_id: "103",
-    school_name: "Lincoln High",
-    description: "FreshBites delivery was 30 minutes late. Lunch schedule disrupted.",
-    rating: 1,
-    wallet_address: "0x789...ghi",
-    created_at: new Date(Date.now() - 200000).toISOString(),
-    ai_analysis: {
-      sentiment: "negative",
-      vendor: "FreshBites Catering",
-      issues: ["lateness", "service disruption"],
-      confidence: 0.99
-    },
-    location: { lat: 40.7128, lon: -74.0060 }
-  }
-];
 
 // --- Helper Components ---
 
@@ -114,8 +65,7 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [usingMockData, setUsingMockData] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // --- Data Fetching ---
 
@@ -127,6 +77,8 @@ export default function AdminPage() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          // Note: If your API requires auth, ensure credentials/cookies are passed:
+          // 'Authorization': `Bearer ${token}` 
         }
       });
 
@@ -135,12 +87,11 @@ export default function AdminPage() {
       }
 
       const data = await response.json();
-      setReports(data);
-      setUsingMockData(false);
-    } catch (err) {
-      console.warn("Could not fetch from live server, falling back to mock data:", err);
-      setReports(MOCK_REPORTS);
-      setUsingMockData(true);
+      setReports(data || []);
+    } catch (err: any) {
+      console.error("Failed to fetch reports:", err);
+      setError(err.message || "Failed to load data");
+      setReports([]); // Ensure empty state on error
     } finally {
       setLoading(false);
     }
@@ -156,6 +107,7 @@ export default function AdminPage() {
     const stats: any = {};
     
     reports.forEach(r => {
+      // The vendor name often comes from the AI analysis in your schema
       const vendorName = r.ai_analysis?.vendor || "Unknown Vendor";
       
       if (!stats[vendorName]) {
@@ -174,6 +126,7 @@ export default function AdminPage() {
       if (r.school_name) stats[vendorName].schools.add(r.school_name);
     });
 
+    // Calculate averages
     Object.keys(stats).forEach(k => {
       const s = stats[k];
       if (s.totalReports > 0) {
@@ -228,9 +181,9 @@ export default function AdminPage() {
       </div>
       <div className="mt-auto p-6 border-t border-slate-800">
         <div className="flex items-center gap-2 mb-2">
-            <Server size={14} className={usingMockData ? "text-amber-500" : "text-emerald-500"} />
+            <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">
-                {usingMockData ? "Mock Mode" : "Live Server"}
+                {error ? "Connection Error" : "Live Server"}
             </span>
         </div>
         <p className="text-[10px] text-slate-600">v2.1 Connected to Postgres</p>
@@ -240,6 +193,7 @@ export default function AdminPage() {
 
   const DashboardView = () => (
     <div className="space-y-6">
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6">
           <div className="flex items-center gap-4">
@@ -288,7 +242,7 @@ export default function AdminPage() {
             </h3>
             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
                 {reports.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-8">No reports yet.</p>
+                    <p className="text-slate-400 text-sm text-center py-8">No reports received yet.</p>
                 ) : (
                     reports.slice(0, 5).map((report, idx) => (
                         <div key={report.report_id || idx} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
@@ -342,7 +296,7 @@ export default function AdminPage() {
                         </div>
                     </div>
                 ))}
-                 {vendorStats.length === 0 && <p className="text-sm text-slate-400 text-center">No ratings available</p>}
+                 {vendorStats.length === 0 && <p className="text-sm text-slate-400 text-center">No rating data available.</p>}
             </div>
         </Card>
       </div>
@@ -439,9 +393,16 @@ export default function AdminPage() {
                     </tbody>
                 </table>
             </div>
-            {reports.length === 0 && (
+            {reports.length === 0 && !error && (
                 <div className="p-12 text-center text-slate-400">
                     No reports found in the database.
+                </div>
+            )}
+            {error && (
+                <div className="p-12 text-center text-rose-500 bg-rose-50 rounded-lg mx-6 mb-6">
+                    <p className="font-bold">Error loading reports</p>
+                    <p className="text-sm mt-1">{error}</p>
+                    <button onClick={fetchReports} className="mt-4 text-rose-700 underline text-sm">Try Again</button>
                 </div>
             )}
         </div>
