@@ -14,15 +14,14 @@ import {
   Users,
   MapPin,
   RefreshCw,
-  Server
+  Server,
+  Filter // Added Filter icon
 } from 'lucide-react';
 
 // --- Configuration ---
-// Replace this with your actual Railway server URL
 const API_BASE_URL = "https://milestone-api-production.up.railway.app"; 
 
 // --- Helper Components ---
-
 const Card = ({ children, className = "" }: any) => (
   <div className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`}>
     {children}
@@ -66,6 +65,9 @@ export default function AdminPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // [FIX] Added filter state to toggle between Pending and All history
+  const [filterStatus, setFilterStatus] = useState<string>('all'); 
 
   // --- Data Fetching ---
 
@@ -73,12 +75,21 @@ export default function AdminPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/reports`, {
+      // [FIX] Append the status query parameter
+      // We default to 'all' to see completed/paid reports too
+      const url = new URL(`${API_BASE_URL}/api/reports`);
+      if (filterStatus !== 'all') {
+        url.searchParams.append('status', filterStatus);
+      } else {
+        // Some APIs might need an explicit flag to show everything
+        url.searchParams.append('limit', '100'); 
+        url.searchParams.append('include_archived', 'true');
+      }
+
+      const response = await fetch(url.toString(), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          // Note: If your API requires auth, ensure credentials/cookies are passed:
-          // 'Authorization': `Bearer ${token}` 
         }
       });
 
@@ -87,19 +98,23 @@ export default function AdminPage() {
       }
 
       const data = await response.json();
-      setReports(data || []);
+      
+      // Handle different API response structures (array vs { items: [] })
+      const items = Array.isArray(data) ? data : data.items || [];
+      setReports(items);
     } catch (err: any) {
       console.error("Failed to fetch reports:", err);
       setError(err.message || "Failed to load data");
-      setReports([]); // Ensure empty state on error
+      setReports([]); 
     } finally {
       setLoading(false);
     }
   };
 
+  // Re-fetch when the filter changes
   useEffect(() => {
     fetchReports();
-  }, []);
+  }, [filterStatus]);
 
   // --- Derived Metrics ---
 
@@ -107,8 +122,7 @@ export default function AdminPage() {
     const stats: any = {};
     
     reports.forEach(r => {
-      // The vendor name often comes from the AI analysis in your schema
-      const vendorName = r.ai_analysis?.vendor || "Unknown Vendor";
+      const vendorName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
       
       if (!stats[vendorName]) {
         stats[vendorName] = { 
@@ -122,7 +136,9 @@ export default function AdminPage() {
       }
       
       stats[vendorName].totalReports += 1;
-      stats[vendorName].totalScore += (r.rating || 0);
+      // Handle potential string numbers
+      const rating = Number(r.rating) || 0;
+      stats[vendorName].totalScore += rating;
       if (r.school_name) stats[vendorName].schools.add(r.school_name);
     });
 
@@ -131,8 +147,9 @@ export default function AdminPage() {
       const s = stats[k];
       if (s.totalReports > 0) {
         s.average = (s.totalScore / s.totalReports).toFixed(1);
-        if (s.average >= 4) s.sentiment = 'positive';
-        else if (s.average < 2.5) s.sentiment = 'negative';
+        const avg = parseFloat(s.average);
+        if (avg >= 4) s.sentiment = 'positive';
+        else if (avg < 2.5) s.sentiment = 'negative';
       }
       s.schoolCount = s.schools.size;
     });
@@ -186,7 +203,7 @@ export default function AdminPage() {
                 {error ? "Connection Error" : "Live Server"}
             </span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.1 Connected to Postgres</p>
+        <p className="text-[10px] text-slate-600">v2.2 Connected to Postgres</p>
       </div>
     </div>
   );
@@ -203,6 +220,7 @@ export default function AdminPage() {
             <div>
               <p className="text-sm text-slate-500 font-medium">Total Reports</p>
               <p className="text-2xl font-bold text-slate-800">{reports.length}</p>
+              <p className="text-xs text-slate-400">Showing {filterStatus === 'all' ? 'All History' : filterStatus}</p>
             </div>
           </div>
         </Card>
@@ -285,7 +303,7 @@ export default function AdminPage() {
                             </div>
                             <div>
                                 <p className="text-sm font-semibold text-slate-800">{stat.name}</p>
-                                <p className="text-xs text-slate-500">{stat.totalReports} reports across {stat.schoolCount} schools</p>
+                                <p className="text-xs text-slate-500">{stat.totalReports} reports</p>
                             </div>
                         </div>
                         <div className="text-right">
@@ -305,18 +323,36 @@ export default function AdminPage() {
 
   const ReportsView = () => (
     <div className="space-y-6">
-        <div className="flex justify-between items-end">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800">Analyzed Reports</h2>
                 <p className="text-slate-500">Incoming field reports from schools, processed by AI.</p>
             </div>
-            <button 
-                onClick={fetchReports}
-                className="flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-md transition-colors"
-            >
-                <RefreshCw size={16} />
-                Refresh Data
-            </button>
+            
+            {/* [FIX] Status Filter Dropdown */}
+            <div className="flex items-center gap-2">
+                <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                    <select 
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                    >
+                        <option value="all">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="completed">Completed / Paid</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+
+                <button 
+                    onClick={fetchReports}
+                    className="flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-md transition-colors"
+                >
+                    <RefreshCw size={16} />
+                    Refresh
+                </button>
+            </div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -324,22 +360,29 @@ export default function AdminPage() {
                 <table className="w-full text-sm text-left">
                     <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                         <tr>
-                            <th className="p-4">Date</th>
+                            <th className="p-4">Date & Status</th>
                             <th className="p-4">School</th>
-                            <th className="p-4">Vendor (AI Detected)</th>
+                            <th className="p-4">Vendor</th>
                             <th className="p-4">Rating</th>
-                            <th className="p-4 w-1/3">Analysis / Description</th>
+                            <th className="p-4 w-1/3">Analysis</th>
                             <th className="p-4">Evidence</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {reports.map((report, i) => (
                             <tr key={report.report_id || i} className="hover:bg-slate-50">
-                                <td className="p-4 text-slate-500 whitespace-nowrap">
-                                    {new Date(report.created_at).toLocaleDateString()}
-                                    <div className="text-xs text-slate-400">
+                                <td className="p-4 whitespace-nowrap">
+                                    <div className="text-slate-700 font-medium">{new Date(report.created_at).toLocaleDateString()}</div>
+                                    <div className="text-xs text-slate-400 mb-1">
                                         {new Date(report.created_at).toLocaleTimeString()}
                                     </div>
+                                    {/* [FIX] Display Status Badge */}
+                                    <Badge color={
+                                        report.status === 'paid' || report.status === 'completed' ? 'green' : 
+                                        report.status === 'rejected' ? 'red' : 'blue'
+                                    }>
+                                        {report.status || 'Pending'}
+                                    </Badge>
                                 </td>
                                 <td className="p-4">
                                     <div className="flex items-center gap-2 font-medium text-slate-800">
@@ -395,14 +438,7 @@ export default function AdminPage() {
             </div>
             {reports.length === 0 && !error && (
                 <div className="p-12 text-center text-slate-400">
-                    No reports found in the database.
-                </div>
-            )}
-            {error && (
-                <div className="p-12 text-center text-rose-500 bg-rose-50 rounded-lg mx-6 mb-6">
-                    <p className="font-bold">Error loading reports</p>
-                    <p className="text-sm mt-1">{error}</p>
-                    <button onClick={fetchReports} className="mt-4 text-rose-700 underline text-sm">Try Again</button>
+                    No reports found matching criteria.
                 </div>
             )}
         </div>
