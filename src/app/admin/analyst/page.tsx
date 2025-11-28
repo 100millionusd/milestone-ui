@@ -15,7 +15,7 @@ import {
   MapPin,
   RefreshCw,
   Server,
-  Filter // Added Filter icon
+  Filter 
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -66,7 +66,6 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // [FIX] Added filter state to toggle between Pending and All history
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
 
   // --- Data Fetching ---
@@ -75,13 +74,10 @@ export default function AdminPage() {
     setLoading(true);
     setError(null);
     try {
-      // [FIX] Append the status query parameter
-      // We default to 'all' to see completed/paid reports too
       const url = new URL(`${API_BASE_URL}/api/reports`);
       if (filterStatus !== 'all') {
         url.searchParams.append('status', filterStatus);
       } else {
-        // Some APIs might need an explicit flag to show everything
         url.searchParams.append('limit', '100'); 
         url.searchParams.append('include_archived', 'true');
       }
@@ -98,8 +94,6 @@ export default function AdminPage() {
       }
 
       const data = await response.json();
-      
-      // Handle different API response structures (array vs { items: [] })
       const items = Array.isArray(data) ? data : data.items || [];
       setReports(items);
     } catch (err: any) {
@@ -111,7 +105,6 @@ export default function AdminPage() {
     }
   };
 
-  // Re-fetch when the filter changes
   useEffect(() => {
     fetchReports();
   }, [filterStatus]);
@@ -136,13 +129,11 @@ export default function AdminPage() {
       }
       
       stats[vendorName].totalReports += 1;
-      // Handle potential string numbers
       const rating = Number(r.rating) || 0;
       stats[vendorName].totalScore += rating;
       if (r.school_name) stats[vendorName].schools.add(r.school_name);
     });
 
-    // Calculate averages
     Object.keys(stats).forEach(k => {
       const s = stats[k];
       if (s.totalReports > 0) {
@@ -210,7 +201,6 @@ export default function AdminPage() {
 
   const DashboardView = () => (
     <div className="space-y-6">
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6">
           <div className="flex items-center gap-4">
@@ -329,7 +319,6 @@ export default function AdminPage() {
                 <p className="text-slate-500">Incoming field reports from schools, processed by AI.</p>
             </div>
             
-            {/* [FIX] Status Filter Dropdown */}
             <div className="flex items-center gap-2">
                 <div className="relative">
                     <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
@@ -376,7 +365,6 @@ export default function AdminPage() {
                                     <div className="text-xs text-slate-400 mb-1">
                                         {new Date(report.created_at).toLocaleTimeString()}
                                     </div>
-                                    {/* [FIX] Display Status Badge */}
                                     <Badge color={
                                         report.status === 'paid' || report.status === 'completed' ? 'green' : 
                                         report.status === 'rejected' ? 'red' : 'blue'
@@ -390,7 +378,10 @@ export default function AdminPage() {
                                         {report.school_name}
                                     </div>
                                     <div className="text-xs text-slate-400 ml-6">
-                                        {report.location?.lat ? `${report.location.lat.toFixed(4)}, ${report.location.lon.toFixed(4)}` : 'No GPS'}
+                                        {/* [FIX] Safe check for both lat and lon */}
+                                        {(report.location?.lat != null && report.location?.lon != null) 
+                                          ? `${Number(report.location.lat).toFixed(4)}, ${Number(report.location.lon).toFixed(4)}` 
+                                          : 'No GPS'}
                                     </div>
                                 </td>
                                 <td className="p-4">
