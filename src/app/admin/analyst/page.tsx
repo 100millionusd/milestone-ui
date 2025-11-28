@@ -28,22 +28,29 @@ const Card = ({ children, className = "" }: any) => (
   </div>
 );
 
-// Helper to find GPS coordinates deeply nested in the AI object
-function extractGps(analysis: any) {
-  if (!analysis) return null;
+// Recursive helper to find { lat, lon } anywhere in a JSON object
+function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
+  if (!obj || typeof obj !== 'object') return null;
 
-  // 1. Direct properties (e.g. ai_analysis.lat)
-  if (analysis.lat != null && analysis.lon != null) return { lat: analysis.lat, lon: analysis.lon };
-  if (analysis.latitude != null && analysis.longitude != null) return { lat: analysis.latitude, lon: analysis.longitude };
+  // 1. Check current object for common key variations
+  const lat = obj.lat ?? obj.latitude ?? obj.gps_lat ?? obj.Latitude ?? obj.Lat ?? obj.gpsLat;
+  const lon = obj.lon ?? obj.lng ?? obj.longitude ?? obj.gps_lon ?? obj.Longitude ?? obj.Lon ?? obj.Lng ?? obj.gpsLon;
 
-  // 2. Common nested keys (e.g. ai_analysis.geo.lat or ai_analysis.location.lat)
-  const sub = analysis.geo || analysis.location || analysis.gps || analysis.coordinates;
-  if (sub) {
-    if (sub.lat != null && sub.lon != null) return { lat: sub.lat, lon: sub.lon };
-    if (sub.latitude != null && sub.longitude != null) return { lat: sub.latitude, lon: sub.longitude };
-    
-    // 3. Deep nesting (e.g. ai_analysis.geo.firstFix from Agent2)
-    if (sub.firstFix?.lat != null && sub.firstFix?.lon != null) return { lat: sub.firstFix.lat, lon: sub.firstFix.lon };
+  // 2. Validate: Must be numbers and not (0,0)
+  if (lat != null && lon != null) {
+    const nLat = Number(lat);
+    const nLon = Number(lon);
+    if (!isNaN(nLat) && !isNaN(nLon) && (nLat !== 0 || nLon !== 0)) {
+      return { lat: nLat, lon: nLon };
+    }
+  }
+
+  // 3. Recurse into children
+  for (const key of Object.keys(obj)) {
+    if (typeof obj[key] === 'object') {
+      const found = findGpsRecursively(obj[key]);
+      if (found) return found;
+    }
   }
 
   return null;
@@ -400,31 +407,35 @@ export default function AdminPage() {
   </div>
   <div className="text-xs ml-6 mt-1">
     {(() => {
-      // Priority 1: Device GPS (from the report submission)
+      // 1. Try Device GPS (Priority: The user was physically there)
       if (report.location?.lat != null && report.location?.lon != null) {
-        return (
-          <span className="text-slate-500 flex items-center" title="Device GPS">
-            <MapPin size={12} className="mr-1" />
-            {Number(report.location.lat).toFixed(4)}, {Number(report.location.lon).toFixed(4)}
-          </span>
-        );
+        const dLat = Number(report.location.lat);
+        const dLon = Number(report.location.lon);
+        if (dLat !== 0 || dLon !== 0) {
+          return (
+            <span className="text-slate-500 flex items-center" title="Device GPS (User Location)">
+              <MapPin size={12} className="mr-1" />
+              {dLat.toFixed(4)}, {dLon.toFixed(4)}
+            </span>
+          );
+        }
       }
       
-      // Priority 2: AI/Image GPS (extracted via helper)
-      const aiGps = extractGps(report.ai_analysis);
+      // 2. Fallback: Deep Search in AI Analysis (Image Metadata)
+      const aiGps = findGpsRecursively(report.ai_analysis);
       
       if (aiGps) {
         return (
-          <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image (AI)">
+          <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image Metadata">
             <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">
               IMG
             </span>
-            {Number(aiGps.lat).toFixed(4)}, {Number(aiGps.lon).toFixed(4)}
+            {aiGps.lat.toFixed(4)}, {aiGps.lon.toFixed(4)}
           </span>
         );
       }
 
-      // Priority 3: None
+      // 3. No GPS found
       return <span className="text-slate-400 italic">No GPS</span>;
     })()}
   </div>
