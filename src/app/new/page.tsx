@@ -1,41 +1,32 @@
-// src/app/new/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   createProposal, 
-  uploadProofFiles, // ✅ Use this (supports PDFs)
+  uploadProofFiles, 
   getAuthRoleOnce, 
   getProposerProfile 
 } from "@/lib/api";
 import Link from 'next/link';
+import { MapPin, AlertCircle, Loader2, Search } from 'lucide-react';
 
 // ✅ Guard: only allow submit when the clicked button opts in
 const allowOnlyExplicitSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
-  // @ts-ignore nativeEvent is fine in Next/React DOM
+  // @ts-ignore
   const submitter = e.nativeEvent?.submitter as HTMLElement | undefined;
   if (!submitter || submitter.getAttribute('data-allow-submit') !== 'true') {
     e.preventDefault();
   }
 };
 
-// Is the user's profile “complete” enough to allow proposal submit?
 const isProfileReady = (p: any) => {
   if (!p) return false;
-  const hasName =
-    (typeof p.vendor_name === 'string' && p.vendor_name.trim() !== '') ||
-    (typeof p.vendorName === 'string' && p.vendorName.trim() !== '');
-  const hasEmail = typeof p.email === 'string' && p.email.trim() !== '';
-  const hasPhone =
-    (typeof p.phone === 'string' && p.phone.trim() !== '') ||
-    (typeof p.whatsapp === 'string' && p.whatsapp.trim() !== '');
-  const hasTelegram =
-    (typeof p.telegram_username === 'string' && p.telegram_username.trim() !== '') ||
-    (typeof p.telegramUsername === 'string' && p.telegramUsername.trim() !== '') ||
-    (typeof p.telegram_chat_id === 'string' && p.telegram_chat_id.trim() !== '') ||
-    (typeof p.telegramChatId === 'string' && p.telegramChatId.trim() !== '');
-  return hasName && (hasEmail || hasPhone || hasTelegram);
+  const hasName = (p.vendor_name?.trim() || p.vendorName?.trim());
+  const hasContact = p.email?.trim() || p.phone?.trim() || p.whatsapp?.trim() || 
+                     p.telegram_username?.trim() || p.telegramUsername?.trim() || 
+                     p.telegram_chat_id?.trim() || p.telegramChatId?.trim();
+  return !!(hasName && hasContact);
 };
 
 export default function NewProposalPage() {
@@ -46,6 +37,11 @@ export default function NewProposalPage() {
   const [profile, setProfile] = useState<any>(null);
   const profileReady = isProfileReady(profile);
   const [flash, setFlash] = useState<string | null>(null);
+
+  // GPS State
+  const [gps, setGps] = useState<{ lat: number | null, lon: number | null }>({ lat: null, lon: null });
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState(false);
 
   useEffect(() => {
     const u = new URL(window.location.href);
@@ -70,7 +66,6 @@ export default function NewProposalPage() {
   });
   const [files, setFiles] = useState<File[]>([]);
 
-  // Load connected wallet
   useEffect(() => {
     (async () => {
       try {
@@ -80,7 +75,6 @@ export default function NewProposalPage() {
     })();
   }, []);
 
-  // Load proposer profile
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -96,7 +90,43 @@ export default function NewProposalPage() {
     return () => { alive = false; };
   }, []);
 
- const handleSubmit = async (e: React.FormEvent) => {
+  // --- 🌍 AUTOMATIC GEOCODING ---
+  // Triggered when user clicks "Find Location"
+  const handleGeocode = async () => {
+    const query = [formData.address, formData.city, formData.country].filter(Boolean).join(', ');
+    
+    if (!query || query.length < 5) {
+      setGpsError("Please enter a valid address, city, and country first.");
+      return;
+    }
+
+    setIsGeocoding(true);
+    setGpsError(null);
+
+    try {
+      // Use OpenStreetMap Nominatim API (Free, no key required for low volume)
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'LithiumX-Proposal-App' } });
+      const data = await res.json();
+
+      if (data && data.length > 0) {
+        setGps({
+          lat: parseFloat(data[0].lat),
+          lon: parseFloat(data[0].lon)
+        });
+      } else {
+        setGpsError("Could not find coordinates for this address. Please check spelling or enter GPS manually.");
+        setGps({ lat: null, lon: null });
+      }
+    } catch (err) {
+      console.error("Geocoding error:", err);
+      setGpsError("Failed to fetch location. Please enter GPS manually.");
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
@@ -106,8 +136,13 @@ export default function NewProposalPage() {
       return;
     }
 
+    if (!gps.lat || !gps.lon) {
+      alert('Please verify the School Location (GPS) before submitting.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      // 1. Upload files
       let docs: Array<{ cid: string; url: string; name: string; size: number }> = [];
       if (files.length > 0) {
         const uploaded = await uploadProofFiles(files);
@@ -119,13 +154,11 @@ export default function NewProposalPage() {
         }));
       }
 
-      // 2. Prepare Money Values (Number AND String)
       const rawStr = formData.amountUSD.toString().replace(/,/g, ''); 
       const amountNum = parseFloat(rawStr);
       const finalAmount = Number.isFinite(amountNum) ? amountNum : 0;
-      const finalString = finalAmount.toString(); // e.g. "75000"
+      const finalString = finalAmount.toString();
 
-      // 3. Send EVERY possible combination
       const body: any = {
         orgName: formData.orgName,
         title: formData.title,
@@ -134,35 +167,22 @@ export default function NewProposalPage() {
         address: formData.address,
         city: formData.city,
         country: formData.country,
-        
-        // --- MONEY SHOTGUN ---
-        // 1. Standard Numbers
         amount: finalAmount,
         amountUSD: finalAmount,
         amount_usd: finalAmount,
         price: finalAmount,
         budget: finalAmount,
-
-        // 2. Strings (Some backends require this for currency)
         amountStr: finalString,
         budgetStr: finalString,
-        
-        // 3. Field found in your api.ts "ProposerSummary"
         totalBudgetUSD: finalAmount, 
-        
         docs,
         ownerPhone: (formData.ownerPhone || '').trim(),
+        location: { lat: gps.lat, lon: gps.lon }
       };
-
-      console.log("🚀 Sending Proposal Body:", body); 
 
       const res = await createProposal(body);
 
-      // 🔍 DEBUG: Log what the server actually sent back
-      console.log("✅ Server Response:", res);
-
       if (res?.proposalId) {
-        // Force a hard reload to ensure admin page fetches fresh data
         window.location.href = `/admin/proposals/${res.proposalId}`;
       } else {
         alert('Proposal created, but no ID returned.');
@@ -175,16 +195,14 @@ export default function NewProposalPage() {
     }
   };
   
-  // ✅ Add new files to the list (instead of replacing)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files);
       setFiles((prev) => [...prev, ...newFiles]);
-      e.target.value = ''; // Clear input so same file can be selected again
+      e.target.value = '';
     }
   };
 
-  // ✅ Remove a specific file
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
@@ -192,11 +210,13 @@ export default function NewProposalPage() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Proposal</h1>
+      
       {flash === 'proposer-profile-saved' && (
         <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-700">
           Profile saved. You can submit your proposal now.
         </div>
       )}
+      
       {!profileReady && (
         <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
           <div className="font-medium mb-1">Complete your profile first</div>
@@ -204,220 +224,161 @@ export default function NewProposalPage() {
             Add your name and at least one contact method (email, phone/WhatsApp, or Telegram) to your profile.
           </div>
           <div className="mt-3">
-            <Link
-              href="/vendor/profile"
-              className="inline-flex items-center px-3 py-2 rounded-lg border border-sky-600 text-sky-700 hover:bg-sky-50"
-            >
+            <Link href="/vendor/profile" className="inline-flex items-center px-3 py-2 rounded-lg border border-sky-600 text-sky-700 hover:bg-sky-50">
               Open Profile
             </Link>
           </div>
         </div>
       )}
 
- <form
-  onSubmit={(e) => {
-    e.preventDefault(); // 🛑 Always stop reload immediately
-    handleSubmit(e);
-  }}
-  className="space-y-6"
->
+      <form onSubmit={(e) => { e.preventDefault(); handleSubmit(e); }} className="space-y-6">
+        
+        {/* Basic Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Organization Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.orgName}
-              onChange={(e) => setFormData({...formData, orgName: e.target.value})}
-              className="w-full p-2 border rounded"
-            />
+            <input type="text" required value={formData.orgName} onChange={(e) => setFormData({...formData, orgName: e.target.value})} className="w-full p-2 border rounded" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Contact Email *</label>
-            <input
-              type="email"
-              required
-              value={formData.contact}
-              onChange={(e) => setFormData({...formData, contact: e.target.value})}
-              className="w-full p-2 border rounded"
-            />
+            <input type="email" required value={formData.contact} onChange={(e) => setFormData({...formData, contact: e.target.value})} className="w-full p-2 border rounded" />
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Project Title *</label>
-          <input
-            type="text"
-            required
-            value={formData.title}
-            onChange={(e) => setFormData({...formData, title: e.target.value})}
-            className="w-full p-2 border rounded"
-          />
+          <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} className="w-full p-2 border rounded" />
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Project Summary *</label>
-          <textarea
-            required
-            value={formData.summary}
-            onChange={(e) => setFormData({...formData, summary: e.target.value})}
-            className="w-full p-2 border rounded"
-            rows={4}
-          />
+          <textarea required value={formData.summary} onChange={(e) => setFormData({...formData, summary: e.target.value})} className="w-full p-2 border rounded" rows={4} />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
- <div>
-            <label className="block text-sm font-medium mb-1">Budget (USD)</label>
-            <input
-              type="text" 
-              inputMode="decimal" // Opens number pad on mobile
-              placeholder="e.g. 75000"
-              value={formData.amountUSD}
-              onChange={(e) => {
-                 // Allow only numbers, commas, and dots while typing
-                 const val = e.target.value;
-                 if (/^[0-9.,]*$/.test(val)) {
-                   setFormData({...formData, amountUSD: val});
-                 }
-              }}
-              className="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">City</label>
-            <input
-              type="text"
-              value={formData.city}
-              onChange={(e) => setFormData({...formData, city: e.target.value})}
-              className="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Country</label>
-            <input
-              type="text"
-              value={formData.country}
-              onChange={(e) => setFormData({...formData, country: e.target.value})}
-              className="w-full p-2 border rounded"
-            />
-          </div>
-        </div>
-
+        {/* Budget */}
         <div>
-          <label className="block text-sm font-medium mb-1">Address</label>
-          <textarea
-            value={formData.address}
-            onChange={(e) => setFormData({...formData, address: e.target.value})}
-            className="w-full p-2 border rounded"
-            rows={2}
-          />
+            <label className="block text-sm font-medium mb-1">Budget (USD)</label>
+            <input type="text" inputMode="decimal" placeholder="e.g. 75000" value={formData.amountUSD} onChange={(e) => { if (/^[0-9.,]*$/.test(e.target.value)) setFormData({...formData, amountUSD: e.target.value}); }} className="w-full p-2 border rounded" />
+        </div>
+
+        {/* --- Location Section (Address -> GPS) --- */}
+        <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+          <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+            <MapPin size={18} className="text-emerald-600" />
+            School Location
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label className="block text-sm font-medium mb-1">Address / Street</label>
+                <input type="text" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} className="w-full p-2 border rounded bg-white" placeholder="123 Main St" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-sm font-medium mb-1">City</label>
+                    <input type="text" value={formData.city} onChange={(e) => setFormData({...formData, city: e.target.value})} className="w-full p-2 border rounded bg-white" placeholder="New York" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium mb-1">Country</label>
+                    <input type="text" value={formData.country} onChange={(e) => setFormData({...formData, country: e.target.value})} className="w-full p-2 border rounded bg-white" placeholder="USA" />
+                </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-4 items-end pt-2 border-t border-slate-200">
+            <div className="flex-1 w-full">
+              <label className="text-xs text-slate-500 mb-1 block">Latitude</label>
+              <input
+                type="number"
+                step="any"
+                value={gps.lat ?? ''}
+                onChange={(e) => setGps({ ...gps, lat: parseFloat(e.target.value) || null })}
+                className="w-full p-2 border rounded bg-slate-100 text-slate-600"
+                placeholder="Auto-filled"
+              />
+            </div>
+            <div className="flex-1 w-full">
+              <label className="text-xs text-slate-500 mb-1 block">Longitude</label>
+              <input
+                type="number"
+                step="any"
+                value={gps.lon ?? ''}
+                onChange={(e) => setGps({ ...gps, lon: parseFloat(e.target.value) || null })}
+                className="w-full p-2 border rounded bg-slate-100 text-slate-600"
+                placeholder="Auto-filled"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleGeocode}
+              disabled={isGeocoding}
+              className="w-full md:w-auto bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 mb-[1px]"
+            >
+              {isGeocoding ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+              Find GPS from Address
+            </button>
+          </div>
+          
+          {gpsError && (
+            <div className="flex items-center gap-2 mt-2 text-rose-600 text-xs">
+              <AlertCircle size={14} />
+              {gpsError}
+            </div>
+          )}
+          <p className="text-xs text-slate-500 mt-1">
+            Click "Find GPS" to auto-fill coordinates based on the address above. These are required for verifying delivery reports.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Phone (for WhatsApp)</label>
-            <input
-              type="tel"
-              placeholder="+34600111222"
-              value={formData.ownerPhone}
-              onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
-              className="w-full p-2 border rounded"
-            />
+            <input type="tel" placeholder="+34600111222" value={formData.ownerPhone} onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })} className="w-full p-2 border rounded" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Telegram</label>
             <div className="flex items-center gap-3">
               {(profile?.telegram_username || profile?.telegramUsername || profile?.telegram_chat_id || profile?.telegramChatId) ? (
-                <span className="text-emerald-600 text-sm">
-                  Connected
-                  {(profile?.telegram_username || profile?.telegramUsername)
-                    ? ` (@${String(profile.telegram_username ?? profile.telegramUsername).replace(/^@/, '')})`
-                    : ''}
-                </span>
+                <span className="text-emerald-600 text-sm">Connected</span>
               ) : (
                 <span className="text-slate-500 text-sm">Not connected</span>
               )}
-
               {wallet ? (
-                <a
-                  href={`https://t.me/${bot}?start=link_${(wallet || '').toLowerCase()}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50"
-                >
-                  {(profile?.telegram_username || profile?.telegramUsername) ? 'Re-link' : 'Connect Telegram'}
+                <a href={`https://t.me/${bot}?start=link_${(wallet || '').toLowerCase()}`} target="_blank" rel="noreferrer" className="inline-flex items-center px-3 py-2 rounded-xl border hover:bg-slate-50">
+                  Link Telegram
                 </a>
               ) : (
-                <div className="text-sm text-gray-500">
-                  Connect wallet to enable Telegram linking.
-                </div>
+                <div className="text-sm text-gray-500">Connect wallet first</div>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Opens Telegram to link this wallet to your account.
-            </p>
           </div>
         </div>
 
-        {/* ✅ Files Section with Mini Removal Buttons */}
+        {/* Files Section */}
         <div>
           <label className="block text-sm font-medium mb-1">Supporting Documents</label>
           <div className="space-y-3">
-            <input
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-              onChange={handleFileChange}
-              className="w-full p-2 border rounded"
-            />
-            
-            {/* Selected Files List */}
+            <input type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={handleFileChange} className="w-full p-2 border rounded" />
             {files.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {files.map((file, i) => (
-                  <div 
-                    key={`${file.name}-${i}`}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-sm text-slate-700 shadow-sm"
-                  >
-                    <span className="truncate max-w-[180px]" title={file.name}>
-                      {file.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeFile(i)}
-                      className="text-slate-400 hover:text-rose-600 transition-colors"
-                      title="Remove file"
-                    >
-                      {/* Close Icon */}
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
+                  <div key={`${file.name}-${i}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-sm text-slate-700 shadow-sm">
+                    <span className="truncate max-w-[180px]" title={file.name}>{file.name}</span>
+                    <button type="button" onClick={() => removeFile(i)} className="text-slate-400 hover:text-rose-600 transition-colors" title="Remove file">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-1">Upload any relevant documents (PDF, images, etc.)</p>
         </div>
 
         <div className="flex gap-4">
-          <button
-            type="submit"
-            data-allow-submit="true"
-            disabled={loading || !profileReady}
-            title={!profileReady ? 'Complete your profile first' : undefined}
-            className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400 hover:bg-blue-700 transition-colors"
-          >
+          <button type="submit" data-allow-submit="true" disabled={loading || !profileReady} className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400 hover:bg-blue-700 transition-colors">
             {loading ? 'Creating...' : 'Create Proposal'}
           </button>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600 transition-colors"
-          >
+          <button type="button" onClick={() => router.back()} className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600 transition-colors">
             Cancel
           </button>
         </div>
