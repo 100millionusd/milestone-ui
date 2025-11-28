@@ -28,6 +28,27 @@ const Card = ({ children, className = "" }: any) => (
   </div>
 );
 
+// Helper to find GPS coordinates deeply nested in the AI object
+function extractGps(analysis: any) {
+  if (!analysis) return null;
+
+  // 1. Direct properties (e.g. ai_analysis.lat)
+  if (analysis.lat != null && analysis.lon != null) return { lat: analysis.lat, lon: analysis.lon };
+  if (analysis.latitude != null && analysis.longitude != null) return { lat: analysis.latitude, lon: analysis.longitude };
+
+  // 2. Common nested keys (e.g. ai_analysis.geo.lat or ai_analysis.location.lat)
+  const sub = analysis.geo || analysis.location || analysis.gps || analysis.coordinates;
+  if (sub) {
+    if (sub.lat != null && sub.lon != null) return { lat: sub.lat, lon: sub.lon };
+    if (sub.latitude != null && sub.longitude != null) return { lat: sub.latitude, lon: sub.longitude };
+    
+    // 3. Deep nesting (e.g. ai_analysis.geo.firstFix from Agent2)
+    if (sub.firstFix?.lat != null && sub.firstFix?.lon != null) return { lat: sub.firstFix.lat, lon: sub.firstFix.lon };
+  }
+
+  return null;
+}
+
 const Badge = ({ children, color = "blue" }: any) => {
   const colors: any = {
     blue: "bg-blue-100 text-blue-700",
@@ -379,30 +400,31 @@ export default function AdminPage() {
   </div>
   <div className="text-xs ml-6 mt-1">
     {(() => {
-      // 1. Try Device GPS (The most accurate "proof of presence")
+      // Priority 1: Device GPS (from the report submission)
       if (report.location?.lat != null && report.location?.lon != null) {
         return (
-          <span className="text-slate-500" title="Device GPS">
-            <MapPin size={12} className="inline mr-1 -mt-0.5" />
+          <span className="text-slate-500 flex items-center" title="Device GPS">
+            <MapPin size={12} className="mr-1" />
             {Number(report.location.lat).toFixed(4)}, {Number(report.location.lon).toFixed(4)}
           </span>
         );
       }
       
-      // 2. Fallback: AI/Image GPS (Extracted from photo EXIF)
-      // The app might send it as ai_analysis.geo or ai_analysis.location
-      const aiGeo = report.ai_analysis?.geo || report.ai_analysis?.location;
+      // Priority 2: AI/Image GPS (extracted via helper)
+      const aiGps = extractGps(report.ai_analysis);
       
-      if (aiGeo?.lat != null && aiGeo?.lon != null) {
+      if (aiGps) {
         return (
-          <span className="text-blue-600 font-medium" title="Extracted from Image (AI)">
-            <span className="inline-block mr-1 text-[10px] border border-blue-200 bg-blue-50 px-1 rounded">IMG</span>
-            {Number(aiGeo.lat).toFixed(4)}, {Number(aiGeo.lon).toFixed(4)}
+          <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image (AI)">
+            <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">
+              IMG
+            </span>
+            {Number(aiGps.lat).toFixed(4)}, {Number(aiGps.lon).toFixed(4)}
           </span>
         );
       }
 
-      // 3. No GPS found
+      // Priority 3: None
       return <span className="text-slate-400 italic">No GPS</span>;
     })()}
   </div>
