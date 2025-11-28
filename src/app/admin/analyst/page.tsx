@@ -372,18 +372,41 @@ export default function AdminPage() {
                                         {report.status || 'Pending'}
                                     </Badge>
                                 </td>
-                                <td className="p-4">
-                                    <div className="flex items-center gap-2 font-medium text-slate-800">
-                                        <School size={14} className="text-slate-400" />
-                                        {report.school_name}
-                                    </div>
-                                    <div className="text-xs text-slate-400 ml-6">
-                                        {/* [FIX] Safe check for both lat and lon */}
-                                        {(report.location?.lat != null && report.location?.lon != null) 
-                                          ? `${Number(report.location.lat).toFixed(4)}, ${Number(report.location.lon).toFixed(4)}` 
-                                          : 'No GPS'}
-                                    </div>
-                                </td>
+ <td className="p-4">
+  <div className="flex items-center gap-2 font-medium text-slate-800">
+    <School size={14} className="text-slate-400" />
+    {report.school_name}
+  </div>
+  <div className="text-xs ml-6 mt-1">
+    {(() => {
+      // 1. Try Device GPS (The most accurate "proof of presence")
+      if (report.location?.lat != null && report.location?.lon != null) {
+        return (
+          <span className="text-slate-500" title="Device GPS">
+            <MapPin size={12} className="inline mr-1 -mt-0.5" />
+            {Number(report.location.lat).toFixed(4)}, {Number(report.location.lon).toFixed(4)}
+          </span>
+        );
+      }
+      
+      // 2. Fallback: AI/Image GPS (Extracted from photo EXIF)
+      // The app might send it as ai_analysis.geo or ai_analysis.location
+      const aiGeo = report.ai_analysis?.geo || report.ai_analysis?.location;
+      
+      if (aiGeo?.lat != null && aiGeo?.lon != null) {
+        return (
+          <span className="text-blue-600 font-medium" title="Extracted from Image (AI)">
+            <span className="inline-block mr-1 text-[10px] border border-blue-200 bg-blue-50 px-1 rounded">IMG</span>
+            {Number(aiGeo.lat).toFixed(4)}, {Number(aiGeo.lon).toFixed(4)}
+          </span>
+        );
+      }
+
+      // 3. No GPS found
+      return <span className="text-slate-400 italic">No GPS</span>;
+    })()}
+  </div>
+</td>
                                 <td className="p-4">
                                     <span className="font-semibold text-slate-700">
                                         {report.ai_analysis?.vendor || "Unknown"}
