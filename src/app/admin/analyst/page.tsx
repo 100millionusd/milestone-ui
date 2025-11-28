@@ -28,15 +28,24 @@ const Card = ({ children, className = "" }: any) => (
   </div>
 );
 
-// Recursive helper to find { lat, lon } anywhere in a JSON object
+// Helper: Find GPS recursively (handles objects, arrays, and JSON strings)
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
-  if (!obj || typeof obj !== 'object') return null;
+  if (!obj) return null;
 
-  // 1. Check current object for common key variations
+  // Handle double-stringified JSON (common DB issue)
+  if (typeof obj === 'string') {
+    if (obj.trim().startsWith('{') || obj.trim().startsWith('[')) {
+      try { return findGpsRecursively(JSON.parse(obj)); } catch { return null; }
+    }
+    return null;
+  }
+
+  if (typeof obj !== 'object') return null;
+
+  // 1. Check for standard keys (Lat/Lon)
   const lat = obj.lat ?? obj.latitude ?? obj.gps_lat ?? obj.Latitude ?? obj.Lat ?? obj.gpsLat;
   const lon = obj.lon ?? obj.lng ?? obj.longitude ?? obj.gps_lon ?? obj.Longitude ?? obj.Lon ?? obj.Lng ?? obj.gpsLon;
 
-  // 2. Validate: Must be numbers and not (0,0)
   if (lat != null && lon != null) {
     const nLat = Number(lat);
     const nLon = Number(lon);
@@ -45,9 +54,27 @@ function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
     }
   }
 
-  // 3. Recurse into children
+  // 2. Check for GeoJSON-style arrays [lon, lat] or [lat, lon]
+  // Keys often used: "coordinates", "gps", "location", "point"
+  for (const key of ['coordinates', 'gps', 'location', 'point', 'geo']) {
+    const arr = obj[key];
+    if (Array.isArray(arr) && arr.length >= 2) {
+      const n1 = Number(arr[0]);
+      const n2 = Number(arr[1]);
+      if (!isNaN(n1) && !isNaN(n2)) {
+        // Simple heuristic: Latitude is usually the one between -90 and 90.
+        // GeoJSON is [lon, lat], Google sometimes [lat, lon].
+        // If 2nd val is definitely lat, use [lon, lat]
+        if (Math.abs(n2) <= 90 && Math.abs(n1) > 90) return { lat: n2, lon: n1 };
+        // Default assume [lat, lon] if ambiguous or standard array
+        return { lat: n1, lon: n2 };
+      }
+    }
+  }
+
+  // 3. Recurse deeper
   for (const key of Object.keys(obj)) {
-    if (typeof obj[key] === 'object') {
+    if (typeof obj[key] === 'object' || typeof obj[key] === 'string') {
       const found = findGpsRecursively(obj[key]);
       if (found) return found;
     }
@@ -400,14 +427,14 @@ export default function AdminPage() {
                                         {report.status || 'Pending'}
                                     </Badge>
                                 </td>
- <td className="p-4">
+<td className="p-4">
   <div className="flex items-center gap-2 font-medium text-slate-800">
     <School size={14} className="text-slate-400" />
     {report.school_name}
   </div>
   <div className="text-xs ml-6 mt-1">
     {(() => {
-      // 1. Try Device GPS (Priority: The user was physically there)
+      // 1. Device GPS (High Priority)
       if (report.location?.lat != null && report.location?.lon != null) {
         const dLat = Number(report.location.lat);
         const dLon = Number(report.location.lon);
@@ -421,7 +448,7 @@ export default function AdminPage() {
         }
       }
       
-      // 2. Fallback: Deep Search in AI Analysis (Image Metadata)
+      // 2. AI/Image GPS (Deep Search)
       const aiGps = findGpsRecursively(report.ai_analysis);
       
       if (aiGps) {
@@ -435,8 +462,23 @@ export default function AdminPage() {
         );
       }
 
-      // 3. No GPS found
-      return <span className="text-slate-400 italic">No GPS</span>;
+      // 3. Debug Fallback (Shows keys if GPS is missing but data exists)
+      const hasData = report.ai_analysis && Object.keys(report.ai_analysis).length > 0;
+      return (
+        <div className="flex items-center gap-1">
+          <span className="text-slate-400 italic">No GPS</span>
+          {hasData && (
+            <div className="group relative">
+              <span className="cursor-help text-[10px] text-slate-300 border border-slate-200 rounded-full w-4 h-4 flex items-center justify-center hover:bg-slate-100 hover:text-slate-600">?</span>
+              {/* Tooltip showing raw keys to debug */}
+              <div className="absolute left-0 bottom-full mb-2 w-64 bg-slate-800 text-white text-[10px] p-2 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible z-50 overflow-hidden break-words">
+                <strong>Debug Data:</strong><br/>
+                {JSON.stringify(report.ai_analysis).slice(0, 300)}
+              </div>
+            </div>
+          )}
+        </div>
+      );
     })()}
   </div>
 </td>
