@@ -25,7 +25,8 @@ import {
   ChevronDown, 
   ChevronRight,
   Trash2,
-  Navigation // Added for Address Icon
+  Navigation,
+  Loader2 // Added for loading state during delete
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -70,7 +71,7 @@ const StarRating = ({ rating }: any) => {
   );
 };
 
-// --- NEW COMPONENT: Address Resolver (Reverse Geocoding) ---
+// --- COMPONENT: Address Resolver ---
 const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
     const [address, setAddress] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -79,11 +80,9 @@ const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
         let isMounted = true;
         const fetchAddress = async () => {
             try {
-                // Using OpenStreetMap Nominatim (Free, no key required for demo)
                 const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
                 const data = await res.json();
                 if (isMounted && data.display_name) {
-                    // Cleanup address to make it shorter (first 3 parts)
                     const shortAddr = data.display_name.split(',').slice(0, 3).join(',');
                     setAddress(shortAddr);
                 }
@@ -108,7 +107,7 @@ const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
     );
 };
 
-// --- UTILS: Formatting & Calculations ---
+// --- UTILS ---
 
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
@@ -178,7 +177,7 @@ function getSuspiciousReason(report: any): string | null {
 
   if (deviceGps && imageGps) {
     const dist = calculateDistance(Number(deviceGps.lat), Number(deviceGps.lon), imageGps.lat, imageGps.lon);
-    if (dist > 0.1) { // 0.1km threshold
+    if (dist > 0.1) { 
       return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
     }
   }
@@ -193,13 +192,11 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const aiData = report.ai_analysis || {};
   const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
   const suspiciousReason = getSuspiciousReason(report);
-  
   const cost = PAY_RATE;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-        
         {/* Header */}
         <div className={`flex justify-between items-center p-6 border-b ${suspiciousReason ? 'bg-rose-50 border-rose-200' : 'border-slate-100'}`}>
           <div>
@@ -223,7 +220,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            
             {/* Left Column: Image Evidence */}
             <div className="space-y-4">
                {suspiciousReason && (
@@ -334,7 +330,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                     </pre>
                 </div>
               </div>
-
             </div>
           </div>
         </div>
@@ -359,6 +354,9 @@ export default function AdminPage() {
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
   const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating' | 'money'>('count');
+  
+  // State to track if deletion is currently happening
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // --- Data Fetching ---
 
@@ -383,6 +381,7 @@ export default function AdminPage() {
 
       const data = await response.json();
       const items = Array.isArray(data) ? data : data.items || [];
+      
       setReports(items);
     } catch (err: any) {
       console.error("Failed to fetch reports:", err);
@@ -397,16 +396,50 @@ export default function AdminPage() {
     fetchReports();
   }, [filterStatus]);
 
-  // --- DELETE FUNCTIONALITY ---
-  const handleDeleteSchool = (schoolName: string) => {
-    const confirmDelete = window.confirm(`Are you sure you want to delete "${schoolName}" and all its reports? This action cannot be undone.`);
+  // --- SERVER-SIDE DELETE FUNCTIONALITY ---
+  const handleDeleteSchool = async (schoolName: string) => {
+    // 1. Identify all reports that belong to this school (using normalization)
+    const targetName = schoolName.trim().toLowerCase();
+    
+    const reportsToDelete = reports.filter(r => {
+        const rName = (r.school_name || "Unknown School").trim().toLowerCase();
+        return rName === targetName;
+    });
+
+    if (reportsToDelete.length === 0) return;
+
+    // 2. Confirmation
+    const confirmDelete = window.confirm(`Are you sure you want to delete "${schoolName}"? \n\nThis will PERMANENTLY delete ${reportsToDelete.length} reports from the server.`);
+    
     if (confirmDelete) {
-        const targetName = schoolName.trim().toLowerCase();
-        const updatedReports = reports.filter(r => {
-            const rName = (r.school_name || "Unknown").trim().toLowerCase();
-            return rName !== targetName;
-        });
-        setReports(updatedReports);
+        setIsDeleting(true);
+        try {
+            // 3. Parallel API Deletion Requests
+            const deletePromises = reportsToDelete.map(report => 
+                fetch(`${API_BASE_URL}/api/reports/${report.report_id}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+            );
+
+            // Wait for all to finish
+            await Promise.all(deletePromises);
+
+            // 4. Update UI State (Optimistic update)
+            setReports(prev => prev.filter(r => {
+                const rName = (r.school_name || "Unknown School").trim().toLowerCase();
+                return rName !== targetName;
+            }));
+
+            alert(`Successfully deleted ${reportsToDelete.length} reports for ${schoolName}.`);
+
+        } catch (err) {
+            console.error("Deletion failed:", err);
+            alert("Failed to delete some reports. Please refresh and try again.");
+            fetchReports(); // Refresh data to be safe
+        } finally {
+            setIsDeleting(false);
+        }
     }
   };
 
@@ -539,7 +572,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.4 Address Resolver</p>
+        <p className="text-[10px] text-slate-600">v3.6 Server Delete</p>
       </div>
     </div>
   );
@@ -728,7 +761,6 @@ export default function AdminPage() {
                                                 </>
                                             ) : <span className="text-slate-300 italic block">No Device GPS</span>}
 
-                                            {/* --- THE GREEN MARK / WARNING --- */}
                                             {isMatch ? (
                                                 <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit mt-1">
                                                     <CheckCircle size={10} />
@@ -861,13 +893,17 @@ export default function AdminPage() {
                             </td>
                             <td className="p-4 text-slate-500">{new Date(school.lastActive).toLocaleDateString()}</td>
                             <td className="p-4 text-right">
-                                <button 
-                                    onClick={() => handleDeleteSchool(school.name)}
-                                    className="p-2 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 transition-colors"
-                                    title="Delete School & Reports"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
+                                {isDeleting ? (
+                                    <div className="p-2"><Loader2 className="animate-spin text-slate-400" size={16}/></div>
+                                ) : (
+                                    <button 
+                                        onClick={() => handleDeleteSchool(school.name)}
+                                        className="p-2 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 transition-colors"
+                                        title="PERMANENTLY DELETE from Server"
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                )}
                             </td>
                         </tr>
                     ))}
