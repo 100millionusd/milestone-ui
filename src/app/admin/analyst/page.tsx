@@ -21,7 +21,7 @@ import {
   Code,
   ShieldAlert,
   ArrowUpDown,
-  DollarSign // Added for Money visualization
+  DollarSign
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -72,8 +72,20 @@ const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-    maximumFractionDigits: 0
+    maximumFractionDigits: 2
   }).format(amount);
+};
+
+// Helper to parse money from various formats (strings, numbers, undefined)
+const parseMoney = (value: any): number => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+        // Remove '$', ',', and spaces to parse "$1,200.00"
+        const cleaned = value.replace(/[^0-9.-]+/g,"");
+        return parseFloat(cleaned) || 0;
+    }
+    return 0;
 };
 
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
@@ -148,7 +160,7 @@ function getSuspiciousReason(report: any): string | null {
   return null;
 }
 
-// --- MODAL COMPONENT (Preserved) ---
+// --- MODAL COMPONENT ---
 const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) => {
   if (!report) return null;
 
@@ -156,8 +168,8 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
   const suspiciousReason = getSuspiciousReason(report);
   
-  // Simulated cost if not in API
-  const cost = report.cost ? Number(report.cost) : 450; 
+  // Try to find cost in multiple places
+  const cost = parseMoney(report.cost || report.amount || report.value);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -173,7 +185,7 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
             <div className="flex items-center gap-2 mt-1">
                  <p className="text-sm text-slate-500">Report ID: {report.report_id} • {new Date(report.created_at).toLocaleString()}</p>
                  {suspiciousReason ? <Badge color="red">ANOMALY DETECTED</Badge> : 
-                  (report.status === 'paid' || report.status === 'completed') ? 
+                  (report.status?.toLowerCase() === 'paid' || report.status?.toLowerCase() === 'completed') ? 
                   <Badge color="green">PAID: {formatCurrency(cost)}</Badge> : null
                  }
             </div>
@@ -375,13 +387,15 @@ export default function AdminPage() {
 
   // --- Derived Metrics ---
 
-  // Calculate Total Paid Money
+  // Calculate Total Paid Money - UPDATED LOGIC
   const totalMoneyPaid = useMemo(() => {
     return reports.reduce((acc, r) => {
-        // Only count status 'paid' or 'completed'
-        if (r.status === 'paid' || r.status === 'completed') {
-            // Use r.cost if available, else default to 450 for demo
-            return acc + (Number(r.cost) || 450); 
+        const status = r.status?.toLowerCase() || '';
+        if (status === 'paid' || status === 'completed') {
+            // Check for various potential key names for cost
+            const rawCost = r.cost || r.amount || r.value;
+            const cost = parseMoney(rawCost);
+            return acc + cost;
         }
         return acc;
     }, 0);
@@ -428,9 +442,10 @@ export default function AdminPage() {
         stats[r.school_name].reports += 1;
         stats[r.school_name].scoreSum += (Number(r.rating) || 0);
         
-        // Accumulate money for this school
-        if (r.status === 'paid' || r.status === 'completed') {
-             stats[r.school_name].totalPaid += (Number(r.cost) || 450);
+        const status = r.status?.toLowerCase() || '';
+        if (status === 'paid' || status === 'completed') {
+             const rawCost = r.cost || r.amount || r.value;
+             stats[r.school_name].totalPaid += parseMoney(rawCost);
         }
 
         if (new Date(r.created_at) > new Date(stats[r.school_name].lastActive)) {
@@ -503,7 +518,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.6 Money Module</p>
+        <p className="text-[10px] text-slate-600">v2.7 Money Fix</p>
       </div>
     </div>
   );
@@ -647,13 +662,18 @@ export default function AdminPage() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {reports.map((report, i) => (
+                        {reports.map((report, i) => {
+                            const status = report.status?.toLowerCase() || 'pending';
+                            const rawCost = report.cost || report.amount || report.value;
+                            const cost = parseMoney(rawCost);
+
+                            return (
                             <tr key={report.report_id || i} className="hover:bg-slate-50 group">
                                 <td className="p-4 whitespace-nowrap">
                                     <div className="text-slate-700 font-medium">{new Date(report.created_at).toLocaleDateString()}</div>
                                     <Badge color={
-                                        report.status === 'paid' || report.status === 'completed' ? 'green' : 
-                                        report.status === 'rejected' ? 'red' : 'blue'
+                                        status === 'paid' || status === 'completed' ? 'green' : 
+                                        status === 'rejected' ? 'red' : 'blue'
                                     }>
                                         {report.status || 'Pending'}
                                     </Badge>
@@ -675,9 +695,9 @@ export default function AdminPage() {
                                   </div>
                                 </td>
                                 <td className="p-4">
-                                    { (report.status === 'paid' || report.status === 'completed') ? (
+                                    { (status === 'paid' || status === 'completed') ? (
                                         <span className="font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
-                                            {formatCurrency(report.cost || 450)}
+                                            {formatCurrency(cost)}
                                         </span>
                                     ) : (
                                         <span className="text-slate-300 text-xs">-</span>
@@ -716,7 +736,7 @@ export default function AdminPage() {
                                     </button>
                                 </td>
                             </tr>
-                        ))}
+                        )})}
                     </tbody>
                 </table>
             </div>
