@@ -24,7 +24,8 @@ import {
   DollarSign,
   ChevronDown, 
   ChevronRight,
-  Trash2 // Added for Delete Icon
+  Trash2,
+  Navigation // Added for Address Icon
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -67,6 +68,44 @@ const StarRating = ({ rating }: any) => {
       ))}
     </div>
   );
+};
+
+// --- NEW COMPONENT: Address Resolver (Reverse Geocoding) ---
+const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
+    const [address, setAddress] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+        const fetchAddress = async () => {
+            try {
+                // Using OpenStreetMap Nominatim (Free, no key required for demo)
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+                const data = await res.json();
+                if (isMounted && data.display_name) {
+                    // Cleanup address to make it shorter (first 3 parts)
+                    const shortAddr = data.display_name.split(',').slice(0, 3).join(',');
+                    setAddress(shortAddr);
+                }
+            } catch (e) {
+                if (isMounted) setAddress("Address lookup failed");
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+        fetchAddress();
+        return () => { isMounted = false; };
+    }, [lat, lon]);
+
+    if (loading) return <span className="text-[10px] text-slate-400 animate-pulse">Resolving location...</span>;
+    if (!address) return null;
+
+    return (
+        <div className="flex items-start gap-1 mt-1 text-[10px] text-slate-500 bg-slate-100 p-1 rounded border border-slate-200">
+            <Navigation size={10} className="mt-0.5 shrink-0 text-blue-500" />
+            <span className="leading-tight">{address}</span>
+        </div>
+    );
 };
 
 // --- UTILS: Formatting & Calculations ---
@@ -214,7 +253,12 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
               <div className="grid grid-cols-2 gap-2">
                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
                       <strong className="text-blue-800 block mb-1">Device Location</strong>
-                      {report.location ? `${Number(report.location.lat).toFixed(5)}, ${Number(report.location.lon).toFixed(5)}` : "N/A"}
+                      {report.location ? (
+                          <>
+                            <div>{Number(report.location.lat).toFixed(5)}, {Number(report.location.lon).toFixed(5)}</div>
+                            <AddressResolver lat={Number(report.location.lat)} lon={Number(report.location.lon)} />
+                          </>
+                      ) : "N/A"}
                   </div>
                   <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-sm">
                       <strong className="text-purple-800 block mb-1">Image Metadata</strong>
@@ -357,19 +401,12 @@ export default function AdminPage() {
   const handleDeleteSchool = (schoolName: string) => {
     const confirmDelete = window.confirm(`Are you sure you want to delete "${schoolName}" and all its reports? This action cannot be undone.`);
     if (confirmDelete) {
-        // Normalization logic to find matches regardless of case
         const targetName = schoolName.trim().toLowerCase();
-        
-        // Filter out reports that match this school name (normalized)
         const updatedReports = reports.filter(r => {
             const rName = (r.school_name || "Unknown").trim().toLowerCase();
             return rName !== targetName;
         });
-        
         setReports(updatedReports);
-        
-        // NOTE: In a real backend, you would make an API call here:
-        // await fetch(`${API_BASE_URL}/api/schools/${schoolId}`, { method: 'DELETE' });
     }
   };
 
@@ -414,7 +451,6 @@ export default function AdminPage() {
     reports.forEach(r => {
         if (!r.school_name) return;
         
-        // Normalize name
         const normalizedName = (r.school_name || "Unknown").trim().replace(/\w\S*/g, (w:string) => (w.replace(/^\w/, (c) => c.toUpperCase())));
 
         if (!stats[normalizedName]) {
@@ -503,7 +539,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.3 School Delete Added</p>
+        <p className="text-[10px] text-slate-600">v3.4 Address Resolver</p>
       </div>
     </div>
   );
@@ -556,7 +592,6 @@ export default function AdminPage() {
   );
 
   const ReportsView = () => {
-    // 1. Group Data with Normalization
     const groupedReports = useMemo(() => {
         const groups: Record<string, any[]> = {};
         reports.forEach(r => {
@@ -684,19 +719,23 @@ export default function AdminPage() {
                                       return (
                                         <>
                                             {hasDevice ? (
-                                                <div className="text-slate-500 flex items-center" title="Device GPS">
-                                                    <MapPin size={12} className="mr-1" />
-                                                    {deviceGps?.lat.toFixed(4)}, {deviceGps?.lon.toFixed(4)}
-                                                </div>
+                                                <>
+                                                    <div className="text-slate-500 flex items-center" title="Device GPS">
+                                                        <MapPin size={12} className="mr-1" />
+                                                        {deviceGps?.lat.toFixed(4)}, {deviceGps?.lon.toFixed(4)}
+                                                    </div>
+                                                    <AddressResolver lat={deviceGps!.lat} lon={deviceGps!.lon} />
+                                                </>
                                             ) : <span className="text-slate-300 italic block">No Device GPS</span>}
 
+                                            {/* --- THE GREEN MARK / WARNING --- */}
                                             {isMatch ? (
-                                                <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit">
+                                                <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit mt-1">
                                                     <CheckCircle size={10} />
                                                     <span>Match</span>
                                                 </div>
                                             ) : (deviceGps && imageGps) ? (
-                                                <div className="flex items-center text-rose-600 font-bold gap-1 bg-rose-50 px-1.5 py-0.5 rounded w-fit">
+                                                <div className="flex items-center text-rose-600 font-bold gap-1 bg-rose-50 px-1.5 py-0.5 rounded w-fit mt-1">
                                                     <AlertTriangle size={10} />
                                                     <span>Mismatch</span>
                                                 </div>
@@ -791,7 +830,7 @@ export default function AdminPage() {
                         <th className="p-4">Average Rating</th>
                         <th className="p-4">Status</th>
                         <th className="p-4">Last Activity</th>
-                        <th className="p-4 text-right">Actions</th> {/* Added Action Header */}
+                        <th className="p-4 text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
