@@ -26,7 +26,8 @@ import {
   ChevronRight,
   Trash2,
   Navigation,
-  Loader2 // Added for loading state during delete
+  Loader2,
+  Camera // Added for Image GPS icon
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -260,7 +261,12 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                       <strong className="text-purple-800 block mb-1">Image Metadata</strong>
                       {(() => {
                           const gps = findGpsRecursively(aiData);
-                          return gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : "Not extracted";
+                          return gps ? (
+                              <>
+                                <div>{gps.lat.toFixed(5)}, {gps.lon.toFixed(5)}</div>
+                                <AddressResolver lat={gps.lat} lon={gps.lon} />
+                              </>
+                          ) : "Not extracted";
                       })()}
                   </div>
               </div>
@@ -572,7 +578,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.6 Server Delete</p>
+        <p className="text-[10px] text-slate-600">v3.7 Image Address</p>
       </div>
     </div>
   );
@@ -730,7 +736,7 @@ export default function AdminPage() {
                                     </Badge>
                                 </td>
                                 <td className="p-4">
-                                  <div className="text-xs ml-0 mt-1 space-y-1">
+                                  <div className="text-xs ml-0 mt-1 space-y-2">
                                     {(() => {
                                       // --- GPS Verification Logic ---
                                       let deviceGps = null;
@@ -751,15 +757,31 @@ export default function AdminPage() {
 
                                       return (
                                         <>
-                                            {hasDevice ? (
-                                                <>
-                                                    <div className="text-slate-500 flex items-center" title="Device GPS">
-                                                        <MapPin size={12} className="mr-1" />
-                                                        {deviceGps?.lat.toFixed(4)}, {deviceGps?.lon.toFixed(4)}
+                                            {/* Device GPS Block */}
+                                            <div className="mb-1">
+                                                <span className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">Device</span>
+                                                {hasDevice ? (
+                                                    <>
+                                                        <div className="text-slate-600 flex items-center mt-0.5" title="Device GPS">
+                                                            <MapPin size={12} className="mr-1" />
+                                                            {deviceGps?.lat.toFixed(4)}, {deviceGps?.lon.toFixed(4)}
+                                                        </div>
+                                                        <AddressResolver lat={deviceGps!.lat} lon={deviceGps!.lon} />
+                                                    </>
+                                                ) : <span className="text-slate-300 italic block">N/A</span>}
+                                            </div>
+
+                                            {/* Image GPS Block */}
+                                            {imageGps && (
+                                                <div className="pt-1 border-t border-slate-100">
+                                                    <span className="text-[10px] uppercase text-purple-400 font-bold tracking-wider">Image</span>
+                                                    <div className="text-purple-700 flex items-center mt-0.5" title="Image GPS">
+                                                        <Camera size={12} className="mr-1" />
+                                                        {imageGps.lat.toFixed(4)}, {imageGps.lon.toFixed(4)}
                                                     </div>
-                                                    <AddressResolver lat={deviceGps!.lat} lon={deviceGps!.lon} />
-                                                </>
-                                            ) : <span className="text-slate-300 italic block">No Device GPS</span>}
+                                                    <AddressResolver lat={imageGps.lat} lon={imageGps.lon} />
+                                                </div>
+                                            )}
 
                                             {isMatch ? (
                                                 <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit mt-1">
