@@ -76,12 +76,11 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-// Helper to parse money from various formats (strings, numbers, undefined)
+// Helper to parse money from various formats
 const parseMoney = (value: any): number => {
     if (value === null || value === undefined) return 0;
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
-        // Remove '$', ',', and spaces to parse "$1,200.00"
         const cleaned = value.replace(/[^0-9.-]+/g,"");
         return parseFloat(cleaned) || 0;
     }
@@ -126,27 +125,24 @@ function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
   return null;
 }
 
-// Haversine formula to calculate distance between two points in km
+// Haversine formula to calculate distance
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Radius of the earth in km
+  const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
   const a = 
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
-  return R * c; // Distance in km
+  return R * c; 
 }
 
-// Check if a report is suspicious
 function getSuspiciousReason(report: any): string | null {
-  // 1. Check for AI Match Failure
   const vendor = report.ai_analysis?.vendor;
   if (!vendor || vendor === "Unknown" || vendor === "Unknown Vendor") {
     return "AI Failed to Identify Vendor (No Match)";
   }
 
-  // 2. Check for GPS Spoofing (Device vs Image mismatch > 1km)
   const deviceGps = report.location;
   const imageGps = findGpsRecursively(report.ai_analysis);
 
@@ -167,8 +163,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const aiData = report.ai_analysis || {};
   const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
   const suspiciousReason = getSuspiciousReason(report);
-  
-  // Try to find cost in multiple places
   const cost = parseMoney(report.cost || report.amount || report.value);
 
   return (
@@ -216,11 +210,7 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
               </h3>
               <div className="bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center min-h-[400px]">
                 {imageUrl ? (
-                  <img 
-                    src={imageUrl} 
-                    alt="Report Evidence" 
-                    className="w-full h-auto object-contain max-h-[600px]"
-                  />
+                  <img src={imageUrl} alt="Report Evidence" className="w-full h-auto object-contain max-h-[600px]" />
                 ) : (
                   <div className="text-slate-400 flex flex-col items-center">
                     <AlertTriangle size={48} className="mb-2 opacity-50" />
@@ -229,7 +219,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                 )}
               </div>
               
-              {/* Image Metadata / GPS Comparison */}
               <div className="grid grid-cols-2 gap-2">
                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
                       <strong className="text-blue-800 block mb-1">Device Location</strong>
@@ -247,8 +236,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
 
             {/* Right Column: AI Analysis */}
             <div className="space-y-6">
-              
-              {/* Summary Card */}
               <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                 <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
                   <Activity size={18} className="text-emerald-600" /> AI Assessment
@@ -301,7 +288,6 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                 </div>
               </div>
 
-              {/* Raw JSON View */}
               <div>
                 <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
                     <Code size={16} /> Raw Analysis Data
@@ -317,12 +303,8 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
           </div>
         </div>
         
-        {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 text-right">
-            <button 
-                onClick={onClose}
-                className="px-6 py-2 bg-white border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-100 transition-colors"
-            >
+            <button onClick={onClose} className="px-6 py-2 bg-white border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-100 transition-colors">
                 Close
             </button>
         </div>
@@ -338,8 +320,6 @@ export default function AdminPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // State for Modal & Sort
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
   const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating' | 'money'>('count');
@@ -360,14 +340,10 @@ export default function AdminPage() {
 
       const response = await fetch(url.toString(), {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers: { 'Content-Type': 'application/json' }
       });
 
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
       const data = await response.json();
       const items = Array.isArray(data) ? data : data.items || [];
@@ -387,15 +363,12 @@ export default function AdminPage() {
 
   // --- Derived Metrics ---
 
-  // Calculate Total Paid Money - UPDATED LOGIC
   const totalMoneyPaid = useMemo(() => {
     return reports.reduce((acc, r) => {
         const status = r.status?.toLowerCase() || '';
         if (status === 'paid' || status === 'completed') {
-            // Check for various potential key names for cost
             const rawCost = r.cost || r.amount || r.value;
-            const cost = parseMoney(rawCost);
-            return acc + cost;
+            return acc + parseMoney(rawCost);
         }
         return acc;
     }, 0);
@@ -425,7 +398,6 @@ export default function AdminPage() {
     return Object.values(stats).sort((a: any, b: any) => b.average - a.average);
   }, [reports]);
 
-  // Aggregate School Data (Sorted)
   const schoolStats = useMemo(() => {
     const stats: any = {};
     reports.forEach(r => {
@@ -467,7 +439,6 @@ export default function AdminPage() {
     }
   }, [reports, sortSchoolsBy]);
 
-  // Suspicious Reports Filter
   const suspiciousReports = useMemo(() => {
     return reports.filter(r => getSuspiciousReason(r) !== null);
   }, [reports]);
@@ -518,7 +489,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.7 Money Fix</p>
+        <p className="text-[10px] text-slate-600">v2.8 GPS & Money Fix</p>
       </div>
     </div>
   );
@@ -653,7 +624,7 @@ export default function AdminPage() {
                     <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                         <tr>
                             <th className="p-4">Date & Status</th>
-                            <th className="p-4">School</th>
+                            <th className="p-4">School (Location)</th>
                             <th className="p-4">Value</th>
                             <th className="p-4">Vendor</th>
                             <th className="p-4">Rating</th>
@@ -685,11 +656,27 @@ export default function AdminPage() {
                                   </div>
                                   <div className="text-xs ml-6 mt-1">
                                     {(() => {
-                                      if (report.location?.lat != null) {
-                                          return <span className="text-slate-500 flex items-center"><MapPin size={12} className="mr-1" /> GPS</span>;
+                                      // RESTORED: Full Coordinate Display
+                                      if (report.location?.lat != null && report.location?.lon != null) {
+                                        const dLat = Number(report.location.lat);
+                                        const dLon = Number(report.location.lon);
+                                        return (
+                                            <span className="text-slate-500 flex items-center" title="Device GPS">
+                                              <MapPin size={12} className="mr-1" />
+                                              {dLat.toFixed(4)}, {dLon.toFixed(4)}
+                                            </span>
+                                        );
                                       }
+                                      
                                       const aiGps = findGpsRecursively(report.ai_analysis);
-                                      if (aiGps) return <span className="text-blue-600 font-medium flex items-center">IMG Meta</span>;
+                                      if (aiGps) {
+                                          return (
+                                            <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image Metadata">
+                                                <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">IMG</span>
+                                                {aiGps.lat.toFixed(4)}, {aiGps.lon.toFixed(4)}
+                                            </span>
+                                          );
+                                      }
                                       return <span className="text-slate-300 italic">No GPS</span>;
                                     })()}
                                   </div>
@@ -748,6 +735,8 @@ export default function AdminPage() {
         </div>
     </div>
   );
+
+  // ... (SchoolsView, AnomaliesView, VendorsView are identical to previous turn)
 
   const SchoolsView = () => (
     <div className="space-y-6">
