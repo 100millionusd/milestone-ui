@@ -15,7 +15,10 @@ import {
   MapPin,
   RefreshCw,
   Server,
-  Filter 
+  Filter,
+  X,        // Added for Modal Close button
+  Maximize2, // Added for "View Details" icon
+  Code      // Added for JSON view
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -28,24 +31,18 @@ const Card = ({ children, className = "" }: any) => (
   </div>
 );
 
-// Helper: Find GPS recursively (handles objects, arrays, and JSON strings)
+// ... (findGpsRecursively function remains exactly the same as your original code) ...
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
   if (!obj) return null;
-
-  // Handle double-stringified JSON (common DB issue)
   if (typeof obj === 'string') {
     if (obj.trim().startsWith('{') || obj.trim().startsWith('[')) {
       try { return findGpsRecursively(JSON.parse(obj)); } catch { return null; }
     }
     return null;
   }
-
   if (typeof obj !== 'object') return null;
-
-  // 1. Check for standard keys (Lat/Lon)
   const lat = obj.lat ?? obj.latitude ?? obj.gps_lat ?? obj.Latitude ?? obj.Lat ?? obj.gpsLat;
   const lon = obj.lon ?? obj.lng ?? obj.longitude ?? obj.gps_lon ?? obj.Longitude ?? obj.Lon ?? obj.Lng ?? obj.gpsLon;
-
   if (lat != null && lon != null) {
     const nLat = Number(lat);
     const nLon = Number(lon);
@@ -53,33 +50,23 @@ function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
       return { lat: nLat, lon: nLon };
     }
   }
-
-  // 2. Check for GeoJSON-style arrays [lon, lat] or [lat, lon]
-  // Keys often used: "coordinates", "gps", "location", "point"
   for (const key of ['coordinates', 'gps', 'location', 'point', 'geo']) {
     const arr = obj[key];
     if (Array.isArray(arr) && arr.length >= 2) {
       const n1 = Number(arr[0]);
       const n2 = Number(arr[1]);
       if (!isNaN(n1) && !isNaN(n2)) {
-        // Simple heuristic: Latitude is usually the one between -90 and 90.
-        // GeoJSON is [lon, lat], Google sometimes [lat, lon].
-        // If 2nd val is definitely lat, use [lon, lat]
         if (Math.abs(n2) <= 90 && Math.abs(n1) > 90) return { lat: n2, lon: n1 };
-        // Default assume [lat, lon] if ambiguous or standard array
         return { lat: n1, lon: n2 };
       }
     }
   }
-
-  // 3. Recurse deeper
   for (const key of Object.keys(obj)) {
     if (typeof obj[key] === 'object' || typeof obj[key] === 'string') {
       const found = findGpsRecursively(obj[key]);
       if (found) return found;
     }
   }
-
   return null;
 }
 
@@ -113,6 +100,148 @@ const StarRating = ({ rating }: any) => {
   );
 };
 
+// --- NEW COMPONENT: Analysis Modal ---
+const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) => {
+  if (!report) return null;
+
+  const aiData = report.ai_analysis || {};
+  const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b border-slate-100">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <School size={20} className="text-emerald-600" />
+              {report.school_name}
+            </h2>
+            <p className="text-sm text-slate-500">Report ID: {report.report_id} • {new Date(report.created_at).toLocaleString()}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} className="text-slate-500" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            {/* Left Column: Image Evidence */}
+            <div className="space-y-4">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                <MapPin size={18} /> Photographic Evidence
+              </h3>
+              <div className="bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center min-h-[400px]">
+                {imageUrl ? (
+                  <img 
+                    src={imageUrl} 
+                    alt="Report Evidence" 
+                    className="w-full h-auto object-contain max-h-[600px]"
+                  />
+                ) : (
+                  <div className="text-slate-400 flex flex-col items-center">
+                    <AlertTriangle size={48} className="mb-2 opacity-50" />
+                    <p>No Image Available</p>
+                  </div>
+                )}
+              </div>
+              {/* Image Metadata / GPS if available */}
+              {report.location && (
+                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm text-blue-800">
+                    <strong>Device Coordinates:</strong> {report.location.lat}, {report.location.lon}
+                 </div>
+              )}
+            </div>
+
+            {/* Right Column: AI Analysis */}
+            <div className="space-y-6">
+              
+              {/* Summary Card */}
+              <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                  <Activity size={18} className="text-emerald-600" /> AI Assessment
+                </h3>
+                
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <span className="text-xs text-slate-400 uppercase font-bold">Vendor</span>
+                        <p className="font-semibold text-slate-800 text-lg">{aiData.vendor || "Unknown"}</p>
+                    </div>
+                    <div>
+                        <span className="text-xs text-slate-400 uppercase font-bold">Calculated Rating</span>
+                        <div className="flex items-center gap-2">
+                            <StarRating rating={report.rating} />
+                            <span className="font-bold text-slate-700">({report.rating}/5)</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="mb-4">
+                    <span className="text-xs text-slate-400 uppercase font-bold">Analysis Summary</span>
+                    <p className="text-slate-700 mt-1 leading-relaxed">{report.description}</p>
+                </div>
+
+                <div className="space-y-3">
+                    {aiData.issues?.length > 0 && (
+                        <div>
+                            <span className="text-xs text-rose-500 uppercase font-bold mb-1 block">Detected Issues</span>
+                            <div className="flex flex-wrap gap-2">
+                                {aiData.issues.map((issue: string, i: number) => (
+                                    <span key={i} className="px-2 py-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-md border border-rose-200">
+                                        {issue}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {aiData.highlights?.length > 0 && (
+                        <div>
+                            <span className="text-xs text-emerald-500 uppercase font-bold mb-1 block">Positive Highlights</span>
+                            <div className="flex flex-wrap gap-2">
+                                {aiData.highlights.map((h: string, i: number) => (
+                                    <span key={i} className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-md border border-emerald-200">
+                                        {h}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+              </div>
+
+              {/* Raw JSON View */}
+              <div>
+                <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
+                    <Code size={16} /> Raw Analysis Data
+                </h3>
+                <div className="bg-slate-900 rounded-xl p-4 overflow-auto max-h-[300px] border border-slate-700">
+                    <pre className="text-xs font-mono text-emerald-400 whitespace-pre-wrap">
+                        {JSON.stringify(aiData, null, 2)}
+                    </pre>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="p-4 bg-slate-50 border-t border-slate-200 text-right">
+            <button 
+                onClick={onClose}
+                className="px-6 py-2 bg-white border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-100 transition-colors"
+            >
+                Close
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Application Component ---
 
 export default function AdminPage() {
@@ -120,6 +249,9 @@ export default function AdminPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for the modal
+  const [selectedReport, setSelectedReport] = useState<any>(null);
   
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
 
@@ -249,7 +381,7 @@ export default function AdminPage() {
                 {error ? "Connection Error" : "Live Server"}
             </span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.2 Connected to Postgres</p>
+        <p className="text-[10px] text-slate-600">v2.3 Connected to Postgres</p>
       </div>
     </div>
   );
@@ -308,7 +440,11 @@ export default function AdminPage() {
                     <p className="text-slate-400 text-sm text-center py-8">No reports received yet.</p>
                 ) : (
                     reports.slice(0, 5).map((report, idx) => (
-                        <div key={report.report_id || idx} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                        <div 
+                            key={report.report_id || idx} 
+                            onClick={() => setSelectedReport(report)}
+                            className="border-b border-slate-100 pb-3 last:border-0 last:pb-0 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors"
+                        >
                             <div className="flex justify-between items-start">
                                 <span className="text-xs text-slate-400 font-mono">
                                     {report.school_name}
@@ -414,7 +550,7 @@ export default function AdminPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {reports.map((report, i) => (
-                            <tr key={report.report_id || i} className="hover:bg-slate-50">
+                            <tr key={report.report_id || i} className="hover:bg-slate-50 group">
                                 <td className="p-4 whitespace-nowrap">
                                     <div className="text-slate-700 font-medium">{new Date(report.created_at).toLocaleDateString()}</div>
                                     <div className="text-xs text-slate-400 mb-1">
@@ -427,61 +563,42 @@ export default function AdminPage() {
                                         {report.status || 'Pending'}
                                     </Badge>
                                 </td>
-<td className="p-4">
-  <div className="flex items-center gap-2 font-medium text-slate-800">
-    <School size={14} className="text-slate-400" />
-    {report.school_name}
-  </div>
-  <div className="text-xs ml-6 mt-1">
-    {(() => {
-      // 1. Device GPS (High Priority)
-      if (report.location?.lat != null && report.location?.lon != null) {
-        const dLat = Number(report.location.lat);
-        const dLon = Number(report.location.lon);
-        if (dLat !== 0 || dLon !== 0) {
-          return (
-            <span className="text-slate-500 flex items-center" title="Device GPS (User Location)">
-              <MapPin size={12} className="mr-1" />
-              {dLat.toFixed(4)}, {dLon.toFixed(4)}
-            </span>
-          );
-        }
-      }
-      
-      // 2. AI/Image GPS (Deep Search)
-      const aiGps = findGpsRecursively(report.ai_analysis);
-      
-      if (aiGps) {
-        return (
-          <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image Metadata">
-            <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">
-              IMG
-            </span>
-            {aiGps.lat.toFixed(4)}, {aiGps.lon.toFixed(4)}
-          </span>
-        );
-      }
-
-      // 3. Debug Fallback (Shows keys if GPS is missing but data exists)
-      const hasData = report.ai_analysis && Object.keys(report.ai_analysis).length > 0;
-      return (
-        <div className="flex items-center gap-1">
-          <span className="text-slate-400 italic">No GPS</span>
-          {hasData && (
-            <div className="group relative">
-              <span className="cursor-help text-[10px] text-slate-300 border border-slate-200 rounded-full w-4 h-4 flex items-center justify-center hover:bg-slate-100 hover:text-slate-600">?</span>
-              {/* Tooltip showing raw keys to debug */}
-              <div className="absolute left-0 bottom-full mb-2 w-64 bg-slate-800 text-white text-[10px] p-2 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible z-50 overflow-hidden break-words">
-                <strong>Debug Data:</strong><br/>
-                {JSON.stringify(report.ai_analysis).slice(0, 300)}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    })()}
-  </div>
-</td>
+                                <td className="p-4">
+                                  <div className="flex items-center gap-2 font-medium text-slate-800">
+                                    <School size={14} className="text-slate-400" />
+                                    {report.school_name}
+                                  </div>
+                                  <div className="text-xs ml-6 mt-1">
+                                    {(() => {
+                                      // 1. Device GPS
+                                      if (report.location?.lat != null && report.location?.lon != null) {
+                                        const dLat = Number(report.location.lat);
+                                        const dLon = Number(report.location.lon);
+                                        if (dLat !== 0 || dLon !== 0) {
+                                          return (
+                                            <span className="text-slate-500 flex items-center" title="Device GPS">
+                                              <MapPin size={12} className="mr-1" />
+                                              {dLat.toFixed(4)}, {dLon.toFixed(4)}
+                                            </span>
+                                          );
+                                        }
+                                      }
+                                      // 2. AI/Image GPS
+                                      const aiGps = findGpsRecursively(report.ai_analysis);
+                                      if (aiGps) {
+                                        return (
+                                          <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image Metadata">
+                                            <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">
+                                              IMG
+                                            </span>
+                                            {aiGps.lat.toFixed(4)}, {aiGps.lon.toFixed(4)}
+                                          </span>
+                                        );
+                                      }
+                                      return <span className="text-slate-300 italic">No GPS</span>;
+                                    })()}
+                                  </div>
+                                </td>
                                 <td className="p-4">
                                     <span className="font-semibold text-slate-700">
                                         {report.ai_analysis?.vendor || "Unknown"}
@@ -497,28 +614,22 @@ export default function AdminPage() {
                                     <p className="text-slate-800 mb-1">{report.description}</p>
                                     {report.ai_analysis && (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {report.ai_analysis.issues?.map((issue: string) => (
+                                            {report.ai_analysis.issues?.slice(0, 2).map((issue: string) => (
                                                 <span key={issue} className="px-1.5 py-0.5 bg-rose-50 text-rose-600 text-xs rounded border border-rose-100">
                                                     {issue}
-                                                </span>
-                                            ))}
-                                            {report.ai_analysis.highlights?.map((h: string) => (
-                                                <span key={h} className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-xs rounded border border-emerald-100">
-                                                    {h}
                                                 </span>
                                             ))}
                                         </div>
                                     )}
                                 </td>
                                 <td className="p-4">
-                                    {report.image_cid ? (
-                                        <a href={`https://ipfs.io/ipfs/${report.image_cid}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-xs flex items-center gap-1">
-                                            <MapPin size={12} />
-                                            View Image
-                                        </a>
-                                    ) : (
-                                        <span className="text-slate-300 text-xs italic">No image</span>
-                                    )}
+                                    <button 
+                                        onClick={() => setSelectedReport(report)}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-md transition-colors"
+                                    >
+                                        <Maximize2 size={12} />
+                                        View Analysis
+                                    </button>
                                 </td>
                             </tr>
                         ))}
@@ -622,6 +733,15 @@ export default function AdminPage() {
                 {activeTab === 'vendors' && <VendorsView />}
             </>
         )}
+
+        {/* --- Render Modal Logic --- */}
+        {selectedReport && (
+            <ReportModal 
+                report={selectedReport} 
+                onClose={() => setSelectedReport(null)} 
+            />
+        )}
+
       </div>
     </div>
   );
