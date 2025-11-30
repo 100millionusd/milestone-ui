@@ -145,7 +145,7 @@ function getSuspiciousReason(report: any): string | null {
 
   if (deviceGps && imageGps) {
     const dist = calculateDistance(Number(deviceGps.lat), Number(deviceGps.lon), imageGps.lat, imageGps.lon);
-    if (dist > 1.0) {
+    if (dist > 0.1) {
       return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
     }
   }
@@ -667,7 +667,7 @@ export default function AdminPage() {
 
                                       if (deviceGps && imageGps) {
                                           const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
-                                          if (dist <= 1.0) isMatch = true;
+                                          if (dist <= 0.1) isMatch = true;
                                       }
 
                                       return (
