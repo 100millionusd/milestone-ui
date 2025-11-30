@@ -78,6 +78,7 @@ const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Guard: Don't attempt fetch if coordinates are invalid
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
             setLoading(false);
             return;
@@ -89,11 +90,12 @@ const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
                 const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
                 const data = await res.json();
                 if (isMounted && data.display_name) {
+                    // Shorten the address for display (first 3 parts)
                     const shortAddr = data.display_name.split(',').slice(0, 3).join(',');
                     setAddress(shortAddr);
                 }
             } catch (e) {
-                if (isMounted) setAddress("Address lookup failed");
+                if (isMounted) setAddress(null); // Silent fail
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -123,40 +125,42 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+// --- ROBUST GPS EXTRACTOR (The Fix) ---
+function extractCoords(obj: any): { lat: number, lon: number } | null {
+  if (!obj) return null;
+  // Handle stringified JSON
+  if (typeof obj === 'string') {
+    try { return extractCoords(JSON.parse(obj)); } catch { return null; }
+  }
+  
+  // Try all common variations of key names
+  const lat = obj.lat ?? obj.latitude ?? obj.gps_lat ?? obj.Latitude ?? obj.Lat ?? (Array.isArray(obj.coordinates) ? obj.coordinates[1] : null);
+  const lon = obj.lon ?? obj.lng ?? obj.longitude ?? obj.gps_lon ?? obj.Longitude ?? obj.Lon ?? obj.Lng ?? (Array.isArray(obj.coordinates) ? obj.coordinates[0] : null);
+
+  const nLat = Number(lat);
+  const nLon = Number(lon);
+
+  if (Number.isFinite(nLat) && Number.isFinite(nLon) && (nLat !== 0 || nLon !== 0)) {
+    return { lat: nLat, lon: nLon };
+  }
+  
+  return null;
+}
+
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
   if (!obj) return null;
-  if (typeof obj === 'string') {
-    if (obj.trim().startsWith('{') || obj.trim().startsWith('[')) {
-      try { return findGpsRecursively(JSON.parse(obj)); } catch { return null; }
-    }
-    return null;
-  }
-  if (typeof obj !== 'object') return null;
-  const lat = obj.lat ?? obj.latitude ?? obj.gps_lat ?? obj.Latitude ?? obj.Lat ?? obj.gpsLat;
-  const lon = obj.lon ?? obj.lng ?? obj.longitude ?? obj.gps_lon ?? obj.Longitude ?? obj.Lon ?? obj.Lng ?? obj.gpsLon;
-  if (lat != null && lon != null) {
-    const nLat = Number(lat);
-    const nLon = Number(lon);
-    if (!isNaN(nLat) && !isNaN(nLon) && (nLat !== 0 || nLon !== 0)) {
-      return { lat: nLat, lon: nLon };
-    }
-  }
-  for (const key of ['coordinates', 'gps', 'location', 'point', 'geo']) {
-    const arr = obj[key];
-    if (Array.isArray(arr) && arr.length >= 2) {
-      const n1 = Number(arr[0]);
-      const n2 = Number(arr[1]);
-      if (!isNaN(n1) && !isNaN(n2)) {
-        if (Math.abs(n2) <= 90 && Math.abs(n1) > 90) return { lat: n2, lon: n1 };
-        return { lat: n1, lon: n2 };
+  // First try direct extraction
+  const direct = extractCoords(obj);
+  if (direct) return direct;
+
+  // Then recurse deeper if not found
+  if (typeof obj === 'object') {
+      for (const key of Object.keys(obj)) {
+        if (typeof obj[key] === 'object' || typeof obj[key] === 'string') {
+          const found = findGpsRecursively(obj[key]);
+          if (found) return found;
+        }
       }
-    }
-  }
-  for (const key of Object.keys(obj)) {
-    if (typeof obj[key] === 'object' || typeof obj[key] === 'string') {
-      const found = findGpsRecursively(obj[key]);
-      if (found) return found;
-    }
   }
   return null;
 }
@@ -178,22 +182,13 @@ function getSuspiciousReason(report: any): string | null {
     return "AI Failed to Identify Vendor (No Match)";
   }
 
-  const deviceGps = report.location;
+  const deviceGps = extractCoords(report.location); // Use new extractor
   const imageGps = findGpsRecursively(report.ai_analysis);
 
   if (deviceGps && imageGps) {
-    const dLat = Number(deviceGps.lat);
-    const dLon = Number(deviceGps.lon);
-    
-    // Only calculate if device GPS is valid
-    if (Number.isFinite(dLat) && Number.isFinite(dLon)) {
-        const dist = calculateDistance(dLat, dLon, imageGps.lat, imageGps.lon);
-        if (dist > 0.1) { 
-          return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
-        }
-    } else {
-        // If device GPS is corrupt (NaN), we might still want to flag it? 
-        // For now, returning null (not suspicious, just broken)
+    const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
+    if (dist > 0.1) { 
+        return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
     }
   }
 
@@ -209,12 +204,9 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const suspiciousReason = getSuspiciousReason(report);
   const cost = PAY_RATE;
 
-  // Prepare GPS display logic for Modal
-  const rawLat = report.location?.lat;
-  const rawLon = report.location?.lon;
-  const dLat = Number(rawLat);
-  const dLon = Number(rawLon);
-  const isValidDevice = Number.isFinite(dLat) && Number.isFinite(dLon) && (dLat !== 0 || dLon !== 0);
+  // Use robust extractor for Modal too
+  const deviceGps = extractCoords(report.location);
+  const imageGps = findGpsRecursively(aiData);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -271,28 +263,21 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
               <div className="grid grid-cols-2 gap-2">
                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
                       <strong className="text-blue-800 block mb-1">Device Location</strong>
-                      {isValidDevice ? (
+                      {deviceGps ? (
                           <>
-                            <div>{dLat.toFixed(5)}, {dLon.toFixed(5)}</div>
-                            <AddressResolver lat={dLat} lon={dLon} />
+                            <div>{deviceGps.lat.toFixed(5)}, {deviceGps.lon.toFixed(5)}</div>
+                            <AddressResolver lat={deviceGps.lat} lon={deviceGps.lon} />
                           </>
-                      ) : (rawLat !== undefined || rawLon !== undefined) ? (
-                          <div className="text-rose-600 font-mono">
-                              Raw: {String(rawLat)}, {String(rawLon)}
-                          </div>
                       ) : "N/A"}
                   </div>
                   <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-sm">
                       <strong className="text-purple-800 block mb-1">Image Metadata</strong>
-                      {(() => {
-                          const gps = findGpsRecursively(aiData);
-                          return gps ? (
-                              <>
-                                <div>{gps.lat.toFixed(5)}, {gps.lon.toFixed(5)}</div>
-                                <AddressResolver lat={gps.lat} lon={gps.lon} />
-                              </>
-                          ) : "Not extracted";
-                      })()}
+                      {imageGps ? (
+                          <>
+                            <div>{imageGps.lat.toFixed(5)}, {imageGps.lon.toFixed(5)}</div>
+                            <AddressResolver lat={imageGps.lat} lon={imageGps.lon} />
+                          </>
+                      ) : "Not extracted"}
                   </div>
               </div>
             </div>
@@ -597,7 +582,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.9 Partial GPS Fix</p>
+        <p className="text-[10px] text-slate-600">v4.0 Robust GPS</p>
       </div>
     </div>
   );
@@ -743,15 +728,16 @@ export default function AdminPage() {
                                             const status = report.status?.toLowerCase() || 'pending';
                                             const cost = PAY_RATE;
 
-                                            // 1. RAW Extraction
-                                            const rawLat = report.location?.lat;
-                                            const rawLon = report.location?.lon;
-                                            const dLat = Number(rawLat);
-                                            const dLon = Number(rawLon);
+                                            // 1. EXTRACT USING ROBUST PARSER
+                                            const deviceGps = extractCoords(report.location);
+                                            const imageGps = findGpsRecursively(report.ai_analysis);
                                             
-                                            // 2. Validity Check
-                                            const isValidDevice = Number.isFinite(dLat) && Number.isFinite(dLon) && (dLat !== 0 || dLon !== 0);
-                                            const hasRawData = (rawLat !== undefined || rawLon !== undefined);
+                                            // 2. CHECK MATCH
+                                            let isMatch = false;
+                                            if (deviceGps && imageGps) {
+                                                const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
+                                                if (dist <= 0.1) isMatch = true;
+                                            }
 
                                             return (
                                             <tr key={report.report_id || i} className="hover:bg-slate-50 group">
@@ -766,72 +752,47 @@ export default function AdminPage() {
                                 </td>
                                 <td className="p-4">
                                   <div className="text-xs ml-0 mt-1 space-y-2">
-                                    {(() => {
-                                      // --- GPS Verification Logic ---
-                                      let deviceGps = null;
-                                      let imageGps = null;
-                                      let isMatch = false;
+                                    
+                                    {/* Device GPS Block */}
+                                    <div className="mb-1">
+                                        <span className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">Device</span>
+                                        {deviceGps ? (
+                                            <>
+                                                <div className="text-slate-600 flex items-center mt-0.5" title="Device GPS">
+                                                    <MapPin size={12} className="mr-1" />
+                                                    {deviceGps.lat.toFixed(5)}, {deviceGps.lon.toFixed(5)}
+                                                </div>
+                                                <AddressResolver lat={deviceGps.lat} lon={deviceGps.lon} />
+                                            </>
+                                        ) : (
+                                            <span className="text-slate-300 italic block">No Device GPS</span>
+                                        )}
+                                    </div>
 
-                                      if (isValidDevice) {
-                                        deviceGps = { lat: dLat, lon: dLon };
-                                      }
-                                      
-                                      imageGps = findGpsRecursively(report.ai_analysis);
-
-                                      if (deviceGps && imageGps) {
-                                          const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
-                                          if (dist <= 0.1) isMatch = true;
-                                      }
-
-                                      return (
-                                        <>
-                                            {/* Device GPS Block - NEW DISPLAY LOGIC */}
-                                            <div className="mb-1">
-                                                <span className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">Device</span>
-                                                {isValidDevice ? (
-                                                    <>
-                                                        <div className="text-slate-600 flex items-center mt-0.5" title="Device GPS">
-                                                            <MapPin size={12} className="mr-1" />
-                                                            {dLat.toFixed(5)}, {dLon.toFixed(5)}
-                                                        </div>
-                                                        <AddressResolver lat={dLat} lon={dLon} />
-                                                    </>
-                                                ) : hasRawData ? (
-                                                    <div className="text-rose-500 text-xs flex items-center mt-0.5" title="Partial/Corrupt GPS Data">
-                                                        <AlertTriangle size={12} className="mr-1" />
-                                                        {String(rawLat)}, {String(rawLon)}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-slate-300 italic block">No Device GPS</span>
-                                                )}
+                                    {/* Image GPS Block */}
+                                    {imageGps && (
+                                        <div className="pt-1 border-t border-slate-100">
+                                            <span className="text-[10px] uppercase text-purple-400 font-bold tracking-wider">Image</span>
+                                            <div className="text-purple-700 flex items-center mt-0.5" title="Image GPS">
+                                                <Camera size={12} className="mr-1" />
+                                                {imageGps.lat.toFixed(4)}, {imageGps.lon.toFixed(4)}
                                             </div>
+                                            <AddressResolver lat={imageGps.lat} lon={imageGps.lon} />
+                                        </div>
+                                    )}
 
-                                            {/* Image GPS Block */}
-                                            {imageGps && (
-                                                <div className="pt-1 border-t border-slate-100">
-                                                    <span className="text-[10px] uppercase text-purple-400 font-bold tracking-wider">Image</span>
-                                                    <div className="text-purple-700 flex items-center mt-0.5" title="Image GPS">
-                                                        <Camera size={12} className="mr-1" />
-                                                        {imageGps.lat.toFixed(4)}, {imageGps.lon.toFixed(4)}
-                                                    </div>
-                                                    <AddressResolver lat={imageGps.lat} lon={imageGps.lon} />
-                                                </div>
-                                            )}
-
-                                            {isMatch ? (
-                                                <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit mt-1">
-                                                    <CheckCircle size={10} />
-                                                    <span>Match</span>
-                                                </div>
-                                            ) : (deviceGps && imageGps) ? (
-                                                <div className="flex items-center text-rose-600 font-bold gap-1 bg-rose-50 px-1.5 py-0.5 rounded w-fit mt-1">
-                                                    <AlertTriangle size={10} />
-                                                    <span>Mismatch</span>
-                                                </div>
-                                            ) : null}
-                                        </>
-                                      );
-                                    })()}
+                                    {isMatch ? (
+                                        <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit mt-1">
+                                            <CheckCircle size={10} />
+                                            <span>Match</span>
+                                        </div>
+                                    ) : (deviceGps && imageGps) ? (
+                                        <div className="flex items-center text-rose-600 font-bold gap-1 bg-rose-50 px-1.5 py-0.5 rounded w-fit mt-1">
+                                            <AlertTriangle size={10} />
+                                            <span>Mismatch</span>
+                                        </div>
+                                    ) : null}
+                                  
                                   </div>
                                 </td>
                                 <td className="p-4">
@@ -888,6 +849,12 @@ export default function AdminPage() {
   );
   };
 
+  // ... (SchoolsView, AnomaliesView, VendorsView remain unchanged)
+  // ... (Same as previous, just update the main component if needed, but the parser is the key)
+
+  // NOTE: For brevity, I am returning the main component using the updated ReportsView logic.
+  // The rest of the views (Schools, Vendors, Anomalies) are identical to the previous version.
+  
   const SchoolsView = () => (
     <div className="space-y-6">
         <div className="flex justify-between items-end">
