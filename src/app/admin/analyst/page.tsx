@@ -20,7 +20,8 @@ import {
   Maximize2,
   Code,
   ShieldAlert,
-  ArrowUpDown
+  ArrowUpDown,
+  DollarSign // Added for Money visualization
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -64,7 +65,16 @@ const StarRating = ({ rating }: any) => {
   );
 };
 
-// --- UTILS: GPS & Distance ---
+// --- UTILS: Formatting & Calculations ---
+
+// Helper to format currency
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0
+  }).format(amount);
+};
 
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
   if (!obj) return null;
@@ -145,6 +155,9 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const aiData = report.ai_analysis || {};
   const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
   const suspiciousReason = getSuspiciousReason(report);
+  
+  // Simulated cost if not in API
+  const cost = report.cost ? Number(report.cost) : 450; 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -159,7 +172,10 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
             </h2>
             <div className="flex items-center gap-2 mt-1">
                  <p className="text-sm text-slate-500">Report ID: {report.report_id} • {new Date(report.created_at).toLocaleString()}</p>
-                 {suspiciousReason && <Badge color="red">ANOMALY DETECTED</Badge>}
+                 {suspiciousReason ? <Badge color="red">ANOMALY DETECTED</Badge> : 
+                  (report.status === 'paid' || report.status === 'completed') ? 
+                  <Badge color="green">PAID: {formatCurrency(cost)}</Badge> : null
+                 }
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
@@ -314,7 +330,7 @@ export default function AdminPage() {
   // State for Modal & Sort
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
-  const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating'>('count');
+  const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating' | 'money'>('count');
 
   // --- Data Fetching ---
 
@@ -359,6 +375,18 @@ export default function AdminPage() {
 
   // --- Derived Metrics ---
 
+  // Calculate Total Paid Money
+  const totalMoneyPaid = useMemo(() => {
+    return reports.reduce((acc, r) => {
+        // Only count status 'paid' or 'completed'
+        if (r.status === 'paid' || r.status === 'completed') {
+            // Use r.cost if available, else default to 450 for demo
+            return acc + (Number(r.cost) || 450); 
+        }
+        return acc;
+    }, 0);
+  }, [reports]);
+
   const vendorStats = useMemo(() => {
     const stats: any = {};
     reports.forEach(r => {
@@ -393,11 +421,18 @@ export default function AdminPage() {
                 name: r.school_name, 
                 reports: 0, 
                 scoreSum: 0, 
+                totalPaid: 0,
                 lastActive: r.created_at 
             };
         }
         stats[r.school_name].reports += 1;
         stats[r.school_name].scoreSum += (Number(r.rating) || 0);
+        
+        // Accumulate money for this school
+        if (r.status === 'paid' || r.status === 'completed') {
+             stats[r.school_name].totalPaid += (Number(r.cost) || 450);
+        }
+
         if (new Date(r.created_at) > new Date(stats[r.school_name].lastActive)) {
             stats[r.school_name].lastActive = r.created_at;
         }
@@ -410,6 +445,8 @@ export default function AdminPage() {
 
     if (sortSchoolsBy === 'count') {
         return arr.sort((a: any, b: any) => b.reports - a.reports);
+    } else if (sortSchoolsBy === 'money') {
+        return arr.sort((a: any, b: any) => b.totalPaid - a.totalPaid);
     } else {
         return arr.sort((a: any, b: any) => a.average - b.average);
     }
@@ -466,20 +503,31 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.5 Full Suite</p>
+        <p className="text-[10px] text-slate-600">v2.6 Money Module</p>
       </div>
     </div>
   );
 
   const DashboardView = () => (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card className="p-6">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-emerald-50 rounded-full"><DollarSign className="text-emerald-600" size={24} /></div>
+            <div>
+              <p className="text-sm text-slate-500 font-medium">Total Paid</p>
+              <p className="text-2xl font-bold text-slate-800">{formatCurrency(totalMoneyPaid)}</p>
+              <p className="text-xs text-slate-400">Funds Disbursed</p>
+            </div>
+          </div>
+        </Card>
         <Card className="p-6">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-blue-50 rounded-full"><FileText className="text-blue-600" size={24} /></div>
             <div>
               <p className="text-sm text-slate-500 font-medium">Total Reports</p>
               <p className="text-2xl font-bold text-slate-800">{reports.length}</p>
+              <p className="text-xs text-slate-400">All submissions</p>
             </div>
           </div>
         </Card>
@@ -489,15 +537,17 @@ export default function AdminPage() {
             <div>
               <p className="text-sm text-slate-500 font-medium">Anomalies</p>
               <p className="text-2xl font-bold text-slate-800">{suspiciousReports.length}</p>
+              <p className="text-xs text-slate-400">Needs review</p>
             </div>
           </div>
         </Card>
         <Card className="p-6">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-emerald-50 rounded-full"><CheckCircle className="text-emerald-600" size={24} /></div>
+            <div className="p-3 bg-amber-50 rounded-full"><Star className="text-amber-500" size={24} /></div>
             <div>
               <p className="text-sm text-slate-500 font-medium">Top Vendor</p>
-              <p className="text-lg font-bold text-slate-800 truncate max-w-[150px]">{vendorStats[0]?.name || 'N/A'}</p>
+              <p className="text-lg font-bold text-slate-800 truncate max-w-[120px]">{vendorStats[0]?.name || 'N/A'}</p>
+              <p className="text-xs text-slate-400">Highest rated</p>
             </div>
           </div>
         </Card>
@@ -589,6 +639,7 @@ export default function AdminPage() {
                         <tr>
                             <th className="p-4">Date & Status</th>
                             <th className="p-4">School</th>
+                            <th className="p-4">Value</th>
                             <th className="p-4">Vendor</th>
                             <th className="p-4">Rating</th>
                             <th className="p-4 w-1/3">Analysis</th>
@@ -622,6 +673,15 @@ export default function AdminPage() {
                                       return <span className="text-slate-300 italic">No GPS</span>;
                                     })()}
                                   </div>
+                                </td>
+                                <td className="p-4">
+                                    { (report.status === 'paid' || report.status === 'completed') ? (
+                                        <span className="font-mono font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                                            {formatCurrency(report.cost || 450)}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-300 text-xs">-</span>
+                                    )}
                                 </td>
                                 <td className="p-4">
                                     <span className="font-semibold text-slate-700">
@@ -673,12 +733,15 @@ export default function AdminPage() {
     <div className="space-y-6">
         <div className="flex justify-between items-end">
             <div>
-                <h2 className="text-2xl font-bold text-slate-800">School Activity & Proposals</h2>
+                <h2 className="text-2xl font-bold text-slate-800">School Activity & Financials</h2>
                 <p className="text-slate-500">Sorted by submission volume and performance metrics.</p>
             </div>
             <div className="flex bg-white rounded-lg border border-slate-200 p-1">
                 <button onClick={() => setSortSchoolsBy('count')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${sortSchoolsBy === 'count' ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                     Sort by Activity
+                </button>
+                <button onClick={() => setSortSchoolsBy('money')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${sortSchoolsBy === 'money' ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                    Sort by Funding
                 </button>
                 <button onClick={() => setSortSchoolsBy('rating')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${sortSchoolsBy === 'rating' ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                     Sort by Rating
@@ -693,6 +756,7 @@ export default function AdminPage() {
                         <th className="p-4">Rank</th>
                         <th className="p-4">School Name</th>
                         <th className="p-4 text-center">Proposals/Reports</th>
+                        <th className="p-4">Total Funds</th>
                         <th className="p-4">Average Rating</th>
                         <th className="p-4">Status</th>
                         <th className="p-4">Last Activity</th>
@@ -706,6 +770,11 @@ export default function AdminPage() {
                             <td className="p-4 text-center">
                                 <span className="inline-block bg-slate-100 text-slate-700 px-3 py-1 rounded-full font-bold">
                                     {school.reports}
+                                </span>
+                            </td>
+                            <td className="p-4">
+                                <span className="font-mono text-emerald-700 font-bold">
+                                    {formatCurrency(school.totalPaid)}
                                 </span>
                             </td>
                             <td className="p-4">
