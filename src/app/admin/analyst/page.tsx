@@ -6,7 +6,7 @@ import {
   School, 
   Utensils, 
   AlertTriangle, 
-  CheckCircle, // Used for the Green Mark
+  CheckCircle, 
   Search, 
   Star, 
   LayoutDashboard,
@@ -26,6 +26,7 @@ import {
 
 // --- Configuration ---
 const API_BASE_URL = "https://milestone-api-production.up.railway.app"; 
+const PAY_RATE = 0.05; // Fixed rate per report
 
 // --- Helper Components ---
 const Card = ({ children, className = "" }: any) => (
@@ -73,16 +74,6 @@ const formatCurrency = (amount: number) => {
     currency: 'USD',
     maximumFractionDigits: 2
   }).format(amount);
-};
-
-const parseMoney = (value: any): number => {
-    if (value === null || value === undefined) return 0;
-    if (typeof value === 'number') return value;
-    if (typeof value === 'string') {
-        const cleaned = value.replace(/[^0-9.-]+/g,"");
-        return parseFloat(cleaned) || 0;
-    }
-    return 0;
 };
 
 function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
@@ -145,7 +136,7 @@ function getSuspiciousReason(report: any): string | null {
 
   if (deviceGps && imageGps) {
     const dist = calculateDistance(Number(deviceGps.lat), Number(deviceGps.lon), imageGps.lat, imageGps.lon);
-    if (dist > 0.1) {
+    if (dist > 0.1) { // 0.1km (100m) threshold
       return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
     }
   }
@@ -160,7 +151,9 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
   const aiData = report.ai_analysis || {};
   const imageUrl = report.image_cid ? `https://ipfs.io/ipfs/${report.image_cid}` : null;
   const suspiciousReason = getSuspiciousReason(report);
-  const cost = parseMoney(report.cost || report.amount || report.value);
+  
+  // FIXED: Hardcoded cost
+  const cost = PAY_RATE;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -364,8 +357,8 @@ export default function AdminPage() {
     return reports.reduce((acc, r) => {
         const status = r.status?.toLowerCase() || '';
         if (status === 'paid' || status === 'completed') {
-            const rawCost = r.cost || r.amount || r.value;
-            return acc + parseMoney(rawCost);
+            // FIXED: Hardcoded $0.05
+            return acc + PAY_RATE;
         }
         return acc;
     }, 0);
@@ -413,8 +406,8 @@ export default function AdminPage() {
         
         const status = r.status?.toLowerCase() || '';
         if (status === 'paid' || status === 'completed') {
-             const rawCost = r.cost || r.amount || r.value;
-             stats[r.school_name].totalPaid += parseMoney(rawCost);
+             // FIXED: Hardcoded $0.05
+             stats[r.school_name].totalPaid += PAY_RATE;
         }
 
         if (new Date(r.created_at) > new Date(stats[r.school_name].lastActive)) {
@@ -486,7 +479,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.9 GPS Match Returned</p>
+        <p className="text-[10px] text-slate-600">v3.0 Fixed 5c Rate</p>
       </div>
     </div>
   );
@@ -632,8 +625,8 @@ export default function AdminPage() {
                     <tbody className="divide-y divide-slate-100">
                         {reports.map((report, i) => {
                             const status = report.status?.toLowerCase() || 'pending';
-                            const rawCost = report.cost || report.amount || report.value;
-                            const cost = parseMoney(rawCost);
+                            // FIXED: Hardcoded $0.05
+                            const cost = PAY_RATE;
 
                             return (
                             <tr key={report.report_id || i} className="hover:bg-slate-50 group">
@@ -667,6 +660,7 @@ export default function AdminPage() {
 
                                       if (deviceGps && imageGps) {
                                           const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
+                                          // Kept 0.1km logic
                                           if (dist <= 0.1) isMatch = true;
                                       }
 
