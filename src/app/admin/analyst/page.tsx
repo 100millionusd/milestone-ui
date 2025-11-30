@@ -23,7 +23,8 @@ import {
   ArrowUpDown,
   DollarSign,
   ChevronDown, 
-  ChevronRight 
+  ChevronRight,
+  Trash2 // Added for Delete Icon
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -352,6 +353,26 @@ export default function AdminPage() {
     fetchReports();
   }, [filterStatus]);
 
+  // --- DELETE FUNCTIONALITY ---
+  const handleDeleteSchool = (schoolName: string) => {
+    const confirmDelete = window.confirm(`Are you sure you want to delete "${schoolName}" and all its reports? This action cannot be undone.`);
+    if (confirmDelete) {
+        // Normalization logic to find matches regardless of case
+        const targetName = schoolName.trim().toLowerCase();
+        
+        // Filter out reports that match this school name (normalized)
+        const updatedReports = reports.filter(r => {
+            const rName = (r.school_name || "Unknown").trim().toLowerCase();
+            return rName !== targetName;
+        });
+        
+        setReports(updatedReports);
+        
+        // NOTE: In a real backend, you would make an API call here:
+        // await fetch(`${API_BASE_URL}/api/schools/${schoolId}`, { method: 'DELETE' });
+    }
+  };
+
   // --- Derived Metrics ---
 
   const totalMoneyPaid = useMemo(() => {
@@ -393,7 +414,7 @@ export default function AdminPage() {
     reports.forEach(r => {
         if (!r.school_name) return;
         
-        // Normalize name for stats aggregation too
+        // Normalize name
         const normalizedName = (r.school_name || "Unknown").trim().replace(/\w\S*/g, (w:string) => (w.replace(/^\w/, (c) => c.toUpperCase())));
 
         if (!stats[normalizedName]) {
@@ -482,7 +503,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.2 Name Normalized</p>
+        <p className="text-[10px] text-slate-600">v3.3 School Delete Added</p>
       </div>
     </div>
   );
@@ -531,7 +552,6 @@ export default function AdminPage() {
           </div>
         </Card>
       </div>
-      {/* Short Live Feed & Vendor Table omitted for brevity but logic exists */}
     </div>
   );
 
@@ -541,7 +561,6 @@ export default function AdminPage() {
         const groups: Record<string, any[]> = {};
         reports.forEach(r => {
             const rawName = r.school_name || "Unknown School";
-            // Normalization: Title Case to merge "potosi" and "Potosi"
             const name = rawName.trim().toLowerCase().split(' ').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
             
             if (!groups[name]) groups[name] = [];
@@ -671,7 +690,6 @@ export default function AdminPage() {
                                                 </div>
                                             ) : <span className="text-slate-300 italic block">No Device GPS</span>}
 
-                                            {/* --- THE GREEN MARK / WARNING --- */}
                                             {isMatch ? (
                                                 <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit">
                                                     <CheckCircle size={10} />
@@ -773,6 +791,7 @@ export default function AdminPage() {
                         <th className="p-4">Average Rating</th>
                         <th className="p-4">Status</th>
                         <th className="p-4">Last Activity</th>
+                        <th className="p-4 text-right">Actions</th> {/* Added Action Header */}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -802,6 +821,15 @@ export default function AdminPage() {
                                  <Badge color="yellow">Average</Badge>}
                             </td>
                             <td className="p-4 text-slate-500">{new Date(school.lastActive).toLocaleDateString()}</td>
+                            <td className="p-4 text-right">
+                                <button 
+                                    onClick={() => handleDeleteSchool(school.name)}
+                                    className="p-2 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 transition-colors"
+                                    title="Delete School & Reports"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </td>
                         </tr>
                     ))}
                 </tbody>
