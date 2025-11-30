@@ -22,8 +22,8 @@ import {
   ShieldAlert,
   ArrowUpDown,
   DollarSign,
-  ChevronDown, // Added for accordion
-  ChevronRight // Added for accordion
+  ChevronDown, 
+  ChevronRight 
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -392,25 +392,29 @@ export default function AdminPage() {
     const stats: any = {};
     reports.forEach(r => {
         if (!r.school_name) return;
-        if (!stats[r.school_name]) {
-            stats[r.school_name] = { 
-                name: r.school_name, 
+        
+        // Normalize name for stats aggregation too
+        const normalizedName = (r.school_name || "Unknown").trim().replace(/\w\S*/g, (w:string) => (w.replace(/^\w/, (c) => c.toUpperCase())));
+
+        if (!stats[normalizedName]) {
+            stats[normalizedName] = { 
+                name: normalizedName, 
                 reports: 0, 
                 scoreSum: 0, 
                 totalPaid: 0,
                 lastActive: r.created_at 
             };
         }
-        stats[r.school_name].reports += 1;
-        stats[r.school_name].scoreSum += (Number(r.rating) || 0);
+        stats[normalizedName].reports += 1;
+        stats[normalizedName].scoreSum += (Number(r.rating) || 0);
         
         const status = r.status?.toLowerCase() || '';
         if (status === 'paid' || status === 'completed') {
-             stats[r.school_name].totalPaid += PAY_RATE;
+             stats[normalizedName].totalPaid += PAY_RATE;
         }
 
-        if (new Date(r.created_at) > new Date(stats[r.school_name].lastActive)) {
-            stats[r.school_name].lastActive = r.created_at;
+        if (new Date(r.created_at) > new Date(stats[normalizedName].lastActive)) {
+            stats[normalizedName].lastActive = r.created_at;
         }
     });
     
@@ -478,7 +482,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.1 Collapsible Schools</p>
+        <p className="text-[10px] text-slate-600">v3.2 Name Normalized</p>
       </div>
     </div>
   );
@@ -532,11 +536,14 @@ export default function AdminPage() {
   );
 
   const ReportsView = () => {
-    // 1. Group Data
+    // 1. Group Data with Normalization
     const groupedReports = useMemo(() => {
         const groups: Record<string, any[]> = {};
         reports.forEach(r => {
-            const name = r.school_name || "Unknown School";
+            const rawName = r.school_name || "Unknown School";
+            // Normalization: Title Case to merge "potosi" and "Potosi"
+            const name = rawName.trim().toLowerCase().split(' ').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+            
             if (!groups[name]) groups[name] = [];
             groups[name].push(r);
         });
@@ -546,7 +553,6 @@ export default function AdminPage() {
         }, {} as Record<string, any[]>);
     }, [reports]);
 
-    // 2. State for accordion
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
     const toggle = (name: string) => {
