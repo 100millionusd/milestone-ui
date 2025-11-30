@@ -27,7 +27,7 @@ import {
   Trash2,
   Navigation,
   Loader2,
-  Camera // Added for Image GPS icon
+  Camera
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -78,6 +78,12 @@ const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Guard: Don't attempt fetch if coordinates are invalid
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            setLoading(false);
+            return;
+        }
+
         let isMounted = true;
         const fetchAddress = async () => {
             try {
@@ -177,9 +183,15 @@ function getSuspiciousReason(report: any): string | null {
   const imageGps = findGpsRecursively(report.ai_analysis);
 
   if (deviceGps && imageGps) {
-    const dist = calculateDistance(Number(deviceGps.lat), Number(deviceGps.lon), imageGps.lat, imageGps.lon);
-    if (dist > 0.1) { 
-      return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
+    const dLat = Number(deviceGps.lat);
+    const dLon = Number(deviceGps.lon);
+    
+    // Ensure valid coordinates before calculation
+    if (Number.isFinite(dLat) && Number.isFinite(dLon)) {
+        const dist = calculateDistance(dLat, dLon, imageGps.lat, imageGps.lon);
+        if (dist > 0.1) { 
+          return `GPS Mismatch Detected (${dist.toFixed(1)}km discrepancy)`;
+        }
     }
   }
 
@@ -261,12 +273,7 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                       <strong className="text-purple-800 block mb-1">Image Metadata</strong>
                       {(() => {
                           const gps = findGpsRecursively(aiData);
-                          return gps ? (
-                              <>
-                                <div>{gps.lat.toFixed(5)}, {gps.lon.toFixed(5)}</div>
-                                <AddressResolver lat={gps.lat} lon={gps.lon} />
-                              </>
-                          ) : "Not extracted";
+                          return gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : "Not extracted";
                       })()}
                   </div>
               </div>
@@ -361,7 +368,6 @@ export default function AdminPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all'); 
   const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating' | 'money'>('count');
   
-  // State to track if deletion is currently happening
   const [isDeleting, setIsDeleting] = useState(false);
 
   // --- Data Fetching ---
@@ -404,7 +410,6 @@ export default function AdminPage() {
 
   // --- SERVER-SIDE DELETE FUNCTIONALITY ---
   const handleDeleteSchool = async (schoolName: string) => {
-    // 1. Identify all reports that belong to this school (using normalization)
     const targetName = schoolName.trim().toLowerCase();
     
     const reportsToDelete = reports.filter(r => {
@@ -414,13 +419,11 @@ export default function AdminPage() {
 
     if (reportsToDelete.length === 0) return;
 
-    // 2. Confirmation
     const confirmDelete = window.confirm(`Are you sure you want to delete "${schoolName}"? \n\nThis will PERMANENTLY delete ${reportsToDelete.length} reports from the server.`);
     
     if (confirmDelete) {
         setIsDeleting(true);
         try {
-            // 3. Parallel API Deletion Requests
             const deletePromises = reportsToDelete.map(report => 
                 fetch(`${API_BASE_URL}/api/reports/${report.report_id}`, {
                     method: 'DELETE',
@@ -428,10 +431,8 @@ export default function AdminPage() {
                 })
             );
 
-            // Wait for all to finish
             await Promise.all(deletePromises);
 
-            // 4. Update UI State (Optimistic update)
             setReports(prev => prev.filter(r => {
                 const rName = (r.school_name || "Unknown School").trim().toLowerCase();
                 return rName !== targetName;
@@ -442,7 +443,7 @@ export default function AdminPage() {
         } catch (err) {
             console.error("Deletion failed:", err);
             alert("Failed to delete some reports. Please refresh and try again.");
-            fetchReports(); // Refresh data to be safe
+            fetchReports();
         } finally {
             setIsDeleting(false);
         }
@@ -578,7 +579,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v3.7 Image Address</p>
+        <p className="text-[10px] text-slate-600">v3.8 Fix GPS NaN</p>
       </div>
     </div>
   );
@@ -744,10 +745,16 @@ export default function AdminPage() {
                                       let isMatch = false;
                                       let hasDevice = false;
 
+                                      // STRICT CHECK: Ensure numbers are finite (not NaN)
                                       if (report.location?.lat != null && report.location?.lon != null) {
-                                        deviceGps = { lat: Number(report.location.lat), lon: Number(report.location.lon) };
-                                        hasDevice = true;
+                                        const dLat = Number(report.location.lat);
+                                        const dLon = Number(report.location.lon);
+                                        if (Number.isFinite(dLat) && Number.isFinite(dLon)) {
+                                            deviceGps = { lat: dLat, lon: dLon };
+                                            hasDevice = true;
+                                        }
                                       }
+                                      
                                       imageGps = findGpsRecursively(report.ai_analysis);
 
                                       if (deviceGps && imageGps) {
@@ -768,7 +775,7 @@ export default function AdminPage() {
                                                         </div>
                                                         <AddressResolver lat={deviceGps!.lat} lon={deviceGps!.lon} />
                                                     </>
-                                                ) : <span className="text-slate-300 italic block">N/A</span>}
+                                                ) : <span className="text-slate-300 italic block">No Device GPS</span>}
                                             </div>
 
                                             {/* Image GPS Block */}
