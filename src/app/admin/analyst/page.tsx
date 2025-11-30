@@ -6,7 +6,7 @@ import {
   School, 
   Utensils, 
   AlertTriangle, 
-  CheckCircle, 
+  CheckCircle, // Used for the Green Mark
   Search, 
   Star, 
   LayoutDashboard,
@@ -67,7 +67,6 @@ const StarRating = ({ rating }: any) => {
 
 // --- UTILS: Formatting & Calculations ---
 
-// Helper to format currency
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -76,7 +75,6 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-// Helper to parse money from various formats
 const parseMoney = (value: any): number => {
     if (value === null || value === undefined) return 0;
     if (typeof value === 'number') return value;
@@ -125,7 +123,6 @@ function findGpsRecursively(obj: any): { lat: number, lon: number } | null {
   return null;
 }
 
-// Haversine formula to calculate distance
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -489,7 +486,7 @@ export default function AdminPage() {
             <Server size={14} className={error ? "text-rose-500" : "text-emerald-500"} />
             <span className="text-xs font-mono text-slate-400">{error ? "Connection Error" : "Live Server"}</span>
         </div>
-        <p className="text-[10px] text-slate-600">v2.8 GPS & Money Fix</p>
+        <p className="text-[10px] text-slate-600">v2.9 GPS Match Returned</p>
       </div>
     </div>
   );
@@ -654,30 +651,48 @@ export default function AdminPage() {
                                     <School size={14} className="text-slate-400" />
                                     {report.school_name}
                                   </div>
-                                  <div className="text-xs ml-6 mt-1">
+                                  <div className="text-xs ml-6 mt-1 space-y-1">
                                     {(() => {
-                                      // RESTORED: Full Coordinate Display
+                                      // --- GPS Verification Logic ---
+                                      let deviceGps = null;
+                                      let imageGps = null;
+                                      let isMatch = false;
+                                      let hasDevice = false;
+
                                       if (report.location?.lat != null && report.location?.lon != null) {
-                                        const dLat = Number(report.location.lat);
-                                        const dLon = Number(report.location.lon);
-                                        return (
-                                            <span className="text-slate-500 flex items-center" title="Device GPS">
-                                              <MapPin size={12} className="mr-1" />
-                                              {dLat.toFixed(4)}, {dLon.toFixed(4)}
-                                            </span>
-                                        );
+                                        deviceGps = { lat: Number(report.location.lat), lon: Number(report.location.lon) };
+                                        hasDevice = true;
                                       }
-                                      
-                                      const aiGps = findGpsRecursively(report.ai_analysis);
-                                      if (aiGps) {
-                                          return (
-                                            <span className="text-blue-600 font-medium flex items-center" title="Extracted from Image Metadata">
-                                                <span className="inline-flex items-center justify-center mr-1 text-[9px] border border-blue-200 bg-blue-50 px-1 rounded h-4 leading-none uppercase tracking-wide">IMG</span>
-                                                {aiGps.lat.toFixed(4)}, {aiGps.lon.toFixed(4)}
-                                            </span>
-                                          );
+                                      imageGps = findGpsRecursively(report.ai_analysis);
+
+                                      if (deviceGps && imageGps) {
+                                          const dist = calculateDistance(deviceGps.lat, deviceGps.lon, imageGps.lat, imageGps.lon);
+                                          if (dist <= 1.0) isMatch = true;
                                       }
-                                      return <span className="text-slate-300 italic">No GPS</span>;
+
+                                      return (
+                                        <>
+                                            {hasDevice ? (
+                                                <div className="text-slate-500 flex items-center" title="Device GPS">
+                                                    <MapPin size={12} className="mr-1" />
+                                                    {deviceGps?.lat.toFixed(4)}, {deviceGps?.lon.toFixed(4)}
+                                                </div>
+                                            ) : <span className="text-slate-300 italic block">No Device GPS</span>}
+
+                                            {/* --- THE GREEN MARK / WARNING --- */}
+                                            {isMatch ? (
+                                                <div className="flex items-center text-emerald-600 font-bold gap-1 bg-emerald-50 px-1.5 py-0.5 rounded w-fit">
+                                                    <CheckCircle size={10} />
+                                                    <span>Match</span>
+                                                </div>
+                                            ) : (deviceGps && imageGps) ? (
+                                                <div className="flex items-center text-rose-600 font-bold gap-1 bg-rose-50 px-1.5 py-0.5 rounded w-fit">
+                                                    <AlertTriangle size={10} />
+                                                    <span>Mismatch</span>
+                                                </div>
+                                            ) : null}
+                                        </>
+                                      );
                                     })()}
                                   </div>
                                 </td>
@@ -735,8 +750,6 @@ export default function AdminPage() {
         </div>
     </div>
   );
-
-  // ... (SchoolsView, AnomaliesView, VendorsView are identical to previous turn)
 
   const SchoolsView = () => (
     <div className="space-y-6">
