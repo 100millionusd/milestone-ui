@@ -72,6 +72,106 @@ const StarRating = ({ rating }: any) => {
   );
 };
 
+// --- NEW COMPONENT: Smart School Validator ---
+const SchoolValidator = ({ lat, lon, declaredName }: { lat: number, lon: number, declaredName: string }) => {
+    const [locationData, setLocationData] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+    const [isSchoolZone, setIsSchoolZone] = useState(false);
+
+    useEffect(() => {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            setLoading(false);
+            return;
+        }
+
+        let isMounted = true;
+        const verifyLocation = async () => {
+            try {
+                // We request 'addressdetails=1' and 'extratags=1' to find school markers
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&extratags=1`);
+                const data = await res.json();
+                
+                if (isMounted && data) {
+                    setLocationData(data);
+                    
+                    // HEURISTIC: Check if OSM tags this location as educational
+                    const type = data.type || "";
+                    const category = data.category || "";
+                    const amenity = data.extratags?.amenity || "";
+                    
+                    if (
+                        category === "education" || 
+                        type === "school" || 
+                        amenity === "school" || 
+                        data.display_name.toLowerCase().includes("escuela") ||
+                        data.display_name.toLowerCase().includes("colegio") ||
+                        data.display_name.toLowerCase().includes("unidad educativa")
+                    ) {
+                        setIsSchoolZone(true);
+                    }
+                }
+            } catch (e) {
+                // Silent fail
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+        verifyLocation();
+        return () => { isMounted = false; };
+    }, [lat, lon]);
+
+    if (loading) return <span className="text-[10px] text-slate-400 animate-pulse">Verifying location...</span>;
+    if (!locationData) return <span className="text-[10px] text-rose-400">Location service unavailable</span>;
+
+    // Create Search Links
+    const googleMapsLink = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+    // Search specific Bolivian Ministry site for the name
+    const rueSearchLink = `https://www.google.com/search?q=site:rue.sie.gob.bo+"${declaredName}"+Potosi`; 
+
+    return (
+        <div className="mt-2 space-y-2">
+            {/* 1. Address Display */}
+            <div className="flex items-start gap-1.5 text-[11px] text-slate-600 bg-slate-100 p-2 rounded border border-slate-200">
+                <MapPin size={12} className="mt-0.5 shrink-0 text-blue-500" />
+                <span className="leading-tight">{locationData.display_name}</span>
+            </div>
+
+            {/* 2. Automated Verdict */}
+            <div className="flex items-center gap-2">
+                {isSchoolZone ? (
+                    <span className="flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
+                        <CheckCircle size={10} /> Confirmed School Zone (OSM)
+                    </span>
+                ) : (
+                    <span className="flex items-center gap-1 text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold border border-amber-200">
+                        <AlertTriangle size={10} /> Unverified / Residential Area
+                    </span>
+                )}
+            </div>
+
+            {/* 3. Manual Verification Tools */}
+            <div className="flex gap-2 pt-1">
+                <a 
+                    href={googleMapsLink} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1 text-[10px] bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 py-1 px-2 rounded transition-colors"
+                >
+                    <Maximize2 size={10} /> Check Satellite
+                </a>
+                <a 
+                    href={rueSearchLink} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1 text-[10px] bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 py-1 px-2 rounded transition-colors"
+                >
+                    <Search size={10} /> Search RUE (Official)
+                </a>
+            </div>
+        </div>
+    );
+};
+
 // --- COMPONENT: Address Resolver ---
 const AddressResolver = ({ lat, lon }: { lat: number, lon: number }) => {
     const [address, setAddress] = useState<string | null>(null);
@@ -261,15 +361,22 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
               </div>
               
               <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
-                      <strong className="text-blue-800 block mb-1">Device Location</strong>
-                      {deviceGps ? (
-                          <>
-                            <div>{deviceGps.lat.toFixed(5)}, {deviceGps.lon.toFixed(5)}</div>
-                            <AddressResolver lat={deviceGps.lat} lon={deviceGps.lon} />
-                          </>
-                      ) : "N/A"}
-                  </div>
+   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm">
+    <strong className="text-blue-800 block mb-1">Device Verification</strong>
+    {deviceGps ? (
+        <>
+          <div className="font-mono text-xs text-blue-900 mb-1">
+            GPS: {deviceGps.lat.toFixed(5)}, {deviceGps.lon.toFixed(5)}
+          </div>
+          {/* Inject the new Validator here */}
+          <SchoolValidator 
+             lat={deviceGps.lat} 
+             lon={deviceGps.lon} 
+             declaredName={report.school_name || ""} 
+          />
+        </>
+    ) : "N/A"}
+</div>
                   <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-sm">
                       <strong className="text-purple-800 block mb-1">Image Metadata</strong>
                       {imageGps ? (
