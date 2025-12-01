@@ -1131,23 +1131,45 @@ export default function AdminPage() {
                     </div>
                 )}
 
-                {Object.entries(groupedReports).map(([schoolName, schoolReports]) => (
-                    <div key={schoolName} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                        <button 
-                            onClick={() => toggle(schoolName)}
-                            className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-200"
-                        >
-                            <div className="flex items-center gap-3">
-                                {expanded[schoolName] ? <ChevronDown size={20} className="text-slate-400" /> : <ChevronRight size={20} className="text-slate-400" />}
-                                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                                    <School size={18} className="text-emerald-600" />
-                                    {schoolName}
-                                </h3>
-                                <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">
-                                    {schoolReports.length}
-                                </span>
-                            </div>
-                        </button>
+ {Object.entries(groupedReports).map(([schoolName, schoolReports]) => (
+    <div key={schoolName} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        
+        {/* --- HEADER (Updated) --- */}
+        <div className="w-full flex items-center justify-between bg-slate-50 border-b border-slate-200 pr-4">
+            
+            {/* Clickable Area to Toggle Accordion */}
+            <button 
+                onClick={() => toggle(schoolName)}
+                className="flex-1 flex items-center gap-3 p-4 hover:bg-slate-100 transition-colors text-left"
+            >
+                {expanded[schoolName] ? (
+                    <ChevronDown size={20} className="text-slate-400" />
+                ) : (
+                    <ChevronRight size={20} className="text-slate-400" />
+                )}
+                
+                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                    <School size={18} className="text-emerald-600" />
+                    {schoolName}
+                </h3>
+                
+                <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">
+                    {schoolReports.length}
+                </span>
+            </button>
+
+            {/* DELETE ACTION (New) */}
+            <button
+                onClick={(e) => {
+                    e.stopPropagation(); // Prevent toggling the accordion
+                    handleDeleteSchool(schoolName);
+                }}
+                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                title={`Delete all reports for ${schoolName}`}
+            >
+                <Trash2 size={18} />
+            </button>
+        </div>
 
                         {expanded[schoolName] && (
                             <div className="overflow-x-auto">
