@@ -792,14 +792,32 @@ export default function AdminPage() {
   const vendorStats = useMemo(() => {
     const stats: any = {};
     reports.forEach(r => {
+      // 1. Determine Vendor Name
       const vendorName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
+      
       if (!stats[vendorName]) {
-        stats[vendorName] = { name: vendorName, totalReports: 0, totalScore: 0, average: 0, sentiment: 'neutral', schools: new Set() };
+        stats[vendorName] = { 
+            name: vendorName, 
+            totalReports: 0, 
+            totalScore: 0, 
+            average: 0, 
+            sentiment: 'neutral', 
+            schools: new Set(),
+            // 2. NEW: Capture Wallet from the report itself if available
+            detectedWallet: null 
+        };
       }
+      
+      // Store the wallet found in the report (if one exists)
+      if (r.wallet_address && !stats[vendorName].detectedWallet) {
+          stats[vendorName].detectedWallet = r.wallet_address;
+      }
+
       stats[vendorName].totalReports += 1;
       stats[vendorName].totalScore += (Number(r.rating) || 0);
       if (r.school_name) stats[vendorName].schools.add(r.school_name);
     });
+
     Object.keys(stats).forEach(k => {
       const s = stats[k];
       if (s.totalReports > 0) {
@@ -1317,22 +1335,38 @@ export default function AdminPage() {
     // 1. Merge Report Stats with Official Registry Data
     const processedVendors = useMemo(() => {
         return vendorStats.map((stat: any) => {
-            // Find official record by name (case-insensitive)
-            const official = registeredVendors.find(
-                v => v.vendorName?.toLowerCase().trim() === stat.name?.toLowerCase().trim()
+            // STRATEGY A: Match by Wallet (Precise)
+            // If the report had a wallet address, check if it exists in the registry
+            let official = registeredVendors.find(
+                v => v.walletAddress?.toLowerCase() === stat.detectedWallet?.toLowerCase()
             );
+
+            // STRATEGY B: Match by Name (Fuzzy Fallback)
+            if (!official) {
+                official = registeredVendors.find(v => {
+                    const regName = v.vendorName?.toLowerCase().trim() || "";
+                    const statName = stat.name?.toLowerCase().trim() || "";
+                    // Check exact match OR if one includes the other (handles "S.R.L." suffixes)
+                    return regName === statName || (regName.length > 5 && statName.includes(regName)) || (statName.length > 5 && regName.includes(statName));
+                });
+            }
+
+            // Determine effective wallet: Official Profile > Report Data > Null
+            const effectiveWallet = official?.walletAddress || stat.detectedWallet || null;
+
             return {
                 ...stat,
-                walletAddress: official?.walletAddress || null,
+                walletAddress: effectiveWallet,
+                officialName: official?.vendorName || null, // Display official name if found
                 isArchived: official?.archived || false,
-                isRegistered: !!official
+                isRegistered: !!official || !!stat.detectedWallet // Consider registered if we have a wallet at all
             };
         }).sort((a: any, b: any) => {
-            // 2. SORT LOGIC: Active First, Archived Last
-            if (a.isArchived !== b.isArchived) {
-                return a.isArchived ? 1 : -1; 
-            }
-            // Then sort by Rating (High to Low)
+            // Sort: Active First, Archived Last
+            if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
+            // Then Sort: Known Wallet First
+            if (!!a.walletAddress !== !!b.walletAddress) return a.walletAddress ? -1 : 1;
+            // Then Sort: Rating
             return parseFloat(b.average) - parseFloat(a.average);
         });
     }, [vendorStats, registeredVendors]);
@@ -1366,7 +1400,6 @@ export default function AdminPage() {
                         : 'bg-white shadow-sm hover:shadow-md'
                     }`}
                 >
-                    {/* Color Bar */}
                     <div className="h-2 bg-slate-100">
                         <div 
                             className={`h-full ${
@@ -1382,18 +1415,27 @@ export default function AdminPage() {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                                    {vendor.name}
+                                    {vendor.officialName || vendor.name}
                                     {vendor.isArchived && (
                                         <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full uppercase font-bold tracking-wide">
                                             Archived
                                         </span>
                                     )}
                                 </h3>
-                                <p className="text-xs text-slate-500 font-mono mt-1">
-                                    {vendor.walletAddress 
-                                        ? `${vendor.walletAddress.substring(0,6)}...${vendor.walletAddress.substring(38)}` 
-                                        : "Unregistered / No Wallet"
-                                    }
+                                <p className="text-xs text-slate-500 font-mono mt-1 flex items-center gap-1">
+                                    {vendor.walletAddress ? (
+                                        <>
+                                            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                            <span title={vendor.walletAddress} className="bg-slate-100 px-1 rounded cursor-help">
+                                                {vendor.walletAddress.substring(0,6)}...{vendor.walletAddress.substring(38)}
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                            <span className="italic">Name Match Only (No Wallet)</span>
+                                        </>
+                                    )}
                                 </p>
                             </div>
                             <div className="bg-slate-100 px-2 py-1 rounded text-sm font-bold text-slate-700 flex items-center gap-1">
@@ -1412,9 +1454,8 @@ export default function AdminPage() {
                             </div>
                         </div>
 
-                        {/* Archive Action */}
                         <div className="pt-3 border-t border-slate-100 flex justify-end">
-                            {vendor.isRegistered ? (
+                            {vendor.walletAddress ? (
                                 <button
                                     onClick={() => handleVendorArchive(vendor.walletAddress, vendor.isArchived)}
                                     className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded transition-colors ${
@@ -1430,8 +1471,8 @@ export default function AdminPage() {
                                     )}
                                 </button>
                             ) : (
-                                <span className="text-[10px] text-slate-300 italic py-2">
-                                    Link wallet to archive
+                                <span className="text-[10px] text-slate-300 italic py-2 cursor-not-allowed">
+                                    Requires Wallet to Archive
                                 </span>
                             )}
                         </div>
