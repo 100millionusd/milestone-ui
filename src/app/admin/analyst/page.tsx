@@ -637,22 +637,21 @@ export default function AdminPage() {
   const [registeredVendors, setRegisteredVendors] = useState<any[]>([]);
   const [vendorListLoading, setVendorListLoading] = useState(false);
 
-  // 1. Fetch Official Vendor List (to get Wallet Addresses & Archive Status)
+
+
+ / 1. Fetch Official Vendor List (to get Wallet Addresses & Archive Status)
   const fetchRegisteredVendors = async () => {
     setVendorListLoading(true);
     try {
-      // API call to existing endpoint in server.js
       const res = await fetch(`${API_BASE_URL}/admin/vendors?includeArchived=true`, {
         headers: { 
             'Content-Type': 'application/json',
-            // Include auth token if your setup requires it manually, 
-            // otherwise 'credentials: include' handles cookies
             'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
         },
+        credentials: 'include' // <--- CRITICAL FIX: Sends the auth cookie
       });
       if (res.ok) {
         const data = await res.json();
-        // Handle array response
         setRegisteredVendors(Array.isArray(data) ? data : data.items || []);
       }
     } catch (e) {
@@ -683,13 +682,15 @@ export default function AdminPage() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
         },
+        credentials: 'include' // <--- CRITICAL FIX: Sends the auth cookie
       });
 
       if (res.ok) {
-        // Refresh list to update UI sorting
+        // Refresh list to update UI sorting immediately
         fetchRegisteredVendors(); 
       } else {
-        alert("Action failed. Ensure you are an admin.");
+        const err = await res.json();
+        alert(`Action failed: ${err.error || "Ensure you are an admin."}`);
       }
     } catch (e) {
       console.error(e);
