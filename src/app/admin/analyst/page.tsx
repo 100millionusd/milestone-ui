@@ -838,10 +838,17 @@ export default function AdminPage() {
 
   const vendorStats = useMemo(() => {
     const stats: any = {};
+    
     reports.forEach(r => {
-      // 1. Determine Vendor Name from AI or Metadata
+      // 1. Determine Vendor Name
       const vendorName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
       
+      // 2. CRITICAL FIX: Exclude Infrastructure Reports
+      // Damage reports are not vendors. They should not appear in this tab.
+      if (vendorName.includes("(Infrastructure)") || vendorName === "N/A") {
+          return; // Skip this iteration entirely
+      }
+
       if (!stats[vendorName]) {
         stats[vendorName] = { 
             name: vendorName, 
@@ -849,8 +856,9 @@ export default function AdminPage() {
             totalScore: 0, 
             average: 0, 
             sentiment: 'neutral', 
-            schools: new Set()
-            // REMOVED: detectedWallet (Because the report wallet belongs to the USER, not the VENDOR)
+            schools: new Set(),
+            // Only used for matching, never populated from report itself anymore
+            detectedWallet: null 
         };
       }
       
@@ -870,6 +878,7 @@ export default function AdminPage() {
       }
       s.schoolCount = s.schools.size;
     });
+    
     return Object.values(stats).sort((a: any, b: any) => b.average - a.average);
   }, [reports]);
 
