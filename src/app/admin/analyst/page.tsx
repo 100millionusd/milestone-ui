@@ -839,7 +839,7 @@ export default function AdminPage() {
   const vendorStats = useMemo(() => {
     const stats: any = {};
     reports.forEach(r => {
-      // 1. Determine Vendor Name
+      // 1. Determine Vendor Name from AI or Metadata
       const vendorName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
       
       if (!stats[vendorName]) {
@@ -849,17 +849,12 @@ export default function AdminPage() {
             totalScore: 0, 
             average: 0, 
             sentiment: 'neutral', 
-            schools: new Set(),
-            // 2. NEW: Capture Wallet from the report itself if available
-            detectedWallet: null 
+            schools: new Set()
+            // REMOVED: detectedWallet (Because the report wallet belongs to the USER, not the VENDOR)
         };
       }
       
-      // Store the wallet found in the report (if one exists)
-      if (r.wallet_address && !stats[vendorName].detectedWallet) {
-          stats[vendorName].detectedWallet = r.wallet_address;
-      }
-
+      // Calculate Stats
       stats[vendorName].totalReports += 1;
       stats[vendorName].totalScore += (Number(r.rating) || 0);
       if (r.school_name) stats[vendorName].schools.add(r.school_name);
@@ -1379,41 +1374,35 @@ export default function AdminPage() {
   );
 
   const VendorsView = () => {
-    // Local state for visibility filter
     const [hideUnknown, setHideUnknown] = useState(false);
 
-    // 1. Merge & Sort Logic
     const processedVendors = useMemo(() => {
         return vendorStats.map((stat: any) => {
-            // STRATEGY A: Match by Wallet
-            let official = registeredVendors.find(
-                v => v.walletAddress?.toLowerCase() === stat.detectedWallet?.toLowerCase()
-            );
-
-            // STRATEGY B: Match by Name (Fuzzy)
-            if (!official) {
-                official = registeredVendors.find(v => {
-                    const regName = v.vendorName?.toLowerCase().trim() || "";
-                    const statName = stat.name?.toLowerCase().trim() || "";
-                    return regName === statName || (regName.length > 5 && statName.includes(regName)) || (statName.length > 5 && regName.includes(statName));
-                });
-            }
-
-            const effectiveWallet = official?.walletAddress || stat.detectedWallet || null;
+            // STRICT MATCHING: Only link a wallet if the name matches the Official Registry
+            // We do NOT look at the report's wallet_address anymore.
+            let official = registeredVendors.find(v => {
+                const regName = v.vendorName?.toLowerCase().trim() || "";
+                const statName = stat.name?.toLowerCase().trim() || "";
+                
+                // Exact match or significant partial match
+                return regName === statName || 
+                       (regName.length > 5 && statName.includes(regName)) || 
+                       (statName.length > 5 && regName.includes(statName));
+            });
 
             return {
                 ...stat,
-                walletAddress: effectiveWallet,
+                // Only populate wallet if found in Official Registry
+                walletAddress: official?.walletAddress || null, 
                 officialName: official?.vendorName || null,
                 isArchived: official?.archived || false,
-                isRegistered: !!official || !!stat.detectedWallet
+                isRegistered: !!official
             };
         }).sort((a: any, b: any) => {
             if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
-            // Sort Real vendors above "Unknown" ones
-            const aIsUnknown = a.name.toLowerCase().includes('unknown') || a.name.toLowerCase().includes('n/a');
-            const bIsUnknown = b.name.toLowerCase().includes('unknown') || b.name.toLowerCase().includes('n/a');
-            if (aIsUnknown !== bIsUnknown) return aIsUnknown ? 1 : -1;
+            
+            // Sort Real (Registered) vendors above "Unknown"
+            if (a.isRegistered !== b.isRegistered) return a.isRegistered ? -1 : 1;
             
             return parseFloat(b.average) - parseFloat(a.average);
         });
