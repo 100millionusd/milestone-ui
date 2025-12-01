@@ -26,6 +26,8 @@ import {
   ChevronRight,
   Trash2,
   Navigation,
+  Archive, 
+  RotateCcw, 
   Loader2,
   Hammer,
   Camera
@@ -630,6 +632,70 @@ export default function AdminPage() {
   const [sortSchoolsBy, setSortSchoolsBy] = useState<'count' | 'rating' | 'money'>('count');
   
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // --- NEW: Vendor Management State ---
+  const [registeredVendors, setRegisteredVendors] = useState<any[]>([]);
+  const [vendorListLoading, setVendorListLoading] = useState(false);
+
+  // 1. Fetch Official Vendor List (to get Wallet Addresses & Archive Status)
+  const fetchRegisteredVendors = async () => {
+    setVendorListLoading(true);
+    try {
+      // API call to existing endpoint in server.js
+      const res = await fetch(`${API_BASE_URL}/admin/vendors?includeArchived=true`, {
+        headers: { 
+            'Content-Type': 'application/json',
+            // Include auth token if your setup requires it manually, 
+            // otherwise 'credentials: include' handles cookies
+            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Handle array response
+        setRegisteredVendors(Array.isArray(data) ? data : data.items || []);
+      }
+    } catch (e) {
+      console.error("Failed to load vendor registry", e);
+    } finally {
+      setVendorListLoading(false);
+    }
+  };
+
+  // 2. Load vendors only when tab is active
+  useEffect(() => {
+    if (activeTab === 'vendors') {
+      fetchRegisteredVendors();
+    }
+  }, [activeTab]);
+
+  // 3. Archive/Restore Action
+  const handleVendorArchive = async (wallet: string, isArchived: boolean) => {
+    if (!wallet) return;
+    const action = isArchived ? 'unarchive' : 'archive';
+    
+    if (!window.confirm(`Are you sure you want to ${action} this vendor?`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/vendors/${wallet}/${action}`, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+        },
+      });
+
+      if (res.ok) {
+        // Refresh list to update UI sorting
+        fetchRegisteredVendors(); 
+      } else {
+        alert("Action failed. Ensure you are an admin.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Network error.");
+    }
+  };
 
   // --- Data Fetching ---
 
@@ -1247,29 +1313,95 @@ export default function AdminPage() {
     </div>
   );
 
-  const VendorsView = () => (
+  const VendorsView = () => {
+    // 1. Merge Report Stats with Official Registry Data
+    const processedVendors = useMemo(() => {
+        return vendorStats.map((stat: any) => {
+            // Find official record by name (case-insensitive)
+            const official = registeredVendors.find(
+                v => v.vendorName?.toLowerCase().trim() === stat.name?.toLowerCase().trim()
+            );
+            return {
+                ...stat,
+                walletAddress: official?.walletAddress || null,
+                isArchived: official?.archived || false,
+                isRegistered: !!official
+            };
+        }).sort((a: any, b: any) => {
+            // 2. SORT LOGIC: Active First, Archived Last
+            if (a.isArchived !== b.isArchived) {
+                return a.isArchived ? 1 : -1; 
+            }
+            // Then sort by Rating (High to Low)
+            return parseFloat(b.average) - parseFloat(a.average);
+        });
+    }, [vendorStats, registeredVendors]);
+
+    return (
     <div className="space-y-6">
-        <div>
-            <h2 className="text-2xl font-bold text-slate-800">Vendor Analytics</h2>
-            <p className="text-slate-500">Aggregated performance ratings based on school reports.</p>
+        <div className="flex justify-between items-center">
+            <div>
+                <h2 className="text-2xl font-bold text-slate-800">Vendor Analytics</h2>
+                <p className="text-slate-500">
+                    Performance ratings. Archived vendors are sorted to the bottom.
+                </p>
+            </div>
+            <button 
+                onClick={fetchRegisteredVendors} 
+                disabled={vendorListLoading}
+                className="flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-md transition-colors"
+            >
+                <RefreshCw size={16} className={vendorListLoading ? "animate-spin" : ""} /> 
+                Sync Registry
+            </button>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {vendorStats.map((vendor: any) => (
-                <Card key={vendor.name} className="overflow-hidden">
+            {processedVendors.map((vendor: any) => (
+                <Card 
+                    key={vendor.name} 
+                    className={`overflow-hidden transition-all duration-300 ${
+                        vendor.isArchived 
+                        ? 'opacity-60 grayscale bg-slate-50 border-dashed border-slate-300 order-last' 
+                        : 'bg-white shadow-sm hover:shadow-md'
+                    }`}
+                >
+                    {/* Color Bar */}
                     <div className="h-2 bg-slate-100">
-                        <div className={`h-full ${vendor.average >= 4 ? 'bg-emerald-500' : vendor.average < 3 ? 'bg-rose-500' : 'bg-amber-500'}`} style={{ width: `${(vendor.average / 5) * 100}%` }}/>
+                        <div 
+                            className={`h-full ${
+                                vendor.isArchived ? 'bg-slate-400' :
+                                parseFloat(vendor.average) >= 4 ? 'bg-emerald-500' : 
+                                parseFloat(vendor.average) < 3 ? 'bg-rose-500' : 'bg-amber-500'
+                            }`} 
+                            style={{ width: `${(parseFloat(vendor.average) / 5) * 100}%` }}
+                        />
                     </div>
+                    
                     <div className="p-6">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <h3 className="font-bold text-lg text-slate-800">{vendor.name}</h3>
-                                <p className="text-xs text-slate-500">ID: {vendor.name.substring(0,3).toUpperCase()}</p>
+                                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                    {vendor.name}
+                                    {vendor.isArchived && (
+                                        <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full uppercase font-bold tracking-wide">
+                                            Archived
+                                        </span>
+                                    )}
+                                </h3>
+                                <p className="text-xs text-slate-500 font-mono mt-1">
+                                    {vendor.walletAddress 
+                                        ? `${vendor.walletAddress.substring(0,6)}...${vendor.walletAddress.substring(38)}` 
+                                        : "Unregistered / No Wallet"
+                                    }
+                                </p>
                             </div>
                             <div className="bg-slate-100 px-2 py-1 rounded text-sm font-bold text-slate-700 flex items-center gap-1">
                                 {vendor.average} <Star size={12} className="fill-slate-700" />
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+
+                        <div className="grid grid-cols-2 gap-4 mb-4">
                             <div className="text-center p-3 bg-slate-50 rounded-lg">
                                 <p className="text-xs text-slate-400 uppercase font-bold">Total Reports</p>
                                 <p className="text-xl font-bold text-slate-700">{vendor.totalReports}</p>
@@ -1279,12 +1411,36 @@ export default function AdminPage() {
                                 <p className="text-xl font-bold text-slate-700">{vendor.schoolCount}</p>
                             </div>
                         </div>
+
+                        {/* Archive Action */}
+                        <div className="pt-3 border-t border-slate-100 flex justify-end">
+                            {vendor.isRegistered ? (
+                                <button
+                                    onClick={() => handleVendorArchive(vendor.walletAddress, vendor.isArchived)}
+                                    className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded transition-colors ${
+                                        vendor.isArchived
+                                        ? 'text-emerald-600 hover:bg-emerald-50'
+                                        : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                                    }`}
+                                >
+                                    {vendor.isArchived ? (
+                                        <><RotateCcw size={14} /> Restore Vendor</>
+                                    ) : (
+                                        <><Archive size={14} /> Archive Vendor</>
+                                    )}
+                                </button>
+                            ) : (
+                                <span className="text-[10px] text-slate-300 italic py-2">
+                                    Link wallet to archive
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </Card>
             ))}
         </div>
     </div>
-  );
+  )};
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
