@@ -696,6 +696,36 @@ export default function AdminPage() {
     }
   };
 
+  // NEW: Delete a single specific report
+  const handleDeleteReport = async (report: any) => {
+    if (!report || !report.report_id) return;
+
+    const confirmMsg = `⚠️ PERMANENT DELETE ⚠️\n\nAre you sure you want to delete this flagged report from "${report.school_name}"?\n\nThis action cannot be undone.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reports/${report.report_id}`, {
+        method: 'DELETE',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+        },
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        // Remove from local state immediately
+        setReports(prev => prev.filter(r => r.report_id !== report.report_id));
+      } else {
+        alert("Failed to delete report. Ensure you are an admin.");
+      }
+    } catch (e) {
+      console.error("Delete error:", e);
+      alert("Network error trying to delete report.");
+    }
+  };
+
   // NEW: Archive a specific report
   const handleArchiveReport = async (report: any) => {
     if (!report || !report.report_id) return;
@@ -1434,25 +1464,57 @@ export default function AdminPage() {
             ) : (
                 suspiciousReports.map((report) => (
                     <div key={report.report_id} className="bg-white border-l-4 border-rose-500 rounded-lg shadow-sm p-4 flex flex-col md:flex-row gap-4 items-start">
+                        {/* Image Thumbnail */}
                         <div className="w-full md:w-48 shrink-0">
                             {report.image_cid ? (
-                                <img src={`https://ipfs.io/ipfs/${report.image_cid}`} className="w-full h-32 object-cover rounded-md border border-slate-200"/>
+                                <img 
+                                    src={`https://ipfs.io/ipfs/${report.image_cid}`} 
+                                    className="w-full h-32 object-cover rounded-md border border-slate-200"
+                                    alt="Evidence"
+                                />
                             ) : (
-                                <div className="w-full h-32 bg-slate-100 flex items-center justify-center rounded-md text-slate-400">No Image</div>
+                                <div className="w-full h-32 bg-slate-100 flex items-center justify-center rounded-md text-slate-400">
+                                    <Camera size={24} />
+                                </div>
                             )}
                         </div>
-                        <div className="flex-1">
+
+                        {/* Content */}
+                        <div className="flex-1 w-full">
                             <div className="flex justify-between items-start">
-                                <h3 className="font-bold text-slate-800">{report.school_name}</h3>
-                                <span className="text-xs text-slate-400">{new Date(report.created_at).toLocaleString()}</span>
+                                <h3 className="font-bold text-slate-800 text-lg">{report.school_name}</h3>
+                                <span className="text-xs text-slate-400 font-mono">
+                                    {new Date(report.created_at).toLocaleString()}
+                                </span>
                             </div>
-                            <div className="mt-2 bg-rose-50 inline-block px-3 py-1 rounded border border-rose-100 text-rose-700 text-sm font-bold">
-                                ⚠️ {getSuspiciousReason(report)}
+                            
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                <div className="bg-rose-50 px-3 py-1 rounded border border-rose-100 text-rose-700 text-sm font-bold flex items-center gap-2">
+                                    <AlertTriangle size={14} />
+                                    {getSuspiciousReason(report)}
+                                </div>
                             </div>
-                            <p className="text-slate-600 text-sm mt-2">{report.description}</p>
-                            <div className="mt-4">
-                                <button onClick={() => setSelectedReport(report)} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded transition-colors">
-                                    Inspect Details
+
+                            <p className="text-slate-600 text-sm mt-3 line-clamp-2">
+                                {report.description}
+                            </p>
+
+                            {/* Action Buttons */}
+                            <div className="mt-4 flex gap-3 pt-3 border-t border-slate-100">
+                                <button 
+                                    onClick={() => setSelectedReport(report)} 
+                                    className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded transition-colors font-medium flex items-center gap-2"
+                                >
+                                    <Maximize2 size={14} /> Inspect Details
+                                </button>
+                                
+                                <div className="flex-1"></div>
+
+                                <button 
+                                    onClick={() => handleDeleteReport(report)} 
+                                    className="text-sm bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 px-4 py-2 rounded transition-colors font-medium flex items-center gap-2"
+                                >
+                                    <Trash2 size={14} /> Delete Report
                                 </button>
                             </div>
                         </div>
