@@ -638,8 +638,6 @@ export default function AdminPage() {
   const [vendorListLoading, setVendorListLoading] = useState(false);
 
 
-
- / 1. Fetch Official Vendor List (to get Wallet Addresses & Archive Status)
   const fetchRegisteredVendors = async () => {
     setVendorListLoading(true);
     try {
