@@ -697,13 +697,25 @@ export default function AdminPage() {
   };
 
   // NEW: Delete all reports for a specific vendor name (Clean up junk data)
+  // NEW: Robust Delete Function with Debugging
   const handleDeleteVendorReports = async (vendorName: string) => {
+    // 1. Debug Log: Check what we are clicking on
+    console.log("Clicked cleanup for:", vendorName);
+
+    // 2. Find Reports (with trim to fix " Vendor " vs "Vendor" mismatches)
     const targetReports = reports.filter(r => {
         const rName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
-        return rName === vendorName;
+        return rName.trim() === vendorName.trim();
     });
 
-    if (targetReports.length === 0) return;
+    // 3. Debug Log: How many did we find?
+    console.log("Reports found in memory:", targetReports.length);
+
+    // 4. Alert if 0 found (This explains why no network request happens)
+    if (targetReports.length === 0) {
+        alert(`Error: Could not find reports for "${vendorName}" in memory. Try refreshing the page.`);
+        return;
+    }
 
     const confirmMsg = `⚠️ CLEAN UP DATA WARNING ⚠️\n\nAre you sure you want to delete ALL ${targetReports.length} reports associated with "${vendorName}"?\n\nThis action cannot be undone.`;
     
@@ -711,7 +723,8 @@ export default function AdminPage() {
 
     setIsDeleting(true);
     try {
-        await Promise.all(targetReports.map(r => 
+        // 5. Execute Deletes
+        const results = await Promise.all(targetReports.map(r => 
             fetch(`${API_BASE_URL}/api/reports/${r.report_id}`, {
                 method: 'DELETE',
                 headers: { 
@@ -720,11 +733,16 @@ export default function AdminPage() {
                 }
             })
         ));
+
+        // Check if any failed
+        const allOk = results.every(res => res.ok);
+        if (!allOk) throw new Error("Some deletes failed on the server.");
+
         await fetchReports(); // Reload data
         alert(`Successfully cleaned up ${targetReports.length} reports.`);
     } catch (e) {
-        console.error(e);
-        alert("Failed to delete reports.");
+        console.error("Delete failed:", e);
+        alert("Failed to delete reports. Check console for details.");
     } finally {
         setIsDeleting(false);
     }
