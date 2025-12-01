@@ -27,6 +27,7 @@ import {
   Trash2,
   Navigation,
   Loader2,
+  Hammer,
   Camera
 } from 'lucide-react';
 
@@ -70,6 +71,134 @@ const StarRating = ({ rating }: any) => {
       ))}
     </div>
   );
+};
+
+// --- NEW COMPONENT: Reward Eligibility Checker ---
+const RewardEligibilityChecker = ({ lat, lon, aiAnalysis }: { lat: number, lon: number, aiAnalysis: any }) => {
+    const [locationData, setLocationData] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+    const [isSchoolZone, setIsSchoolZone] = useState(false);
+
+    // 1. Analyze Content Type
+    // Infra: valid if severity exists and is > 0
+    const isInfra = typeof aiAnalysis?.severity === 'number';
+    const hasDamage = isInfra && aiAnalysis.severity > 0;
+    
+    // Food: valid if score exists and is > 0
+    const isFood = typeof aiAnalysis?.score === 'number' || typeof aiAnalysis?.isFood === 'boolean';
+    const hasFood = isFood && (aiAnalysis.score > 0 || aiAnalysis.isFood === true);
+
+    useEffect(() => {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            setLoading(false);
+            return;
+        }
+
+        let isMounted = true;
+        const verifyLocation = async () => {
+            try {
+                // Fetch Address Details + Extra Tags
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&extratags=1`);
+                const data = await res.json();
+                
+                if (isMounted && data) {
+                    setLocationData(data);
+                    
+                    // 2. Analyze Location Context (OSM Tags)
+                    const type = data.type || "";
+                    const category = data.category || "";
+                    const amenity = data.extratags?.amenity || "";
+                    const building = data.extratags?.building || "";
+                    const name = (data.display_name || "").toLowerCase();
+                    
+                    // Strict School Check
+                    if (
+                        category === "education" || 
+                        type === "school" || 
+                        amenity === "school" || 
+                        amenity === "kindergarten" || 
+                        amenity === "college" || 
+                        amenity === "university" ||
+                        building === "school" ||
+                        name.includes("escuela") ||
+                        name.includes("colegio") ||
+                        name.includes("unidad educativa") ||
+                        name.includes("educativo")
+                    ) {
+                        setIsSchoolZone(true);
+                    }
+                }
+            } catch (e) {
+                // Silent fail
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+        verifyLocation();
+        return () => { isMounted = false; };
+    }, [lat, lon]);
+
+    if (loading) return <div className="mt-4 p-3 bg-slate-50 rounded border border-slate-200 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-slate-400"/> <span className="text-xs text-slate-500">Verifying Eligibility...</span></div>;
+    
+    // DECISION LOGIC: School Zone AND (Damage OR Food)
+    const isEligible = isSchoolZone && (hasDamage || hasFood);
+
+    return (
+        <div className={`mt-4 p-4 rounded-xl border-l-4 shadow-sm ${isEligible ? 'bg-emerald-50 border-emerald-500' : 'bg-slate-50 border-slate-300'}`}>
+            <h4 className="font-bold text-sm uppercase mb-3 flex items-center gap-2">
+                {isEligible ? <CheckCircle className="text-emerald-600" size={18} /> : <AlertTriangle className="text-slate-400" size={18} />}
+                <span className={isEligible ? "text-emerald-800" : "text-slate-600"}>
+                    Payment Eligibility Check
+                </span>
+            </h4>
+
+            <div className="space-y-2 text-xs">
+                {/* Criterion 1: AI Analysis */}
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                    <span className="text-slate-500">1. Content Analysis</span>
+                    {isInfra ? (
+                        hasDamage ? 
+                        <span className="font-bold text-emerald-600 flex items-center gap-1"><Hammer size={10}/> Damage Verified (Sev: {aiAnalysis.severity})</span> : 
+                        <span className="font-bold text-rose-500">No Damage Detected</span>
+                    ) : (
+                        hasFood ? 
+                        <span className="font-bold text-emerald-600 flex items-center gap-1"><Utensils size={10}/> Food Verified</span> : 
+                        <span className="font-bold text-rose-500">No Food Detected</span>
+                    )}
+                </div>
+
+                {/* Criterion 2: School Zone */}
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                    <span className="text-slate-500">2. Address Verification</span>
+                    {locationData ? (
+                        isSchoolZone ? 
+                        <span className="font-bold text-emerald-600 flex items-center gap-1"><School size={10}/> Confirmed School Zone</span> : 
+                        <span className="font-bold text-amber-600">Residential/Public Area</span>
+                    ) : <span className="text-slate-400">GPS Unavailable</span>}
+                </div>
+
+                {/* Final Verdict */}
+                <div className="pt-2 flex justify-between items-center">
+                    <span className="font-bold text-slate-700">VERDICT:</span>
+                    {isEligible ? (
+                        <span className="bg-emerald-600 text-white px-3 py-1 rounded-full font-bold shadow-sm animate-pulse">
+                            ✅ PAY REWARD
+                        </span>
+                    ) : (
+                        <span className="bg-slate-200 text-slate-500 px-3 py-1 rounded-full font-bold">
+                            ❌ NOT ELIGIBLE
+                        </span>
+                    )}
+                </div>
+                
+                {locationData && (
+                     <div className="mt-2 text-[10px] text-slate-400 italic truncate">
+                        Verified at: {locationData.display_name}
+                     </div>
+                )}
+            </div>
+        </div>
+    );
 };
 
 // --- NEW COMPONENT: Smart School Validator ---
@@ -414,6 +543,15 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
                     <span className="text-xs text-slate-400 uppercase font-bold">Analysis Summary</span>
                     <p className="text-slate-700 mt-1 leading-relaxed">{report.description}</p>
                 </div>
+
+                {/* Use the best available GPS (Image preferred, Device fallback) */}
+{(imageGps || deviceGps) && (
+    <RewardEligibilityChecker 
+        lat={(imageGps || deviceGps).lat} 
+        lon={(imageGps || deviceGps).lon} 
+        aiAnalysis={aiData} 
+    />
+)}
 
                 <div className="space-y-3">
                     {aiData.issues?.length > 0 && (
