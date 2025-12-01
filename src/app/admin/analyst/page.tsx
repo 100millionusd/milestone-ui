@@ -696,6 +696,40 @@ export default function AdminPage() {
     }
   };
 
+  // NEW: Delete all reports for a specific vendor name (Clean up junk data)
+  const handleDeleteVendorReports = async (vendorName: string) => {
+    const targetReports = reports.filter(r => {
+        const rName = r.ai_analysis?.vendor || r.vendor_name || "Unknown Vendor";
+        return rName === vendorName;
+    });
+
+    if (targetReports.length === 0) return;
+
+    const confirmMsg = `⚠️ CLEAN UP DATA WARNING ⚠️\n\nAre you sure you want to delete ALL ${targetReports.length} reports associated with "${vendorName}"?\n\nThis action cannot be undone.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeleting(true);
+    try {
+        await Promise.all(targetReports.map(r => 
+            fetch(`${API_BASE_URL}/api/reports/${r.report_id}`, {
+                method: 'DELETE',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+                }
+            })
+        ));
+        await fetchReports(); // Reload data
+        alert(`Successfully cleaned up ${targetReports.length} reports.`);
+    } catch (e) {
+        console.error(e);
+        alert("Failed to delete reports.");
+    } finally {
+        setIsDeleting(false);
+    }
+  };
+
   // --- Data Fetching ---
 
   const fetchReports = async () => {
@@ -1331,69 +1365,100 @@ export default function AdminPage() {
   );
 
   const VendorsView = () => {
-    // 1. Merge Report Stats with Official Registry Data
+    // Local state for visibility filter
+    const [hideUnknown, setHideUnknown] = useState(false);
+
+    // 1. Merge & Sort Logic
     const processedVendors = useMemo(() => {
         return vendorStats.map((stat: any) => {
-            // STRATEGY A: Match by Wallet (Precise)
-            // If the report had a wallet address, check if it exists in the registry
+            // STRATEGY A: Match by Wallet
             let official = registeredVendors.find(
                 v => v.walletAddress?.toLowerCase() === stat.detectedWallet?.toLowerCase()
             );
 
-            // STRATEGY B: Match by Name (Fuzzy Fallback)
+            // STRATEGY B: Match by Name (Fuzzy)
             if (!official) {
                 official = registeredVendors.find(v => {
                     const regName = v.vendorName?.toLowerCase().trim() || "";
                     const statName = stat.name?.toLowerCase().trim() || "";
-                    // Check exact match OR if one includes the other (handles "S.R.L." suffixes)
                     return regName === statName || (regName.length > 5 && statName.includes(regName)) || (statName.length > 5 && regName.includes(statName));
                 });
             }
 
-            // Determine effective wallet: Official Profile > Report Data > Null
             const effectiveWallet = official?.walletAddress || stat.detectedWallet || null;
 
             return {
                 ...stat,
                 walletAddress: effectiveWallet,
-                officialName: official?.vendorName || null, // Display official name if found
+                officialName: official?.vendorName || null,
                 isArchived: official?.archived || false,
-                isRegistered: !!official || !!stat.detectedWallet // Consider registered if we have a wallet at all
+                isRegistered: !!official || !!stat.detectedWallet
             };
         }).sort((a: any, b: any) => {
-            // Sort: Active First, Archived Last
             if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
-            // Then Sort: Known Wallet First
-            if (!!a.walletAddress !== !!b.walletAddress) return a.walletAddress ? -1 : 1;
-            // Then Sort: Rating
+            // Sort Real vendors above "Unknown" ones
+            const aIsUnknown = a.name.toLowerCase().includes('unknown') || a.name.toLowerCase().includes('n/a');
+            const bIsUnknown = b.name.toLowerCase().includes('unknown') || b.name.toLowerCase().includes('n/a');
+            if (aIsUnknown !== bIsUnknown) return aIsUnknown ? 1 : -1;
+            
             return parseFloat(b.average) - parseFloat(a.average);
         });
     }, [vendorStats, registeredVendors]);
 
+    // 2. Apply Visibility Filter
+    const displayedVendors = processedVendors.filter((v: any) => {
+        if (!hideUnknown) return true;
+        const n = v.name.toLowerCase();
+        return !n.includes('unknown') && !n.startsWith('n/a') && !n.includes('unregistered');
+    });
+
     return (
     <div className="space-y-6">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800">Vendor Analytics</h2>
-                <p className="text-slate-500">
-                    Performance ratings. Archived vendors are sorted to the bottom.
-                </p>
+                <p className="text-slate-500">Performance ratings aggregated from field reports.</p>
             </div>
-            <button 
-                onClick={fetchRegisteredVendors} 
-                disabled={vendorListLoading}
-                className="flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-md transition-colors"
-            >
-                <RefreshCw size={16} className={vendorListLoading ? "animate-spin" : ""} /> 
-                Sync Registry
-            </button>
+            <div className="flex gap-2">
+                {/* --- NEW: VISIBILITY TOGGLE --- */}
+                <button 
+                    onClick={() => setHideUnknown(!hideUnknown)}
+                    className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg border transition-all ${
+                        hideUnknown 
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-md' 
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                >
+                    {hideUnknown ? <Filter size={16} className="fill-white" /> : <Filter size={16} />}
+                    {hideUnknown ? "Hidden: Unknown / N/A" : "Show All Vendors"}
+                </button>
+
+                <button 
+                    onClick={fetchRegisteredVendors} 
+                    disabled={vendorListLoading}
+                    className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-4 py-2 rounded-lg transition-colors"
+                >
+                    <RefreshCw size={16} className={vendorListLoading ? "animate-spin" : ""} /> 
+                    Sync Registry
+                </button>
+            </div>
         </div>
 
+        {displayedVendors.length === 0 && (
+            <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                <p className="text-slate-400">No vendors found matching your filter.</p>
+                <button onClick={() => setHideUnknown(false)} className="text-blue-500 mt-2 hover:underline">Show all</button>
+            </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {processedVendors.map((vendor: any) => (
+            {displayedVendors.map((vendor: any) => {
+                const isJunkData = vendor.name.toLowerCase().includes('unknown') || vendor.name.toLowerCase().includes('n/a');
+
+                return (
                 <Card 
                     key={vendor.name} 
-                    className={`overflow-hidden transition-all duration-300 ${
+                    className={`overflow-hidden transition-all duration-300 flex flex-col ${
                         vendor.isArchived 
                         ? 'opacity-60 grayscale bg-slate-50 border-dashed border-slate-300 order-last' 
                         : 'bg-white shadow-sm hover:shadow-md'
@@ -1410,30 +1475,23 @@ export default function AdminPage() {
                         />
                     </div>
                     
-                    <div className="p-6">
+                    <div className="p-6 flex-1">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
                                     {vendor.officialName || vendor.name}
-                                    {vendor.isArchived && (
-                                        <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full uppercase font-bold tracking-wide">
-                                            Archived
-                                        </span>
-                                    )}
+                                    {vendor.isArchived && <Badge color="gray">Archived</Badge>}
                                 </h3>
                                 <p className="text-xs text-slate-500 font-mono mt-1 flex items-center gap-1">
                                     {vendor.walletAddress ? (
                                         <>
-                                            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                            <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
                                             <span title={vendor.walletAddress} className="bg-slate-100 px-1 rounded cursor-help">
                                                 {vendor.walletAddress.substring(0,6)}...{vendor.walletAddress.substring(38)}
                                             </span>
                                         </>
                                     ) : (
-                                        <>
-                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                            <span className="italic">Name Match Only (No Wallet)</span>
-                                        </>
+                                        <span className="text-amber-500 italic">No Wallet Linked</span>
                                     )}
                                 </p>
                             </div>
@@ -1452,32 +1510,46 @@ export default function AdminPage() {
                                 <p className="text-xl font-bold text-slate-700">{vendor.schoolCount}</p>
                             </div>
                         </div>
+                    </div>
 
-                        <div className="pt-3 border-t border-slate-100 flex justify-end">
-                            {vendor.walletAddress ? (
-                                <button
-                                    onClick={() => handleVendorArchive(vendor.walletAddress, vendor.isArchived)}
-                                    className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded transition-colors ${
-                                        vendor.isArchived
-                                        ? 'text-emerald-600 hover:bg-emerald-50'
-                                        : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                                    }`}
-                                >
-                                    {vendor.isArchived ? (
-                                        <><RotateCcw size={14} /> Restore Vendor</>
-                                    ) : (
-                                        <><Archive size={14} /> Archive Vendor</>
-                                    )}
-                                </button>
-                            ) : (
-                                <span className="text-[10px] text-slate-300 italic py-2 cursor-not-allowed">
-                                    Requires Wallet to Archive
-                                </span>
-                            )}
-                        </div>
+                    {/* Actions Footer */}
+                    <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center mt-auto">
+                        
+                        {/* LEFT: Clean Up Button (Only for junk data) */}
+                        {isJunkData ? (
+                            <button
+                                onClick={() => handleDeleteVendorReports(vendor.name)}
+                                className="flex items-center gap-1.5 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-2 py-1.5 rounded transition-colors border border-rose-200"
+                                title="Delete all reports for this unknown vendor"
+                            >
+                                <Trash2 size={12} /> Clean Up Data
+                            </button>
+                        ) : <div></div>}
+
+                        {/* RIGHT: Archive Button (Only for real wallets) */}
+                        {vendor.walletAddress ? (
+                            <button
+                                onClick={() => handleVendorArchive(vendor.walletAddress, vendor.isArchived)}
+                                className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded transition-colors ${
+                                    vendor.isArchived
+                                    ? 'text-emerald-600 hover:bg-emerald-50'
+                                    : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
+                                }`}
+                            >
+                                {vendor.isArchived ? (
+                                    <><RotateCcw size={14} /> Restore</>
+                                ) : (
+                                    <><Archive size={14} /> Archive</>
+                                )}
+                            </button>
+                        ) : (
+                            <span className="text-[10px] text-slate-300 italic">
+                                Cannot Archive (No Wallet)
+                            </span>
+                        )}
                     </div>
                 </Card>
-            ))}
+            )})}
         </div>
     </div>
   )};
