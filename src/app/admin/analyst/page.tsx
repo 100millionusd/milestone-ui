@@ -696,6 +696,53 @@ export default function AdminPage() {
     }
   };
 
+  // NEW: Archive a specific report
+  const handleArchiveReport = async (report: any) => {
+    if (!report || !report.report_id) return;
+
+    // Check if already archived to prevent redundant calls
+    if (report.status === 'archived') {
+        alert("This report is already archived.");
+        return;
+    }
+
+    const confirmMsg = `Are you sure you want to archive this report from "${report.school_name}"?\n\nIt will be hidden from the default Pending/Completed views.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reports/${report.report_id}/archive`, {
+        method: 'PUT', // Note: server.js defines this as PUT
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+        },
+        credentials: 'include' // CRITICAL: Sends auth cookie
+      });
+
+      if (res.ok) {
+        // Optimistic UI update: remove from current view if we are not viewing "All"
+        if (filterStatus !== 'all') {
+            setReports(prev => prev.filter(r => r.report_id !== report.report_id));
+        } else {
+            // If viewing all, just update status
+            setReports(prev => prev.map(r => 
+                r.report_id === report.report_id ? { ...r, status: 'archived' } : r
+            ));
+        }
+        
+        // Refresh to ensure server sync
+        await fetchReports();
+      } else {
+        const err = await res.json();
+        alert(`Failed to archive: ${err.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      console.error("Archive error:", e);
+      alert("Network error trying to archive report.");
+    }
+  };
+
   // NEW: Robust Delete Function (Fixed Auth)
   const handleDeleteVendorReports = async (vendorName: string) => {
     console.log("Clicked cleanup for:", vendorName);
@@ -1133,7 +1180,10 @@ export default function AdminPage() {
                                             }
 
                                             return (
-                                            <tr key={report.report_id || i} className="hover:bg-slate-50 group">
+                                            <tr 
+    key={report.report_id || i} 
+    className={`hover:bg-slate-50 group ${report.status === 'archived' ? 'opacity-50 grayscale bg-slate-50' : ''}`}
+>
                                                 <td className="p-4 whitespace-nowrap">
                                                     <div className="text-slate-700 font-medium">{new Date(report.created_at).toLocaleDateString()}</div>
                                                     <Badge color={
@@ -1220,14 +1270,27 @@ export default function AdminPage() {
                                         </div>
                                     )}
                                 </td>
-                                <td className="p-4">
-                                    <button 
-                                        onClick={() => setSelectedReport(report)}
-                                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-md transition-colors"
-                                    >
-                                        <Maximize2 size={12} />
-                                        View Analysis
-                                    </button>
+ <td className="p-4">
+                                    <div className="flex flex-col gap-2">
+                                        <button 
+                                            onClick={() => setSelectedReport(report)}
+                                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-md transition-colors w-full justify-center"
+                                        >
+                                            <Maximize2 size={12} />
+                                            View Analysis
+                                        </button>
+
+                                        {report.status !== 'archived' && (
+                                            <button 
+                                                onClick={() => handleArchiveReport(report)}
+                                                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-700 text-xs font-medium rounded-md transition-colors w-full justify-center"
+                                                title="Archive this report"
+                                            >
+                                                <Archive size={12} />
+                                                Archive
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         )})}
@@ -1242,10 +1305,6 @@ export default function AdminPage() {
   );
   };
 
-  // ... (SchoolsView, AnomaliesView, VendorsView remain unchanged)
-  // ... (Same as previous, just update the main component if needed, but the parser is the key)
-
-  // NOTE: For brevity, I am returning the main component using the updated ReportsView logic.
   // The rest of the views (Schools, Vendors, Anomalies) are identical to the previous version.
   
   const SchoolsView = () => (
