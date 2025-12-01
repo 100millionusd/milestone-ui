@@ -73,18 +73,26 @@ const StarRating = ({ rating }: any) => {
   );
 };
 
-// --- NEW COMPONENT: Reward Eligibility Checker ---
-const RewardEligibilityChecker = ({ lat, lon, aiAnalysis }: { lat: number, lon: number, aiAnalysis: any }) => {
+/// --- UPDATED COMPONENT: Reward Eligibility Checker ---
+const RewardEligibilityChecker = ({ 
+    lat, 
+    lon, 
+    aiAnalysis,
+    suspiciousReason // <--- 1. NEW PROP
+}: { 
+    lat: number, 
+    lon: number, 
+    aiAnalysis: any, 
+    suspiciousReason: string | null 
+}) => {
     const [locationData, setLocationData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [isSchoolZone, setIsSchoolZone] = useState(false);
 
-    // 1. Analyze Content Type
-    // Infra: valid if severity exists and is > 0
+    // Analyze Content Type
     const isInfra = typeof aiAnalysis?.severity === 'number';
     const hasDamage = isInfra && aiAnalysis.severity > 0;
     
-    // Food: valid if score exists and is > 0
     const isFood = typeof aiAnalysis?.score === 'number' || typeof aiAnalysis?.isFood === 'boolean';
     const hasFood = isFood && (aiAnalysis.score > 0 || aiAnalysis.isFood === true);
 
@@ -97,40 +105,27 @@ const RewardEligibilityChecker = ({ lat, lon, aiAnalysis }: { lat: number, lon: 
         let isMounted = true;
         const verifyLocation = async () => {
             try {
-                // Fetch Address Details + Extra Tags
                 const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&extratags=1`);
                 const data = await res.json();
                 
                 if (isMounted && data) {
                     setLocationData(data);
-                    
-                    // 2. Analyze Location Context (OSM Tags)
                     const type = data.type || "";
                     const category = data.category || "";
                     const amenity = data.extratags?.amenity || "";
                     const building = data.extratags?.building || "";
                     const name = (data.display_name || "").toLowerCase();
                     
-                    // Strict School Check
                     if (
-                        category === "education" || 
-                        type === "school" || 
-                        amenity === "school" || 
-                        amenity === "kindergarten" || 
-                        amenity === "college" || 
-                        amenity === "university" ||
-                        building === "school" ||
-                        name.includes("escuela") ||
-                        name.includes("colegio") ||
-                        name.includes("unidad educativa") ||
-                        name.includes("educativo")
+                        category === "education" || type === "school" || amenity === "school" || 
+                        amenity === "kindergarten" || building === "school" ||
+                        name.includes("escuela") || name.includes("colegio") ||
+                        name.includes("unidad educativa")
                     ) {
                         setIsSchoolZone(true);
                     }
                 }
-            } catch (e) {
-                // Silent fail
-            } finally {
+            } catch (e) { } finally {
                 if (isMounted) setLoading(false);
             }
         };
@@ -140,8 +135,11 @@ const RewardEligibilityChecker = ({ lat, lon, aiAnalysis }: { lat: number, lon: 
 
     if (loading) return <div className="mt-4 p-3 bg-slate-50 rounded border border-slate-200 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-slate-400"/> <span className="text-xs text-slate-500">Verifying Eligibility...</span></div>;
     
-    // DECISION LOGIC: School Zone AND (Damage OR Food)
-    const isEligible = isSchoolZone && (hasDamage || hasFood);
+    // --- DECISION LOGIC ---
+    // 1. Must be School Zone
+    // 2. Must have Content (Damage or Food)
+    // 3. Must NOT have a Security Flag (suspiciousReason)
+    const isEligible = isSchoolZone && (hasDamage || hasFood) && !suspiciousReason;
 
     return (
         <div className={`mt-4 p-4 rounded-xl border-l-4 shadow-sm ${isEligible ? 'bg-emerald-50 border-emerald-500' : 'bg-slate-50 border-slate-300'}`}>
@@ -153,23 +151,32 @@ const RewardEligibilityChecker = ({ lat, lon, aiAnalysis }: { lat: number, lon: 
             </h4>
 
             <div className="space-y-2 text-xs">
-                {/* Criterion 1: AI Analysis */}
+                {/* 1. Security Check (The new blocker) */}
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1">
-                    <span className="text-slate-500">1. Content Analysis</span>
+                    <span className="text-slate-500">1. Security / Vendor Check</span>
+                    {!suspiciousReason ? 
+                        <span className="font-bold text-emerald-600 flex items-center gap-1"><CheckCircle size={10}/> Passed</span> : 
+                        <span className="font-bold text-rose-500 flex items-center gap-1"><ShieldAlert size={10}/> Failed ({suspiciousReason})</span>
+                    }
+                </div>
+
+                {/* 2. Content Analysis */}
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                    <span className="text-slate-500">2. Content Analysis</span>
                     {isInfra ? (
                         hasDamage ? 
-                        <span className="font-bold text-emerald-600 flex items-center gap-1"><Hammer size={10}/> Damage Verified (Sev: {aiAnalysis.severity})</span> : 
-                        <span className="font-bold text-rose-500">No Damage Detected</span>
+                        <span className="font-bold text-emerald-600 flex items-center gap-1"><Hammer size={10}/> Damage Verified</span> : 
+                        <span className="font-bold text-rose-500">No Damage</span>
                     ) : (
                         hasFood ? 
                         <span className="font-bold text-emerald-600 flex items-center gap-1"><Utensils size={10}/> Food Verified</span> : 
-                        <span className="font-bold text-rose-500">No Food Detected</span>
+                        <span className="font-bold text-rose-500">No Food</span>
                     )}
                 </div>
 
-                {/* Criterion 2: School Zone */}
+                {/* 3. Address Verification */}
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1">
-                    <span className="text-slate-500">2. Address Verification</span>
+                    <span className="text-slate-500">3. Address Verification</span>
                     {locationData ? (
                         isSchoolZone ? 
                         <span className="font-bold text-emerald-600 flex items-center gap-1"><School size={10}/> Confirmed School Zone</span> : 
@@ -407,11 +414,16 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 function getSuspiciousReason(report: any): string | null {
   const vendor = report.ai_analysis?.vendor;
-  if (!vendor || vendor === "Unknown" || vendor === "Unknown Vendor") {
+  const isInfra = report.ai_analysis?.severity !== undefined; // Check if it's infra
+
+  // 1. Vendor Check (Only critical for FOOD)
+  // If it is NOT infra, and vendor is unknown -> Flag it
+  if (!isInfra && (!vendor || vendor === "Unknown" || vendor === "Unknown Vendor")) {
     return "AI Failed to Identify Vendor (No Match)";
   }
 
-  const deviceGps = extractCoords(report.location); // Use new extractor
+  // 2. GPS Mismatch Check (For everyone)
+  const deviceGps = extractCoords(report.location); 
   const imageGps = findGpsRecursively(report.ai_analysis);
 
   if (deviceGps && imageGps) {
@@ -550,6 +562,7 @@ const ReportModal = ({ report, onClose }: { report: any, onClose: () => void }) 
         lat={(imageGps || deviceGps).lat} 
         lon={(imageGps || deviceGps).lon} 
         aiAnalysis={aiData} 
+        suspiciousReason={suspiciousReason}
     />
 )}
 
