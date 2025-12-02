@@ -131,11 +131,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
               console.log('[Client] Setting tenant cookie:', data.id);
               document.cookie = `lx_tenant_id=${data.id}; path=/; max-age=86400; samesite=lax`;
               document.cookie = `lx_tenant_slug=${data.slug}; path=/; max-age=86400; samesite=lax`;
-              // Force a reload if the cookie was missing/wrong to ensure next requests use it
-              if (!currentCookie) {
-                // Optional: trigger re-fetch of role
-                refreshRole();
-              }
+
+              // Force re-fetch of role since tenant context changed
+              refreshRole();
+
+              // Optional: Reload page if we want to be absolutely sure everything resets
+              // window.location.reload();
             }
           })
           .catch(err => console.error('[Client] Tenant lookup failed:', err));
