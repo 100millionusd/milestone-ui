@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
     method: 'GET',
     headers: {
       Cookie: `auth_token=${jwt}`,
-      Accept: 'application/json'
+      Accept: 'application/json',
+      ...(req.headers.get('x-tenant-id') ? { 'X-Tenant-ID': req.headers.get('x-tenant-id')! } : {})
     },
     cache: 'no-store',
     redirect: 'manual'

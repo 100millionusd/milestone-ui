@@ -6,6 +6,7 @@ export async function GET(req: NextRequest) {
   const res = await fetch('https://milestone-api-production.up.railway.app/auth/role', {
     headers: {
       cookie: `lx_jwt=${jwt}`,
+      ...(req.headers.get('x-tenant-id') ? { 'X-Tenant-ID': req.headers.get('x-tenant-id')! } : {})
     },
     cache: 'no-store',
   });
