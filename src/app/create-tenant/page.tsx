@@ -26,9 +26,20 @@ export default function CreateTenantPage() {
             // Redirect to the new tenant's admin dashboard
             const protocol = window.location.protocol;
             const host = window.location.host;
-            const rootDomain = host.split('.').slice(-2).join('.');
-            const isLocal = host.includes('localhost');
 
+            // Naive check: if we are on localhost, we might need port
+            // But getRootDomain handles the domain part.
+            // Let's inline the logic or import it? 
+            // Importing is cleaner but I need to make sure I can import from @/lib/domains
+
+            // Inline logic for safety and speed to avoid import errors if tsconfig is weird
+            const parts = host.split('.');
+            let rootDomain = parts.slice(-2).join('.');
+            if (host.endsWith('netlify.app') || host.endsWith('vercel.app')) {
+                rootDomain = parts.slice(-3).join('.');
+            }
+
+            const isLocal = host.includes('localhost');
             const targetHost = isLocal ? `${tenant.slug}.localhost:3000` : `${tenant.slug}.${rootDomain}`;
 
             // Force full reload to pick up new tenant context

@@ -293,7 +293,16 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch { }
-        const domain = window.location.hostname.includes('localhost') ? '' : `; Domain=.${window.location.hostname.split('.').slice(-2).join('.')}`;
+        let domain = '';
+        const hostname = window.location.hostname;
+        if (!hostname.includes('localhost')) {
+          const parts = hostname.split('.');
+          if (hostname.endsWith('netlify.app') || hostname.endsWith('vercel.app')) {
+            domain = `; Domain=.${parts.slice(-3).join('.')}`;
+          } else {
+            domain = `; Domain=.${parts.slice(-2).join('.')}`;
+          }
+        }
         document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None${domain}`;
         setToken(jwt);
       }
