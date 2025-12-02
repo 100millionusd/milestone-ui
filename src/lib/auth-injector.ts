@@ -57,7 +57,7 @@ function getToken(): string | null {
     try { u = new URL(href, location.href); } catch { return origFetch(input as any, init); }
 
     const isRailwayAPI = u.origin === API_ORIGIN;
-    const isNextProxy  = u.origin === location.origin && u.pathname.startsWith('/api/');
+    const isNextProxy = u.origin === location.origin && u.pathname.startsWith('/api/');
 
     if (isRailwayAPI || isNextProxy) {
       // Start with headers from Request object (if any)...
@@ -68,6 +68,12 @@ function getToken(): string | null {
       if (!headers.has('authorization')) {
         const tok = getToken();
         if (tok) headers.set('authorization', `Bearer ${tok}`);
+      }
+
+      // ✅ Inject Tenant ID from cookie if not present
+      if (!headers.has('X-Tenant-ID')) {
+        const tid = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'))?.[2];
+        if (tid) headers.set('X-Tenant-ID', tid);
       }
 
       init = { ...init, headers };
