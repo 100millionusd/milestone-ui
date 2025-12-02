@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
-import { createTenant } from '@/api';
+import { createTenant } from '@/lib/api';
 
 export default function CreateTenantPage() {
     const { address, login, session } = useWeb3Auth();
