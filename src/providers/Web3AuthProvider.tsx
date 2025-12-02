@@ -9,7 +9,7 @@ import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
 // We still need all these for the role-aware redirect
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache, apiFetch } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
@@ -38,8 +38,8 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   role: 'guest',
   session: 'unauthenticated',
   token: null,
-  login: async (role: 'vendor' | 'proposer') => {}, // 💡 CHANGED
-  logout: async () => {},
+  login: async (role: 'vendor' | 'proposer') => { }, // 💡 CHANGED
+  logout: async () => { },
   refreshRole: async () => ({ role: 'guest', address: null }),
 });
 
@@ -138,10 +138,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setWeb3auth(globalWeb3Auth);
       return;
     }
-    
+
     // 3. If it's initializing but not done, wait.
     if (globalWeb3Auth && !isWeb3AuthInitialized) {
-      return; 
+      return;
     }
 
     // 4. This is the FIRST time we're initializing
@@ -154,8 +154,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Check again in case of a race condition
         if (globalWeb3Auth) {
-           setWeb3auth(globalWeb3Auth);
-           return;
+          setWeb3auth(globalWeb3Auth);
+          return;
         }
 
         const rpcTarget = await pickHealthyRpc();
@@ -197,10 +197,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
         // 6. Init the modal
         await globalWeb3Auth.initModal();
-        
+
         // 7. Mark as initialized
         isWeb3AuthInitialized = true;
-        
+
         // 8. Set to state
         setWeb3auth(globalWeb3Auth);
 
@@ -213,7 +213,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     init();
 
     // 9. No cleanup function is needed because the instance is global and persistent.
-    
+
   }, [needsWallet, web3auth]); // Dependencies ensure this runs if we need a wallet and don't have it
 
   // This function now returns the fresh role info to fix the login race condition
@@ -227,8 +227,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       setAddress(addr);
 
       // mirror for cross-tab listeners / UI that peeks localStorage
-      try { localStorage.setItem('lx_role', r); } catch {}
-      try { window.dispatchEvent(new Event('lx-role-changed')); } catch {}
+      try { localStorage.setItem('lx_role', r); } catch { }
+      try { window.dispatchEvent(new Event('lx-role-changed')); } catch { }
       // Return the fresh info
       return { role: r, address: addr };
     } catch (e) {
@@ -290,20 +290,20 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 💡 CHANGED: Pass the chosen role to the server
       const { token: jwt } = await loginWithSignature(addr, signature, role);
-      
+
       if (jwt) {
-        try { localStorage.setItem('lx_jwt', jwt); } catch {}
+        try { localStorage.setItem('lx_jwt', jwt); } catch { }
         document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
         setToken(jwt);
       }
-      
+
       // ==========================================================
       // 💡 Await refreshRole AND use its return value
       // ==========================================================
-      
+
       // 1. Clear any stale client-side cache
-      clearAuthRoleCache(); 
-      
+      clearAuthRoleCache();
+
       // 2. Await the fresh role *directly* from the server
       const { role: finalRole } = await refreshRole(); // This now returns the role
 
@@ -321,12 +321,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           if (nextParam && (nextParam.startsWith('/proposer') || nextParam === '/new')) {
             nextParam = null; // Ignore forbidden nextParam
           }
-          
+
           // Check vendor profile completeness
           const p = await getVendorProfile().catch(() => null);
           dest = (!p || !(p?.vendorName || p?.companyName) || !p?.email)
-              ? `/vendor/profile?next=${encodeURIComponent(nextParam || '/vendor/dashboard')}`
-              : (nextParam || '/vendor/dashboard');
+            ? `/vendor/profile?next=${encodeURIComponent(nextParam || '/vendor/dashboard')}`
+            : (nextParam || '/vendor/dashboard');
 
         } else if (finalRole === 'proposer') {
           // 💡 If nextParam is for vendors, ignore it.
@@ -337,8 +337,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
           // Check proposer profile completeness
           const p = await getProposerProfile().catch(() => null);
           dest = (!p || !p?.orgName || !p?.contactEmail)
-              ? `/proposer/profile?next=${encodeURIComponent(nextParam || '/new')}`
-              : (nextParam || '/new');
+            ? `/proposer/profile?next=${encodeURIComponent(nextParam || '/new')}`
+            : (nextParam || '/new');
         } else {
           // Guest
           dest = nextParam || '/';
@@ -360,23 +360,23 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const clearJwtEverywhere = () => {
-    try { localStorage.removeItem('lx_jwt'); } catch {}
-    try { localStorage.removeItem('lx_role'); } catch {}
+    try { localStorage.removeItem('lx_jwt'); } catch { }
+    try { localStorage.removeItem('lx_role'); } catch { }
     // kill site cookie copy
-    try { document.cookie = 'lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None'; } catch {}
+    try { document.cookie = 'lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
   };
 
   const logout = async () => {
-    try { await web3auth?.logout(); } catch {}
-    try { await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }); } catch {}
+    try { await web3auth?.logout(); } catch { }
+    try { await apiFetch('/auth/logout', { method: 'POST' }); } catch { }
     clearJwtEverywhere();
     setProvider(null);
     setAddress(null);
     setToken(null);
     setRole('guest');
     setSession('unauthenticated');
-    try { window.dispatchEvent(new Event('lx-role-changed')); } catch {}
-    try { router.replace('/vendor/login'); } catch {}
+    try { window.dispatchEvent(new Event('lx-role-changed')); } catch { }
+    try { router.replace('/vendor/login'); } catch { }
   };
 
   // Account / network change
@@ -384,12 +384,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (!needsWallet) return;
     if (typeof window === 'undefined') return;
     const eth = (window as any).ethereum;
-    
+
     if (!eth?.on) return; // Fixed typo
 
     const onAccountsChanged = async (_accounts: string[]) => {
       try {
-        await fetch(api('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
+        await apiFetch('/auth/logout', { method: 'POST' }).catch(() => { });
       } finally {
         clearJwtEverywhere();
         setProvider(null);
@@ -409,7 +409,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         eth.removeListener?.('accountsChanged', onAccountsChanged);
         eth.removeListener?.('chainChanged', onChainChanged);
-      } catch {}
+      } catch { }
     };
   }, [needsWallet]);
 
