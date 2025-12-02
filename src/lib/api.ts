@@ -295,6 +295,7 @@ function getTenantId(): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const match = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'));
+    console.log('[API] getTenantId cookie match:', match ? match[2] : 'null', 'all cookies:', document.cookie);
     if (match) return match[2];
   } catch { }
   return null;
@@ -434,6 +435,10 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
     ...(options.headers as any),
     ...ssrForward,
   };
+
+  if (path.includes('/auth/role')) {
+    console.log('[API] Fetching /auth/role. TenantID:', clientTenantId, 'Headers:', headers);
+  }
 
   if (!callerCT && !isFormData && options.body != null) {
     headers['Content-Type'] = 'application/json';
