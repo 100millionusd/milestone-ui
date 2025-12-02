@@ -11,10 +11,10 @@ type Role = 'admin' | 'vendor' | 'proposer' | 'guest';
 type NavItem =
   | { href: string; label: string; roles?: Array<Role>; requiresApproval?: boolean }
   | {
-      label: string;
-      roles?: Array<Role>;
-      children: { href: string; label: string }[];
-    };
+    label: string;
+    roles?: Array<Role>;
+    children: { href: string; label: string }[];
+  };
 
 /** ------------ auth role singleflight + tiny cache (prevents loops / bursts) ------------ */
 type AuthInfo = { role?: string; address?: string; vendorStatus?: string | null };
@@ -55,7 +55,7 @@ export default function Navigation() {
   const router = useRouter();
 
   // Wallet context
-  const { address, role: web3Role, logout = async () => {}, provider } = useWeb3Auth() || ({} as any);
+  const { address, role: web3Role, logout = async () => { }, provider } = useWeb3Auth() || ({} as any);
 
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
@@ -70,16 +70,16 @@ export default function Navigation() {
         if (!alive) return;
 
         const backendRole = String(info?.role || '').toLowerCase();
- let mappedRole: Role;
-if (backendRole === 'admin') {
-  mappedRole = 'admin';
-} else if (backendRole === 'vendor') {
-  mappedRole = 'vendor';
-} else if (backendRole === 'proposer') {
-  mappedRole = 'proposer';
-} else {
-  mappedRole = 'guest';
-}
+        let mappedRole: Role;
+        if (backendRole === 'admin') {
+          mappedRole = 'admin';
+        } else if (backendRole === 'vendor') {
+          mappedRole = 'vendor';
+        } else if (backendRole === 'proposer') {
+          mappedRole = 'proposer';
+        } else {
+          mappedRole = 'guest';
+        }
 
         const vs = String(info?.vendorStatus ?? 'pending').toLowerCase() as
           | 'approved'
@@ -117,6 +117,8 @@ if (backendRole === 'admin') {
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor', 'proposer', 'guest'] },
       { href: '/new', label: 'Submit Proposal', roles: ['guest', 'proposer'] },
+      { href: '/create-tenant', label: 'Create Org', roles: ['guest', 'vendor', 'proposer', 'admin'] },
+
       {
         label: 'Admin',
         roles: ['admin'],
@@ -200,11 +202,10 @@ if (backendRole === 'admin') {
                 <div key={item.label} className="relative">
                   <button
                     onClick={() => setIsAdminOpen(!isAdminOpen)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${
-                      pathname.startsWith('/admin')
-                        ? 'text-cyan-400 bg-gray-700'
-                        : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
+                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1 ${pathname.startsWith('/admin')
+                      ? 'text-cyan-400 bg-gray-700'
+                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      }`}
                   >
                     {item.label}
                     <svg
@@ -223,9 +224,8 @@ if (backendRole === 'admin') {
                         <div
                           key={sub.href}
                           onClick={() => handleNavigation(sub.href)}
-                          className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer ${
-                            isActive(sub.href) ? 'text-cyan-600 bg-gray-50' : 'text-gray-700'
-                          }`}
+                          className={`block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer ${isActive(sub.href) ? 'text-cyan-600 bg-gray-50' : 'text-gray-700'
+                            }`}
                         >
                           {sub.label}
                         </div>
@@ -237,9 +237,8 @@ if (backendRole === 'admin') {
                 <div
                   key={item.href}
                   onClick={() => handleNavigation(resolveHref(item.href))}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-                    isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                    }`}
                 >
                   {item.label}
                 </div>
@@ -269,14 +268,14 @@ if (backendRole === 'admin') {
                 <div className="absolute right-0 mt-1 w-48 bg-white text-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-200">
                   {address ? (
                     <>
- <div
-  onClick={() => handleNavigation('/vendor/profile')}
-  className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
-  title="Profile"
-  aria-label="Profile"
->
-  Profile
-</div>
+                      <div
+                        onClick={() => handleNavigation('/vendor/profile')}
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 transition-colors cursor-pointer"
+                        title="Profile"
+                        aria-label="Profile"
+                      >
+                        Profile
+                      </div>
 
                       <button
                         onClick={handleLogout}
@@ -325,9 +324,8 @@ if (backendRole === 'admin') {
                         <div
                           key={sub.href}
                           onClick={() => handleNavigation(sub.href)}
-                          className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-                            isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                          }`}
+                          className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${isActive(sub.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                            }`}
                         >
                           {sub.label}
                         </div>
@@ -338,9 +336,8 @@ if (backendRole === 'admin') {
                   <div
                     key={item.href}
                     onClick={() => handleNavigation(resolveHref(item.href))}
-                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${
-                      isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                    }`}
+                    className={`block px-3 py-2 rounded-md text-base font-medium transition-colors cursor-pointer ${isActive(item.href) ? 'text-cyan-400 bg-gray-700' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      }`}
                   >
                     {item.label}
                   </div>
@@ -349,14 +346,14 @@ if (backendRole === 'admin') {
 
               {address ? (
                 <>
- <div
-  onClick={() => handleNavigation('/vendor/profile')}
-  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
-  title="Profile"
-  aria-label="Profile"
->
-  Profile
-</div>
+                  <div
+                    onClick={() => handleNavigation('/vendor/profile')}
+                    className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
+                    title="Profile"
+                    aria-label="Profile"
+                  >
+                    Profile
+                  </div>
                   <button
                     onClick={() => {
                       setIsMobileMenuOpen(false);
