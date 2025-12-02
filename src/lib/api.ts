@@ -573,10 +573,11 @@ let _authRoleMainInflight: Promise<AuthInfo> | null = null;
 let _authRoleMainCache: { at: number; data: AuthInfo } | null = null;
 
 export function getAuthRoleOnce(): Promise<AuthInfo> {
-  const now = Date.now();
-  if (_authRoleMainCache && now - _authRoleMainCache.at < 3_000) {
-    return Promise.resolve(_authRoleMainCache.data);
-  }
+  // 💥 CACHE DISABLED: To prevent stale roles across tenant switches
+  // const now = Date.now();
+  // if (_authRoleMainCache && now - _authRoleMainCache.at < 3_000) {
+  //   return Promise.resolve(_authRoleMainCache.data);
+  // }
   if (_authRoleMainInflight) return _authRoleMainInflight;
 
   _authRoleMainInflight = getAuthRole().then((info) => {
