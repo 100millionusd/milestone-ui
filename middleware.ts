@@ -120,8 +120,15 @@ export async function middleware(req: NextRequest) {
         console.log('[Middleware] Resolved Tenant:', tenantId, 'Slug:', tenantSlug, 'Path:', pathname, 'API_BASE:', API_BASE);
         response.cookies.set('lx_tenant_id', tenantId, { httpOnly: false, sameSite: 'lax', path: '/' });
         response.cookies.set('lx_tenant_slug', tenantSlug, { httpOnly: false, sameSite: 'lax', path: '/' });
+
+        // Debug headers
+        response.headers.set('X-Debug-Tenant-ID', tenantId);
+        response.headers.set('X-Debug-Tenant-Slug', tenantSlug);
     } else {
         console.log('[Middleware] No tenant resolved for path:', pathname, 'Host:', hostname, 'Params:', searchParams.toString(), 'API_BASE:', API_BASE);
+        response.headers.set('X-Debug-Error', 'No tenant resolved');
+        response.headers.set('X-Debug-Candidate-Slug', candidateSlug || 'null');
+        response.headers.set('X-Debug-API-Base', API_BASE);
     }
 
     return response;
