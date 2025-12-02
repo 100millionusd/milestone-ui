@@ -7,7 +7,7 @@ const API_BASE =
     'https://milestone-api-production.up.railway.app';
 
 export async function middleware(req: NextRequest) {
-    const { pathname, search } = req.nextUrl;
+    const { pathname, searchParams } = req.nextUrl;
     const hostname = req.headers.get('host') || '';
 
     // 1. Tenant Resolution
@@ -111,8 +111,8 @@ export async function middleware(req: NextRequest) {
     });
 
     if (tenantId) {
-        response.cookies.set('lx_tenant_id', tenantId);
-        response.cookies.set('lx_tenant_slug', tenantSlug);
+        response.cookies.set('lx_tenant_id', tenantId, { httpOnly: false, sameSite: 'lax', path: '/' });
+        response.cookies.set('lx_tenant_slug', tenantSlug, { httpOnly: false, sameSite: 'lax', path: '/' });
     }
 
     return response;
