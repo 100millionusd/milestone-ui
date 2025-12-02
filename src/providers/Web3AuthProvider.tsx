@@ -410,6 +410,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     try { localStorage.removeItem('lx_role'); } catch { }
     // kill site cookie copy
     try { document.cookie = 'lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
+    // 🛑 FIX: Also clear tenant cookies to prevent session leakage
+    try { document.cookie = 'lx_tenant_id=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
+    try { document.cookie = 'lx_tenant_slug=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
   };
 
   const logout = async () => {
