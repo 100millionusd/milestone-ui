@@ -117,16 +117,11 @@ export async function middleware(req: NextRequest) {
     });
 
     if (tenantId) {
-        response.cookies.set('lx_tenant_id', tenantId, { httpOnly: false, sameSite: 'lax', path: '/' });
-        response.cookies.set('lx_tenant_slug', tenantSlug, { httpOnly: false, sameSite: 'lax', path: '/' });
-    }
-
-    if (tenantId) {
-        console.log('[Middleware] Resolved Tenant:', tenantId, 'Slug:', tenantSlug, 'Path:', pathname);
+        console.log('[Middleware] Resolved Tenant:', tenantId, 'Slug:', tenantSlug, 'Path:', pathname, 'API_BASE:', API_BASE);
         response.cookies.set('lx_tenant_id', tenantId, { httpOnly: false, sameSite: 'lax', path: '/' });
         response.cookies.set('lx_tenant_slug', tenantSlug, { httpOnly: false, sameSite: 'lax', path: '/' });
     } else {
-        console.log('[Middleware] No tenant resolved for path:', pathname, 'Host:', hostname, 'Params:', searchParams.toString());
+        console.log('[Middleware] No tenant resolved for path:', pathname, 'Host:', hostname, 'Params:', searchParams.toString(), 'API_BASE:', API_BASE);
     }
 
     return response;
