@@ -87,7 +87,7 @@ export interface Bid {
   preferredStablecoin: "USDT" | "USDC";
   milestones: Milestone[];
   doc: any | null;
-  docs?: any[]; 
+  docs?: any[];
   files?: any[];
   status: "pending" | "approved" | "completed" | "rejected" | "archived";
   createdAt: string;
@@ -222,11 +222,14 @@ async function getServerForwardHeaders(): Promise<Record<string, string>> {
 
     // 🔑 lift our site cookie lx_jwt and turn it into Bearer for the backend
     const lxJwt = c.get("lx_jwt")?.value;
+    const tenantId = c.get("lx_tenant_id")?.value || headers().get("x-tenant-id");
 
     const out: Record<string, string> = {};
     if (cookieStr) out["cookie"] = cookieStr;
     if (incomingAuth) out["authorization"] = incomingAuth;
     else if (lxJwt) out["authorization"] = `Bearer ${lxJwt}`;
+
+    if (tenantId) out["X-Tenant-ID"] = tenantId;
 
     return out;
   } catch {
@@ -283,15 +286,26 @@ function setJwt(token: string | null) {
   try {
     if (token) localStorage.setItem("lx_jwt", token);
     else localStorage.removeItem("lx_jwt");
-  } catch {}
+    if (token) localStorage.setItem("lx_jwt", token);
+    else localStorage.removeItem("lx_jwt");
+  } catch { }
+}
+
+function getTenantId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const match = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'));
+    if (match) return match[2];
+  } catch { }
+  return null;
 }
 
 export function syncJwtCookieFromLocalStorage() {
   if (typeof window === 'undefined') return;
   try {
     const t = localStorage.getItem('lx_jwt');
-    if (t) document.cookie = `lx_jwt=${t}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`;
-  } catch {}
+    if (t) document.cookie = `lx_jwt=${t}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=None; Secure`;
+  } catch { }
 }
 
 
@@ -335,12 +349,12 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
   const p = path.startsWith("/") ? path : `/${path}`;
   const bases: string[] = [];
 
-     if (!isBrowser) {
+  if (!isBrowser) {
     bases.push(trimSlashEnd(API_BASE)); // server-side: only external
   } else {
-  // Force external API. Same-origin fallbacks cause 404 and mask auth issues.
-  bases.push(trimSlashEnd(API_BASE));
-}
+    // Force external API. Same-origin fallbacks cause 404 and mask auth issues.
+    bases.push(trimSlashEnd(API_BASE));
+  }
 
   let lastResp: Response | null = null;
 
@@ -364,7 +378,7 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
     }
   }
 
-    // If we get here, nothing succeeded; throw using the last response status if we have it.
+  // If we get here, nothing succeeded; throw using the last response status if we have it.
   if (lastResp) {
     const status = lastResp.status;
     const ct = lastResp.headers.get("content-type") || "";
@@ -382,7 +396,7 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
       try {
         const t2 = await lastResp.text();
         if (t2 && t2.trim()) msg = t2.slice(0, 400);
-      } catch {}
+      } catch { }
     }
 
     throw new Error(msg);
@@ -396,9 +410,9 @@ async function fetchWithFallback(path: string, init: RequestInit): Promise<Respo
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method || 'GET').toString().toUpperCase();
 
- // Ensure leading slash (no cache-busting)
-const basePath = path.startsWith('/') ? path : `/${path}`;
-const fullPath = basePath;
+  // Ensure leading slash (no cache-busting)
+  const basePath = path.startsWith('/') ? path : `/${path}`;
+  const fullPath = basePath;
 
   // Only set Content-Type when not FormData and caller didn't set it
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -408,29 +422,31 @@ const fullPath = basePath;
 
   // Bearer fallback (when API cookie isn't available, e.g., cross-origin/Safari)
   const token = getJwt();
+  const clientTenantId = getTenantId();
 
   // Forward cookies/authorization on the server for SSR calls
   const ssrForward = !isBrowser ? await getServerForwardHeaders() : {};
 
   const headers: Record<string, string> = {
-  Accept: 'application/json',
-  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  ...(options.headers as any),
-  ...ssrForward,
-};
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(clientTenantId ? { 'X-Tenant-ID': clientTenantId } : {}),
+    ...(options.headers as any),
+    ...ssrForward,
+  };
 
   if (!callerCT && !isFormData && options.body != null) {
     headers['Content-Type'] = 'application/json';
   }
 
-const init: RequestInit = {
-  ...options,
-  cache: 'no-store',           // force no-store on SSR and browser
-  mode: 'cors',
-  redirect: 'follow',
-  credentials: 'include',
-  headers,
-};
+  const init: RequestInit = {
+    ...options,
+    cache: 'no-store',           // force no-store on SSR and browser
+    mode: 'cors',
+    redirect: 'follow',
+    credentials: 'include',
+    headers,
+  };
 
   // Use the resilient base resolver (API_BASE → '' → '/api')
   const r = await fetchWithFallback(fullPath, init);
@@ -456,13 +472,13 @@ const init: RequestInit = {
     try {
       const text = await r.clone().text();
       if (text && text.trim()) msg = text.slice(0, 400);
-    } catch {}
+    } catch { }
 
     if (ct.includes('application/json')) {
       try {
         const j = await r.clone().json();
         if (j && (j.error || j.message)) msg = String(j.error || j.message);
-      } catch {}
+      } catch { }
     }
 
     throw new Error(msg);
@@ -511,14 +527,14 @@ export async function chooseRole(role: 'vendor' | 'proposer') {
     method: 'POST',
     body: JSON.stringify({ role }),
   });
- if (r?.token) {
-  const token = String(r.token);
-  try { localStorage.setItem('lx_jwt', token); } catch {}
-  try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
-}
+  if (r?.token) {
+    const token = String(r.token);
+    try { localStorage.setItem('lx_jwt', token); } catch { }
+    try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=None; Secure`; } catch { }
+  }
 
   // refresh local role cache if you use one
-  try { clearAuthRoleCache?.(); } catch {}
+  try { clearAuthRoleCache?.(); } catch { }
   return r;
 }
 
@@ -527,15 +543,15 @@ export async function getAuthRole(opts?: { address?: string }): Promise<AuthInfo
   try {
     const r = await apiFetch(`/auth/role${q}`);
     // AFTER
-const serverRole = String(r?.role || "").toLowerCase();
+    const serverRole = String(r?.role || "").toLowerCase();
 
-let mapped: AuthInfo["role"];
-if (serverRole === "admin" || serverRole === "vendor" || serverRole === "proposer") {
-  mapped = serverRole as AuthInfo["role"];
-} else {
-  // Unknown on server → be a guest until the user explicitly chooses a role
-  mapped = "guest";
-}
+    let mapped: AuthInfo["role"];
+    if (serverRole === "admin" || serverRole === "vendor" || serverRole === "proposer") {
+      mapped = serverRole as AuthInfo["role"];
+    } else {
+      // Unknown on server → be a guest until the user explicitly chooses a role
+      mapped = "guest";
+    }
 
     return {
       address: r?.address ?? undefined,
@@ -633,7 +649,7 @@ export async function loginWithSignature(
   const token = (res && res.token) ? String(res.token) : null;
   if (token) {
     setJwt(token); // localStorage
-    try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7*24*3600}; SameSite=None; Secure`; } catch {}
+    try { document.cookie = `lx_jwt=${token}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=None; Secure`; } catch { }
   } // keep localStorage fallback in sync
 
   return {
@@ -643,7 +659,7 @@ export async function loginWithSignature(
   };
 }
 
-export const loginVendor   = (addr: string, sig: string) => loginWithSignature(addr, sig, 'vendor');
+export const loginVendor = (addr: string, sig: string) => loginWithSignature(addr, sig, 'vendor');
 export const loginProposer = (addr: string, sig: string) => loginWithSignature(addr, sig, 'proposer');
 /* ==========================
    🆕 Agent Digest (dashboard)
@@ -672,6 +688,21 @@ export async function markDigestSeen(): Promise<{ ok: boolean; at?: string }> {
   });
 }
 
+// ---- Tenant Management ----
+export async function createTenant(name: string, slug: string) {
+  return apiFetch('/api/tenants', {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+export async function updateTenantConfig(tenantId: string, key: string, value: string, isEncrypted = false) {
+  return apiFetch(`/api/tenants/${tenantId}/config`, {
+    method: 'PUT',
+    body: JSON.stringify({ key, value, isEncrypted }),
+  });
+}
+
 // ---- Normalizers ----
 function toProposal(p: any): Proposal {
   const rawId = p?.proposalId ?? p?.proposal_id ?? p?.id ?? p?.proposalID;
@@ -691,14 +722,14 @@ function toProposal(p: any): Proposal {
 
     // ✅ THE FIX: Add 'p?.amountUsd' to this list
     amountUSD: Number(p?.amountUSD ?? p?.amountUsd ?? p?.amount_usd ?? p?.amount) || 0,
-    
+
     docs: Array.isArray(p?.docs) ? p.docs : [],
     cid: p?.cid ?? null,
     status: (p?.status as Proposal["status"]) ?? "pending",
     createdAt: p?.createdAt ?? p?.created_at ?? new Date().toISOString(),
     ownerWallet: p?.ownerWallet ?? p?.owner_wallet ?? null,
-    ownerEmail:  p?.ownerEmail  ?? p?.owner_email  ?? null,
-    updatedAt:   p?.updatedAt   ?? p?.updated_at   ?? undefined,
+    ownerEmail: p?.ownerEmail ?? p?.owner_email ?? null,
+    updatedAt: p?.updatedAt ?? p?.updated_at ?? undefined,
   };
 }
 
@@ -743,7 +774,7 @@ function toMilestones(raw: any): Milestone[] {
   }));
 }
 
-  function toBid(b: any): Bid {
+function toBid(b: any): Bid {
   const bidId = b?.bidId ?? b?.bid_id ?? b?.id;
   const proposalId = b?.proposalId ?? b?.proposal_id ?? b?.proposalID ?? b?.proposal;
   const aiRaw = b?.aiAnalysis ?? b?.ai_analysis;
@@ -982,16 +1013,18 @@ export async function deleteBid(id: number): Promise<boolean> {
 
 export async function updateBidMilestones(id: number, milestones: Milestone[]): Promise<Bid> {
   if (!Number.isFinite(id)) throw new Error("Invalid bid ID");
-  const body = { milestones: milestones.map(m => ({
-    name: m.name,
-    amount: Number(m.amount),
-    dueDate: m.dueDate,
-    completed: !!m.completed,
-    completionDate: m.completionDate ?? null,
-    proof: m.proof ?? "",
-    paymentTxHash: m.paymentTxHash ?? null,
-    paymentDate: m.paymentDate ?? null,
-  })) };
+  const body = {
+    milestones: milestones.map(m => ({
+      name: m.name,
+      amount: Number(m.amount),
+      dueDate: m.dueDate,
+      completed: !!m.completed,
+      completionDate: m.completionDate ?? null,
+      proof: m.proof ?? "",
+      paymentTxHash: m.paymentTxHash ?? null,
+      paymentDate: m.paymentDate ?? null,
+    }))
+  };
   const b = await apiFetch(`/bids/${encodeURIComponent(String(id))}/milestones`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -1212,10 +1245,10 @@ export async function listProposers(params?: {
         r.telegram_chat_id ??
         null;
 
-        const tgConnected = !!(
-        r.telegramConnected ?? 
+      const tgConnected = !!(
+        r.telegramConnected ??
         r.telegram_connected ??
-        r.profile?.telegramConnected ?? 
+        r.profile?.telegramConnected ??
         r.profile?.telegram_connected
       );
 
@@ -1271,7 +1304,7 @@ export async function listProposers(params?: {
         // 5. ✅ THIS IS THE CRITICAL FIX
         // Pass the server's 'archived' flag directly
         //
-        archived: !!r.archived, 
+        archived: !!r.archived,
 
         totalBudgetUSD: Number(
           r.totalBudgetUSD ?? r.total_budget_usd ?? r.amountUSD ?? r.amount_usd ?? 0
@@ -1592,7 +1625,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function uploadFileToIPFS(file: File, existingToken?: any) {
   const keys = existingToken || await apiFetch("/auth/pinata-token");
-  
+
   if (!keys?.JWT) throw new Error("No upload token received");
 
   const fd = new FormData();
@@ -1615,7 +1648,7 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
         const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
         return {
           cid: result.IpfsHash,
-          url: `https://${gateway}/ipfs/${result.IpfsHash}`, 
+          url: `https://${gateway}/ipfs/${result.IpfsHash}`,
           name: file.name
         };
       }
@@ -1638,7 +1671,7 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
       attempt++;
     }
   }
-  
+
   throw new Error("Upload failed after max retries");
 }
 
@@ -1647,13 +1680,13 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
 //    Returns: [{ cid, url, name }]
 
 async function runConcurrent<T>(
-  items: T[], 
-  concurrency: number, 
+  items: T[],
+  concurrency: number,
   fn: (item: T) => Promise<any>
 ): Promise<any[]> {
   const results: any[] = [];
   const queue = [...items]; // Copy array to avoid mutating original
-  
+
   // Worker function: keeps picking items from the queue until empty
   const worker = async () => {
     while (queue.length > 0) {
@@ -1667,7 +1700,7 @@ async function runConcurrent<T>(
 
   // Create a pool of workers (max 3 workers for 3 parallel uploads)
   const workers = Array.from({ length: Math.min(items.length, concurrency) }, () => worker());
-  
+
   // Wait for all workers to finish
   await Promise.all(workers);
   return results;
@@ -1692,7 +1725,7 @@ export async function uploadFilesSequentially(
   // 3. Prepare the Folder Payload
   const fd = new FormData();
   const folderName = `proposal_assets_${Date.now()}`;
-  
+
   files.forEach(f => {
     // Critical: "folder/filename" structure triggers the folder mode in Pinata
     fd.append('file', f, `${folderName}/${f.name}`);
@@ -1716,7 +1749,7 @@ export async function uploadFilesSequentially(
       if (res.ok) {
         const json = await res.json();
         const folderCid = json.IpfsHash;
-        
+
         // ✅ Force Dedicated Gateway
         const gateway = "sapphire-given-snake-741.mypinata.cloud";
 
@@ -1734,7 +1767,7 @@ export async function uploadFilesSequentially(
       // ⚠️ Handle Rate Limit (429)
       if (res.status === 429) {
         // Wait 3s -> 6s -> 12s... (Aggressive backoff)
-        const waitTime = 3000 * Math.pow(2, attempt); 
+        const waitTime = 3000 * Math.pow(2, attempt);
         console.warn(`[Batch Upload] Rate limited. Retrying in ${waitTime / 1000}s... (Attempt ${attempt + 1})`);
         await delay(waitTime);
         attempt++;
@@ -1747,7 +1780,7 @@ export async function uploadFilesSequentially(
 
     } catch (e) {
       console.error(`[Batch Upload] Attempt ${attempt + 1} failed:`, e);
-      
+
       // If it's a network error (not a 4xx/5xx response), wait and retry
       if (attempt < maxRetries - 1) {
         await delay(2000);
@@ -1788,7 +1821,7 @@ export async function saveProofFilesToDb(params: {
 
   if (!res.ok) {
     let msg = `Proof save HTTP ${res.status}`;
-    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+    try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch { }
     throw new Error(msg);
   }
 
@@ -1836,16 +1869,16 @@ export async function getMilestoneArchive(bidId: number, milestoneIndex: number)
 /** Bulk archive status - uses your existing route */
 export async function getBulkArchiveStatus(bidIds: number[]): Promise<Record<number, Record<number, ArchiveInfo>>> {
   if (!bidIds.length) return {};
-  
+
   const qs = new URLSearchParams({
     bidIds: bidIds.join(',')
   });
-  
+
   const res = await fetch(`/api/milestones/bulk-status?${qs.toString()}`, {
     method: 'GET',
     credentials: 'omit',
   });
-  
+
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -1916,7 +1949,7 @@ export async function getPublicProjects(): Promise<any[]> {
       const data = await r.json().catch(() => []);
       if (Array.isArray(data)) return data;
     }
-  } catch {}
+  } catch { }
 
   // Fallbacks if the route is somehow unreachable
   const candidates = [
@@ -1932,7 +1965,7 @@ export async function getPublicProjects(): Promise<any[]> {
     try {
       const rows = await apiFetch(path);
       if (Array.isArray(rows)) return rows;
-    } catch {}
+    } catch { }
   }
   return [];
 }
@@ -1965,7 +1998,7 @@ export async function getPublicProject(bidId: number): Promise<any | null> {
     try {
       const row = await apiFetch(path);
       if (row && typeof row === "object") return row;
-    } catch {}
+    } catch { }
   }
   return null;
 }
@@ -2029,7 +2062,7 @@ export async function createBidFromTemplate(input: {
     desc?: string;
   }>;
 }): Promise<{ ok: boolean; bidId: number }> {
-  
+
   console.log('🔍 API DEBUG - createBidFromTemplate input:', {
     templateId: input.templateId,
     slug: input.slug,
@@ -2043,17 +2076,17 @@ export async function createBidFromTemplate(input: {
 
   const files = Array.isArray(input.files) ? input.files : [];
   const docs = Array.isArray(input.docs) ? input.docs : files;
-  
+
   const milestones = Array.isArray(input.milestones)
     ? input.milestones.map((m) => {
-        const text = m.description ?? m.notes ?? m.desc ?? '';
-        return { 
-          ...m, 
-          description: text, 
-          notes: text, 
-          desc: text 
-        };
-      })
+      const text = m.description ?? m.notes ?? m.desc ?? '';
+      return {
+        ...m,
+        description: text,
+        notes: text,
+        desc: text
+      };
+    })
     : [];
 
   const doc = input.doc || files[0] || docs[0] || null;
@@ -2078,9 +2111,9 @@ export async function createBidFromTemplate(input: {
   });
 
   const result = await postJSON(`/bids/from-template`, payload);
-  
+
   console.log('🔍 API DEBUG - Response from /bids/from-template:', result);
-  
+
   return result;
 }
 
@@ -2111,8 +2144,8 @@ export function splitIntoPhases(totalBOB: number, totalDays: number, baseName: s
 }
 
 export function buildMilestonesFromSelection(
-  scopes: Array<{key:string; name:string}>,
-  sel: Record<string, {selected:boolean; amount:number; days:number}>
+  scopes: Array<{ key: string; name: string }>,
+  sel: Record<string, { selected: boolean; amount: number; days: number }>
 ) {
   const out: Array<{
     name: string; amount: number; dueDate: string; acceptance?: string[]; archived?: boolean;
@@ -2166,13 +2199,13 @@ export async function saveProposerProfile(profile: any) {
     typeof a === 'string'
       ? a
       : a && typeof a === 'object'
-      ? {
+        ? {
           line1: a.line1 ?? '',
           city: a.city ?? '',
           postalCode: a.postalCode ?? '',
           country: a.country ?? '',
         }
-      : undefined;
+        : undefined;
 
   const payload = {
     vendorName: profile?.vendorName ?? profile?.orgName ?? '',
@@ -2200,7 +2233,7 @@ export function switchRole(role: 'vendor' | 'proposer') {
 }
 
 export const chooseRoleProposer = () => chooseRole('proposer');
-export const chooseRoleVendor   = () => chooseRole('vendor');
+export const chooseRoleVendor = () => chooseRole('vendor');
 
 
 export default {
