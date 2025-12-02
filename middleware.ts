@@ -51,17 +51,23 @@ export async function middleware(req: NextRequest) {
 
     if (candidateSlug) {
         try {
-            const res = await fetch(`${API_BASE}/api/tenants/lookup?slug=${candidateSlug}`, {
+            const fetchUrl = `${API_BASE}/api/tenants/lookup?slug=${candidateSlug}`;
+            console.log('[Middleware] Fetching tenant:', fetchUrl);
+            const res = await fetch(fetchUrl, {
                 headers: { accept: 'application/json' },
                 next: { revalidate: 60 }, // Cache for 60s
             });
+            console.log('[Middleware] Lookup response:', res.status);
             if (res.ok) {
                 const data = await res.json();
                 tenantId = data.id;
                 tenantSlug = data.slug;
+                console.log('[Middleware] Resolved ID:', tenantId);
+            } else {
+                console.error('[Middleware] Lookup failed with status:', res.status);
             }
         } catch (e) {
-            console.error('Tenant lookup failed', e);
+            console.error('[Middleware] Tenant lookup exception:', e);
         }
     }
 
