@@ -23,7 +23,16 @@ export default function CreateTenantPage() {
             const tenant = await createTenant(name, slug);
             // Redirect to admin dashboard or configuration page
             // For now, let's go to admin dashboard which should now work for this new tenant
-            router.push('/admin');
+            // Redirect to the new tenant's admin dashboard
+            const protocol = window.location.protocol;
+            const host = window.location.host;
+            const rootDomain = host.split('.').slice(-2).join('.');
+            const isLocal = host.includes('localhost');
+
+            const targetHost = isLocal ? `${tenant.slug}.localhost:3000` : `${tenant.slug}.${rootDomain}`;
+
+            // Force full reload to pick up new tenant context
+            window.location.href = `${protocol}//${targetHost}/admin`;
         } catch (err: any) {
             console.error(err);
             setError(err.message || 'Failed to create organization');

@@ -293,7 +293,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch { }
-        document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None`;
+        const domain = window.location.hostname.includes('localhost') ? '' : `; Domain=.${window.location.hostname.split('.').slice(-2).join('.')}`;
+        document.cookie = `lx_jwt=${jwt}; path=/; Secure; SameSite=None${domain}`;
         setToken(jwt);
       }
 
