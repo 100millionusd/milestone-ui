@@ -21,17 +21,31 @@ export async function middleware(req: NextRequest) {
 
     let candidateSlug = null;
 
-    if (isLocal) {
-        // e.g. tenant1.localhost:3000 -> parts=['tenant1', 'localhost:3000']
-        if (parts.length > 1 && parts[0] !== 'www') {
-            candidateSlug = parts[0];
-        }
+    // Priority:
+    // 1. Query param ?tenant=slug (overrides everything)
+    // 2. Cookie lx_tenant_slug
+    // 3. Subdomain
+
+    const tenantParam = searchParams.get('tenant');
+    const tenantCookie = req.cookies.get('lx_tenant_slug')?.value;
+
+    if (tenantParam) {
+        candidateSlug = tenantParam;
+    } else if (tenantCookie) {
+        candidateSlug = tenantCookie;
     } else {
-        // e.g. tenant1.lithiumx.app -> parts=['tenant1', 'lithiumx', 'app']
-        // e.g. milestone-api-production.up.railway.app -> might be tricky, usually custom domains are used
-        // For now, assume standard [slug].[domain].[tld]
-        if (parts.length > 2 && parts[0] !== 'www') {
-            candidateSlug = parts[0];
+        if (isLocal) {
+            // e.g. tenant1.localhost:3000 -> parts=['tenant1', 'localhost:3000']
+            if (parts.length > 1 && parts[0] !== 'www') {
+                candidateSlug = parts[0];
+            }
+        } else {
+            // e.g. tenant1.lithiumx.app -> parts=['tenant1', 'lithiumx', 'app']
+            // e.g. milestone-api-production.up.railway.app -> might be tricky, usually custom domains are used
+            // For now, assume standard [slug].[domain].[tld]
+            if (parts.length > 2 && parts[0] !== 'www') {
+                candidateSlug = parts[0];
+            }
         }
     }
 
@@ -98,6 +112,7 @@ export async function middleware(req: NextRequest) {
 
     if (tenantId) {
         response.cookies.set('lx_tenant_id', tenantId);
+        response.cookies.set('lx_tenant_slug', tenantSlug);
     }
 
     return response;

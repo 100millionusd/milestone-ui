@@ -24,26 +24,8 @@ export default function CreateTenantPage() {
             // Redirect to admin dashboard or configuration page
             // For now, let's go to admin dashboard which should now work for this new tenant
             // Redirect to the new tenant's admin dashboard
-            const protocol = window.location.protocol;
-            const host = window.location.host;
-
-            // Naive check: if we are on localhost, we might need port
-            // But getRootDomain handles the domain part.
-            // Let's inline the logic or import it? 
-            // Importing is cleaner but I need to make sure I can import from @/lib/domains
-
-            // Inline logic for safety and speed to avoid import errors if tsconfig is weird
-            const parts = host.split('.');
-            let rootDomain = parts.slice(-2).join('.');
-            if (host.endsWith('netlify.app') || host.endsWith('vercel.app')) {
-                rootDomain = parts.slice(-3).join('.');
-            }
-
-            const isLocal = host.includes('localhost');
-            const targetHost = isLocal ? `${tenant.slug}.localhost:3000` : `${tenant.slug}.${rootDomain}`;
-
-            // Force full reload to pick up new tenant context
-            window.location.href = `${protocol}//${targetHost}/admin`;
+            // We use a query param to set the context, which middleware will persist in a cookie
+            window.location.href = `/admin?tenant=${tenant.slug}`;
         } catch (err: any) {
             console.error(err);
             setError(err.message || 'Failed to create organization');
