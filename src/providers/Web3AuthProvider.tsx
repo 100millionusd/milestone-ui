@@ -101,12 +101,47 @@ const pageNeedsWallet = (p?: string) => {
 let globalWeb3Auth: Web3Auth | null = null;
 let isWeb3AuthInitialized = false;
 // ==================================================
+let web3authInstance: Web3Auth | null = null;
+let providerInstance: SafeEventEmitterProvider | null = null;
 
 
 // ---------- PROVIDER ----------
 export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+
+  // 1. Client-side Tenant Resolution Fallback
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const tenantSlug = params.get('tenant');
+
+    if (tenantSlug) {
+      // Check if we already have the correct cookie
+      const currentCookie = document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
+
+      if (currentCookie !== tenantSlug) {
+        console.log('[Client] Resolving tenant slug:', tenantSlug);
+        // Fetch ID from API
+        fetch(`${API_BASE}/api/tenants/lookup?slug=${tenantSlug}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.id) {
+              console.log('[Client] Setting tenant cookie:', data.id);
+              document.cookie = `lx_tenant_id=${data.id}; path=/; max-age=86400; samesite=lax`;
+              document.cookie = `lx_tenant_slug=${data.slug}; path=/; max-age=86400; samesite=lax`;
+              // Force a reload if the cookie was missing/wrong to ensure next requests use it
+              if (!currentCookie) {
+                // Optional: trigger re-fetch of role
+                refreshRole();
+              }
+            }
+          })
+          .catch(err => console.error('[Client] Tenant lookup failed:', err));
+      }
+    }
+  }, [pathname]);
   const needsWallet = useMemo(() => pageNeedsWallet(pathname || ''), [pathname]);
 
   // Use the global instance as the *initial* state
