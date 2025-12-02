@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { getAuthRoleOnce } from '@/lib/api';
 
@@ -24,25 +24,14 @@ let __roleInflight: Promise<AuthInfo> | null = null;
 let __roleCache: { at: number; data: AuthInfo } | null = null;
 
 async function getAuthRoleOnceCached(): Promise<AuthInfo> {
-  const now = Date.now();
-  if (__roleCache && now - __roleCache.at < ROLE_TTL_MS) return __roleCache.data;
-  if (__roleInflight) return __roleInflight;
-
-  __roleInflight = (async () => {
-    const info = (await getAuthRoleOnce()) || {};
-    const data: AuthInfo = {
-      role: (info as any)?.role,
-      address: (info as any)?.address,
-      vendorStatus: (info as any)?.vendorStatus ?? null,
-    };
-    __roleCache = { at: Date.now(), data };
-    return data;
-  })()
-    .finally(() => {
-      __roleInflight = null;
-    });
-
-  return __roleInflight;
+  // 💥 CACHE REMOVED: It was causing stale roles across tenants
+  // Always fetch fresh to ensure we get the correct tenant-specific role
+  const info = (await getAuthRoleOnce()) || {};
+  return {
+    role: (info as any)?.role,
+    address: (info as any)?.address,
+    vendorStatus: (info as any)?.vendorStatus ?? null,
+  };
 }
 /** -------------------------------------------------------------------------------------- */
 
@@ -52,6 +41,7 @@ export default function Navigation() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
 
   // Wallet context
@@ -60,12 +50,30 @@ export default function Navigation() {
   // Server cookie/JWT
   const [serverRole, setServerRole] = useState<Role | null>(null);
   const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
+  const [debugTenantId, setDebugTenantId] = useState<string>('');
 
   // mount-only role load, deduped & cached; also ignores updates after unmount
   useEffect(() => {
     let alive = true;
+
+    // 🛑 RACE CONDITION FIX:
+    // If the URL has ?tenant=slug, but the cookie is different, DO NOT FETCH YET.
+    // Wait for Web3AuthProvider to update the cookie.
+    const tenantParam = searchParams.get('tenant');
+    if (tenantParam) {
+      const currentSlug = document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
+      if (currentSlug !== tenantParam) {
+        console.log('[Nav] Waiting for tenant cookie sync...', { want: tenantParam, have: currentSlug });
+        return;
+      }
+    }
+
     (async () => {
       try {
+        // Debug: Read tenant cookie
+        const tid = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'))?.[2] || 'missing';
+        setDebugTenantId(tid);
+
         const info = await getAuthRoleOnceCached();
         if (!alive) return;
 
@@ -98,10 +106,10 @@ export default function Navigation() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [pathname, searchParams]); // Re-run on path or params change
 
   // Effective role
-  const role: Role = useMemo(() => serverRole ?? 'guest', [serverRole]);
+  const role = serverRole || web3Role || 'guest';
 
   // Only admins or approved vendors can see project lists
   const canSeeProjects = role === 'admin' || (role === 'vendor' && vendorStatus === 'approved');
