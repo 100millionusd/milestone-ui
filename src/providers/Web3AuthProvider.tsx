@@ -327,7 +327,17 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const signature = await signer.signMessage(nonce);
 
       // 💡 CHANGED: Pass the chosen role to the server
-      const { token: jwt } = await loginWithSignature(addr, signature, role);
+      const { token: jwt, action, tenants } = await loginWithSignature(addr, signature, role);
+
+      // 🛑 FIX: Handle tenant selection redirect
+      if (action === 'select_tenant' && tenants && tenants.length > 0) {
+        // Auto-redirect to the first tenant found (simplest UX)
+        // Ideally we'd show a modal, but this solves the "Login as Admin" 400 error immediately
+        const targetTenant = tenants[0];
+        const targetUrl = `/admin?tenant=${targetTenant.slug}`;
+        window.location.href = targetUrl;
+        return;
+      }
 
       if (jwt) {
         try { localStorage.setItem('lx_jwt', jwt); } catch { }

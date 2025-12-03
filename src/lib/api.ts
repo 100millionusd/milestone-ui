@@ -527,7 +527,7 @@ export async function saveProfile(data: {
   return apiFetch(`/profile`, { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function chooseRole(role: 'vendor' | 'proposer') {
+export async function chooseRole(role: 'vendor' | 'proposer' | 'admin') {
   const r = await apiFetch(`/profile/choose-role?role=${encodeURIComponent(role)}`, {
     method: 'POST',
     body: JSON.stringify({ role }),
@@ -646,11 +646,16 @@ export async function loginWithSignature(
   address: string,
   signature: string,
   role: 'vendor' | 'proposer' | 'admin' = 'proposer' // <-- 1. Set default back to 'proposer'
-): Promise<{ role: AuthInfo["role"]; token: string | null }> {
+): Promise<{ role: AuthInfo["role"]; token: string | null; action?: string; tenants?: any[] }> {
   const res = await apiFetch(`/auth/login?role=${role}`, {
     method: "POST",
     body: JSON.stringify({ address, signature }),
   });
+
+  // Handle tenant selection flow
+  if (res?.action === 'select_tenant') {
+    return { role: 'guest', token: null, action: 'select_tenant', tenants: res.tenants };
+  }
 
   const token = (res && res.token) ? String(res.token) : null;
   if (token) {
