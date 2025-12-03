@@ -26,7 +26,7 @@ interface Web3AuthContextType {
   role: Role;
   session: Session;
   token: string | null;
-  login: (role: 'vendor' | 'proposer') => Promise<void>; // 💡 CHANGED
+  login: (role: 'vendor' | 'proposer' | 'admin') => Promise<void>; // 💡 CHANGED
   logout: () => Promise<void>;
   refreshRole: () => Promise<{ role: Role; address: string | null }>;
 }
@@ -38,7 +38,7 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   role: 'guest',
   session: 'unauthenticated',
   token: null,
-  login: async (role: 'vendor' | 'proposer') => { }, // 💡 CHANGED
+  login: async (role: 'vendor' | 'proposer' | 'admin') => { }, // 💡 CHANGED
   logout: async () => { },
   refreshRole: async () => ({ role: 'guest', address: null }),
 });
@@ -293,7 +293,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   // Removed the useEffect[pathname] hook that was causing the redirect loop
 
   // 💡 CHANGED: login now accepts the user's role intent
-  const login = async (role: 'vendor' | 'proposer') => {
+  const login = async (role: 'vendor' | 'proposer' | 'admin') => {
     if (!web3auth || loggingIn) return;
     setLoggingIn(true);
     try {

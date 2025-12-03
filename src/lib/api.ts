@@ -645,7 +645,7 @@ export async function getBidsOnce(proposalId?: number): Promise<Bid[]> {
 export async function loginWithSignature(
   address: string,
   signature: string,
-  role: 'vendor' | 'proposer' = 'proposer' // <-- 1. Set default back to 'proposer'
+  role: 'vendor' | 'proposer' | 'admin' = 'proposer' // <-- 1. Set default back to 'proposer'
 ): Promise<{ role: AuthInfo["role"]; token: string | null }> {
   const res = await apiFetch(`/auth/login?role=${role}`, {
     method: "POST",

@@ -21,7 +21,7 @@ const HeaderLogo = () => (
   </div>
 );
 
-type Role = 'vendor' | 'proposer';
+type Role = 'vendor' | 'proposer' | 'admin';
 
 export default function LoginPage() {
   const { login, session } = useWeb3Auth();
@@ -30,16 +30,16 @@ export default function LoginPage() {
   // Defaulting to 'vendor' matches the screenshot (blue border), 
   // but you can set to null if you want no default selection.
   const [selectedRole, setSelectedRole] = useState<Role>('vendor');
-  
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function handleConnectWallet() {
     if (busy || session === 'authenticating') return;
-    
+
     setBusy(true);
     setErr(null);
-    
+
     try {
       // Pass the currently selected role to the login function
       await login(selectedRole);
@@ -52,11 +52,11 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-slate-200 flex flex-col font-sans">
-      
+
       {/* Navigation Bar */}
       <nav className="w-full px-6 py-4 flex justify-between items-center border-b border-white/5 bg-[#0B1120]">
         <HeaderLogo />
-        <button 
+        <button
           className="bg-[#0ea5e9] hover:bg-[#0284c7] text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
           disabled={true} // Visual only in navbar as per screenshot context
         >
@@ -66,10 +66,10 @@ export default function LoginPage() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col items-center justify-center p-4">
-        
+
         {/* Card Container */}
         <div className="w-full max-w-md bg-[#151e32] border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
-          
+
           {/* Card Header */}
           <div className="flex flex-col items-center text-center space-y-4 mb-8">
             <LithiumLogo />
@@ -89,15 +89,15 @@ export default function LoginPage() {
           {/* Role Selection */}
           <div className="space-y-3 mb-8">
             <label className="text-sm font-medium text-slate-300 ml-1">Select Role</label>
-            
-            <div className="grid grid-cols-2 gap-4">
+
+            <div className="grid grid-cols-3 gap-4">
               {/* Proposer Card */}
               <button
                 onClick={() => setSelectedRole('proposer')}
                 className={`
                   flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-200
-                  ${selectedRole === 'proposer' 
-                    ? 'bg-[#1e293b] border-[#0ea5e9] shadow-[0_0_0_1px_#0ea5e9]' 
+                  ${selectedRole === 'proposer'
+                    ? 'bg-[#1e293b] border-[#0ea5e9] shadow-[0_0_0_1px_#0ea5e9]'
                     : 'bg-[#1e293b]/50 border-slate-700 hover:border-slate-600 hover:bg-[#1e293b]'}
                 `}
               >
@@ -110,13 +110,27 @@ export default function LoginPage() {
                 onClick={() => setSelectedRole('vendor')}
                 className={`
                   flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-200
-                  ${selectedRole === 'vendor' 
-                    ? 'bg-[#1e293b] border-[#0ea5e9] shadow-[0_0_0_1px_#0ea5e9]' 
+                  ${selectedRole === 'vendor'
+                    ? 'bg-[#1e293b] border-[#0ea5e9] shadow-[0_0_0_1px_#0ea5e9]'
                     : 'bg-[#1e293b]/50 border-slate-700 hover:border-slate-600 hover:bg-[#1e293b]'}
                 `}
               >
                 <span className="text-white font-semibold text-lg">Vendor</span>
                 <span className="text-slate-400 text-xs mt-1">Submit Bids</span>
+              </button>
+
+              {/* Admin Card */}
+              <button
+                onClick={() => setSelectedRole('admin')}
+                className={`
+                  flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-200
+                  ${selectedRole === 'admin'
+                    ? 'bg-[#1e293b] border-[#0ea5e9] shadow-[0_0_0_1px_#0ea5e9]'
+                    : 'bg-[#1e293b]/50 border-slate-700 hover:border-slate-600 hover:bg-[#1e293b]'}
+                `}
+              >
+                <span className="text-white font-semibold text-lg">Admin</span>
+                <span className="text-slate-400 text-xs mt-1">Manage Org</span>
               </button>
             </div>
           </div>
