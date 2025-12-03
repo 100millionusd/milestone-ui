@@ -359,7 +359,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
         let nextParam = url.searchParams.get('next'); // Get the raw nextParam
         let dest = '/'; // Final destination
 
-        if (finalRole === 'admin') {
+        const currentPath = window.location.pathname;
+
+        // 🛑 FIX: Allow staying on specific pages (like create-tenant) even after login
+        if (currentPath === '/create-tenant' || currentPath === '/new') {
+          dest = currentPath;
+        } else if (finalRole === 'admin') {
           dest = nextParam || '/admin'; // Admin can go anywhere
 
         } else if (finalRole === 'vendor') {
