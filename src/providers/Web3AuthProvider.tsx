@@ -258,9 +258,11 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
       const info = await getAuthRole(); // Use UNCACHED function
       const r = normalizeRole(info?.role);
       setRole(r);
-      setSession(r === 'vendor' || r === 'admin' || r === 'proposer' ? 'authenticated' : 'unauthenticated');
       const addr = (info as any)?.address ? String((info as any).address) : null;
       setAddress(addr);
+
+      // 🛑 FIX: If we have an address, we are authenticated (even if just a guest)
+      setSession(addr ? 'authenticated' : 'unauthenticated');
 
       // mirror for cross-tab listeners / UI that peeks localStorage
       try { localStorage.setItem('lx_role', r); } catch { }
