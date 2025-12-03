@@ -415,9 +415,26 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const clearJwtEverywhere = () => {
     try { localStorage.removeItem('lx_jwt'); } catch { }
     try { localStorage.removeItem('lx_role'); } catch { }
-    // kill site cookie copy
+
+    // Calculate domain for robust clearing (same logic as login)
+    let domain = '';
+    const hostname = window.location.hostname;
+    if (!hostname.includes('localhost')) {
+      const parts = hostname.split('.');
+      if (hostname.endsWith('netlify.app') || hostname.endsWith('vercel.app')) {
+        domain = `; Domain=.${parts.slice(-3).join('.')}`;
+      } else {
+        domain = `; Domain=.${parts.slice(-2).join('.')}`;
+      }
+    }
+
+    // 1. Clear with domain (for cross-subdomain cookies)
+    try { document.cookie = `lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None${domain}`; } catch { }
+    try { document.cookie = `lx_tenant_id=; Max-Age=0; path=/; Secure; SameSite=None${domain}`; } catch { }
+    try { document.cookie = `lx_tenant_slug=; Max-Age=0; path=/; Secure; SameSite=None${domain}`; } catch { }
+
+    // 2. Clear without domain (fallback for host-only cookies)
     try { document.cookie = 'lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
-    // 🛑 FIX: Also clear tenant cookies to prevent session leakage
     try { document.cookie = 'lx_tenant_id=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
     try { document.cookie = 'lx_tenant_slug=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
   };
