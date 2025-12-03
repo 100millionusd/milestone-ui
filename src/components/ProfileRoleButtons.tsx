@@ -25,6 +25,7 @@ type Props = {
   profile: Profile;
   nextAfterVendor?: string;
   nextAfterProposer?: string;
+  nextAfterAdmin?: string;
 };
 
 function normalizeWebsite(v?: string | null) {
@@ -68,13 +69,14 @@ export default function ProfileRoleButtons({
   profile,
   nextAfterVendor = '/vendor/dashboard?flash=vendor-profile-saved',
   nextAfterProposer = '/new?flash=proposer-profile-saved',
+  nextAfterAdmin = '/admin',
 }: Props) {
   const router = useRouter();
-  const [saving, setSaving] = useState<'idle' | 'vendor' | 'proposer'>('idle');
+  const [saving, setSaving] = useState<'idle' | 'vendor' | 'proposer' | 'admin'>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
 
-  async function go(kind: 'vendor' | 'proposer') {
+  async function go(kind: 'vendor' | 'proposer' | 'admin') {
     if (saving !== 'idle') return;
     setErr(null);
     setSaving(kind);
@@ -83,9 +85,10 @@ export default function ProfileRoleButtons({
 
       if (kind === 'vendor') {
         await saveVendorProfile(payload);
-      } else {
+      } else if (kind === 'proposer') {
         await saveProposerProfile(payload);
       }
+      // Admin: skip profile save for now (or implement saveAdminProfile if needed)
 
       // choose role and persist JWT so future reads include Bearer
       const res = await chooseRole(kind);
@@ -94,11 +97,13 @@ export default function ProfileRoleButtons({
           localStorage.setItem('lx_jwt', res.token);
           // helps Safari/3rd-party cookie cases when SSR hits /auth/role
           document.cookie = `lx_jwt=${res.token}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=None; Secure`;
-        } catch {}
+        } catch { }
       }
 
       setOk(true);
-      router.replace(kind === 'vendor' ? nextAfterVendor : nextAfterProposer);
+      if (kind === 'vendor') router.replace(nextAfterVendor);
+      else if (kind === 'proposer') router.replace(nextAfterProposer);
+      else router.replace(nextAfterAdmin);
     } catch (e: any) {
       setErr(e?.message || `Failed to continue as ${kind}`);
       setSaving('idle');
@@ -135,6 +140,15 @@ export default function ProfileRoleButtons({
           className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
         >
           {saving === 'proposer' ? 'Saving…' : 'Continue as Entity (Submit Proposal)'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => go('admin')}
+          disabled={saving !== 'idle'}
+          className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-xl shadow-sm disabled:opacity-60"
+        >
+          {saving === 'admin' ? 'Saving…' : 'Continue as Admin'}
         </button>
       </div>
     </div>
