@@ -153,6 +153,7 @@ export default function Navigation() {
           { href: '/admin/entities', label: 'Entities' },
           { href: '/admin/vendors', label: 'Vendors' },
           { href: '/admin/analyst', label: 'Analyst' },
+          { href: '/admin/settings', label: 'Settings' },
         ],
       },
       { href: '/vendor/dashboard', label: 'MyDesk' },
