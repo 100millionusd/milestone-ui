@@ -6,35 +6,24 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120; // allow long uploads
 
 const PINATA_ENDPOINT = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+const API_BASE = "https://milestone-api-production.up.railway.app";
 
-function gatewayBase(): string {
-  const envGw =
-    process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
-    process.env.NEXT_PUBLIC_IPFS_GATEWAY;
-
-  // host-only → ensure single /ipfs suffix
-  let base = envGw
-    ? `https://${String(envGw).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
-    : 'https://gateway.pinata.cloud';
-
-  base = base.replace(/\/+$/, '');
-  if (!/\/ipfs$/i.test(base)) base += '/ipfs';
-  return base;
-}
-
-function pinataHeaders(): Record<string, string> {
-  const jwt = process.env.PINATA_JWT?.trim();
-  if (jwt) {
-    // accept raw token or "Bearer <token>"
-    const val = /^Bearer\s+/i.test(jwt) ? jwt : `Bearer ${jwt}`;
-    return { Authorization: val };
+async function getTenantConfig(key: string, auth: string, tenantId: string) {
+  try {
+    const res = await fetch(`${API_BASE}/api/tenants/config/${key}`, {
+      headers: {
+        'Authorization': auth,
+        'X-Tenant-ID': tenantId,
+        'Accept': 'application/json'
+      }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.value;
+  } catch (e) {
+    console.error(`Failed to fetch config ${key}`, e);
+    return null;
   }
-  const key = process.env.PINATA_API_KEY;
-  const secret = process.env.PINATA_SECRET_API_KEY;
-  if (key && secret) {
-    return { pinata_api_key: key, pinata_secret_api_key: secret };
-  }
-  throw new Error('Missing Pinata credentials');
 }
 
 type FileLike = Blob & { name?: string };
@@ -44,7 +33,7 @@ function toArray<T>(x: T | T[] | null): T[] {
   return Array.isArray(x) ? x : [x];
 }
 
-async function pinOne(file: FileLike, metadata?: any) {
+async function pinOne(file: FileLike, metadata: any, jwt: string, gateway: string) {
   const fd = new FormData();
   fd.append('file', file as any, (file as any).name || 'file');
   if (metadata) fd.append('pinataMetadata', JSON.stringify(metadata));
@@ -55,7 +44,9 @@ async function pinOne(file: FileLike, metadata?: any) {
   try {
     const res = await fetch(PINATA_ENDPOINT, {
       method: 'POST',
-      headers: pinataHeaders(),
+      headers: {
+        'Authorization': `Bearer ${jwt}`
+      },
       body: fd as any, // undici sets boundary
       signal: controller.signal,
       cache: 'no-store',
@@ -65,12 +56,17 @@ async function pinOne(file: FileLike, metadata?: any) {
     if (!res.ok) throw new Error(`Pinata ${res.status}: ${text.slice(0, 500)}`);
 
     let json: any = {};
-    try { json = JSON.parse(text); } catch {}
+    try { json = JSON.parse(text); } catch { }
     const cid = json?.IpfsHash || json?.ipfsHash || json?.Hash || json?.cid;
     if (!cid) throw new Error('Pinata response missing CID');
 
     const name = (file as any).name || 'file';
-    const url = `${gatewayBase()}/${cid}?filename=${encodeURIComponent(name)}`;
+
+    // Format gateway URL
+    let gw = gateway.replace(/\/+$/, '');
+    if (!/\/ipfs$/i.test(gw)) gw += '/ipfs';
+
+    const url = `${gw}/${cid}?filename=${encodeURIComponent(name)}`;
     return { cid, url, name };
   } finally {
     clearTimeout(t);
@@ -79,6 +75,27 @@ async function pinOne(file: FileLike, metadata?: any) {
 
 export async function POST(req: Request) {
   try {
+    const auth = req.headers.get('authorization') || '';
+    const tenantId = req.headers.get('x-tenant-id') || '';
+
+    if (!auth || !tenantId) {
+      return NextResponse.json({ error: 'Unauthorized', message: 'Missing auth or tenant ID' }, { status: 401 });
+    }
+
+    // Fetch credentials
+    const [jwt, gateway] = await Promise.all([
+      getTenantConfig('pinata_jwt', auth, tenantId),
+      getTenantConfig('pinata_gateway', auth, tenantId)
+    ]);
+
+    // Fallback to env vars if not configured (backward compatibility)
+    const finalJwt = jwt || process.env.PINATA_JWT;
+    const finalGateway = gateway || process.env.NEXT_PUBLIC_PINATA_GATEWAY || 'https://gateway.pinata.cloud';
+
+    if (!finalJwt) {
+      return NextResponse.json({ error: 'config_missing', message: 'Pinata not configured for this tenant' }, { status: 500 });
+    }
+
     const form = await req.formData();
 
     // accept BOTH field names: "file" and "files"
@@ -104,7 +121,7 @@ export async function POST(req: Request) {
         name: (f as any).name || 'file',
         keyvalues: { proposalId, milestoneIndex },
       };
-      uploads.push(await pinOne(f, meta));
+      uploads.push(await pinOne(f, meta, finalJwt, finalGateway));
     }
 
     // return both keys for client compatibility
