@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
 import { useSearchParams } from 'next/navigation';
+import { API_BASE } from '@/lib/api';
 
 // Simple Li Icon Component to match the screenshot
 const LithiumLogo = () => (
@@ -38,7 +39,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (tenantSlug) {
-      fetch(`/api/tenants/lookup?slug=${tenantSlug}`)
+      fetch(`${API_BASE}/api/tenants/lookup?slug=${tenantSlug}`)
         .then(r => r.json())
         .then(data => {
           if (data && data.name) setTenantName(data.name);

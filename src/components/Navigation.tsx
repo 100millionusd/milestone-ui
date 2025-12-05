@@ -56,7 +56,7 @@ export default function Navigation() {
   useEffect(() => {
     const tSlug = searchParams.get('tenant') || document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
     if (tSlug) {
-      fetch(`/api/tenants/lookup?slug=${tSlug}`)
+      fetch(`${API_BASE}/api/tenants/lookup?slug=${tSlug}`)
         .then(r => r.json())
         .then(data => {
           if (data && data.name) setTenantName(data.name);
