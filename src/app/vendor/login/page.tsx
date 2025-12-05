@@ -25,7 +25,7 @@ const HeaderLogo = () => (
 type Role = 'vendor' | 'proposer' | 'admin';
 
 export default function LoginPage() {
-  const { login, session } = useWeb3Auth();
+  const { login, session, isResolvingTenant } = useWeb3Auth();
 
   // State to track which card is selected. 
   // Defaulting to 'vendor' matches the screenshot (blue border), 
@@ -159,15 +159,15 @@ export default function LoginPage() {
           {/* Connect Button */}
           <button
             onClick={handleConnectWallet}
-            disabled={busy || session === 'authenticating'}
+            disabled={busy || session === 'authenticating' || isResolvingTenant}
             className={`
               w-full py-3.5 rounded-lg text-white font-semibold text-lg transition-all duration-200
-              ${busy || session === 'authenticating'
+              ${busy || session === 'authenticating' || isResolvingTenant
                 ? 'bg-slate-700 cursor-not-allowed text-slate-400'
                 : 'bg-[#0ea5e9] hover:bg-[#0284c7] shadow-lg shadow-blue-900/20 active:scale-[0.98]'}
             `}
           >
-            {busy || session === 'authenticating' ? 'Connecting...' : 'Connect Wallet'}
+            {isResolvingTenant ? 'Loading Organization...' : (busy || session === 'authenticating' ? 'Connecting...' : 'Connect Wallet')}
           </button>
 
         </div>

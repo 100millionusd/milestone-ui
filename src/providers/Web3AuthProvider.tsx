@@ -29,6 +29,7 @@ interface Web3AuthContextType {
   login: (role: 'vendor' | 'proposer' | 'admin') => Promise<void>; // 💡 CHANGED
   logout: () => Promise<void>;
   refreshRole: () => Promise<{ role: Role; address: string | null }>;
+  isResolvingTenant: boolean;
 }
 
 const Web3AuthContext = createContext<Web3AuthContextType>({
@@ -38,9 +39,10 @@ const Web3AuthContext = createContext<Web3AuthContextType>({
   role: 'guest',
   session: 'unauthenticated',
   token: null,
-  login: async (role: 'vendor' | 'proposer' | 'admin') => { }, // 💡 CHANGED
+  login: async (role: 'vendor' | 'proposer' | 'admin') => { },
   logout: async () => { },
   refreshRole: async () => ({ role: 'guest', address: null }),
+  isResolvingTenant: false,
 });
 
 // ---------- ENV ----------
@@ -123,6 +125,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (currentCookie !== tenantSlug) {
         console.log('[Client] Resolving tenant slug:', tenantSlug);
+        setIsResolvingTenant(true); // Start resolution
         // Fetch ID from API
         fetch(`${API_BASE}/api/tenants/lookup?slug=${tenantSlug}`)
           .then(res => res.json())
@@ -134,12 +137,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
               // Force re-fetch of role since tenant context changed
               refreshRole();
-
-              // Optional: Reload page if we want to be absolutely sure everything resets
-              // window.location.reload();
             }
           })
-          .catch(err => console.error('[Client] Tenant lookup failed:', err));
+          .catch(err => console.error('[Client] Tenant lookup failed:', err))
+          .finally(() => setIsResolvingTenant(false)); // End resolution
       }
     }
   }, [pathname]);
@@ -154,6 +155,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [isResolvingTenant, setIsResolvingTenant] = useState(false);
 
   // Only restore token for Bearer fallback; DO NOT restore address/role (prevents early redirect)
   useEffect(() => {
@@ -506,7 +508,7 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Web3AuthContext.Provider
-      value={{ web3auth, provider, address, role, session, token, login, logout, refreshRole }}
+      value={{ web3auth, provider, address, role, session, token, login, logout, refreshRole, isResolvingTenant }}
     >
       {children}
     </Web3AuthContext.Provider>
