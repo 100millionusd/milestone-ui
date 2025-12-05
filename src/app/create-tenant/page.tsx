@@ -25,7 +25,8 @@ export default function CreateTenantPage() {
             // For now, let's go to admin dashboard which should now work for this new tenant
             // Redirect to the new tenant's admin dashboard
             // We use a query param to set the context, which middleware will persist in a cookie
-            window.location.href = `/admin?tenant=${tenant.slug}`;
+            // Redirect to the login page with the tenant slug to establish context
+            window.location.href = `/vendor/login?tenant=${tenant.slug}`;
         } catch (err: any) {
             console.error(err);
             setError(err.message || 'Failed to create organization');
