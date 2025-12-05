@@ -450,6 +450,9 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    // Capture tenant slug before clearing cookies
+    const slug = document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
+
     try { await web3auth?.logout(); } catch { }
     try { await apiFetch('/auth/logout', { method: 'POST' }); } catch { }
     clearJwtEverywhere();
@@ -459,7 +462,10 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     setRole('guest');
     setSession('unauthenticated');
     try { window.dispatchEvent(new Event('lx-role-changed')); } catch { }
-    try { router.replace('/vendor/login'); } catch { }
+
+    // Redirect to login with tenant context if available
+    const dest = slug ? `/vendor/login?tenant=${slug}` : '/vendor/login';
+    try { router.replace(dest); } catch { }
   };
 
   // Account / network change

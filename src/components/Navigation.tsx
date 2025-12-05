@@ -178,10 +178,8 @@ export default function Navigation() {
   const handleLogout = async () => {
     try {
       await logout();
-      router.push('/vendor/login');
     } catch (error) {
       console.error('Logout failed:', error);
-      router.push('/vendor/login');
     }
   };
 
