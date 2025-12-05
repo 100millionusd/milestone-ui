@@ -300,8 +300,12 @@ function getTenantId(): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const match = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'));
-    console.log('[API] getTenantId cookie match:', match ? match[2] : 'null', 'all cookies:', document.cookie);
-    if (match) return match[2];
+    if (match) {
+      // console.log('[API] getTenantId found:', match[2]);
+      return match[2];
+    } else {
+      console.log('[API] getTenantId: No lx_tenant_id cookie found. All cookies:', document.cookie);
+    }
   } catch { }
   return null;
 }

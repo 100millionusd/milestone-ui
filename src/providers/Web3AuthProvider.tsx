@@ -120,11 +120,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     const tenantSlug = params.get('tenant');
 
     if (tenantSlug) {
-      // Check if we already have the correct cookie
+      // Check if we already have the correct cookie AND the ID cookie
       const currentCookie = document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
+      const hasIdCookie = document.cookie.match(new RegExp('(^| )lx_tenant_id=([^;]+)'));
 
-      if (currentCookie !== tenantSlug) {
-        console.log('[Client] Resolving tenant slug:', tenantSlug);
+      if (currentCookie !== tenantSlug || !hasIdCookie) {
+        console.log('[Client] Resolving tenant (slug mismatch or missing ID):', tenantSlug);
         setIsResolvingTenant(true); // Start resolution
         // Fetch ID from API
         fetch(`${API_BASE}/api/tenants/lookup?slug=${tenantSlug}`)
