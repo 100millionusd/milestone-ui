@@ -21,6 +21,8 @@ export default function SettingsPage() {
     const [safeReconcileMinutes, setSafeReconcileMinutes] = useState("");
     const [safeThresholdUsd, setSafeThresholdUsd] = useState("");
     const [safeAddress, setSafeAddress] = useState("");
+    const [ethPrivateKey, setEthPrivateKey] = useState("");
+    const [ethRpcUrl, setEthRpcUrl] = useState("");
 
     useEffect(() => {
         loadSettings();
@@ -29,7 +31,7 @@ export default function SettingsPage() {
     async function loadSettings() {
         try {
             setLoading(true);
-            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl, apiKey, reconcile, threshold, safeAddr] = await Promise.all([
+            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl, apiKey, reconcile, threshold, safeAddr, ethKey, ethRpc] = await Promise.all([
                 apiFetch('/api/tenants/config/pinata_jwt').then(r => r.value),
                 apiFetch('/api/tenants/config/pinata_gateway').then(r => r.value),
                 apiFetch('/api/tenants/config/payment_address').then(r => r.value),
@@ -41,7 +43,9 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config/safe_api_key').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_reconcile_minutes').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_threshold_usd').then(r => r.value),
-                apiFetch('/api/tenants/config/safe_address').then(r => r.value)
+                apiFetch('/api/tenants/config/safe_address').then(r => r.value),
+                apiFetch('/api/tenants/config/ETH_PRIVATE_KEY').then(r => r.value),
+                apiFetch('/api/tenants/config/ETH_RPC_URL').then(r => r.value)
             ]);
 
             setPinataJwt(jwt || "");
@@ -55,9 +59,9 @@ export default function SettingsPage() {
             setSafeApiKey(apiKey || "");
             setSafeReconcileMinutes(reconcile || "");
             setSafeThresholdUsd(threshold || "");
-            // If safe_address is set, use it. Otherwise fallback to payment_address for display if safe_address is empty?
-            // Better to keep them distinct to avoid confusion. If safe_address is empty, it's empty.
             setSafeAddress(safeAddr || "");
+            setEthPrivateKey(ethKey || "");
+            setEthRpcUrl(ethRpc || "");
         } catch (e) {
             console.error('Failed to load settings', e);
             setMsg({ type: 'error', text: 'Failed to load settings' });
@@ -84,7 +88,9 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_api_key', value: safeApiKey, isEncrypted: true }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_reconcile_minutes', value: safeReconcileMinutes }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_threshold_usd', value: safeThresholdUsd }) }),
-                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_address', value: safeAddress }) })
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_address', value: safeAddress }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'ETH_PRIVATE_KEY', value: ethPrivateKey, isEncrypted: true }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'ETH_RPC_URL', value: ethRpcUrl }) })
             ]);
             setMsg({ type: 'success', text: 'Settings saved successfully' });
         } catch (e: any) {
@@ -272,6 +278,44 @@ export default function SettingsPage() {
                                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
                             />
                             <p className="text-xs text-gray-500 mt-1">Minimum amount to trigger Safe payment.</p>
+                        </div>
+                    </div>
+                </section>
+
+                {/* DIRECT PAYMENTS (HOT WALLET) */}
+                <section className="bg-gray-800/50 border border-gray-700 rounded-xl p-6">
+                    <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="text-orange-400">🔥</span> Direct Payments (Hot Wallet)
+                    </h2>
+                    <p className="text-gray-400 text-sm mb-6">
+                        Configure a standard wallet for direct transfers (when Safe is not used).
+                    </p>
+
+                    <div className="grid grid-cols-1 gap-6">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Private Key</label>
+                            <input
+                                type="password"
+                                value={ethPrivateKey}
+                                onChange={(e) => setEthPrivateKey(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-amber-500/80 mt-1">
+                                ⚠️ Stored encrypted. Used for direct transfers below the Safe threshold.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">RPC URL (Optional)</label>
+                            <input
+                                type="text"
+                                value={ethRpcUrl}
+                                onChange={(e) => setEthRpcUrl(e.target.value)}
+                                placeholder="https://rpc.ankr.com/eth_sepolia"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Leave blank to use system default.</p>
                         </div>
                     </div>
                 </section>
