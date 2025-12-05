@@ -17,6 +17,9 @@ export default function SettingsPage() {
     const [safeRpcUrl, setSafeRpcUrl] = useState("");
     const [safeOwnerKey, setSafeOwnerKey] = useState("");
     const [safeServiceUrl, setSafeServiceUrl] = useState("");
+    const [safeApiKey, setSafeApiKey] = useState("");
+    const [safeReconcileMinutes, setSafeReconcileMinutes] = useState("");
+    const [safeThresholdUsd, setSafeThresholdUsd] = useState("");
 
     useEffect(() => {
         loadSettings();
@@ -25,7 +28,7 @@ export default function SettingsPage() {
     async function loadSettings() {
         try {
             setLoading(true);
-            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl] = await Promise.all([
+            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl, apiKey, reconcile, threshold] = await Promise.all([
                 apiFetch('/api/tenants/config/pinata_jwt').then(r => r.value),
                 apiFetch('/api/tenants/config/pinata_gateway').then(r => r.value),
                 apiFetch('/api/tenants/config/payment_address').then(r => r.value),
@@ -33,7 +36,10 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config/safe_chain_id').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_rpc_url').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_owner_key').then(r => r.value),
-                apiFetch('/api/tenants/config/safe_service_url').then(r => r.value)
+                apiFetch('/api/tenants/config/safe_service_url').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_api_key').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_reconcile_minutes').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_threshold_usd').then(r => r.value)
             ]);
 
             setPinataJwt(jwt || "");
@@ -44,6 +50,9 @@ export default function SettingsPage() {
             setSafeRpcUrl(rpcUrl || "");
             setSafeOwnerKey(ownerKey || "");
             setSafeServiceUrl(serviceUrl || "");
+            setSafeApiKey(apiKey || "");
+            setSafeReconcileMinutes(reconcile || "");
+            setSafeThresholdUsd(threshold || "");
         } catch (e) {
             console.error('Failed to load settings', e);
             setMsg({ type: 'error', text: 'Failed to load settings' });
@@ -66,7 +75,10 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_chain_id', value: safeChainId }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_rpc_url', value: safeRpcUrl }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_owner_key', value: safeOwnerKey, isEncrypted: true }) }),
-                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_service_url', value: safeServiceUrl }) })
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_service_url', value: safeServiceUrl }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_api_key', value: safeApiKey, isEncrypted: true }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_reconcile_minutes', value: safeReconcileMinutes }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_threshold_usd', value: safeThresholdUsd }) })
             ]);
             setMsg({ type: 'success', text: 'Settings saved successfully' });
         } catch (e: any) {
@@ -216,6 +228,41 @@ export default function SettingsPage() {
                                 placeholder="https://api.safe.global/tx-service/sep"
                                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
                             />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Safe API Key</label>
+                            <input
+                                type="password"
+                                value={safeApiKey}
+                                onChange={(e) => setSafeApiKey(e.target.value)}
+                                placeholder="Required for some Safe services..."
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Reconcile Minutes</label>
+                            <input
+                                type="number"
+                                value={safeReconcileMinutes}
+                                onChange={(e) => setSafeReconcileMinutes(e.target.value)}
+                                placeholder="10"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Interval for checking transaction status.</p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Safe Threshold (USD)</label>
+                            <input
+                                type="number"
+                                value={safeThresholdUsd}
+                                onChange={(e) => setSafeThresholdUsd(e.target.value)}
+                                placeholder="0"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Minimum amount to trigger Safe payment.</p>
                         </div>
                     </div>
                 </section>
