@@ -201,11 +201,16 @@ function getApiBase(): string {
       DEFAULT_API_BASE;
     return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
   }
+  // 🛑 FORCE Railway API for now to fix 404s (user has incorrect env var)
+  return "https://milestone-api-production.up.railway.app";
+
+  /*
   const c =
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
     DEFAULT_API_BASE;
   return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
+  */
 }
 
 export const API_BASE = getApiBase();
