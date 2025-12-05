@@ -51,6 +51,21 @@ export default function Navigation() {
   const [serverRole, setServerRole] = useState<Role | null>(null);
   const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
   const [debugTenantId, setDebugTenantId] = useState<string>('');
+  const [tenantName, setTenantName] = useState<string | null>(null);
+
+  useEffect(() => {
+    const tSlug = searchParams.get('tenant') || document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
+    if (tSlug) {
+      fetch(`/api/tenants/lookup?slug=${tSlug}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.name) setTenantName(data.name);
+        })
+        .catch(() => { });
+    } else {
+      setTenantName(null);
+    }
+  }, [searchParams, pathname]);
 
   // mount-only role load, deduped & cached; also ignores updates after unmount
   useEffect(() => {
@@ -201,6 +216,11 @@ export default function Navigation() {
               <span className="text-white font-bold text-lg">L</span>
             </div>
             <h1 className="text-xl font-semibold">LithiumX</h1>
+            {tenantName && (
+              <span className="ml-3 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded border border-indigo-500/30 hidden sm:inline-block">
+                {tenantName}
+              </span>
+            )}
           </div>
 
           {/* Desktop Navigation */}
@@ -375,7 +395,7 @@ export default function Navigation() {
               ) : (
                 <div
                   onClick={() => handleNavigation('/vendor/login')}
-                  className="block px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
+                  className="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors text-gray-300 hover:text-white hover:bg-gray-700 cursor-pointer"
                 >
                   Login
                 </div>

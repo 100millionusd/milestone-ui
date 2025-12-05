@@ -1,8 +1,9 @@
 // src/app/vendor/login/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
+import { useSearchParams } from 'next/navigation';
 
 // Simple Li Icon Component to match the screenshot
 const LithiumLogo = () => (
@@ -30,6 +31,21 @@ export default function LoginPage() {
   // Defaulting to 'vendor' matches the screenshot (blue border), 
   // but you can set to null if you want no default selection.
   const [selectedRole, setSelectedRole] = useState<Role>('vendor');
+
+  const searchParams = useSearchParams();
+  const tenantSlug = searchParams.get('tenant');
+  const [tenantName, setTenantName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tenantSlug) {
+      fetch(`/api/tenants/lookup?slug=${tenantSlug}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.name) setTenantName(data.name);
+        })
+        .catch(() => { });
+    }
+  }, [tenantSlug]);
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -75,6 +91,11 @@ export default function LoginPage() {
             <LithiumLogo />
             <div>
               <h1 className="text-3xl font-bold text-white mb-2">Welcome to LithiumX</h1>
+              {tenantName && (
+                <div className="mb-2 px-3 py-1 bg-indigo-500/20 text-indigo-200 rounded-full text-sm font-medium border border-indigo-500/30">
+                  Organization: {tenantName}
+                </div>
+              )}
               <p className="text-slate-400">Connect your wallet to continue</p>
             </div>
           </div>
