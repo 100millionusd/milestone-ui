@@ -28,16 +28,19 @@ export interface ProposerSummary {
   ownerPhone?: string | null;
   ownerTelegramUsername?: string | null;
   ownerTelegramChatId?: string | null;
+  telegramConnected?: boolean;
 
   // counts
   proposalsCount: number;
   approvedCount: number;
   pendingCount: number;
   rejectedCount: number;
+  archivedCount?: number; // Added archivedCount
 
   // money + recency
   totalBudgetUSD: number;
   lastActivityAt?: string | null;
+  archived?: boolean;
 }
 
 // ---- Types ----
@@ -145,6 +148,7 @@ export type DigestResponse = {
   counts: DigestCounts;
   items: DigestItem[];
   ai_summary: string;
+  ai_summary_html?: string;
 };
 
 export interface AuthInfo {
@@ -161,6 +165,13 @@ export interface VendorSummary {
   lastBidAt?: string | null;
   totalAwardedUSD: number;
 
+  // counts (optional if not returned by summary endpoint)
+  proposalsCount?: number;
+  approvedCount?: number;
+  pendingCount?: number;
+  rejectedCount?: number;
+  totalBudgetUSD?: number;
+
   // location
   address?: string | null;
   city?: string | null;
@@ -171,14 +182,7 @@ export interface VendorSummary {
   ownerEmail?: string | null;
   ownerWallet?: string | null;
 
-  // counts
-  proposalsCount: number;
-  approvedCount: number;
-  pendingCount: number;
-  rejectedCount: number;
-
   // money + recency
-  totalBudgetUSD: number;
   lastActivityAt?: string | null;
 }
 
@@ -212,17 +216,18 @@ const isBrowser = typeof window !== "undefined";
 async function getServerForwardHeaders(): Promise<Record<string, string>> {
   try {
     const { cookies, headers } = await import("next/headers");
-    const c = cookies();
+    const c = await cookies();
 
     // forward all site cookies (sometimes backend reads auth from cookie)
     const cookieStr = c.getAll().map((k) => `${k.name}=${k.value}`).join("; ");
 
     // keep any incoming Authorization header if present
-    const incomingAuth = headers().get("authorization");
+    const h = await headers();
+    const incomingAuth = h.get("authorization");
 
     // 🔑 lift our site cookie lx_jwt and turn it into Bearer for the backend
     const lxJwt = c.get("lx_jwt")?.value;
-    const tenantId = c.get("lx_tenant_id")?.value || headers().get("x-tenant-id");
+    const tenantId = c.get("lx_tenant_id")?.value || h.get("x-tenant-id");
 
     const out: Record<string, string> = {};
     if (cookieStr) out["cookie"] = cookieStr;
