@@ -11,8 +11,12 @@ export default function SettingsPage() {
     // Form State
     const [pinataJwt, setPinataJwt] = useState('');
     const [pinataGateway, setPinataGateway] = useState('');
-    const [paymentAddress, setPaymentAddress] = useState('');
-    const [paymentStablecoin, setPaymentStablecoin] = useState('USDT');
+    const [paymentAddress, setPaymentAddress] = useState("");
+    const [paymentStablecoin, setPaymentStablecoin] = useState("USDT");
+    const [safeChainId, setSafeChainId] = useState("");
+    const [safeRpcUrl, setSafeRpcUrl] = useState("");
+    const [safeOwnerKey, setSafeOwnerKey] = useState("");
+    const [safeServiceUrl, setSafeServiceUrl] = useState("");
 
     useEffect(() => {
         loadSettings();
@@ -21,17 +25,25 @@ export default function SettingsPage() {
     async function loadSettings() {
         try {
             setLoading(true);
-            const [jwt, gw, addr, coin] = await Promise.all([
+            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl] = await Promise.all([
                 apiFetch('/api/tenants/config/pinata_jwt').then(r => r.value),
                 apiFetch('/api/tenants/config/pinata_gateway').then(r => r.value),
                 apiFetch('/api/tenants/config/payment_address').then(r => r.value),
                 apiFetch('/api/tenants/config/payment_stablecoin').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_chain_id').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_rpc_url').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_owner_key').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_service_url').then(r => r.value)
             ]);
 
-            setPinataJwt(jwt || '');
-            setPinataGateway(gw || '');
-            setPaymentAddress(addr || '');
-            setPaymentStablecoin(coin || 'USDT');
+            setPinataJwt(jwt || "");
+            setPinataGateway(gw || "");
+            setPaymentAddress(addr || "");
+            setPaymentStablecoin(coin || "USDT");
+            setSafeChainId(chainId || "");
+            setSafeRpcUrl(rpcUrl || "");
+            setSafeOwnerKey(ownerKey || "");
+            setSafeServiceUrl(serviceUrl || "");
         } catch (e) {
             console.error('Failed to load settings', e);
             setMsg({ type: 'error', text: 'Failed to load settings' });
@@ -51,6 +63,10 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'pinata_gateway', value: pinataGateway }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'payment_address', value: paymentAddress }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'payment_stablecoin', value: paymentStablecoin }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_chain_id', value: safeChainId }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_rpc_url', value: safeRpcUrl }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_owner_key', value: safeOwnerKey, isEncrypted: true }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_service_url', value: safeServiceUrl }) })
             ]);
             setMsg({ type: 'success', text: 'Settings saved successfully' });
         } catch (e: any) {
@@ -120,11 +136,11 @@ export default function SettingsPage() {
 
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Treasury Wallet Address</label>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Treasury Wallet Address (Safe Address)</label>
                             <input
                                 type="text"
                                 value={paymentAddress}
-                                onChange={e => setPaymentAddress(e.target.value)}
+                                onChange={(e) => setPaymentAddress(e.target.value)}
                                 placeholder="0x..."
                                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono"
                             />
@@ -134,7 +150,7 @@ export default function SettingsPage() {
                             <label className="block text-sm font-medium text-gray-300 mb-1">Preferred Stablecoin</label>
                             <select
                                 value={paymentStablecoin}
-                                onChange={e => setPaymentStablecoin(e.target.value)}
+                                onChange={(e) => setPaymentStablecoin(e.target.value)}
                                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                             >
                                 <option value="USDT">USDT (Tether)</option>
@@ -144,13 +160,73 @@ export default function SettingsPage() {
                     </div>
                 </section>
 
+                {/* SAFE CONFIGURATION */}
+                <section className="bg-gray-800/50 border border-gray-700 rounded-xl p-6">
+                    <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="text-purple-400">🛡️</span> Safe Configuration (Advanced)
+                    </h2>
+                    <p className="text-gray-400 text-sm mb-6">
+                        Configure the Gnosis Safe settings for your chain. Leave blank to use system defaults (Sepolia).
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Chain ID</label>
+                            <input
+                                type="number"
+                                value={safeChainId}
+                                onChange={(e) => setSafeChainId(e.target.value)}
+                                placeholder="11155111"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">e.g. 1 (Mainnet), 10 (Optimism), 11155111 (Sepolia)</p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">RPC URL</label>
+                            <input
+                                type="text"
+                                value={safeRpcUrl}
+                                onChange={(e) => setSafeRpcUrl(e.target.value)}
+                                placeholder="https://rpc.ankr.com/eth_sepolia"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Safe Owner Private Key</label>
+                            <input
+                                type="password"
+                                value={safeOwnerKey}
+                                onChange={(e) => setSafeOwnerKey(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-amber-500/80 mt-1">
+                                ⚠️ Required for the server to propose transactions. Stored encrypted.
+                            </p>
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Safe Transaction Service URL</label>
+                            <input
+                                type="text"
+                                value={safeServiceUrl}
+                                onChange={(e) => setSafeServiceUrl(e.target.value)}
+                                placeholder="https://api.safe.global/tx-service/sep"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                        </div>
+                    </div>
+                </section>
+
                 <div className="flex justify-end">
                     <button
                         type="submit"
                         disabled={saving}
                         className={`px-6 py-2 rounded-lg font-semibold text-white transition-all ${saving
-                                ? 'bg-gray-600 cursor-not-allowed'
-                                : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-lg shadow-cyan-500/20'
+                            ? 'bg-gray-600 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-lg shadow-cyan-500/20'
                             }`}
                     >
                         {saving ? 'Saving...' : 'Save Changes'}
@@ -160,4 +236,3 @@ export default function SettingsPage() {
         </div>
     );
 }
-
