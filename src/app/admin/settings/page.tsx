@@ -20,6 +20,7 @@ export default function SettingsPage() {
     const [safeApiKey, setSafeApiKey] = useState("");
     const [safeReconcileMinutes, setSafeReconcileMinutes] = useState("");
     const [safeThresholdUsd, setSafeThresholdUsd] = useState("");
+    const [safeAddress, setSafeAddress] = useState("");
 
     useEffect(() => {
         loadSettings();
@@ -28,7 +29,7 @@ export default function SettingsPage() {
     async function loadSettings() {
         try {
             setLoading(true);
-            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl, apiKey, reconcile, threshold] = await Promise.all([
+            const [jwt, gw, addr, coin, chainId, rpcUrl, ownerKey, serviceUrl, apiKey, reconcile, threshold, safeAddr] = await Promise.all([
                 apiFetch('/api/tenants/config/pinata_jwt').then(r => r.value),
                 apiFetch('/api/tenants/config/pinata_gateway').then(r => r.value),
                 apiFetch('/api/tenants/config/payment_address').then(r => r.value),
@@ -39,7 +40,8 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config/safe_service_url').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_api_key').then(r => r.value),
                 apiFetch('/api/tenants/config/safe_reconcile_minutes').then(r => r.value),
-                apiFetch('/api/tenants/config/safe_threshold_usd').then(r => r.value)
+                apiFetch('/api/tenants/config/safe_threshold_usd').then(r => r.value),
+                apiFetch('/api/tenants/config/safe_address').then(r => r.value)
             ]);
 
             setPinataJwt(jwt || "");
@@ -53,6 +55,9 @@ export default function SettingsPage() {
             setSafeApiKey(apiKey || "");
             setSafeReconcileMinutes(reconcile || "");
             setSafeThresholdUsd(threshold || "");
+            // If safe_address is set, use it. Otherwise fallback to payment_address for display if safe_address is empty?
+            // Better to keep them distinct to avoid confusion. If safe_address is empty, it's empty.
+            setSafeAddress(safeAddr || "");
         } catch (e) {
             console.error('Failed to load settings', e);
             setMsg({ type: 'error', text: 'Failed to load settings' });
@@ -78,7 +83,8 @@ export default function SettingsPage() {
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_service_url', value: safeServiceUrl }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_api_key', value: safeApiKey, isEncrypted: true }) }),
                 apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_reconcile_minutes', value: safeReconcileMinutes }) }),
-                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_threshold_usd', value: safeThresholdUsd }) })
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_threshold_usd', value: safeThresholdUsd }) }),
+                apiFetch('/api/tenants/config', { method: 'POST', body: JSON.stringify({ key: 'safe_address', value: safeAddress }) })
             ]);
             setMsg({ type: 'success', text: 'Settings saved successfully' });
         } catch (e: any) {
@@ -147,16 +153,7 @@ export default function SettingsPage() {
                     </p>
 
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Treasury Wallet Address (Safe Address)</label>
-                            <input
-                                type="text"
-                                value={paymentAddress}
-                                onChange={(e) => setPaymentAddress(e.target.value)}
-                                placeholder="0x..."
-                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono"
-                            />
-                        </div>
+                        {/* Removed Treasury Wallet Address from here */}
 
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-1">Preferred Stablecoin</label>
@@ -182,6 +179,18 @@ export default function SettingsPage() {
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Safe Address</label>
+                            <input
+                                type="text"
+                                value={safeAddress}
+                                onChange={(e) => setSafeAddress(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">The address of your Gnosis Safe contract.</p>
+                        </div>
+
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-1">Chain ID</label>
                             <input
