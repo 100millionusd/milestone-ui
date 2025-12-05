@@ -117,7 +117,12 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
-    const tenantSlug = params.get('tenant');
+    let tenantSlug = params.get('tenant');
+
+    // 💡 Fallback: If no URL param, check if we have a saved tenant slug cookie
+    if (!tenantSlug && typeof document !== 'undefined') {
+      tenantSlug = document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2] || null;
+    }
 
     if (tenantSlug) {
       // Check if we already have the correct cookie AND the ID cookie
