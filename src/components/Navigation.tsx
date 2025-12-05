@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useWeb3Auth } from '@/providers/Web3AuthProvider';
-import { getAuthRoleOnce } from '@/lib/api';
+import { getAuthRoleOnce, API_BASE } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'proposer' | 'guest';
 
