@@ -449,7 +449,8 @@ export function Web3AuthProvider({ children }: { children: React.ReactNode }) {
     // 2. Clear without domain (fallback for host-only cookies)
     try { document.cookie = 'lx_jwt=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
     try { document.cookie = 'lx_tenant_id=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
-    try { document.cookie = 'lx_tenant_slug=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
+    // 💡 Keep tenant slug so we know where to redirect back to
+    // try { document.cookie = 'lx_tenant_slug=; Max-Age=0; path=/; Secure; SameSite=None'; } catch { }
   };
 
   const logout = async () => {
