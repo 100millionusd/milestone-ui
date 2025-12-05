@@ -9,7 +9,7 @@ import { WalletConnectV2Adapter } from '@web3auth/wallet-connect-v2-adapter';
 import { ethers } from 'ethers';
 import { useRouter, usePathname } from 'next/navigation';
 // We still need all these for the role-aware redirect
-import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache, apiFetch } from '@/lib/api';
+import { postJSON, loginWithSignature, getAuthRole, getVendorProfile, getProposerProfile, clearAuthRoleCache, apiFetch, API_BASE } from '@/lib/api';
 
 type Role = 'admin' | 'vendor' | 'guest' | 'proposer';
 type Session = 'unauthenticated' | 'authenticating' | 'authenticated';
@@ -53,7 +53,7 @@ const envRpc =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC ||
   (ankrKey ? `https://rpc.ankr.com/eth_sepolia/${ankrKey}` : '');
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+// const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const api = (path: string) => (API_BASE ? `${API_BASE}${path}` : `/api${path}`);
 
 // ---------- RPC HEALTH ----------
