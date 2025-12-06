@@ -1,7 +1,19 @@
 // src/app/page.tsx
 import HeroCtas from '@/components/HeroCtas';
+import { listProposals } from '@/lib/api';
+import PublicProjectsGrid from '@/components/PublicProjectsGrid';
 
-export default function Home() {
+export const dynamic = 'force-dynamic'; // Ensure we check headers/cookies on every request
+
+export default async function Home() {
+  // Fetch approved projects (scoped to tenant via middleware -> apiFetch -> headers)
+  let projects: any[] = [];
+  try {
+    projects = await listProposals({ status: 'approved' });
+  } catch (err) {
+    console.error('Failed to load public projects:', err);
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Hero Section */}
@@ -25,8 +37,30 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Public Projects Section */}
+      <section className="py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">
+              Open Projects
+            </h2>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              Explore active projects funding our community.
+            </p>
+          </div>
+
+          {projects.length > 0 ? (
+            <PublicProjectsGrid items={projects} />
+          ) : (
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+              <p className="text-gray-500 italic">No active projects found for this organization.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Features Section */}
-      <section className="py-20">
+      <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold text-gray-900 mb-4">
