@@ -89,8 +89,8 @@ export async function POST(req: Request) {
     ]);
 
     // Fallback to env vars if not configured (backward compatibility)
-    const finalJwt = jwt || process.env.PINATA_JWT;
-    const finalGateway = gateway || process.env.NEXT_PUBLIC_PINATA_GATEWAY || 'https://gateway.pinata.cloud';
+    const finalJwt = jwt;
+    const finalGateway = gateway || 'https://gateway.pinata.cloud';
 
     if (!finalJwt) {
       return NextResponse.json({ error: 'config_missing', message: 'Pinata not configured for this tenant' }, { status: 500 });
