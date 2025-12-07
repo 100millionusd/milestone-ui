@@ -10,6 +10,7 @@ import {
   archiveProposal,
   API_BASE,
   deleteProposal,
+  updateProposal, // ✅ Added
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
@@ -20,11 +21,11 @@ const PINATA_GATEWAY = 'sapphire-given-snake-741.mypinata.cloud';
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
   const cleanUrl = url.split('?')[0]; // strip tokens
-  
+
   // Replace public gateways (or self) with the dedicated gateway constant
   return cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
-    `https://${PINATA_GATEWAY}/ipfs/` 
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
+    `https://${PINATA_GATEWAY}/ipfs/`
   );
 }
 
@@ -58,12 +59,12 @@ function mapsLink(lat: number, lon: number): string {
 
 function fmtTakenAt(date?: Date | null): string | null {
   if (!date) return null;
-  return date.toLocaleString('en-GB', { 
-    day: 'numeric', 
-    month: 'short', 
-    year: 'numeric', 
-    hour: '2-digit', 
-    minute: '2-digit' 
+  return date.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   });
 }
 
@@ -77,7 +78,7 @@ async function getPlaceName(lat: number, lon: number): Promise<string | null> {
     );
     if (!res.ok) return null;
     const data = await res.json();
-    
+
     // Construct simplified address: "City, Country" or "State, Country"
     const addr = data.address || {};
     const city = addr.city || addr.town || addr.village || addr.county;
@@ -87,7 +88,7 @@ async function getPlaceName(lat: number, lon: number): Promise<string | null> {
     const parts = [city, state, country].filter(Boolean);
     // Remove duplicates (e.g. if city name equals state name)
     const uniqueParts = [...new Set(parts)];
-    
+
     return uniqueParts.slice(0, 3).join(', ');
   } catch (e) {
     return null;
@@ -99,14 +100,14 @@ async function fetchMetaViaRange(url: string) {
   try {
     const exifr = (await import('exifr')).default as any;
     // ~512 KB usually enough for header
-    const MAX_RANGE_BYTES = 524_287; 
+    const MAX_RANGE_BYTES = 524_287;
 
     const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_RANGE_BYTES}` } });
     if (!r.ok) return null;
 
     const buf = await r.arrayBuffer();
     const data = await exifr.parse(buf, { gps: true, tiff: true }).catch(() => null);
-    
+
     if (!data) return null;
 
     const lat = data.latitude;
@@ -114,10 +115,10 @@ async function fetchMetaViaRange(url: string) {
     const date = data.DateTimeOriginal || data.CreateDate || data.ModifyDate;
 
     if (lat != null && lon != null) {
-      return { 
-        lat: Number(lat), 
+      return {
+        lat: Number(lat),
         lon: Number(lon),
-        date: date ? new Date(date) : null 
+        date: date ? new Date(date) : null
       };
     }
     return null;
@@ -134,11 +135,11 @@ function AttachmentGrid({
   items: any[];
   onOpenLightbox: (src: string) => void;
 }) {
-  const [headerInfo, setHeaderInfo] = useState<{ 
-    lat: number; 
-    lon: number; 
-    label: string; 
-    date?: Date | null 
+  const [headerInfo, setHeaderInfo] = useState<{
+    lat: number;
+    lon: number;
+    label: string;
+    date?: Date | null
   } | null>(null);
 
   const list = useMemo(() => (Array.isArray(items) ? items : [])
@@ -161,8 +162,8 @@ function AttachmentGrid({
             // Found GPS! Now get the pretty name
             const placeName = await getPlaceName(meta.lat, meta.lon);
             setHeaderInfo({
-                ...meta,
-                label: placeName || `${meta.lat.toFixed(4)}, ${meta.lon.toFixed(4)}`
+              ...meta,
+              label: placeName || `${meta.lat.toFixed(4)}, ${meta.lon.toFixed(4)}`
             });
             return; // Found one representative location, stop scanning.
           }
@@ -177,37 +178,37 @@ function AttachmentGrid({
 
   return (
     <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-      
+
       {/* HEADER ROW (Matches Screenshot Style) */}
       <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3 mb-4">
         <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-            Attachments ({list.length})
+          Attachments ({list.length})
         </h4>
 
         {headerInfo && (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                <a 
-                    href={mapsLink(headerInfo.lat, headerInfo.lon)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1 text-slate-800 hover:text-emerald-600 hover:underline decoration-emerald-500/30 underline-offset-2 font-medium transition-colors"
-                >
-                    <span className="text-red-500 text-base">📍</span>
-                    <span className="border-b border-dotted border-slate-400 hover:border-emerald-500">
-                        {headerInfo.label}
-                    </span>
-                </a>
-                
-                {headerInfo.date && (
-                    <span className="flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-300">
-                       <span>•</span>
-                       Taken {fmtTakenAt(headerInfo.date)}
-                    </span>
-                )}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <a
+              href={mapsLink(headerInfo.lat, headerInfo.lon)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-slate-800 hover:text-emerald-600 hover:underline decoration-emerald-500/30 underline-offset-2 font-medium transition-colors"
+            >
+              <span className="text-red-500 text-base">📍</span>
+              <span className="border-b border-dotted border-slate-400 hover:border-emerald-500">
+                {headerInfo.label}
+              </span>
+            </a>
+
+            {headerInfo.date && (
+              <span className="flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-300">
+                <span>•</span>
+                Taken {fmtTakenAt(headerInfo.date)}
+              </span>
+            )}
+          </div>
         )}
       </div>
-      
+
       {/* THUMBNAILS GRID */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {list.map((f, i) => {
@@ -224,10 +225,10 @@ function AttachmentGrid({
                 title={f.name}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={f.url} 
-                  alt={f.name} 
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+                <img
+                  src={f.url}
+                  alt={f.name}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
               </button>
             );
@@ -244,10 +245,10 @@ function AttachmentGrid({
             >
               {isPdf ? (
                 <div className="flex flex-col items-center gap-1">
-                   <svg className="w-8 h-8 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                   </svg>
-                   <span className="text-[10px] text-slate-500 font-medium mt-1">PDF Document</span>
+                  <svg className="w-8 h-8 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  <span className="text-[10px] text-slate-500 font-medium mt-1">PDF Document</span>
                 </div>
               ) : (
                 <span className="text-[10px] text-slate-400 font-medium">FILE</span>
@@ -267,7 +268,7 @@ function AttachmentGrid({
  * Entities (proposers) types
  * ======================= */
 type ProposerRow = {
-  id: string; 
+  id: string;
   orgName: string;
   address: string | null;
   walletAddress: string | null;
@@ -296,9 +297,9 @@ const fmtUSD = (n: number) =>
 const fmtDateTime = (iso?: string | null) =>
   iso
     ? new Date(iso).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      })
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
     : '—';
 
 async function loadProposers(
@@ -522,21 +523,19 @@ export default function AdminProposalsClient({
           {/* Mode Switcher */}
           <div className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm inline-flex">
             <button
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                mode === 'proposals'
-                  ? 'bg-slate-900 text-white shadow-md'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'proposals'
+                ? 'bg-slate-900 text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-50'
+                }`}
               onClick={() => setMode('proposals')}
             >
               Proposals
             </button>
             <button
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                mode === 'entities'
-                  ? 'bg-slate-900 text-white shadow-md'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'entities'
+                ? 'bg-slate-900 text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-50'
+                }`}
               onClick={() => setMode('entities')}
             >
               Entities
@@ -558,19 +557,17 @@ export default function AdminProposalsClient({
                     <button
                       key={t.key}
                       onClick={() => setTab(t.key)}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        isActive
-                          ? 'bg-slate-800 text-white border-slate-800'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                      }`}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${isActive
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        }`}
                     >
                       {t.label}
                       <span
-                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${
-                          isActive
-                            ? 'bg-slate-600 text-white'
-                            : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
-                        }`}
+                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${isActive
+                          ? 'bg-slate-600 text-white'
+                          : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
+                          }`}
                       >
                         {t.key === 'all' ? counts.all : counts[t.key] || 0}
                       </span>
@@ -602,15 +599,14 @@ export default function AdminProposalsClient({
                   className="group bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
                 >
                   <div
-                    className={`h-1 w-full ${
-                      p.status === 'approved'
-                        ? 'bg-emerald-500'
-                        : p.status === 'rejected'
+                    className={`h-1 w-full ${p.status === 'approved'
+                      ? 'bg-emerald-500'
+                      : p.status === 'rejected'
                         ? 'bg-rose-500'
                         : p.status === 'pending'
-                        ? 'bg-amber-400'
-                        : 'bg-slate-300'
-                    }`}
+                          ? 'bg-amber-400'
+                          : 'bg-slate-300'
+                      }`}
                   />
 
                   <div className="p-6">
@@ -702,7 +698,7 @@ export default function AdminProposalsClient({
                             </svg>
                             Approve
                           </button>
-                          
+
                           <button
                             onClick={() => handleReject(p.proposalId)}
                             disabled={p.status === 'rejected'}
@@ -729,6 +725,32 @@ export default function AdminProposalsClient({
                               Delete
                             </button>
                           </div>
+
+                          {/* Visibility Toggle */}
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-500">Public Visibility</span>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const newVal = !p.is_public;
+                                  // Optimistic update
+                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, is_public: newVal } : x));
+                                  await updateProposal(p.proposalId, { is_public: newVal });
+                                } catch (err) {
+                                  setError('Failed to update visibility');
+                                  // Revert
+                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, is_public: !p.is_public } : x));
+                                }
+                              }}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 ${p.is_public !== false ? 'bg-emerald-500' : 'bg-slate-200'
+                                }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${p.is_public !== false ? 'translate-x-6' : 'translate-x-1'
+                                  }`}
+                              />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -739,12 +761,12 @@ export default function AdminProposalsClient({
               {filtered.length === 0 && (
                 <div className="text-center py-20 bg-white border border-slate-200 rounded-2xl border-dashed">
                   <div className="mx-auto w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                     <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                     </svg>
+                    <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                   </div>
                   <p className="text-slate-500 text-sm font-medium">No proposals match this view.</p>
-                  <button onClick={() => {setQuery(''); setTab('all');}} className="text-emerald-600 text-sm mt-2 hover:underline">Clear filters</button>
+                  <button onClick={() => { setQuery(''); setTab('all'); }} className="text-emerald-600 text-sm mt-2 hover:underline">Clear filters</button>
                 </div>
               )}
             </div>
@@ -758,11 +780,11 @@ export default function AdminProposalsClient({
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <div className="relative w-full sm:w-96">
-                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                 </div>
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
                 <input
                   value={query}
                   onChange={(e) => {
@@ -805,8 +827,8 @@ export default function AdminProposalsClient({
                       <tr>
                         <td colSpan={6} className="px-4 py-12 text-center">
                           <div className="animate-pulse flex flex-col items-center">
-                             <div className="h-4 w-48 bg-slate-200 rounded mb-2"></div>
-                             <div className="h-3 w-32 bg-slate-100 rounded"></div>
+                            <div className="h-4 w-48 bg-slate-200 rounded mb-2"></div>
+                            <div className="h-3 w-32 bg-slate-100 rounded"></div>
                           </div>
                         </td>
                       </tr>
@@ -825,44 +847,44 @@ export default function AdminProposalsClient({
                           <td className="px-4 py-3 align-top">
                             <div className="font-bold text-slate-900">{r.orgName || '—'}</div>
                             <div className="text-xs font-mono text-slate-500 mt-1 truncate max-w-[140px]" title={r.walletAddress || ''}>
-                                {r.walletAddress || 'No Wallet'}
+                              {r.walletAddress || 'No Wallet'}
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">Proposals: {r.proposalsCount}</div>
                           </td>
                           <td className="px-4 py-3 align-top max-w-[200px]">
-                             <div className="text-slate-600 text-xs leading-snug line-clamp-3" title={formatEntityAddress(r.address)}>
-                                {formatEntityAddress(r.address)}
-                             </div>
+                            <div className="text-slate-600 text-xs leading-snug line-clamp-3" title={formatEntityAddress(r.address)}>
+                              {formatEntityAddress(r.address)}
+                            </div>
                           </td>
                           <td className="px-4 py-3 align-top">
-                             <div className="text-slate-700 text-xs">{r.contactEmail}</div>
-                             {r.ownerEmail && r.ownerEmail !== r.contactEmail && (
-                                 <div className="text-slate-400 text-[10px] mt-0.5">{r.ownerEmail}</div>
-                             )}
+                            <div className="text-slate-700 text-xs">{r.contactEmail}</div>
+                            {r.ownerEmail && r.ownerEmail !== r.contactEmail && (
+                              <div className="text-slate-400 text-[10px] mt-0.5">{r.ownerEmail}</div>
+                            )}
                           </td>
                           <td className="px-4 py-3 align-middle text-center">
-                             <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
-                                <span className="flex items-center gap-1 text-xs font-medium text-emerald-700" title="Approved">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                    {r.statusCounts?.approved ?? 0}
-                                </span>
-                                <span className="text-slate-300">/</span>
-                                <span className="flex items-center gap-1 text-xs font-medium text-amber-700" title="Pending">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                                    {r.statusCounts?.pending ?? 0}
-                                </span>
-                                <span className="text-slate-300">/</span>
-                                <span className="flex items-center gap-1 text-xs font-medium text-rose-700" title="Rejected">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                                    {r.statusCounts?.rejected ?? 0}
-                                </span>
-                             </div>
+                            <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
+                              <span className="flex items-center gap-1 text-xs font-medium text-emerald-700" title="Approved">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                {r.statusCounts?.approved ?? 0}
+                              </span>
+                              <span className="text-slate-300">/</span>
+                              <span className="flex items-center gap-1 text-xs font-medium text-amber-700" title="Pending">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                {r.statusCounts?.pending ?? 0}
+                              </span>
+                              <span className="text-slate-300">/</span>
+                              <span className="flex items-center gap-1 text-xs font-medium text-rose-700" title="Rejected">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                {r.statusCounts?.rejected ?? 0}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-4 py-3 align-top text-right font-mono text-slate-700">
-                             {fmtUSD(r.totalBudgetUSD)}
+                            {fmtUSD(r.totalBudgetUSD)}
                           </td>
                           <td className="px-4 py-3 align-top text-xs text-slate-500 whitespace-nowrap">
-                             {fmtDateTime(r.lastProposalAt)}
+                            {fmtDateTime(r.lastProposalAt)}
                           </td>
                         </tr>
                       ))}
@@ -871,26 +893,26 @@ export default function AdminProposalsClient({
               </div>
 
               <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between">
-                 <div className="text-xs text-slate-500">
-                    Total: <span className="font-medium text-slate-700">{entities.total}</span> entities
-                 </div>
-                 <div className="flex items-center gap-2">
-                    <button
-                        className="px-3 py-1 rounded border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={entitiesPage <= 1}
-                        onClick={() => setEntitiesPage((p) => Math.max(1, p - 1))}
-                    >
-                        Previous
-                    </button>
-                    <span className="text-xs font-medium text-slate-700">Page {entitiesPage}</span>
-                    <button
-                        className="px-3 py-1 rounded border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100"
-                        onClick={() => setEntitiesPage((p) => p + 1)}
-                        disabled={entities.items.length < 50}
-                    >
-                        Next
-                    </button>
-                 </div>
+                <div className="text-xs text-slate-500">
+                  Total: <span className="font-medium text-slate-700">{entities.total}</span> entities
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-3 py-1 rounded border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={entitiesPage <= 1}
+                    onClick={() => setEntitiesPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs font-medium text-slate-700">Page {entitiesPage}</span>
+                  <button
+                    className="px-3 py-1 rounded border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100"
+                    onClick={() => setEntitiesPage((p) => p + 1)}
+                    disabled={entities.items.length < 50}
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -902,17 +924,17 @@ export default function AdminProposalsClient({
           className="fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-sm p-4 md:p-8 flex items-center justify-center cursor-pointer"
           onClick={() => setLightbox(null)}
         >
-            <div className="relative max-w-full max-h-full">
-                <button 
-                    onClick={() => setLightbox(null)}
-                    className="absolute -top-12 right-0 text-white hover:text-slate-300 p-2"
-                >
-                    <span className="sr-only">Close</span>
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={lightbox} alt="preview" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
-            </div>
+          <div className="relative max-w-full max-h-full">
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute -top-12 right-0 text-white hover:text-slate-300 p-2"
+            >
+              <span className="sr-only">Close</span>
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={lightbox} alt="preview" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
+          </div>
         </div>
       )}
     </div>
@@ -932,8 +954,8 @@ function StatusPill({ status }: { status: string }) {
   const activeClass = styles[s] || styles.pending;
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${activeClass} capitalize shadow-sm`}>
-      {status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5 animate-pulse"/>}
-      {status === 'approved' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"/>}
+      {status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5 animate-pulse" />}
+      {status === 'approved' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5" />}
       {status}
     </span>
   );

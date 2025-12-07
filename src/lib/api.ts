@@ -61,6 +61,7 @@ export interface Proposal {
   ownerWallet?: string | null;
   ownerEmail?: string | null;
   updatedAt?: string;
+  is_public?: boolean; // New field
 }
 
 export interface Milestone {
@@ -1502,6 +1503,8 @@ export async function archiveProof(proofId: number): Promise<Proof> {
   });
   return toProof(p);
 }
+
+
 
 /** Approve a proof (admin-only) */
 export async function approveProof(proofId: number, note?: string): Promise<Proof> {
