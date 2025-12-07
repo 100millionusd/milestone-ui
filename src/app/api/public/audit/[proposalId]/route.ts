@@ -41,7 +41,8 @@ async function fetchProposalById(id: number) {
  * Returns audit events + summary for a proposal.
  * Anchored = Boolean(cid)  (primary), with txHash/anchoredAt as secondary signals.
  */
-export async function GET(_: Request, { params }: { params: { proposalId: string } }) {
+export async function GET(_: Request, props: { params: Promise<{ proposalId: string }> }) {
+  const params = await props.params;
   const proposalId = asNum(params.proposalId);
   if (!Number.isFinite(proposalId) || proposalId <= 0) {
     return NextResponse.json({ error: "bad proposalId" }, { status: 400 });
@@ -75,16 +76,16 @@ export async function GET(_: Request, { params }: { params: { proposalId: string
     changedFields: Array.isArray(e?.changed_fields)
       ? e.changed_fields
       : Array.isArray(e?.changedFields)
-      ? e.changedFields
-      : [],
+        ? e.changedFields
+        : [],
     ipfsCid: e?.ipfs_cid ?? e?.ipfsCid ?? null,
     batch: e?.batch || null,
     merkleIndex: e?.merkle_index ?? e?.merkleIndex ?? null,
     proof: Array.isArray(e?.merkle_proof)
       ? e.merkle_proof
       : Array.isArray(e?.proof)
-      ? e.proof
-      : [],
+        ? e.proof
+        : [],
   }));
 
   // Prefer the latest event that has batch/tx info (if any)
