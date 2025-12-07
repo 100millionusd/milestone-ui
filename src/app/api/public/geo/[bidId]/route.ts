@@ -16,8 +16,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { bidId: string } }
+  props: { params: Promise<{ bidId: string }> }
 ) {
+  const params = await props.params;
   const bidId = String(params?.bidId || "");
 
   if (!/^\d+$/.test(bidId)) {
