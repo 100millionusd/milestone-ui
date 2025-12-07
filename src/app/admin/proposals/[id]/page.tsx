@@ -64,7 +64,8 @@ function AttachmentTile({ doc }: { doc: any }) {
   );
 }
 
-export default async function ProposalDetailPage({ params }: PageProps) {
+export default async function ProposalDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const proposalId = Number(params.id);
   if (!Number.isFinite(proposalId)) {
     return <div className="p-6">Invalid proposal id.</div>;
@@ -81,10 +82,10 @@ export default async function ProposalDetailPage({ params }: PageProps) {
 
     // --- normalize proposal attachments (proposal.docs is already an array) ---
     // --- normalize proposal attachments: support doc (single), docs[], files[] ---
-const legacyP = normList((proposal as any)?.doc);
-const docsP   = normList((proposal as any)?.docs);
-const filesP  = normList((proposal as any)?.files);
-const proposalDocs = [...docsP, ...filesP, ...legacyP].filter(Boolean);
+    const legacyP = normList((proposal as any)?.doc);
+    const docsP = normList((proposal as any)?.docs);
+    const filesP = normList((proposal as any)?.files);
+    const proposalDocs = [...docsP, ...filesP, ...legacyP].filter(Boolean);
 
     return (
       <div className="p-6 space-y-6">
