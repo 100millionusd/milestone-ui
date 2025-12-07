@@ -61,7 +61,8 @@ export interface Proposal {
   ownerWallet?: string | null;
   ownerEmail?: string | null;
   updatedAt?: string;
-  is_public?: boolean; // New field
+  is_public?: boolean; // DB column (snake_case)
+  isPublic?: boolean;  // API response (camelCase)
 }
 
 export interface Milestone {

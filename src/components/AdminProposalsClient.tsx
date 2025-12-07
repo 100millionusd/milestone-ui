@@ -732,21 +732,26 @@ export default function AdminProposalsClient({
                             <button
                               onClick={async () => {
                                 try {
-                                  const newVal = !p.is_public;
-                                  // Optimistic update
-                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, is_public: newVal } : x));
+                                  // Server returns camelCase 'isPublic', but we send snake_case 'is_public'
+                                  const currentVal = (p as any).isPublic ?? p.is_public ?? true;
+                                  const newVal = !currentVal;
+
+                                  // Optimistic update (update both keys to be safe)
+                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, isPublic: newVal, is_public: newVal } : x));
+
                                   await updateProposal(p.proposalId, { is_public: newVal });
                                 } catch (err) {
                                   setError('Failed to update visibility');
                                   // Revert
-                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, is_public: !p.is_public } : x));
+                                  const oldVal = (p as any).isPublic ?? p.is_public ?? true;
+                                  setProposals(prev => prev.map(x => x.proposalId === p.proposalId ? { ...x, isPublic: oldVal, is_public: oldVal } : x));
                                 }
                               }}
-                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 ${p.is_public !== false ? 'bg-emerald-500' : 'bg-slate-200'
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 ${((p as any).isPublic ?? p.is_public ?? true) !== false ? 'bg-emerald-500' : 'bg-slate-200'
                                 }`}
                             >
                               <span
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${p.is_public !== false ? 'translate-x-6' : 'translate-x-1'
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${((p as any).isPublic ?? p.is_public ?? true) !== false ? 'translate-x-6' : 'translate-x-1'
                                   }`}
                               />
                             </button>
