@@ -1,26 +1,23 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 👇 turn off auto-trailing slashes
+  // 👇 Keep your existing settings
   trailingSlash: false,
+  productionBrowserSourceMaps: true,
 
   // ✅ Unified images configuration
   images: {
-    // 👇 ADDED: Cache images for 1 year to stop Pinata rate limiting
     minimumCacheTTL: 31536000,
-
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'sapphire-given-snake-741.mypinata.cloud',
         pathname: '/ipfs/**',
       },
-      // Allowed the public Pinata gateway
       {
         protocol: 'https',
         hostname: 'gateway.pinata.cloud',
         pathname: '/ipfs/**',
       },
-      // Allowed the Cloudflare IPFS gateway
       {
         protocol: 'https',
         hostname: 'cf-ipfs.com',
@@ -32,10 +29,35 @@ const nextConfig = {
     imageSizes: [200, 300, 400, 600, 800],
   },
 
-  eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
 
-  // Optional: force the canonical no-slash for this endpoint
+  // 👇 REQUIRED FIXES FOR WEB3
+  // 1. Force these to be server-only (Prevents browser crash)
+  serverExternalPackages: [
+    'pino', 
+    'pino-pretty', 
+    'thread-stream',
+    'lokijs', 
+    'encoding'
+  ],
+
+  // 2. Transpile ONLY the Web3 SDKs 
+  // ❌ REMOVED 'pino' and 'thread-stream' from here to fix the conflict error
+  transpilePackages: ['@web3auth', '@walletconnect'],
+
+  // 3. Fix "Module not found" errors
+  webpack: (config) => {
+    config.externals.push({
+      'pino-pretty': 'commonjs pino-pretty',
+      'lokijs': 'commonjs lokijs',
+      'encoding': 'commonjs encoding',
+      'utf-8-validate': 'commonjs utf-8-validate',
+      'bufferutil': 'commonjs bufferutil',
+    });
+    return config;
+  },
+
+  // 👇 Keep your redirects
   async redirects() {
     return [
       {
@@ -46,7 +68,7 @@ const nextConfig = {
     ];
   },
 
-  // ✅ cache public API responses
+  // 👇 Keep your headers
   async headers() {
     return [
       {
@@ -57,8 +79,6 @@ const nextConfig = {
       },
     ];
   },
-
-  productionBrowserSourceMaps: true,
 };
 
 module.exports = nextConfig;
