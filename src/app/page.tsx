@@ -9,7 +9,11 @@ export default async function Home() {
   // Fetch approved projects (scoped to tenant via middleware -> apiFetch -> headers)
   let projects: any[] = [];
   try {
-    projects = await listProposals({ status: 'approved' });
+    const all = await listProposals();
+    projects = all.filter(p =>
+      ['approved', 'funded', 'completed'].includes(p.status) &&
+      p.is_public
+    );
   } catch (err) {
     console.error('Failed to load public projects:', err);
   }

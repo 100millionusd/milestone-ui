@@ -56,7 +56,7 @@ export interface Proposal {
   amountUSD: number;
   docs: any[];
   cid: string | null;
-  status: "pending" | "approved" | "rejected" | "completed" | "archived";
+  status: "pending" | "approved" | "rejected" | "completed" | "archived" | "funded";
   createdAt: string;
   ownerWallet?: string | null;
   ownerEmail?: string | null;
