@@ -757,6 +757,8 @@ function toProposal(p: any): Proposal {
     ownerWallet: p?.ownerWallet ?? p?.owner_wallet ?? null,
     ownerEmail: p?.ownerEmail ?? p?.owner_email ?? null,
     updatedAt: p?.updatedAt ?? p?.updated_at ?? undefined,
+    is_public: p?.is_public ?? true,
+    isPublic: p?.isPublic ?? p?.is_public ?? true,
   };
 }
 
