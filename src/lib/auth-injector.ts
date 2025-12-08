@@ -82,7 +82,5 @@ function getToken(): string | null {
     return origFetch(input as any, init);
   };
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('🔒 Bearer fetch injector active for', { API_ORIGIN, nextProxyOrigin: location.origin });
-  }
+
 })();
