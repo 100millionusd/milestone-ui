@@ -56,7 +56,7 @@ export default function Navigation() {
 
   const handleCopyLink = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const tenantSlug = searchParams.get('tenant');
+    const tenantSlug = searchParams.get('tenant') || document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
     // If we have a tenant param, use it. Otherwise assume we are on the correct domain/subdomain.
     const url = tenantSlug
       ? `${window.location.origin}/?tenant=${tenantSlug}`
