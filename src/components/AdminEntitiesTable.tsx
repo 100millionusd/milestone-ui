@@ -147,7 +147,7 @@ function normalizeRow(r: any): ProposerAgg {
   const telegramConnected = !!(r.telegramConnected ?? r.profile?.telegramConnected ?? r.profile?.telegram?.connected ?? r.profile?.social?.telegram?.connected ?? r.profile?.connections?.telegram?.connected);
 
   const sc = r.statusCounts || r.status_counts || {};
-  
+
   // AGGRESSIVE MAPPING: Check every possible key variation for the count
   const approvedCount = Number(r.approvedCount ?? r.approved_count ?? sc.approved ?? r.proposals?.approved ?? 0);
   const pendingCount = Number(r.pendingCount ?? r.pending_count ?? sc.pending ?? r.proposals?.pending ?? 0);
@@ -225,13 +225,13 @@ function aggregateFromProposals(props: Proposal[]): ProposerAgg[] {
     row.totalBudgetUSD += Number(p.amountUSD) || 0;
     const st = (p.status || 'pending').toLowerCase().trim();
     if (['approved', 'funded', 'completed'].includes(st)) {
-        row.approvedCount += 1;
+      row.approvedCount += 1;
     } else if (st === 'rejected') {
-        row.rejectedCount += 1;
+      row.rejectedCount += 1;
     } else if (st === 'archived') {
-        row.archivedCount = (row.archivedCount || 0) + 1;
+      row.archivedCount = (row.archivedCount || 0) + 1;
     } else {
-        row.pendingCount += 1;
+      row.pendingCount += 1;
     }
 
     const prev = row.lastActivity ? new Date(row.lastActivity).getTime() : 0;
@@ -274,10 +274,10 @@ function toTelegramLink(username?: string | null, chatId?: string | null) {
 }
 
 interface EntitySelector {
-    id?: number | string | null;
-    entity?: string | null;
-    contactEmail?: string | null;
-    wallet?: string | null;
+  id?: number | string | null;
+  entity?: string | null;
+  contactEmail?: string | null;
+  wallet?: string | null;
 }
 
 /* ---------- Component ---------- */
@@ -293,7 +293,7 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
   const [showArchived, setShowArchived] = useState(false);
-  const pageSize = 10; 
+  const pageSize = 10;
 
   // per-row busy state
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -316,19 +316,19 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
         // This ensures we get the RAW data where approved_count = 1
         const url = `${API_BASE}/admin/entities?includeArchived=${showArchived}`;
         const res = await fetch(url, {
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include'
         });
 
         let data: ProposerAgg[] = [];
 
         if (res.ok) {
-            const resp = await res.json();
-            // ✅ 2. Unpack response correctly
-            const rawItems = resp?.items || resp;
-            const arr: any[] = Array.isArray(rawItems) ? rawItems : [];
-            // ✅ 3. Map using the normalized function
-            data = arr.map(normalizeRow);
+          const resp = await res.json();
+          // ✅ 2. Unpack response correctly
+          const rawItems = resp?.items || resp;
+          const arr: any[] = Array.isArray(rawItems) ? rawItems : [];
+          // ✅ 3. Map using the normalized function
+          data = arr.map(normalizeRow);
         }
 
         // Fallback if fetch fails or returns empty
@@ -404,9 +404,9 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
   function toIdOrKey(r: ProposerAgg): EntitySelector {
     if (r.id != null) return { id: r.id };
     return {
-        entity: r.entity ?? null,
-        contactEmail: r.contactEmail ?? null,
-        wallet: r.wallet ?? null,
+      entity: r.entity ?? null,
+      contactEmail: r.contactEmail ?? null,
+      wallet: r.wallet ?? null,
     };
   }
 
@@ -445,65 +445,135 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
 
   // UI
 
-  if (loading) return <div className="p-6 text-slate-500">Loading entities…</div>;
-  if (error) return <div className="p-6 text-red-600">Error: {error}</div>;
+  // Stats Calculation
+  const stats = useMemo(() => {
+    const total = rows.length;
+    const active = rows.filter(r => !r.archived).length;
+    const totalBudget = rows.reduce((acc, r) => acc + r.totalBudgetUSD, 0);
+    const totalProposals = rows.reduce((acc, r) => acc + r.proposalsCount, 0);
+    return { total, active, totalBudget, totalProposals };
+  }, [rows]);
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50/50 p-8 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+        <p className="text-slate-500 font-medium">Loading entities...</p>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="min-h-screen bg-slate-50/50 p-8 flex items-center justify-center">
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-rose-100 max-w-md text-center">
+        <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+        </div>
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">Failed to load entities</h3>
+        <p className="text-slate-600 mb-6">{error}</p>
+        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors font-medium">
+          Retry
+        </button>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50/50">
-      <div className="max-w-[1400px] mx-auto px-4 py-8">
-        
-        <div className="mb-6">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-4">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Admin — Entities</h1>
-                <div className="flex items-center gap-2 text-sm text-slate-600">
-                    <span className="font-medium text-slate-900">{filtered.length}</span> results
-                    {showArchived && <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs font-medium border border-amber-100">Showing Archived</span>}
-                </div>
-            </div>
+    <div className="min-h-screen bg-slate-50/50 pb-20">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-          <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
-            <div className="w-full lg:w-96 relative">
-              <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search entity, email, wallet..." className="w-full pl-4 pr-10 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800 placeholder-slate-500" />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              </div>
+        {/* Header & Stats */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-6">Entities Overview</h1>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <p className="text-sm font-medium text-slate-500 mb-1">Total Entities</p>
+              <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 bg-slate-50 px-3 py-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
-                <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked={showArchived} onChange={(e) => { setShowArchived(e.target.checked); setPage(1); }} />
-                Show archived
-              </label>
-              <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 p-0.5">
-                <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="bg-transparent border-none text-sm text-slate-700 py-2 pl-3 pr-8 focus:ring-0 font-medium cursor-pointer">
-                    <option value="entity">Sort: Name</option>
-                    <option value="proposalsCount">Sort: Proposals</option>
-                    <option value="approvedCount">Sort: Approved</option>
-                    <option value="totalBudgetUSD">Sort: Budget</option>
-                    <option value="lastActivity">Sort: Last Activity</option>
-                </select>
-                <button onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))} className="p-2 hover:bg-white rounded-md shadow-sm transition-all text-slate-500" title="Toggle sort direction">
-                    {sortDir === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <p className="text-sm font-medium text-slate-500 mb-1">Active Entities</p>
+              <p className="text-2xl font-bold text-emerald-600">{stats.active}</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <p className="text-sm font-medium text-slate-500 mb-1">Total Budget Managed</p>
+              <p className="text-2xl font-bold text-slate-900">{fmtMoney(stats.totalBudget)}</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <p className="text-sm font-medium text-slate-500 mb-1">Total Proposals</p>
+              <p className="text-2xl font-bold text-blue-600">{stats.totalProposals}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        {/* Controls */}
+        <div className="bg-white p-4 rounded-t-xl border border-slate-200 border-b-0 shadow-sm flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
+          <div className="w-full lg:w-96 relative group">
+            <input
+              value={q}
+              onChange={(e) => { setQ(e.target.value); setPage(1); }}
+              placeholder="Search entity, email, wallet..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all text-slate-800 placeholder-slate-400 bg-slate-50 focus:bg-white"
+            />
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-cyan-500 transition-colors pointer-events-none">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 bg-slate-50 px-3 py-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors select-none">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                checked={showArchived}
+                onChange={(e) => { setShowArchived(e.target.checked); setPage(1); }}
+              />
+              Show archived
+            </label>
+
+            <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 p-0.5">
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="bg-transparent border-none text-sm text-slate-700 py-2 pl-3 pr-8 focus:ring-0 font-medium cursor-pointer focus:outline-none"
+              >
+                <option value="entity">Sort: Name</option>
+                <option value="proposalsCount">Sort: Proposals</option>
+                <option value="approvedCount">Sort: Approved</option>
+                <option value="totalBudgetUSD">Sort: Budget</option>
+                <option value="lastActivity">Sort: Last Activity</option>
+              </select>
+              <button
+                onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                className="p-2 hover:bg-white rounded-md shadow-sm transition-all text-slate-500 hover:text-cyan-600"
+                title="Toggle sort direction"
+              >
+                {sortDir === 'asc' ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h5m4 0l4 4m0 0l4-4m-4 4V3" /></svg>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="bg-white border border-slate-200 rounded-b-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-800 font-semibold uppercase tracking-wider text-[11px]">
+              <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px] backdrop-blur-sm sticky top-0 z-10">
                 <tr>
-                  <Th className="min-w-[200px]">Entity</Th>
-                  <Th className="min-w-[180px]">Contact</Th>
-                  <Th>Wallet</Th>
-                  <Th className="text-right w-20">Props</Th>
-                  <Th className="text-right w-20">Appr</Th>
-                  <Th className="text-right w-20">Pend</Th>
-                  <Th className="text-right w-20">Rej</Th>
-                  <Th className="text-right min-w-[100px]">Budget</Th>
-                  <Th className="min-w-[120px]">Activity</Th>
-                  <Th className="text-right min-w-[160px]">Actions</Th>
+                  <Th className="min-w-[240px] pl-6">Entity</Th>
+                  <Th className="min-w-[200px]">Contact</Th>
+                  <Th className="min-w-[140px]">Wallet</Th>
+                  <Th className="text-right w-24">Props</Th>
+                  <Th className="text-right w-24">Appr</Th>
+                  <Th className="text-right w-24">Pend</Th>
+                  <Th className="text-right w-24">Rej</Th>
+                  <Th className="text-right min-w-[120px]">Budget</Th>
+                  <Th className="min-w-[140px]">Activity</Th>
+                  <Th className="text-right min-w-[140px] pr-6">Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -511,97 +581,104 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                   const k = keyOf(r);
                   const isBusy = !!busy[k];
                   const email = r.email ?? r.contactEmail ?? r.ownerEmail ?? guessEmail(r as any) ?? null;
+                  const initial = (r.entity || '?').charAt(0).toUpperCase();
+
                   return (
-                    <tr key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`} className={`hover:bg-slate-50/80 transition-colors ${r.archived ? 'bg-slate-50/50 grayscale-[0.5]' : ''}`}>
-                      <Td>
-                        <div className="flex flex-col gap-1">
+                    <tr key={`${r.wallet || r.contactEmail || r.entity || ''}-${i}`} className={`group hover:bg-slate-50/80 transition-colors ${r.archived ? 'bg-slate-50/50 grayscale-[0.5]' : ''}`}>
+                      <Td className="pl-6">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-sm shrink-0 ${r.archived ? 'bg-slate-200 text-slate-500' : 'bg-gradient-to-br from-cyan-500 to-blue-600 text-white'}`}>
+                            {initial}
+                          </div>
+                          <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-2">
-                                <span className="font-bold text-slate-900 text-[15px]">{r.entity || '—'}</span>
-                                {r.archived && (
-                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 uppercase tracking-wide">
-                                    Archived
-                                    </span>
-                                )}
+                              <span className="font-bold text-slate-900 text-[15px]">{r.entity || '—'}</span>
+                              {r.archived && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 uppercase tracking-wide border border-slate-300">
+                                  Archived
+                                </span>
+                              )}
                             </div>
                             {(r.city || r.country) && (
-                            <div className="flex items-center gap-1 text-xs text-slate-700">
-                                <svg className="w-3 h-3 opacity-80 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                              <div className="flex items-center gap-1 text-xs text-slate-500">
+                                <svg className="w-3 h-3 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                                 {[r.city, r.country].filter(Boolean).join(', ')}
-                            </div>
+                              </div>
                             )}
-                            {r.address && <div className="text-xs text-slate-700 break-words leading-relaxed">{r.address}</div>}
+                            {r.address && <div className="text-xs text-slate-500 break-words leading-relaxed max-w-[200px] mt-0.5">{r.address}</div>}
+                          </div>
                         </div>
                       </Td>
                       <Td>
-                        <div className="flex flex-col gap-1.5 items-start">
+                        <div className="flex flex-col gap-2 items-start">
                           {email && (
-                            <a href={toMailto(email, 'Proposal contact')} className="inline-flex items-center gap-1.5 text-slate-900 hover:text-blue-600 transition-colors text-xs group font-medium" title={email}>
-                              <svg className="w-3.5 h-3.5 text-slate-600 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                              <span className="truncate max-w-[160px]">{email}</span>
+                            <a href={toMailto(email, 'Proposal contact')} className="inline-flex items-center gap-2 text-slate-700 hover:text-cyan-600 transition-colors text-xs group/link font-medium bg-slate-50 px-2 py-1 rounded border border-slate-200 hover:border-cyan-200 hover:bg-cyan-50" title={email}>
+                              <svg className="w-3.5 h-3.5 text-slate-400 group-hover/link:text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                              <span className="truncate max-w-[140px]">{email}</span>
                             </a>
                           )}
-                          {(r.telegramUsername || r.telegramChatId || r.ownerTelegramUsername || r.ownerTelegramChatId) && (
-                            <a href={toTelegramLink(r.telegramUsername ?? r.ownerTelegramUsername ?? null, r.telegramChatId ?? r.ownerTelegramChatId ?? null) || '#'} className="inline-flex items-center gap-1.5 text-slate-900 hover:text-sky-500 transition-colors text-xs group font-medium" target="_blank" rel="noreferrer">
-                              <svg className="w-3.5 h-3.5 text-slate-600 group-hover:text-sky-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.18 1.897-.962 6.502-1.361 8.627-.168.9-.5 1.201-.82 1.23-.697.064-1.226-.461-1.901-.903-1.056-.693-1.653-1.124-2.678-1.8-1.185-.781-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
-                              <span className="truncate max-w-[160px]">{r.telegramUsername ?? r.ownerTelegramUsername ? `@${String(r.telegramUsername ?? r.ownerTelegramUsername).replace(/^@/, '')}` : 'Telegram'}</span>
-                            </a>
-                          )}
-                          {(r.ownerPhone || r.whatsapp || r.phone) && (
-                            <a href={toWhatsAppLink(r.ownerPhone ?? r.whatsapp ?? r.phone) || '#'} className="inline-flex items-center gap-1.5 text-slate-900 hover:text-green-600 transition-colors text-xs group font-medium" target="_blank" rel="noreferrer">
-                              <svg className="w-3.5 h-3.5 text-slate-600 group-hover:text-green-500" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.466c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
-                              <span className="truncate max-w-[160px]">{r.ownerPhone ?? r.whatsapp ?? r.phone}</span>
-                            </a>
-                          )}
+                          <div className="flex gap-2">
+                            {(r.telegramUsername || r.telegramChatId || r.ownerTelegramUsername || r.ownerTelegramChatId) && (
+                              <a href={toTelegramLink(r.telegramUsername ?? r.ownerTelegramUsername ?? null, r.telegramChatId ?? r.ownerTelegramChatId ?? null) || '#'} className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-sky-50 text-sky-600 hover:bg-sky-100 hover:scale-105 transition-all border border-sky-100" target="_blank" rel="noreferrer" title="Telegram">
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.18 1.897-.962 6.502-1.361 8.627-.168.9-.5 1.201-.82 1.23-.697.064-1.226-.461-1.901-.903-1.056-.693-1.653-1.124-2.678-1.8-1.185-.781-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
+                              </a>
+                            )}
+                            {(r.ownerPhone || r.whatsapp || r.phone) && (
+                              <a href={toWhatsAppLink(r.ownerPhone ?? r.whatsapp ?? r.phone) || '#'} className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-green-50 text-green-600 hover:bg-green-100 hover:scale-105 transition-all border border-green-100" target="_blank" rel="noreferrer" title="WhatsApp">
+                                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.466c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" /></svg>
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </Td>
                       <Td>
-                        <div className="flex items-center gap-2 group">
-                          <div className="font-mono text-xs text-slate-800 bg-slate-100 px-2 py-1 rounded border border-slate-200 truncate max-w-[140px] group-hover:max-w-none group-hover:bg-white group-hover:absolute group-hover:z-10 group-hover:shadow-md transition-all cursor-default" title={r.wallet || ''}>
+                        <div className="flex items-center gap-2 group/wallet">
+                          <div className="font-mono text-[11px] text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200 truncate max-w-[120px] group-hover/wallet:max-w-none group-hover/wallet:bg-white group-hover/wallet:absolute group-hover/wallet:z-20 group-hover/wallet:shadow-lg group-hover/wallet:border-slate-300 transition-all cursor-default" title={r.wallet || ''}>
                             {r.wallet || '—'}
                           </div>
                           {r.wallet && (
-                            <button onClick={() => navigator.clipboard.writeText(r.wallet!)} className="text-slate-400 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100" title="Copy wallet">
+                            <button onClick={() => navigator.clipboard.writeText(r.wallet!)} className="text-slate-400 hover:text-cyan-600 transition-colors opacity-0 group-hover/wallet:opacity-100" title="Copy wallet">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                             </button>
                           )}
                         </div>
                       </Td>
-                      <Td className="text-right text-slate-900 tabular-nums font-medium">{r.proposalsCount || <span className="text-slate-500">-</span>}</Td>
+                      <Td className="text-right text-slate-900 tabular-nums font-medium">{r.proposalsCount || <span className="text-slate-300">-</span>}</Td>
                       <Td className="text-right tabular-nums">
-                        {r.approvedCount > 0 ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-100">{r.approvedCount}</span> : <span className="text-slate-500">-</span>}
+                        {r.approvedCount > 0 ? <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100">{r.approvedCount}</span> : <span className="text-slate-300">-</span>}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {r.pendingCount > 0 ? <span className="text-slate-900 font-medium">{r.pendingCount}</span> : <span className="text-slate-500">-</span>}
+                        {r.pendingCount > 0 ? <span className="text-amber-600 font-bold">{r.pendingCount}</span> : <span className="text-slate-300">-</span>}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {r.rejectedCount > 0 ? <span className="text-rose-600 font-medium">{r.rejectedCount}</span> : <span className="text-slate-500">-</span>}
+                        {r.rejectedCount > 0 ? <span className="text-rose-600 font-bold">{r.rejectedCount}</span> : <span className="text-slate-300">-</span>}
                       </Td>
-                      <Td className="text-right font-medium text-slate-900 tabular-nums">
-                        {r.totalBudgetUSD > 0 ? fmtMoney(r.totalBudgetUSD) : <span className="text-slate-500">—</span>}
+                      <Td className="text-right font-bold text-slate-900 tabular-nums">
+                        {r.totalBudgetUSD > 0 ? fmtMoney(r.totalBudgetUSD) : <span className="text-slate-300">—</span>}
                       </Td>
                       <Td>
                         <div className="text-xs text-slate-500 flex flex-col">
                           {r.lastActivity ? (
                             <>
                               <span className="text-slate-900 font-medium">{new Date(r.lastActivity).toLocaleDateString()}</span>
-                              <span className="text-[10px] text-slate-600">{new Date(r.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span className="text-[10px] text-slate-400">{new Date(r.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </>
                           ) : '—'}
                         </div>
                       </Td>
-                      <Td className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Link href={proposalsHref(r)} className="p-2 rounded-md hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors" title="View Proposals">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                      <Td className="text-right pr-6">
+                        <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                          <Link href={proposalsHref(r)} className="p-1.5 rounded-md hover:bg-cyan-50 text-slate-400 hover:text-cyan-600 transition-colors" title="View Proposals">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                           </Link>
-                          <button onClick={() => onArchive(r, !r.archived)} disabled={isBusy} className={`p-2 rounded-md transition-colors ${r.archived ? 'hover:bg-emerald-50 text-emerald-600' : 'hover:bg-amber-50 text-slate-400 hover:text-amber-600'}`} title={r.archived ? "Unarchive" : "Archive"}>
+                          <button onClick={() => onArchive(r, !r.archived)} disabled={isBusy} className={`p-1.5 rounded-md transition-colors ${r.archived ? 'hover:bg-emerald-50 text-emerald-600' : 'hover:bg-amber-50 text-slate-400 hover:text-amber-600'}`} title={r.archived ? "Unarchive" : "Archive"}>
                             {r.archived ? (
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             ) : (
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
                             )}
                           </button>
-                          <button onClick={() => onDelete(r)} disabled={isBusy} className="p-2 rounded-md hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors" title="Delete Entity">
+                          <button onClick={() => onDelete(r)} disabled={isBusy} className="p-1.5 rounded-md hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors" title="Delete Entity">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
                         </div>
@@ -611,10 +688,13 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
                 })}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="py-16 text-center">
+                    <td colSpan={10} className="py-24 text-center">
                       <div className="flex flex-col items-center justify-center text-slate-400">
-                        <svg className="w-12 h-12 mb-3 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                        <p>No entities found matching your criteria.</p>
+                        <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                          <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                        </div>
+                        <h3 className="text-lg font-medium text-slate-900 mb-1">No entities found</h3>
+                        <p className="text-slate-500 max-w-sm mx-auto">We couldn't find any entities matching your search criteria. Try adjusting your filters.</p>
                       </div>
                     </td>
                   </tr>
@@ -622,13 +702,27 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination */}
           <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-t border-slate-200">
             <div className="text-sm text-slate-500">
-              Showing <b>{start + 1}</b> to <b>{Math.min(start + pageSize, sorted.length)}</b> of <b>{sorted.length}</b>
+              Showing <span className="font-semibold text-slate-900">{start + 1}</span> to <span className="font-semibold text-slate-900">{Math.min(start + pageSize, sorted.length)}</span> of <span className="font-semibold text-slate-900">{sorted.length}</span>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1} className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">Previous</button>
-              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages} className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">Next</button>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:text-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:text-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+              >
+                Next
+              </button>
             </div>
           </div>
         </div>
