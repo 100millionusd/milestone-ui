@@ -564,16 +564,16 @@ export default function AdminEntitiesTable({ initial = [] }: Props) {
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px] backdrop-blur-sm sticky top-0 z-10">
                 <tr>
-                  <Th className="min-w-[240px] pl-6">Entity</Th>
-                  <Th className="min-w-[200px]">Contact</Th>
-                  <Th className="min-w-[140px]">Wallet</Th>
-                  <Th className="text-right w-24">Props</Th>
-                  <Th className="text-right w-24">Appr</Th>
-                  <Th className="text-right w-24">Pend</Th>
-                  <Th className="text-right w-24">Rej</Th>
-                  <Th className="text-right min-w-[120px]">Budget</Th>
-                  <Th className="min-w-[140px]">Activity</Th>
-                  <Th className="text-right min-w-[140px] pr-6">Actions</Th>
+                  <Th className="w-[20%] pl-6">Entity</Th>
+                  <Th className="w-[15%]">Contact</Th>
+                  <Th className="w-[12%]">Wallet</Th>
+                  <Th className="text-right w-[6%]">Props</Th>
+                  <Th className="text-right w-[6%]">Appr</Th>
+                  <Th className="text-right w-[6%]">Pend</Th>
+                  <Th className="text-right w-[6%]">Rej</Th>
+                  <Th className="text-right w-[10%]">Budget</Th>
+                  <Th className="w-[10%]">Activity</Th>
+                  <Th className="text-right w-auto pr-6">Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
