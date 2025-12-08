@@ -52,6 +52,21 @@ export default function Navigation() {
   const [vendorStatus, setVendorStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
   const [debugTenantId, setDebugTenantId] = useState<string>('');
   const [tenantName, setTenantName] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const tenantSlug = searchParams.get('tenant');
+    // If we have a tenant param, use it. Otherwise assume we are on the correct domain/subdomain.
+    const url = tenantSlug
+      ? `${window.location.origin}/?tenant=${tenantSlug}`
+      : window.location.origin;
+
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   useEffect(() => {
     const tSlug = searchParams.get('tenant') || document.cookie.match(new RegExp('(^| )lx_tenant_slug=([^;]+)'))?.[2];
@@ -216,9 +231,21 @@ export default function Navigation() {
             </div>
             <h1 className="text-xl font-semibold">LithiumX</h1>
             {tenantName && (
-              <span className="ml-3 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded border border-indigo-500/30 hidden sm:inline-block">
+              <button
+                onClick={handleCopyLink}
+                className="ml-3 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded border border-indigo-500/30 hidden sm:inline-flex items-center gap-1 hover:bg-indigo-500/30 transition-colors relative group"
+                title="Copy organization link"
+              >
                 {tenantName}
-              </span>
+                <svg className="w-3 h-3 opacity-50 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                {copied && (
+                  <span className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs py-1 px-2 rounded shadow-lg whitespace-nowrap z-50 border border-gray-700">
+                    Copied!
+                  </span>
+                )}
+              </button>
             )}
           </div>
 
