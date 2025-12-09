@@ -11,7 +11,7 @@ import AuthSync from '@/components/AuthSync';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'LithiumX - Professional Project Management',
+  title: 'MilestoneX - Professional Project Management',
   description: 'Manage projects, bids, and milestone payments with USDT/USDC',
 };
 
