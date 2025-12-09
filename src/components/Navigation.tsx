@@ -233,7 +233,7 @@ export default function Navigation() {
             {tenantName && (
               <button
                 onClick={handleCopyLink}
-                className="ml-3 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded border border-indigo-500/30 hidden sm:inline-flex items-center gap-1 hover:bg-indigo-500/30 transition-colors relative group"
+                className="ml-3 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded border border-indigo-500/30 inline-flex items-center gap-1 hover:bg-indigo-500/30 transition-colors relative group"
                 title="Copy organization link"
               >
                 {tenantName}
