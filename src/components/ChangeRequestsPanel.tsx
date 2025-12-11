@@ -219,12 +219,6 @@ export default function ChangeRequestsPanel(props: Props) {
 
   const actionableCount = useMemo(
     () => {
-      console.log('[ChangeRequestsPanel] Debug:', {
-        idx,
-        currentStatus,
-        milestoneStatuses: JSON.stringify(milestoneStatuses),
-        rows: filteredRows.length
-      });
 
       // If the milestone is already approved/paid, we shouldn't show "Action Required"
       if (currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed') {
@@ -419,15 +413,17 @@ export default function ChangeRequestsPanel(props: Props) {
                   const sending = !!draft?.sending;
 
                   // ROBUST STATUS LOGIC:
-                  // 1. If status is 'resolved' OR resolvedAt is present, it's Resolved.
-                  const isResolved = cr.status === "resolved" || !!cr.resolvedAt;
+                  const isMilestoneDone = currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed';
+
+                  // 1. If status is 'resolved' OR resolvedAt is present OR milestone is done, it's Resolved.
+                  const isResolved = cr.status === "resolved" || !!cr.resolvedAt || isMilestoneDone;
+
                   // 2. If not resolved, check strictly for 'open'.
                   const isStatusOpen = !isResolved && cr.status === "open";
                   const hasReplied = responses.length > 0;
 
-                  // "Action Required" = Open AND Not Resolved AND No Reply AND Milestone Not Approved.
-                  const isActionRequired = isStatusOpen && !hasReplied &&
-                    !(currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed');
+                  // "Action Required" = Open AND Not Resolved AND No Reply.
+                  const isActionRequired = isStatusOpen && !hasReplied;
 
                   // "Waiting for Review" = Open AND Not Resolved AND Has Reply.
                   const isPendingReview = isStatusOpen && hasReplied;
