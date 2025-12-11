@@ -212,13 +212,13 @@ export default function ChangeRequestsPanel(props: Props) {
     return r.status === "open" && !hasReply;
   };
 
+  // Determine status for the CURRENT active milestone (idx)
+  const currentStatus = milestoneStatus ?? (
+    Array.isArray(milestoneStatuses) ? milestoneStatuses[idx] : milestoneStatuses?.[idx]
+  );
+
   const actionableCount = useMemo(
     () => {
-      // Determine status for the CURRENT active milestone (idx)
-      const currentStatus = milestoneStatus ?? (
-        Array.isArray(milestoneStatuses) ? milestoneStatuses[idx] : milestoneStatuses?.[idx]
-      );
-
       console.log('[ChangeRequestsPanel] Debug:', {
         idx,
         currentStatus,
@@ -232,7 +232,7 @@ export default function ChangeRequestsPanel(props: Props) {
       }
       return filteredRows.filter(isRowActionable).length;
     },
-    [filteredRows, milestoneStatus, milestoneStatuses, idx]
+    [filteredRows, currentStatus, idx, milestoneStatuses]
   );
 
   const allMilestones = useMemo(
@@ -425,8 +425,10 @@ export default function ChangeRequestsPanel(props: Props) {
                   const isStatusOpen = !isResolved && cr.status === "open";
                   const hasReplied = responses.length > 0;
 
-                  // "Action Required" = Open AND Not Resolved AND No Reply.
-                  const isActionRequired = isStatusOpen && !hasReplied;
+                  // "Action Required" = Open AND Not Resolved AND No Reply AND Milestone Not Approved.
+                  const isActionRequired = isStatusOpen && !hasReplied &&
+                    !(currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed');
+
                   // "Waiting for Review" = Open AND Not Resolved AND Has Reply.
                   const isPendingReview = isStatusOpen && hasReplied;
 
