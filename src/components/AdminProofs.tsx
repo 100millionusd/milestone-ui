@@ -107,16 +107,52 @@ function msKeyFromProof(p: any): string {
   return `row:${proofKey(p)}`;
 }
 
-// Dedupe a list to one row per milestone, keeping the LATEST one.
+// Dedupe a list to one row per milestone, keeping the LATEST one but aggregating ALL files.
 function uniqByMilestone(list: any[]): any[] {
-  const map = new Map<string, any>();
+  const groups = new Map<string, any[]>();
+
+  // 1. Group by milestone
   for (const p of list || []) {
     const k = msKeyFromProof(p);
-    // Overwrite: since list is usually sorted by time ascending (or we just want the last one we see),
-    // this ensures we keep the latest proof for this milestone key.
-    map.set(k, p);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(p);
   }
-  return Array.from(map.values());
+
+  const out: any[] = [];
+
+  // 2. Process each group
+  Array.from(groups).forEach(([, proofs]) => {
+    // Sort by date descending (latest first)
+    proofs.sort((a: any, b: any) => {
+      const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime();
+      const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime();
+      return bt - at;
+    });
+
+    const latest = proofs[0];
+
+    // 3. Collect all files from ALL proofs in the group (deduplicated by URL)
+    const allFiles: any[] = [];
+    const seen = new Set<string>();
+
+    for (const p of proofs) {
+      const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
+      if (Array.isArray(files)) {
+        for (const f of files) {
+          const u = (f?.url || f || '').toString().trim();
+          if (u && !seen.has(u)) {
+            seen.add(u);
+            allFiles.push(f);
+          }
+        }
+      }
+    }
+
+    // 4. Return merged object
+    out.push({ ...latest, files: allFiles });
+  });
+
+  return out;
 }
 
 /* =========================================
