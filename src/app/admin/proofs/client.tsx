@@ -1429,6 +1429,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           APPROVED
                         </span>
                       )}
+                      {/* WORKAROUND: If we have a proof (lp), but status is 'rejected', it might be a resubmission
+                       * that the buggy backend didn't reset. Show as "Needs Review" (pending) to be safe. */}
+                      {(() => {
+                        const showAsPending = lp && lp.status === 'rejected';
+                        if (isRejectedServer && !lpIsPending && !showAsPending) {
+                          return (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                              REJECTED
+                            </span>
+                          );
+                        }
+                        if (lpIsPending || (lp && lp.status === 'rejected')) {
+                          return (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                              Needs Review
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                       {!approved && !rejected && proofExists && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
                           NEEDS REVIEW

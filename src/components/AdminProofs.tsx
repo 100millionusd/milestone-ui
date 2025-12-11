@@ -320,16 +320,18 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
   const visibleRows = rows.filter((r) => (view === 'archived' ? r.isArchived : !r.isArchived));
 
   // --- GROUPING LOGIC FOR BETTER VISIBILITY ---
-  // Sort by: Needs Review (pending) -> then by ID
+  // Sort by: Needs Review (pending/rejected) -> then by ID
   const { pendingRows, processedRows } = useMemo(() => {
     const pending: typeof visibleRows = [];
     const processed: typeof visibleRows = [];
     visibleRows.forEach(row => {
-      // Treat 'pending' as Needs Review. Everything else (approved, rejected, etc) is Processed.
-      if (row.p.status === 'pending' || !row.p.status) {
-        pending.push(row);
-      } else {
+      // WORKAROUND: Treat 'rejected' as 'Needs Review' because the external API 
+      // fails to reset status to 'pending' on resubmission. 
+      // This ensures admins see the (potentially new) proof at the top.
+      if (row.p.status === 'approved') {
         processed.push(row);
+      } else {
+        pending.push(row);
       }
     });
     return { pendingRows: pending, processedRows: processed };
