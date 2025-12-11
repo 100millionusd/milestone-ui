@@ -205,6 +205,7 @@ function getApiBase(): string {
   }
   // 🛑 FORCE Railway API for now to fix 404s (user has incorrect env var)
   return "https://milestone-api-production.up.railway.app";
+  // return ""; // Use local API (relative path)
 
   /*
   const c =
@@ -851,7 +852,11 @@ function toProof(p: any): Proof {
     walletAddress: p?.walletAddress ?? p?.wallet_address ?? "",
     title: p?.title ?? "",
     description: p?.description ?? "",
-    files: Array.isArray(p?.files) ? p.files : [],
+    files: Array.isArray(p?.files)
+      ? p.files
+      : typeof p?.files === 'string'
+        ? (() => { try { return JSON.parse(p.files); } catch { return []; } })()
+        : [],
     status: p?.status ?? "pending",
     submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(p?.aiAnalysis ?? p?.ai_analysis),
