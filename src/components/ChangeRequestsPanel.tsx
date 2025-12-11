@@ -219,7 +219,12 @@ export default function ChangeRequestsPanel(props: Props) {
         Array.isArray(milestoneStatuses) ? milestoneStatuses[idx] : milestoneStatuses?.[idx]
       );
 
-      console.log('[ChangeRequestsPanel] Debug:', { idx, currentStatus, milestoneStatus, milestoneStatuses, rows: filteredRows.length });
+      console.log('[ChangeRequestsPanel] Debug:', {
+        idx,
+        currentStatus,
+        milestoneStatuses: JSON.stringify(milestoneStatuses),
+        rows: filteredRows.length
+      });
 
       // If the milestone is already approved/paid, we shouldn't show "Action Required"
       if (currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed') {
