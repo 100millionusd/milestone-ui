@@ -23,10 +23,10 @@ import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
 function notifyMsChange(bidId: number, milestoneIndex: number) {
   try {
     window.dispatchEvent(new CustomEvent('milestones:updated', { detail: { bidId, milestoneIndex } }));
-  } catch {}
+  } catch { }
   try {
     new BroadcastChannel('mx-payments').postMessage({ type: 'mx:ms:updated', bidId, milestoneIndex });
-  } catch {}
+  } catch { }
 }
 
 /* ============================
@@ -35,8 +35,8 @@ function notifyMsChange(bidId: number, milestoneIndex: number) {
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '')}/ipfs`
+      .replace(/^https?:\/\//, '')
+      .replace(/\/+$/, '')}/ipfs`
     : 'https://gateway.pinata.cloud/ipfs';
 
 function isImg(s?: string) {
@@ -78,7 +78,7 @@ function toMilestones(raw: any): any[] {
     try {
       const arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr : [];
-    } catch {}
+    } catch { }
   }
   return [];
 }
@@ -107,17 +107,16 @@ function msKeyFromProof(p: any): string {
   return `row:${proofKey(p)}`;
 }
 
-// Dedupe a list to one row per milestone
+// Dedupe a list to one row per milestone, keeping the LATEST one.
 function uniqByMilestone(list: any[]): any[] {
-  const seen = new Set<string>();
-  const out: any[] = [];
+  const map = new Map<string, any>();
   for (const p of list || []) {
     const k = msKeyFromProof(p);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(p);
+    // Overwrite: since list is usually sorted by time ascending (or we just want the last one we see),
+    // this ensures we keep the latest proof for this milestone key.
+    map.set(k, p);
   }
-  return out;
+  return Array.from(map.values());
 }
 
 /* =========================================
@@ -205,12 +204,12 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
 
       const inferredBidIds = Array.isArray(bids)
         ? Array.from(
-            new Set(
-              (bids as any[])
-                .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
-                .filter(Number.isFinite)
-            )
+          new Set(
+            (bids as any[])
+              .map((b: any) => Number(b?.bidId ?? b?.bid_id ?? b?.id))
+              .filter(Number.isFinite)
           )
+        )
         : [];
 
       const useBidId = cleanBidIds[0] ?? inferredBidIds[0];
@@ -229,7 +228,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
+        try { const j = await res.json(); if (j?.error) msg = j.error; } catch { }
         throw new Error(msg);
       }
       const list = await res.json();
@@ -259,7 +258,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         (async () => {
           try {
             const j = await getMilestoneArchive(bidId, idx);
-            const m = j?.milestone ?? j;
+            const m = (j as any)?.milestone ?? j;
             next[key] = {
               archived: !!m?.archived,
               archivedAt: m?.archivedAt ?? null,
@@ -294,7 +293,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
         window.dispatchEvent(new CustomEvent('proofs:changed', { detail }));
       }
-    } catch {}
+    } catch { }
   };
 
   // Re-hydrate when the list of proofs changes
@@ -326,12 +325,12 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     const pending: typeof visibleRows = [];
     const processed: typeof visibleRows = [];
     visibleRows.forEach(row => {
-        // Treat 'pending' as Needs Review. Everything else (approved, rejected, etc) is Processed.
-        if (row.p.status === 'pending' || !row.p.status) {
-            pending.push(row);
-        } else {
-            processed.push(row);
-        }
+      // Treat 'pending' as Needs Review. Everything else (approved, rejected, etc) is Processed.
+      if (row.p.status === 'pending' || !row.p.status) {
+        pending.push(row);
+      } else {
+        processed.push(row);
+      }
     });
     return { pendingRows: pending, processedRows: processed };
   }, [visibleRows]);
@@ -361,7 +360,7 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       const bidId = Number(p.bidId);
       const idx = Number(p.milestoneIndex);
       if (Number.isFinite(bidId) && Number.isFinite(idx)) {
-        try { await unarchiveMs(bidId, idx); } catch {}
+        try { await unarchiveMs(bidId, idx); } catch { }
       }
     }
   };
@@ -378,22 +377,20 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md">
           <button
             onClick={() => setView('active')}
-            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                view === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
+            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${view === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
           >
             Active
           </button>
           <button
             onClick={() => setView('archived')}
-            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                view === 'archived' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
+            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${view === 'archived' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
           >
             Archived ({archivedCount})
           </button>
         </div>
-        
+
         <div className="flex items-center gap-3">
           {view === 'archived' && archivedCount > 0 && (
             <button
@@ -415,64 +412,64 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
       {/* SECTION: Needs Review */}
       {pendingRows.length > 0 && (
         <div className="space-y-4">
-           <h3 className="text-sm font-bold text-amber-700 uppercase tracking-wider flex items-center gap-2">
-             <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-             Needs Review ({pendingRows.length})
-           </h3>
-           {pendingRows.map(({ p, k, isArchived }) => (
-             <ProofCardWrapper
-                key={k}
-                p={p}
-                k={k}
-                isArchived={isArchived}
-                bids={bids}
-                proposalId={proposalId}
-                onRefresh={refreshAll}
-                crOpenFor={crOpenFor}
-                setCrOpenFor={setCrOpenFor}
-                crComment={crComment}
-                setCrComment={setCrComment}
-                crChecklist={crChecklist}
-                setCrChecklist={setCrChecklist}
-                archMap={archMap}
-                setArchMap={setArchMap}
-                archiveMs={archiveMs}
-                unarchiveMs={unarchiveMs}
-                defaultExpanded={true} // Auto expand pending
-             />
-           ))}
+          <h3 className="text-sm font-bold text-amber-700 uppercase tracking-wider flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            Needs Review ({pendingRows.length})
+          </h3>
+          {pendingRows.map(({ p, k, isArchived }) => (
+            <ProofCardWrapper
+              key={k}
+              p={p}
+              k={k}
+              isArchived={isArchived}
+              bids={bids}
+              proposalId={proposalId}
+              onRefresh={refreshAll}
+              crOpenFor={crOpenFor}
+              setCrOpenFor={setCrOpenFor}
+              crComment={crComment}
+              setCrComment={setCrComment}
+              crChecklist={crChecklist}
+              setCrChecklist={setCrChecklist}
+              archMap={archMap}
+              setArchMap={setArchMap}
+              archiveMs={archiveMs}
+              unarchiveMs={unarchiveMs}
+              defaultExpanded={true} // Auto expand pending
+            />
+          ))}
         </div>
       )}
 
       {/* SECTION: Processed (Approved/Rejected) */}
       {processedRows.length > 0 && (
         <div className="space-y-4">
-           {pendingRows.length > 0 && <hr className="border-slate-200 my-6" />}
-           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">
-             Processed / History
-           </h3>
-           {processedRows.map(({ p, k, isArchived }) => (
-             <ProofCardWrapper
-                key={k}
-                p={p}
-                k={k}
-                isArchived={isArchived}
-                bids={bids}
-                proposalId={proposalId}
-                onRefresh={refreshAll}
-                crOpenFor={crOpenFor}
-                setCrOpenFor={setCrOpenFor}
-                crComment={crComment}
-                setCrComment={setCrComment}
-                crChecklist={crChecklist}
-                setCrChecklist={setCrChecklist}
-                archMap={archMap}
-                setArchMap={setArchMap}
-                archiveMs={archiveMs}
-                unarchiveMs={unarchiveMs}
-                defaultExpanded={false} // Auto collapse processed
-             />
-           ))}
+          {pendingRows.length > 0 && <hr className="border-slate-200 my-6" />}
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+            Processed / History
+          </h3>
+          {processedRows.map(({ p, k, isArchived }) => (
+            <ProofCardWrapper
+              key={k}
+              p={p}
+              k={k}
+              isArchived={isArchived}
+              bids={bids}
+              proposalId={proposalId}
+              onRefresh={refreshAll}
+              crOpenFor={crOpenFor}
+              setCrOpenFor={setCrOpenFor}
+              crComment={crComment}
+              setCrComment={setCrComment}
+              crChecklist={crChecklist}
+              setCrChecklist={setCrChecklist}
+              archMap={archMap}
+              setArchMap={setArchMap}
+              archiveMs={archiveMs}
+              unarchiveMs={unarchiveMs}
+              defaultExpanded={false} // Auto collapse processed
+            />
+          ))}
         </div>
       )}
 
@@ -492,28 +489,28 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
 ============================ */
 // This wrapper just extracts the logic for archiving so ProofCard is cleaner
 function ProofCardWrapper(props: any) {
-    const { p, k, isArchived, archiveMs, unarchiveMs, setArchMap, ...rest } = props;
-    const bidId = Number(p.bidId);
-    const idx = Number(p.milestoneIndex);
+  const { p, k, isArchived, archiveMs, unarchiveMs, setArchMap, ...rest } = props;
+  const bidId = Number(p.bidId);
+  const idx = Number(p.milestoneIndex);
 
-    const handleArchiveToggle = async (shouldArchive: boolean) => {
-        if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
-        if (shouldArchive) {
-            await archiveMs(bidId, idx);
-        } else {
-            await unarchiveMs(bidId, idx);
-        }
-    };
+  const handleArchiveToggle = async (shouldArchive: boolean) => {
+    if (!Number.isFinite(bidId) || !Number.isFinite(idx)) return;
+    if (shouldArchive) {
+      await archiveMs(bidId, idx);
+    } else {
+      await unarchiveMs(bidId, idx);
+    }
+  };
 
-    return (
-        <ProofCard
-            proof={p}
-            pkey={k}
-            isArchived={isArchived}
-            onArchive={handleArchiveToggle}
-            {...rest}
-        />
-    );
+  return (
+    <ProofCard
+      proof={p}
+      pkey={k}
+      isArchived={isArchived}
+      onArchive={handleArchiveToggle}
+      {...rest}
+    />
+  );
 }
 
 
@@ -728,300 +725,298 @@ function ProofCard(props: ProofCardProps) {
     proof.status === 'approved'
       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
       : proof.status === 'rejected'
-      ? 'bg-rose-100 text-rose-800 border-rose-200'
-      : 'bg-amber-100 text-amber-800 border-amber-200';
+        ? 'bg-rose-100 text-rose-800 border-rose-200'
+        : 'bg-amber-100 text-amber-800 border-amber-200';
 
-  const cardBorder = expanded 
-    ? 'border-slate-300 shadow-md' 
+  const cardBorder = expanded
+    ? 'border-slate-300 shadow-md'
     : 'border-slate-200 shadow-sm hover:border-slate-300';
 
   return (
     <div className={`bg-white rounded-xl border transition-all duration-200 ${cardBorder}`}>
       {/* Header / Summary Row (Click to toggle) */}
-      <div 
+      <div
         className="p-4 flex items-center justify-between cursor-pointer select-none group"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-4 overflow-hidden">
-            {/* Icon / Status Indicator */}
-            <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg ${
-                proof.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 
-                proof.status === 'rejected' ? 'bg-rose-50 text-rose-600' : 
-                'bg-amber-50 text-amber-600'
+          {/* Icon / Status Indicator */}
+          <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg ${proof.status === 'approved' ? 'bg-emerald-50 text-emerald-600' :
+            proof.status === 'rejected' ? 'bg-rose-50 text-rose-600' :
+              'bg-amber-50 text-amber-600'
             }`}>
-                {proof.status === 'approved' ? '✓' : proof.status === 'rejected' ? '✕' : '?'}
-            </div>
+            {proof.status === 'approved' ? '✓' : proof.status === 'rejected' ? '✕' : '?'}
+          </div>
 
-            <div className="min-w-0">
-                <h2 className="font-bold text-slate-900 truncate text-base">
-                    {milestoneLabel}
-                </h2>
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                    <span className="truncate max-w-[150px]">Bid #{proof.bidId}</span>
-                    <span>&middot;</span>
-                    <span className="truncate font-medium text-slate-700">{proof.vendorName || 'Unknown Vendor'}</span>
-                </div>
+          <div className="min-w-0">
+            <h2 className="font-bold text-slate-900 truncate text-base">
+              {milestoneLabel}
+            </h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <span className="truncate max-w-[150px]">Bid #{proof.bidId}</span>
+              <span>&middot;</span>
+              <span className="truncate font-medium text-slate-700">{proof.vendorName || 'Unknown Vendor'}</span>
             </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
-             {isPaid && (
-                 <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-xs font-medium text-emerald-700">
-                    <span>Paid</span>
-                    {tx && <span className="opacity-50 text-[10px]">↗</span>}
-                 </div>
-             )}
-            <span className={`px-3 py-1 text-xs font-semibold rounded-full border uppercase tracking-wide ${statusChip}`}>
-                {proof.status || 'Pending'}
-            </span>
-            <div className={`transform transition-transform duration-200 text-slate-400 ${expanded ? 'rotate-180' : ''}`}>
-                ▼
+          {isPaid && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-xs font-medium text-emerald-700">
+              <span>Paid</span>
+              {tx && <span className="opacity-50 text-[10px]">↗</span>}
             </div>
+          )}
+          <span className={`px-3 py-1 text-xs font-semibold rounded-full border uppercase tracking-wide ${statusChip}`}>
+            {proof.status || 'Pending'}
+          </span>
+          <div className={`transform transition-transform duration-200 text-slate-400 ${expanded ? 'rotate-180' : ''}`}>
+            ▼
+          </div>
         </div>
       </div>
 
       {/* Expandable Body */}
       {expanded && (
         <div className="border-t border-slate-100 bg-slate-50/30 p-6">
-            
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Left Column: Evidence (Description + Files) */}
-                <div className="lg:col-span-2 space-y-6">
-                    {/* Description */}
-                    <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Vendor Description</h4>
-                        <div className="p-4 bg-white rounded-lg border border-slate-200 text-slate-700 text-sm whitespace-pre-wrap leading-relaxed shadow-sm">
-                            {proof.description || <span className="text-slate-400 italic">No description provided.</span>}
-                        </div>
-                    </div>
 
-{/* Attachments */}
-                    <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                            Attachments {Array.isArray(proof.files) && `(${proof.files.length})`}
-                        </h4>
-                        {Array.isArray(proof.files) && proof.files.length > 0 ? (
-                            // UPDATED: Added 'items-start' to prevent grid items from stretching and creating empty space
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
-                            {proof.files.map((file, i) => {
-                                const href = toGatewayUrl(file);
-                                const imgish = isImg(href) || isImg(file.name);
-                                if (imgish) {
-                                return (
-                                    <a
-                                    key={i}
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={file.name}
-                                    // UPDATED: Removed 'aspect-square', added 'block w-full'
-                                    className="group relative block w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
-                                    >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                        src={href}
-                                        alt={file.name}
-                                        // UPDATED: Changed 'h-full' to 'h-auto' to respect image ratio
-                                        className="w-full h-auto object-cover group-hover:scale-105 transition duration-500"
-                                    />
-                                    </a>
-                                );
-                                }
-                                return (
-                                <div key={i} className="p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-200 hover:shadow-sm transition-all flex flex-col justify-between h-full">
-                                    <p className="truncate text-xs font-medium text-slate-700 mb-2" title={file.name}>{file.name || 'Unknown File'}</p>
-                                    <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
-                                    >
-                                    View File ↗
-                                    </a>
-                                </div>
-                                );
-                            })}
-                            </div>
-                        ) : (
-                            <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 rounded p-4">No files attached.</div>
-                        )}
-                    </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                     {/* Payment Info Detail (if paid) */}
-                     {isPaid && tx && (
-                        <div className="text-xs text-slate-500 flex items-center gap-2">
-                            <span className="font-medium">Payment TX:</span>
-                            <a
-                                href={txUrlByChain(tx, chainId)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline decoration-slate-300 hover:decoration-slate-500 hover:text-slate-700 truncate max-w-md"
-                            >
-                                {tx}
-                            </a>
+            {/* Left Column: Evidence (Description + Files) */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Description */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Vendor Description</h4>
+                <div className="p-4 bg-white rounded-lg border border-slate-200 text-slate-700 text-sm whitespace-pre-wrap leading-relaxed shadow-sm">
+                  {proof.description || <span className="text-slate-400 italic">No description provided.</span>}
+                </div>
+              </div>
+
+              {/* Attachments */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Attachments {Array.isArray(proof.files) && `(${proof.files.length})`}
+                </h4>
+                {Array.isArray(proof.files) && proof.files.length > 0 ? (
+                  // UPDATED: Added 'items-start' to prevent grid items from stretching and creating empty space
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
+                    {proof.files.map((file, i) => {
+                      const href = toGatewayUrl(file);
+                      const imgish = isImg(href) || isImg(file.name);
+                      if (imgish) {
+                        return (
+                          <a
+                            key={i}
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={file.name}
+                            // UPDATED: Removed 'aspect-square', added 'block w-full'
+                            className="group relative block w-full overflow-hidden rounded-lg border border-slate-200 bg-white hover:shadow-md transition-all"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={href}
+                              alt={file.name}
+                              // UPDATED: Changed 'h-full' to 'h-auto' to respect image ratio
+                              className="w-full h-auto object-cover group-hover:scale-105 transition duration-500"
+                            />
+                          </a>
+                        );
+                      }
+                      return (
+                        <div key={i} className="p-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-200 hover:shadow-sm transition-all flex flex-col justify-between h-full">
+                          <p className="truncate text-xs font-medium text-slate-700 mb-2" title={file.name}>{file.name || 'Unknown File'}</p>
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
+                          >
+                            View File ↗
+                          </a>
                         </div>
-                    )}
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 rounded p-4">No files attached.</div>
+                )}
+              </div>
+
+              {/* Payment Info Detail (if paid) */}
+              {isPaid && tx && (
+                <div className="text-xs text-slate-500 flex items-center gap-2">
+                  <span className="font-medium">Payment TX:</span>
+                  <a
+                    href={txUrlByChain(tx, chainId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-slate-300 hover:decoration-slate-500 hover:text-slate-700 truncate max-w-md"
+                  >
+                    {tx}
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Operations (AI, Actions, Admin) */}
+            <div className="space-y-6">
+
+              {/* AI Analysis Box */}
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-bold text-indigo-800 uppercase tracking-wider flex items-center gap-1">
+                    🤖 Agent 2 Analysis
+                  </h4>
                 </div>
 
-                {/* Right Column: Operations (AI, Actions, Admin) */}
-                <div className="space-y-6">
-                    
-                    {/* AI Analysis Box */}
-                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-4">
-                        <div className="flex items-center justify-between mb-3">
-                             <h4 className="text-xs font-bold text-indigo-800 uppercase tracking-wider flex items-center gap-1">
-                                🤖 Agent 2 Analysis
-                             </h4>
-                        </div>
-                        
-                        {proof.aiAnalysis && (
-                            <div className="mb-4 p-3 rounded bg-white/80 border border-indigo-100 shadow-sm">
-                                <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                    {typeof (proof as any).aiAnalysis?.summary === 'string'
-                                    ? (proof as any).aiAnalysis.summary
-                                    : JSON.stringify((proof as any).aiAnalysis, null, 2)}
-                                </div>
-                            </div>
-                        )}
+                {proof.aiAnalysis && (
+                  <div className="mb-4 p-3 rounded bg-white/80 border border-indigo-100 shadow-sm">
+                    <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                      {typeof (proof as any).aiAnalysis?.summary === 'string'
+                        ? (proof as any).aiAnalysis.summary
+                        : JSON.stringify((proof as any).aiAnalysis, null, 2)}
+                    </div>
+                  </div>
+                )}
 
-                        {/* Chat / Prompt */}
-                        <div className="space-y-2">
-                             <textarea
-                                className="w-full border border-indigo-200 rounded-md p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                                rows={2}
-                                placeholder="Ask Agent 2 to verify specifics..."
-                                value={prompt}
-                                onChange={(e) => setPrompt(e.target.value)}
-                            />
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={onRun}
-                                    disabled={!canAnalyze || running}
-                                    className="flex-1 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-50 transition-colors"
-                                >
-                                    {running ? 'Running...' : 'Re-Run Analysis'}
-                                </button>
-                                <button
-                                    onClick={onChat}
-                                    disabled={!canAnalyze || streaming}
-                                    className="flex-1 px-3 py-1.5 rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs font-medium disabled:opacity-50 transition-colors"
-                                >
-                                    {streaming ? 'Thinking...' : 'Quick Chat'}
-                                </button>
-                            </div>
-                             {/* Chat Output Stream */}
-                            {chat && (
-                                <div className="mt-2 rounded border border-indigo-200 bg-white p-3 max-h-40 overflow-y-auto">
-                                <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
-                                </div>
-                            )}
-                        </div>
+                {/* Chat / Prompt */}
+                <div className="space-y-2">
+                  <textarea
+                    className="w-full border border-indigo-200 rounded-md p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                    rows={2}
+                    placeholder="Ask Agent 2 to verify specifics..."
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={onRun}
+                      disabled={!canAnalyze || running}
+                      className="flex-1 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-50 transition-colors"
+                    >
+                      {running ? 'Running...' : 'Re-Run Analysis'}
+                    </button>
+                    <button
+                      onClick={onChat}
+                      disabled={!canAnalyze || streaming}
+                      className="flex-1 px-3 py-1.5 rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs font-medium disabled:opacity-50 transition-colors"
+                    >
+                      {streaming ? 'Thinking...' : 'Quick Chat'}
+                    </button>
+                  </div>
+                  {/* Chat Output Stream */}
+                  {chat && (
+                    <div className="mt-2 rounded border border-indigo-200 bg-white p-3 max-h-40 overflow-y-auto">
+                      <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono">{chat}</div>
                     </div>
-
-                    {/* Primary Actions */}
-                    <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Decision</h4>
-                        
-                        <div className="grid grid-cols-1 gap-2">
-                             {/* Change Request Toggle */}
-                            <button
-                                onClick={() => setCrOpenFor(crOpenFor === (proof.proofId || -1) ? null : (proof.proofId || -1))}
-                                className={`w-full py-2 text-xs font-medium rounded border transition-colors ${
-                                    crOpenFor === (proof.proofId || -1) 
-                                    ? 'bg-amber-50 border-amber-200 text-amber-700' 
-                                    : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 hover:text-amber-600'
-                                }`}
-                            >
-                                {crOpenFor === (proof.proofId || -1) ? 'Cancel Request' : 'Request Changes'}
-                            </button>
-                            
-                            <div className="flex gap-2 pt-2">
-                                <button
-                                    onClick={handleReject}
-                                    disabled={proof.status === 'rejected' || busyReject}
-                                    className="flex-1 py-2 text-xs font-medium rounded bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
-                                >
-                                    {busyReject ? '...' : 'Reject'}
-                                </button>
-                                <button
-                                    onClick={handleApprove}
-                                    disabled={proof.status === 'approved' || busyApprove}
-                                    className="flex-1 py-2 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-50 disabled:bg-slate-300 transition-colors"
-                                >
-                                    {busyApprove ? 'Approving...' : 'Approve'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
- {/* Server Actions (Archive) */}
-                    <div className="mt-3">
-                         {!isArchived ? (
-                            <button
-                            onClick={() => onArchive(true)}
-                            className="w-full py-2 text-xs font-medium rounded border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors shadow-sm"
-                            >
-                            Archive this milestone
-                            </button>
-                        ) : (
-                            <button
-                            onClick={() => onArchive(false)}
-                            className="w-full py-2 text-xs font-medium rounded border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors shadow-sm"
-                            >
-                            Unarchive
-                            </button>
-                        )}
-                    </div>
-
-                </div> {/* End Right Column */}
-            </div> {/* End Grid */}
-
-            {/* Change Request Form (Full Width below grid if active) */}
-            {crOpenFor === (proof.proofId || -1) && (
-                <div className="mt-6 p-4 rounded-lg border border-amber-200 bg-amber-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex items-center gap-2 mb-3 text-amber-800 font-medium text-sm">
-                        <span>✍️ Request Changes</span>
-                    </div>
-                    <div className="grid gap-3">
-                        <div>
-                            <label className="block text-xs font-medium text-amber-800 mb-1">Comment (Instructions for vendor)</label>
-                            <textarea
-                            className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                            rows={3}
-                            value={crComment}
-                            onChange={(e) => setCrComment(e.target.value)}
-                            placeholder="Explain what needs to be fixed..."
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-medium text-amber-800 mb-1">Checklist (Optional, comma separated)</label>
-                            <input
-                            className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                            value={crChecklist}
-                            onChange={(e) => setCrChecklist(e.target.value)}
-                            placeholder="e.g. Upload clearer invoice, Add GPS coordinates"
-                            />
-                        </div>
-                        <div className="flex justify-end pt-2">
-                            <button
-                                onClick={handleCreateChangeRequest}
-                                disabled={busyCR}
-                                className="px-4 py-2 text-sm bg-amber-700 hover:bg-amber-800 text-white rounded font-medium shadow-sm disabled:opacity-70 transition-colors"
-                            >
-                                {busyCR ? 'Sending Request...' : 'Send Change Request'}
-                            </button>
-                        </div>
-                    </div>
+                  )}
                 </div>
-            )}
-            
-            {/* Global Error Display inside card */}
-            {err && (
-                <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700 font-medium">
-                    Error: {err}
+              </div>
+
+              {/* Primary Actions */}
+              <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Decision</h4>
+
+                <div className="grid grid-cols-1 gap-2">
+                  {/* Change Request Toggle */}
+                  <button
+                    onClick={() => setCrOpenFor(crOpenFor === (proof.proofId || -1) ? null : (proof.proofId || -1))}
+                    className={`w-full py-2 text-xs font-medium rounded border transition-colors ${crOpenFor === (proof.proofId || -1)
+                      ? 'bg-amber-50 border-amber-200 text-amber-700'
+                      : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 hover:text-amber-600'
+                      }`}
+                  >
+                    {crOpenFor === (proof.proofId || -1) ? 'Cancel Request' : 'Request Changes'}
+                  </button>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={handleReject}
+                      disabled={proof.status === 'rejected' || busyReject}
+                      className="flex-1 py-2 text-xs font-medium rounded bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
+                    >
+                      {busyReject ? '...' : 'Reject'}
+                    </button>
+                    <button
+                      onClick={handleApprove}
+                      disabled={proof.status === 'approved' || busyApprove}
+                      className="flex-1 py-2 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-50 disabled:bg-slate-300 transition-colors"
+                    >
+                      {busyApprove ? 'Approving...' : 'Approve'}
+                    </button>
+                  </div>
                 </div>
-            )}
+              </div>
+
+              {/* Server Actions (Archive) */}
+              <div className="mt-3">
+                {!isArchived ? (
+                  <button
+                    onClick={() => onArchive(true)}
+                    className="w-full py-2 text-xs font-medium rounded border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors shadow-sm"
+                  >
+                    Archive this milestone
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onArchive(false)}
+                    className="w-full py-2 text-xs font-medium rounded border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors shadow-sm"
+                  >
+                    Unarchive
+                  </button>
+                )}
+              </div>
+
+            </div> {/* End Right Column */}
+          </div> {/* End Grid */}
+
+          {/* Change Request Form (Full Width below grid if active) */}
+          {crOpenFor === (proof.proofId || -1) && (
+            <div className="mt-6 p-4 rounded-lg border border-amber-200 bg-amber-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center gap-2 mb-3 text-amber-800 font-medium text-sm">
+                <span>✍️ Request Changes</span>
+              </div>
+              <div className="grid gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-amber-800 mb-1">Comment (Instructions for vendor)</label>
+                  <textarea
+                    className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                    rows={3}
+                    value={crComment}
+                    onChange={(e) => setCrComment(e.target.value)}
+                    placeholder="Explain what needs to be fixed..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-amber-800 mb-1">Checklist (Optional, comma separated)</label>
+                  <input
+                    className="w-full border border-amber-200 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                    value={crChecklist}
+                    onChange={(e) => setCrChecklist(e.target.value)}
+                    placeholder="e.g. Upload clearer invoice, Add GPS coordinates"
+                  />
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleCreateChangeRequest}
+                    disabled={busyCR}
+                    className="px-4 py-2 text-sm bg-amber-700 hover:bg-amber-800 text-white rounded font-medium shadow-sm disabled:opacity-70 transition-colors"
+                  >
+                    {busyCR ? 'Sending Request...' : 'Send Change Request'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Global Error Display inside card */}
+          {err && (
+            <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700 font-medium">
+              Error: {err}
+            </div>
+          )}
 
         </div>
       )}
