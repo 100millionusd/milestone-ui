@@ -63,6 +63,7 @@ type Props = {
   forceMilestoneIndex?: number;
   hideMilestoneTabs?: boolean;
   milestoneStatus?: string; // ✅ NEW: Pass status to suppress alerts if approved
+  milestoneStatuses?: Record<number, string> | string[]; // ✅ NEW: Support map/array of statuses
 };
 
 type Draft = { message: string; files: File[]; sending?: boolean; error?: string };
@@ -97,7 +98,7 @@ const Icons = {
     <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
   ),
   Alert: () => (
-    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
   )
 };
 
@@ -108,6 +109,7 @@ export default function ChangeRequestsPanel(props: Props) {
     forceMilestoneIndex,
     hideMilestoneTabs,
     milestoneStatus,
+    milestoneStatuses,
   } = props;
 
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
@@ -212,14 +214,20 @@ export default function ChangeRequestsPanel(props: Props) {
 
   const actionableCount = useMemo(
     () => {
+      // Determine status for the CURRENT active milestone (idx)
+      const currentStatus = milestoneStatus ?? (
+        Array.isArray(milestoneStatuses) ? milestoneStatuses[idx] : milestoneStatuses?.[idx]
+      );
+
+      console.log('[ChangeRequestsPanel] Debug:', { idx, currentStatus, milestoneStatus, milestoneStatuses, rows: filteredRows.length });
+
       // If the milestone is already approved/paid, we shouldn't show "Action Required"
-      // because the workflow is effectively done or moved on.
-      if (milestoneStatus === 'approved' || milestoneStatus === 'paid' || milestoneStatus === 'completed') {
+      if (currentStatus === 'approved' || currentStatus === 'paid' || currentStatus === 'completed') {
         return 0;
       }
       return filteredRows.filter(isRowActionable).length;
     },
-    [filteredRows, milestoneStatus]
+    [filteredRows, milestoneStatus, milestoneStatuses, idx]
   );
 
   const allMilestones = useMemo(
