@@ -177,6 +177,7 @@ function entriesFromProofFiles(files: any[]): { name: string; url: string }[] {
 
   for (const x of files) {
     if (!x) continue;
+    console.log('[DEBUG] Processing file:', x);
 
     if (typeof x === 'string') {
       const s = x.trim();
@@ -205,6 +206,7 @@ function entriesFromProofFiles(files: any[]): { name: string; url: string }[] {
 
     const rawName = x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
     const url = toGatewayUrl({ url: typeof x.url === 'string' ? x.url : '', cid: typeof x.cid === 'string' ? x.cid : '', name: rawName || undefined });
+    console.log('[DEBUG] Resolved URL:', url);
     if (!url) continue;
     const name = rawName || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
     out.push({ name, url });
