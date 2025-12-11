@@ -1426,6 +1426,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           APPROVED
                         </span>
                       )}
+
                       {isRejectedServer && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
                           REJECTED
@@ -1437,6 +1438,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           NEEDS REVIEW
                         </span>
                       )}
+
                       {showPendingChip && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
                           PENDING PAYMENT
