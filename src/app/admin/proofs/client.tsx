@@ -177,7 +177,6 @@ function entriesFromProofFiles(files: any[]): { name: string; url: string }[] {
 
   for (const x of files) {
     if (!x) continue;
-    console.log('[DEBUG] Processing file:', x);
 
     if (typeof x === 'string') {
       const s = x.trim();
@@ -206,7 +205,6 @@ function entriesFromProofFiles(files: any[]): { name: string; url: string }[] {
 
     const rawName = x.name || x.fileName || x.filename || x.title || x.displayName || x.originalname || null;
     const url = toGatewayUrl({ url: typeof x.url === 'string' ? x.url : '', cid: typeof x.cid === 'string' ? x.cid : '', name: rawName || undefined });
-    console.log('[DEBUG] Resolved URL:', url);
     if (!url) continue;
     const name = rawName || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || 'file');
     out.push({ name, url });
@@ -309,8 +307,6 @@ function FilesStrip({
     })
     .filter(e => !!e.href);
 
-  console.log('[DEBUG] FilesStrip entries:', entries);
-
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
@@ -342,7 +338,7 @@ function FilesStrip({
                   alt={file.name || 'image'}
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
                   onError={(e) => {
-                    console.error('[DEBUG] Image failed to load:', href);
+                    if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
                     // Don't hide, show alt text or placeholder
                     e.currentTarget.style.display = 'none';
                     e.currentTarget.parentElement?.classList.add('bg-gray-100', 'flex', 'items-center', 'justify-center');
@@ -352,7 +348,7 @@ function FilesStrip({
                     e.currentTarget.parentElement?.appendChild(span);
                   }}
                   onLoad={() => {
-                    console.log('[DEBUG] Image loaded:', href);
+                    if (DEBUG_FILES) console.log('🔍 Image loaded:', href);
                   }}
                 />
               </button>
@@ -836,35 +832,43 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         try {
           const r = await getProofs(bid.bidId);
           list = Array.isArray(r) ? r : (Array.isArray((r as any)?.proofs) ? (r as any).proofs : []);
-          console.log(`[DEBUG] Bid ${bid.bidId} proofs:`, list);
         } catch (e) {
-          console.error(`[DEBUG] Failed to fetch proofs for bid ${bid.bidId}`, e);
+          // console.error(`[DEBUG] Failed to fetch proofs for bid ${bid.bidId}`, e);
         }
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
-          const mine = (list || [])
+          const allForMs = (list || [])
             .filter((p: any) => (p.milestoneIndex ?? p.milestone_index) === i)
             .sort((a: any, b: any) => {
               const at = new Date(a.updatedAt ?? a.submitted_at ?? a.createdAt ?? 0).getTime() || 0;
               const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
               return bt - at;
-            })[0];
+            });
 
-          if (mine) {
-            console.log(`[DEBUG] Bid ${bid.bidId} MS ${i} latest proof:`, mine);
-            console.log(`[DEBUG] Bid ${bid.bidId} MS ${i} files:`, mine.files);
+          const mine = allForMs[0];
+
+          // Collect ALL files from ALL proofs for this milestone (deduplicated)
+          // This ensures that if the "latest" logic fails or if we want to see history, we see everything.
+          const allFiles: any[] = [];
+          const seenUrls = new Set<string>();
+
+          for (const p of allForMs) {
+            const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
+            if (Array.isArray(files)) {
+              for (const f of files) {
+                const u = (f?.url || f || '').toString().trim();
+                if (u && !seenUrls.has(u)) {
+                  seenUrls.add(u);
+                  allFiles.push(f);
+                }
+              }
+            }
           }
 
           if (mine) {
             map[mkKey(bid.bidId, i)] = {
               description: mine?.description || mine?.text || mine?.vendor_prompt || mine?.title || '',
-              files:
-                mine?.files ||
-                mine?.file_json ||
-                mine?.attachments ||
-                mine?.ai_analysis?.files ||
-                mine?.aiAnalysis?.files ||
-                [],
+              files: allFiles,
               status: mine?.status,
             };
           }
