@@ -10,8 +10,8 @@ const prisma = new PrismaClient();
 const PINATA_GATEWAY =
   process.env.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '')}/ipfs`
+      .replace(/^https?:\/\//, '')
+      .replace(/\/+$/, '')}/ipfs`
     : 'https://gateway.pinata.cloud/ipfs';
 
 function normalizeIpfsUrl(input?: string, cid?: string): string {
@@ -48,8 +48,8 @@ function sanitizeFiles(files: any): Array<{ name: string; url: string; cid?: str
     if (typeof f === 'string') {
       rawUrl = f;
     } else if (f && typeof f === 'object') {
-      name   = f.name ? String(f.name) : 'file';
-      cid    = f.cid ? String(f.cid).trim() : '';
+      name = f.name ? String(f.name) : 'file';
+      cid = f.cid ? String(f.cid).trim() : '';
       rawUrl = f.url ? String(f.url).trim() : '';
     }
 
@@ -64,9 +64,10 @@ function sanitizeFiles(files: any): Array<{ name: string; url: string; cid?: str
 }
 // -----------------------------------------------------------------------------
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   try {
-    const id = Number(ctx?.params?.id);
+    const params = await props.params;
+    const id = Number(params?.id);
     if (!Number.isFinite(id)) {
       return NextResponse.json(
         { error: 'bad_request', details: 'id must be a number' },
