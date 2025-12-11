@@ -1,5 +1,6 @@
 // src/app/admin/proposals/[id]/page.tsx
 import Agent2Inline from "@/components/Agent2Inline";
+import AdminProofs from "@/components/AdminProofs";
 import { getProposal, getBids } from "@/lib/api";
 import Link from "next/link";
 
@@ -124,6 +125,15 @@ export default async function ProposalDetailPage(props: { params: Promise<{ id: 
               </div>
             )}
           </div>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold mb-4">Milestone Proofs</h2>
+          <AdminProofs
+            proposalId={proposalId}
+            bids={bids}
+            bidIds={bids.map(b => b.bidId)}
+          />
         </section>
 
         <section>
