@@ -1518,7 +1518,9 @@ export default function ProjectDetailPage() {
                 <p className="text-sm text-gray-500 mb-4">Manage negotiations between admin and vendor.</p>
                 <ChangeRequestsPanel
                   proposalId={projectIdNum}
-                  milestoneStatuses={acceptedMilestones.map((m: any) => m.status)}
+                  milestoneStatuses={acceptedMilestones.map((m: any) =>
+                    m.status || (m.paymentDate || m.paymentTxHash ? 'paid' : (m.completed ? 'completed' : 'pending'))
+                  )}
                 />
               </div>
             </>
@@ -1687,7 +1689,9 @@ export default function ProjectDetailPage() {
             <div className="p-6">
               <ChangeRequestsPanel
                 proposalId={projectIdNum}
-                milestoneStatuses={acceptedMilestones.map((m: any) => m.status)}
+                milestoneStatuses={acceptedMilestones.map((m: any) =>
+                  m.status || (m.paymentDate || m.paymentTxHash ? 'paid' : (m.completed ? 'completed' : 'pending'))
+                )}
               />
             </div>
           </div>

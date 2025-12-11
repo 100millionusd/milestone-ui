@@ -274,7 +274,9 @@ export default function VendorProofPage() {
               <ChangeRequestsPanel
                 proposalId={bid.proposalId}
                 initialMilestoneIndex={selectedOriginalIndex}
-                milestoneStatuses={Array.isArray(bid.milestones) ? bid.milestones.map((m: any) => m.status) : []}
+                milestoneStatuses={Array.isArray(bid.milestones) ? bid.milestones.map((m: any) =>
+                  m.status || (m.paymentDate || m.paymentTxHash ? 'paid' : (m.completed ? 'completed' : 'pending'))
+                ) : []}
                 // Key forces re-mount when the admin/vendor switches milestone,
                 // so the thread always matches the dropdown selection.
                 key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
