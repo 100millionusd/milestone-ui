@@ -1381,7 +1381,17 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               const fromMilestone = extractFilesFromMilestone(m);
               const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
-              const isRejectedServer = m?.status === 'rejected' || lp?.status === 'rejected';
+              // WORKAROUND: The remote backend fails to reset status to 'pending' on resubmission.
+              // We must treat 'rejected' status as 'pending' (Needs Review) if a proof record exists,
+              // otherwise the admin effectively cannot see the new submission.
+              const lpIsPending = lp?.status === 'pending' || (lp && !lp.status);
+
+              // Only consider it rejected if there is NO proof, or if we explicitly decide to trust the status 
+              // BUT here we force it: if lp exists, we assume it needs review.
+              // The only case it is "rejected" is if m.status is rejected AND we don't have a fresh proof?
+              // Actually, let's just say: It is NOT rejected if we have a proof. 
+              // We want to force the "Needs Review" state.
+              const isRejectedServer = m?.status === 'rejected' && !lp;
 
               const rejected = isRejectedServer || rejectedLocal.has(key);
 
@@ -1427,17 +1437,26 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                         </span>
                       )}
 
-                      {isRejectedServer && (
-                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
-                          REJECTED
-                        </span>
-                      )}
-
-                      {!approved && !rejected && proofExists && (
-                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
-                          NEEDS REVIEW
-                        </span>
-                      )}
+                      {/* WORKAROUND: If we have a proof (lp), but status is 'rejected', it might be a resubmission
+                       * that the buggy backend didn't reset. Show as "Needs Review" (pending) to be safe. */}
+                      {(() => {
+                        const showAsPending = lp && lp.status === 'rejected';
+                        if (isRejectedServer && !lpIsPending && !showAsPending) {
+                          return (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                              REJECTED
+                            </span>
+                          );
+                        }
+                        if (lpIsPending || (lp && lp.status === 'rejected')) {
+                          return (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                              Needs Review
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {showPendingChip && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
