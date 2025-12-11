@@ -1532,7 +1532,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               initialMilestoneIndex={origIdx}
                               forceMilestoneIndex={origIdx}
                               hideMilestoneTabs
-                              milestoneStatus={m.status}
+                              milestoneStatus={m.status || (m.paymentTxHash || m.safePaymentTxHash || m.paymentDate ? 'paid' : (m.completed ? 'completed' : 'pending'))}
                             />
                           </div>
                         )}
