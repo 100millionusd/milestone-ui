@@ -820,7 +820,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setBids(rows);
 
       // 🔁 Fetch latest proofs per milestone (same source Agent2 uses)
-      const map: Record<string, { description?: string; files?: any[] }> = {};
+      const map: Record<string, { description?: string; files?: any[]; status?: string }> = {};
       for (const bid of rows) {
         let list: any[] = [];
         try {
@@ -1202,8 +1202,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         const withIdx = ms.map((m: any, idx: number) => ({ m, idx }));
         const visibleWithIdx =
           tab === 'all'
-            ? withIdx.filter(({ idx }) => !isArchived(bid.bidId, idx))
-            : withIdx.filter(({ m, idx }) => milestoneMatchesTab(m, bid.bidId, idx));
+            ? withIdx.filter(({ idx }: { idx: number }) => !isArchived(bid.bidId, idx))
+            : withIdx.filter(({ m, idx }: { m: any; idx: number }) => milestoneMatchesTab(m, bid.bidId, idx));
         return { ...bid, _withIdxAll: withIdx, _withIdxVisible: visibleWithIdx };
       })
       .filter((b: any) => (b._withIdxVisible?.length ?? 0) > 0);
@@ -1381,10 +1381,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               const fromMilestone = extractFilesFromMilestone(m);
               const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
-              // ✅ FIX: If we have a latest proof (lp) and it is NOT rejected, then do NOT treat as rejected server-side.
-              // This allows a "rejected" milestone to show as "Needs Review" if a new proof was submitted.
-              const lpIsPending = lp?.status === 'pending' || (lp && !lp.status);
-              const isRejectedServer = (m?.status === 'rejected' || lp?.status === 'rejected') && !lpIsPending;
+              const isRejectedServer = m?.status === 'rejected' || lp?.status === 'rejected';
 
               const rejected = isRejectedServer || rejectedLocal.has(key);
 
@@ -1429,26 +1426,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                           APPROVED
                         </span>
                       )}
-                      {/* WORKAROUND: If we have a proof (lp), but status is 'rejected', it might be a resubmission
-                       * that the buggy backend didn't reset. Show as "Needs Review" (pending) to be safe. */}
-                      {(() => {
-                        const showAsPending = lp && lp.status === 'rejected';
-                        if (isRejectedServer && !lpIsPending && !showAsPending) {
-                          return (
-                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
-                              REJECTED
-                            </span>
-                          );
-                        }
-                        if (lpIsPending || (lp && lp.status === 'rejected')) {
-                          return (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                              Needs Review
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
+                      {isRejectedServer && (
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                          REJECTED
+                        </span>
+                      )}
+
                       {!approved && !rejected && proofExists && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
                           NEEDS REVIEW

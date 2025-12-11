@@ -325,13 +325,10 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
     const pending: typeof visibleRows = [];
     const processed: typeof visibleRows = [];
     visibleRows.forEach(row => {
-      // WORKAROUND: Treat 'rejected' as 'Needs Review' because the external API 
-      // fails to reset status to 'pending' on resubmission. 
-      // This ensures admins see the (potentially new) proof at the top.
-      if (row.p.status === 'approved') {
-        processed.push(row);
-      } else {
+      if (row.p.status === 'pending') {
         pending.push(row);
+      } else {
+        processed.push(row);
       }
     });
     return { pendingRows: pending, processedRows: processed };
