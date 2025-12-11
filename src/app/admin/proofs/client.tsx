@@ -826,7 +826,10 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
         try {
           const r = await getProofs(bid.bidId);
           list = Array.isArray(r) ? r : (Array.isArray((r as any)?.proofs) ? (r as any).proofs : []);
-        } catch { }
+          console.log(`[DEBUG] Bid ${bid.bidId} proofs:`, list);
+        } catch (e) {
+          console.error(`[DEBUG] Failed to fetch proofs for bid ${bid.bidId}`, e);
+        }
         const ms = Array.isArray(bid.milestones) ? bid.milestones : [];
         for (let i = 0; i < ms.length; i++) {
           const mine = (list || [])
@@ -836,6 +839,12 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               const bt = new Date(b.updatedAt ?? b.submitted_at ?? b.createdAt ?? 0).getTime() || 0;
               return bt - at;
             })[0];
+
+          if (mine) {
+            console.log(`[DEBUG] Bid ${bid.bidId} MS ${i} latest proof:`, mine);
+            console.log(`[DEBUG] Bid ${bid.bidId} MS ${i} files:`, mine.files);
+          }
+
           if (mine) {
             map[mkKey(bid.bidId, i)] = {
               description: mine?.description || mine?.text || mine?.vendor_prompt || mine?.title || '',
