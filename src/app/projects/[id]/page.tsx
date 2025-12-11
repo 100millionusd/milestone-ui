@@ -1685,7 +1685,10 @@ export default function ProjectDetailPage() {
               <h3 className="font-semibold text-gray-900">Change Management</h3>
             </div>
             <div className="p-6">
-              <ChangeRequestsPanel proposalId={projectIdNum} />
+              <ChangeRequestsPanel
+                proposalId={projectIdNum}
+                milestoneStatuses={acceptedMilestones.map((m: any) => m.status)}
+              />
             </div>
           </div>
 
