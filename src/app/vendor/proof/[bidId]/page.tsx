@@ -73,7 +73,7 @@ export default function VendorProofPage() {
     if (!e.target.files) return;
     const newFiles = Array.from(e.target.files);
     setProofFiles(prev => [...prev, ...newFiles]);
-    
+
     // Initialize progress
     const newProgress = { ...uploadProgress };
     newFiles.forEach((f) => (newProgress[f.name] = 0));
@@ -100,7 +100,7 @@ export default function VendorProofPage() {
     try {
       // 1) Upload files to IPFS (Batch Mode)
       let structuredFiles: { name: string; url: string }[] = [];
-      
+
       if (proofFiles.length > 0) {
         // Set progress for all files to 50% (Simulated, since batch is 1 request)
         proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 50 })));
@@ -109,18 +109,18 @@ export default function VendorProofPage() {
           // ✅ FIX: Use the single-request batch uploader
           // This prevents the "429 Rate Limited" crash you were seeing
           const uploaded = await uploadProofFiles(proofFiles);
-          
+
           structuredFiles = uploaded.map(u => ({ name: u.name, url: u.url }));
-          
+
           // Set progress to 100%
           proofFiles.forEach(f => setUploadProgress(prev => ({ ...prev, [f.name]: 100 })));
-          
+
         } catch (e) {
           console.error('Proof batch upload failed', e);
           throw e; // Stop execution so we don't submit an empty proof
         }
       }
-      
+
       // 2) Submit proof (sends both new JSON and legacy "proof" internally)
       const res = await submitProof({
         bidId,
@@ -141,7 +141,7 @@ export default function VendorProofPage() {
         // Legacy fallback (no proofId) – analysis not available for this submission
         alert('Proof submitted successfully! (Legacy mode). Admin will review and release payment.');
       }
-      
+
       // Clear files after success
       setProofFiles([]);
       setProofTitle('');
@@ -274,6 +274,7 @@ export default function VendorProofPage() {
               <ChangeRequestsPanel
                 proposalId={bid.proposalId}
                 initialMilestoneIndex={selectedOriginalIndex}
+                milestoneStatuses={Array.isArray(bid.milestones) ? bid.milestones.map((m: any) => m.status) : []}
                 // Key forces re-mount when the admin/vendor switches milestone,
                 // so the thread always matches the dropdown selection.
                 key={`cr-${bid.proposalId}-${selectedOriginalIndex}`}
