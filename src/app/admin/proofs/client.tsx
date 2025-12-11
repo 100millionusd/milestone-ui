@@ -1471,7 +1471,8 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                             </span>
                           );
                         }
-                        if (lpIsPending || (lp && lp.status === 'rejected')) {
+                        // Only show Needs Review if NOT approved
+                        if (!approved && (lpIsPending || (lp && lp.status === 'rejected'))) {
                           return (
                             <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
                               Needs Review
