@@ -309,6 +309,8 @@ function FilesStrip({
     })
     .filter(e => !!e.href);
 
+  console.log('[DEBUG] FilesStrip entries:', entries);
+
   return (
     <div className="overflow-x-auto scroll-smooth">
       <div className="flex flex-nowrap gap-3 pb-2 touch-pan-x snap-x snap-mandatory">
@@ -337,14 +339,20 @@ function FilesStrip({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={href!}
-                  alt=""
+                  alt={file.name || 'image'}
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
                   onError={(e) => {
-                    if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
+                    console.error('[DEBUG] Image failed to load:', href);
+                    // Don't hide, show alt text or placeholder
                     e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement?.classList.add('bg-gray-100', 'flex', 'items-center', 'justify-center');
+                    const span = document.createElement('span');
+                    span.innerText = '❌ Img';
+                    span.className = 'text-xs text-red-500 font-bold';
+                    e.currentTarget.parentElement?.appendChild(span);
                   }}
                   onLoad={() => {
-                    if (DEBUG_FILES) console.log('🔍 Image loaded:', href);
+                    console.log('[DEBUG] Image loaded:', href);
                   }}
                 />
               </button>
