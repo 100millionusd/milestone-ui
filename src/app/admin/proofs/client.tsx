@@ -1532,6 +1532,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                               initialMilestoneIndex={origIdx}
                               forceMilestoneIndex={origIdx}
                               hideMilestoneTabs
+                              milestoneStatus={m.status}
                             />
                           </div>
                         )}

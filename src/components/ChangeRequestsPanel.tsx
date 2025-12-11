@@ -27,11 +27,11 @@ type ChangeRequestRow = {
 const PINATA_GATEWAY =
   typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY
     ? `https://${String((process as any).env.NEXT_PUBLIC_PINATA_GATEWAY)
-        .replace(/^https?:\/\//, "")
-        .replace(/\/+$/, "")}/ipfs`
+      .replace(/^https?:\/\//, "")
+      .replace(/\/+$/, "")}/ipfs`
     : "https://gateway.pinata.cloud/ipfs";
 
-const GATEWAY_TOKEN = 
+const GATEWAY_TOKEN =
   typeof process !== "undefined" ? (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY_TOKEN : "";
 
 // 2. The Fixed Function
@@ -40,14 +40,14 @@ function toUrl(f: CRResponseFile) {
   // We ignore f.url because it might be the old public link or missing the token.
   if (f?.cid) {
     const baseUrl = `${PINATA_GATEWAY}/${f.cid}`;
-    return GATEWAY_TOKEN 
-      ? `${baseUrl}?pinataGatewayToken=${GATEWAY_TOKEN}` 
+    return GATEWAY_TOKEN
+      ? `${baseUrl}?pinataGatewayToken=${GATEWAY_TOKEN}`
       : baseUrl;
   }
 
   // PRIORITY 2: Fallback to stored URL (e.g. if it's an external link)
   if (f?.url && /^https?:\/\//i.test(f.url)) return f.url;
-  
+
   if (f?.url) return `https://${f.url.replace(/^https?:\/\//, "")}`;
 
   return "#";
@@ -62,6 +62,7 @@ type Props = {
   initialMilestoneIndex?: number;
   forceMilestoneIndex?: number;
   hideMilestoneTabs?: boolean;
+  milestoneStatus?: string; // ✅ NEW: Pass status to suppress alerts if approved
 };
 
 type Draft = { message: string; files: File[]; sending?: boolean; error?: string };
@@ -69,7 +70,7 @@ type Draft = { message: string; files: File[]; sending?: boolean; error?: string
 // --- Icons ---
 const Icons = {
   Refresh: () => (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 21h5v-5" /></svg>
   ),
   CheckCircle: () => (
     <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -106,6 +107,7 @@ export default function ChangeRequestsPanel(props: Props) {
     initialMilestoneIndex = 0,
     forceMilestoneIndex,
     hideMilestoneTabs,
+    milestoneStatus,
   } = props;
 
   const [activeMilestoneIndex, setActiveMilestoneIndex] = useState(initialMilestoneIndex);
@@ -118,7 +120,7 @@ export default function ChangeRequestsPanel(props: Props) {
       const q = url.searchParams.get("ms") ?? url.searchParams.get("milestone");
       const n = q ? Number(q) : NaN;
       if (Number.isFinite(n) && n >= 0) setActiveMilestoneIndex(n);
-    } catch {}
+    } catch { }
   }, []);
 
   const idx = typeof forceMilestoneIndex === "number" ? forceMilestoneIndex : activeMilestoneIndex;
@@ -209,8 +211,15 @@ export default function ChangeRequestsPanel(props: Props) {
   };
 
   const actionableCount = useMemo(
-    () => filteredRows.filter(isRowActionable).length,
-    [filteredRows]
+    () => {
+      // If the milestone is already approved/paid, we shouldn't show "Action Required"
+      // because the workflow is effectively done or moved on.
+      if (milestoneStatus === 'approved' || milestoneStatus === 'paid' || milestoneStatus === 'completed') {
+        return 0;
+      }
+      return filteredRows.filter(isRowActionable).length;
+    },
+    [filteredRows, milestoneStatus]
   );
 
   const allMilestones = useMemo(
@@ -221,7 +230,10 @@ export default function ChangeRequestsPanel(props: Props) {
   const showTabs = !hideMilestoneTabs && typeof forceMilestoneIndex !== "number" && allMilestones.length > 1;
 
   const setDraft = useCallback((crId: number, patch: Partial<Draft>) => {
-    setDrafts((prev) => ({ ...prev, [crId]: { message: "", files: [], ...prev[crId], ...patch } }));
+    setDrafts((prev) => {
+      const existing = prev[crId] || { message: "", files: [] };
+      return { ...prev, [crId]: { ...existing, ...patch } };
+    });
   }, []);
 
   const uploadFiles = useCallback(async (files: File[]) => {
@@ -234,7 +246,10 @@ export default function ChangeRequestsPanel(props: Props) {
       credentials: "include",
       cache: "no-store",
     });
-    if (!r.ok) throw new Error(`Upload failed (HTTP ${r.status})`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `Upload failed (HTTP ${r.status})`);
+    }
     const data = await r.json().catch(() => ({}));
     const arr: any[] = Array.isArray(data) ? data : data.files ?? [];
     return arr
@@ -286,13 +301,12 @@ export default function ChangeRequestsPanel(props: Props) {
   );
 
   // -------------------- render --------------------
-  
+
   return (
-    <div className={`mt-6 rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${
-        actionableCount > 0 && !isExpanded ? "border-red-200 shadow-red-50" : "border-slate-200"
-    }`}>
+    <div className={`mt-6 rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${actionableCount > 0 && !isExpanded ? "border-red-200 shadow-red-50" : "border-slate-200"
+      }`}>
       {/* --- Collapsible Header --- */}
-      <button 
+      <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-6 py-4 bg-white hover:bg-slate-50/50 transition-colors text-left group"
       >
@@ -300,24 +314,23 @@ export default function ChangeRequestsPanel(props: Props) {
           <h4 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Request History
             {!loading && actionableCount > 0 ? (
-                // Only show red if ACTUAL action is required (Open + No Reply + Not Resolved)
-                <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-bold animate-pulse">
-                   <Icons.Alert />
-                   Action Required
-                </span>
+              // Only show red if ACTUAL action is required (Open + No Reply + Not Resolved)
+              <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-bold animate-pulse">
+                <Icons.Alert />
+                Action Required
+              </span>
             ) : !loading && (
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                    filteredRows.length > 0 ? "bg-slate-100 text-slate-600" : "bg-slate-100 text-slate-400"
+              <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${filteredRows.length > 0 ? "bg-slate-100 text-slate-600" : "bg-slate-100 text-slate-400"
                 }`}>
-                    {filteredRows.length}
-                </span>
+                {filteredRows.length}
+              </span>
             )}
           </h4>
           <p className="text-sm text-slate-500 mt-1">Communications regarding Milestone {idx + 1}</p>
         </div>
         <div className="flex items-center gap-4">
           <div className={`transform transition-transform duration-300 text-slate-400 group-hover:text-slate-600 ${isExpanded ? "rotate-180" : ""}`}>
-             <Icons.ChevronDown />
+            <Icons.ChevronDown />
           </div>
         </div>
       </button>
@@ -325,20 +338,20 @@ export default function ChangeRequestsPanel(props: Props) {
       {/* --- Expandable Content --- */}
       {isExpanded && (
         <div className="border-t border-slate-100 bg-slate-50/30 px-6 pb-6 pt-4">
-            
+
           {/* Loading State */}
           {loading && (
             <div className="flex flex-col items-center justify-center space-y-3 text-slate-400 animate-pulse py-8">
-                <div className="h-2 w-1/3 bg-slate-200 rounded"></div>
-                <div className="h-2 w-1/4 bg-slate-200 rounded"></div>
+              <div className="h-2 w-1/3 bg-slate-200 rounded"></div>
+              <div className="h-2 w-1/4 bg-slate-200 rounded"></div>
             </div>
           )}
 
           {/* Error State */}
           {!loading && err && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                {err}
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {err}
             </div>
           )}
 
@@ -346,11 +359,11 @@ export default function ChangeRequestsPanel(props: Props) {
             <>
               <div className="flex justify-end mb-4">
                 <button
-                    onClick={load}
-                    className="text-xs font-medium text-slate-500 hover:text-slate-900 flex items-center gap-1.5 transition-colors"
+                  onClick={load}
+                  className="text-xs font-medium text-slate-500 hover:text-slate-900 flex items-center gap-1.5 transition-colors"
                 >
-                    <Icons.Refresh />
-                    Refresh Thread
+                  <Icons.Refresh />
+                  Refresh Thread
                 </button>
               </div>
 
@@ -391,7 +404,7 @@ export default function ChangeRequestsPanel(props: Props) {
                   const responses = Array.isArray(cr.responses) ? cr.responses : [];
                   const draft = drafts[cr.id];
                   const sending = !!draft?.sending;
-                  
+
                   // ROBUST STATUS LOGIC:
                   // 1. If status is 'resolved' OR resolvedAt is present, it's Resolved.
                   const isResolved = cr.status === "resolved" || !!cr.resolvedAt;
@@ -405,81 +418,79 @@ export default function ChangeRequestsPanel(props: Props) {
                   const isPendingReview = isStatusOpen && hasReplied;
 
                   return (
-                    <li key={cr.id} className={`group relative bg-white rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${
-                        isActionRequired ? "border-red-200 ring-1 ring-red-100" : "border-slate-200"
-                    }`}>
-                      
-                      {/* Card Header */}
-                      <div className={`px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3 ${
-                          isActionRequired 
-                            ? "bg-red-50/30 border-red-100" 
-                            : "bg-slate-50/50 border-slate-100"
+                    <li key={cr.id} className={`group relative bg-white rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${isActionRequired ? "border-red-200 ring-1 ring-red-100" : "border-slate-200"
                       }`}>
+
+                      {/* Card Header */}
+                      <div className={`px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3 ${isActionRequired
+                        ? "bg-red-50/30 border-red-100"
+                        : "bg-slate-50/50 border-slate-100"
+                        }`}>
                         <div className="flex items-center gap-3">
-                           {isActionRequired ? (
-                                <div className="text-red-500 animate-pulse">
-                                     <Icons.Alert />
-                                </div>
-                           ) : isPendingReview ? (
-                                <div className="text-amber-500">
-                                     <Icons.Clock />
-                                </div>
-                           ) : (
-                                <Icons.CheckCircle />
-                           )}
+                          {isActionRequired ? (
+                            <div className="text-red-500 animate-pulse">
+                              <Icons.Alert />
+                            </div>
+                          ) : isPendingReview ? (
+                            <div className="text-amber-500">
+                              <Icons.Clock />
+                            </div>
+                          ) : (
+                            <Icons.CheckCircle />
+                          )}
                           <div className="flex flex-col">
-                             <div className="flex items-center gap-2">
-                                 <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
-                                 {isActionRequired && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />}
-                             </div>
-                             <span className="text-xs text-slate-500 tabular-nums">
-                                {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}
-                             </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-slate-900">Change Request #{cr.id}</span>
+                              {isActionRequired && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />}
+                            </div>
+                            <span className="text-xs text-slate-500 tabular-nums">
+                              {new Date(cr.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            </span>
                           </div>
                         </div>
-                        
+
                         {/* BADGE LOGIC */}
                         {isActionRequired ? (
-                            <div className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
-                                ACTION REQUIRED
-                            </div>
+                          <div className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
+                            ACTION REQUIRED
+                          </div>
                         ) : isPendingReview ? (
-                            <div className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                                WAITING FOR REVIEW
-                            </div>
+                          <div className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                            WAITING FOR REVIEW
+                          </div>
                         ) : (
-                            <div className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                RESOLVED
-                            </div>
+                          <div className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            RESOLVED
+                          </div>
                         )}
                       </div>
 
                       <div className="p-6">
                         {/* Admin Original Request */}
                         <div className="flex gap-4 mb-8">
-                            <div className="flex-shrink-0 mt-1">
-                                <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-sm">
-                                    <Icons.AdminUser />
-                                </div>
+                          <div className="flex-shrink-0 mt-1">
+                            <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                              <Icons.AdminUser />
                             </div>
-                            <div className="flex-grow">
-                                <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-none p-4 text-sm text-slate-800 shadow-sm relative">
-                                    {cr.comment && <p className="whitespace-pre-wrap leading-relaxed">{cr.comment}</p>}
-                                    {cr.checklist?.length ? (
-                                        <div className="mt-3 space-y-2">
-                                            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Action Items</div>
-                                            <ul className="space-y-2">
-                                            {cr.checklist.map((c, i) => (
-                                                <li key={i} className="flex items-start gap-2 text-slate-700">
-                                                    <input type="checkbox" disabled className="mt-1 rounded border-slate-300 text-slate-900 focus:ring-0" />
-                                                    <span className="opacity-80">{c}</span>
-                                                </li>
-                                            ))}
-                                            </ul>
-                                        </div>
-                                    ) : null}
+                          </div>
+                          <div className="flex-grow">
+                            <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-none p-4 text-sm text-slate-800 shadow-sm relative">
+                              {cr.comment && <p className="whitespace-pre-wrap leading-relaxed">{cr.comment}</p>}
+                              {cr.checklist?.length ? (
+                                <div className="mt-3 space-y-2">
+                                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Action Items</div>
+                                  <ul className="space-y-2">
+                                    {cr.checklist.map((c, i) => (
+                                      <li key={i} className="flex items-start gap-2 text-slate-700">
+                                        <input type="checkbox" disabled className="mt-1 rounded border-slate-300 text-slate-900 focus:ring-0" />
+                                        <span className="opacity-80">{c}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
                                 </div>
+                              ) : null}
                             </div>
+                          </div>
                         </div>
 
                         {/* Thread / Timeline */}
@@ -488,10 +499,10 @@ export default function ChangeRequestsPanel(props: Props) {
                             {responses.map((resp, idx) => (
                               <div key={idx} className="relative group/item">
                                 <div className="absolute -left-[39px] top-0 w-5 h-5 rounded-full bg-white border-2 border-blue-500 ring-4 ring-white"></div>
-                                
+
                                 <div className="flex items-baseline justify-between mb-1">
-                                    <span className="text-xs font-bold text-slate-900">Vendor Reply</span>
-                                    <span className="text-xs text-slate-400 tabular-nums">{new Date(resp.createdAt).toLocaleString()}</span>
+                                  <span className="text-xs font-bold text-slate-900">Vendor Reply</span>
+                                  <span className="text-xs text-slate-400 tabular-nums">{new Date(resp.createdAt).toLocaleString()}</span>
                                 </div>
 
                                 {resp.note && (
@@ -499,33 +510,33 @@ export default function ChangeRequestsPanel(props: Props) {
                                     {resp.note}
                                   </div>
                                 )}
-                                
+
                                 {resp.files?.length > 0 && (
                                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {resp.files.map((f, i) => {
                                       const href = toUrl(f);
                                       // Check the filename first, as the URL might be an opaque IPFS hash
                                       const img = isImageHref(f.name || href);
- return img ? (
-  <a
-    key={i}
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    // UPDATED: Removed 'aspect-square'. Kept 'block w-full'.
-    className="group/img relative block w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
-  >
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img
-      src={href}
-      alt={f.name || "image"}
-      // UPDATED: Removed 'absolute inset-0 h-full'. Added 'h-auto'.
-      className="w-full h-auto object-cover transition-transform duration-500 group-hover/img:scale-105"
-    />
-    {/* Hover Overlay */}
-    <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors" />
-  </a>
-) : (
+                                      return img ? (
+                                        <a
+                                          key={i}
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          // UPDATED: Removed 'aspect-square'. Kept 'block w-full'.
+                                          className="group/img relative block w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={href}
+                                            alt={f.name || "image"}
+                                            // UPDATED: Removed 'absolute inset-0 h-full'. Added 'h-auto'.
+                                            className="w-full h-auto object-cover transition-transform duration-500 group-hover/img:scale-105"
+                                          />
+                                          {/* Hover Overlay */}
+                                          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors" />
+                                        </a>
+                                      ) : (
                                         <a
                                           key={i}
                                           href={href}
@@ -534,8 +545,8 @@ export default function ChangeRequestsPanel(props: Props) {
                                           className="flex flex-col p-3 rounded-lg border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-colors group/file"
                                         >
                                           <div className="flex items-center justify-between mb-2 text-slate-400 group-hover/file:text-blue-500">
-                                             <Icons.File />
-                                             <Icons.ExternalLink />
+                                            <Icons.File />
+                                            <Icons.ExternalLink />
                                           </div>
                                           <span className="text-xs font-medium text-slate-700 truncate w-full">{f.name || "Attachment"}</span>
                                         </a>
@@ -558,66 +569,66 @@ export default function ChangeRequestsPanel(props: Props) {
                               onChange={(e) => setDraft(cr.id, { message: e.target.value })}
                               disabled={sending}
                             />
-                            
-                            <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center">
-                                    <label className="cursor-pointer inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
-                                        <div className="relative">
-                                            <input
-                                                type="file"
-                                                multiple
-                                                onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
-                                                disabled={sending}
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                            />
-                                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-slate-200/50">
-                                                <Icons.Attachment />
-                                                <span>Attach Files</span>
-                                            </div>
-                                        </div>
-                                    </label>
-                                     {!!draft?.files?.length && (
-                                        <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                            {draft.files.length} file{draft.files.length > 1 ? 's' : ''}
-                                        </span>
-                                    )}
-                                </div>
 
-                                <div className="flex items-center gap-2">
-                                     <button
-                                        type="button"
-                                        onClick={() =>
-                                            setDrafts((prev) => {
-                                            const n = { ...prev };
-                                            delete n[cr.id];
-                                            return n;
-                                            })
-                                        }
-                                        disabled={sending || (!draft?.message && !draft?.files?.length)}
-                                        className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
-                                        >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={() => submitReply(cr)}
-                                        disabled={sending}
-                                        className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
-                                    >
-                                        {sending ? (
-                                            <>Sending...</>
-                                        ) : (
-                                            <>
-                                                <span>Send Reply</span>
-                                                <Icons.Send />
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
+                            <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center">
+                                <label className="cursor-pointer inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
+                                  <div className="relative">
+                                    <input
+                                      type="file"
+                                      multiple
+                                      onChange={(e) => setDraft(cr.id, { files: Array.from(e.target.files ?? []) })}
+                                      disabled={sending}
+                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    />
+                                    <div className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-slate-200/50">
+                                      <Icons.Attachment />
+                                      <span>Attach Files</span>
+                                    </div>
+                                  </div>
+                                </label>
+                                {!!draft?.files?.length && (
+                                  <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                    {draft.files.length} file{draft.files.length > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDrafts((prev) => {
+                                      const n = { ...prev };
+                                      delete n[cr.id];
+                                      return n;
+                                    })
+                                  }
+                                  disabled={sending || (!draft?.message && !draft?.files?.length)}
+                                  className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => submitReply(cr)}
+                                  disabled={sending}
+                                  className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+                                >
+                                  {sending ? (
+                                    <>Sending...</>
+                                  ) : (
+                                    <>
+                                      <span>Send Reply</span>
+                                      <Icons.Send />
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             {!!draft?.error && (
-                                <div className="mx-3 mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">
-                                    {draft.error}
-                                </div>
+                              <div className="mx-3 mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100">
+                                {draft.error}
+                              </div>
                             )}
                           </div>
                         )}
