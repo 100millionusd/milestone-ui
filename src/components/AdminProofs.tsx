@@ -232,7 +232,19 @@ export default function AdminProofs({ bidIds = [], proposalId, bids = [], onRefr
         throw new Error(msg);
       }
       const list = await res.json();
-      const arr = Array.isArray(list) ? list : [];
+      const rawArr = Array.isArray(list) ? list : [];
+
+      // Parse 'files' if it's a JSON string (Postgres JSONB sometimes returns as string)
+      const arr = rawArr.map((p: any) => {
+        if (typeof p.files === 'string') {
+          try {
+            return { ...p, files: JSON.parse(p.files) };
+          } catch {
+            return { ...p, files: [] };
+          }
+        }
+        return p;
+      });
 
       setProofs(arr);
       await hydrateArchiveStatuses(arr);
