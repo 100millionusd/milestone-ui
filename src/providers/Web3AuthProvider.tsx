@@ -94,7 +94,7 @@ async function pickHealthyRpc(): Promise<string> {
 // ---------- Only load wallet where needed ----------
 const pageNeedsWallet = (p?: string) => {
   if (!p) return false;
-  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet') || p.startsWith('/proposer') || p.startsWith('/new');
+  return p.startsWith('/vendor') || p.startsWith('/admin') || p.startsWith('/wallet') || p.startsWith('/proposer') || p.startsWith('/new') || p.startsWith('/create-tenant');
 };
 
 // ==================================================
