@@ -2024,8 +2024,9 @@ export async function getPublicProject(bidId: number): Promise<any | null> {
   // } catch {}
 
   const id = encodeURIComponent(String(bidId));
+  // Force new route first with cache buster
   const candidates = [
-    `/public/projects/${id}`,
+    `/public/projects/${id}?ts=${Date.now()}`,
     `/public/bids/${id}`,
     `/bids/${id}`, // may succeed if backend exposes approved/public bids without auth
   ] as const;
