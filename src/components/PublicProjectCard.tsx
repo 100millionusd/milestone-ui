@@ -30,6 +30,7 @@ type Project = {
   images?: string[];
   bids?: Bid[];
   cid?: string | null;
+  gateway?: string | null; // <--- Added dynamic gateway
 };
 
 type AuditSummary = {
@@ -96,28 +97,23 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 
 // FIX 2: Updated helper to strip tokens and enforce public gateway
 // FIX 2: Updated helper to strip tokens and enforce public gateway
-function useDedicatedGateway(url: string | null | undefined) {
+function useDedicatedGateway(url: string | null | undefined, gatewayOverride?: string | null) {
   if (!url) return '';
-
-  // Debug log to see what we are getting
-  // console.log('useDedicatedGateway input:', url);
 
   // 1. Remove the query string
   const cleanUrl = url.split('?')[0];
 
+  // Determine the gateway host to use
+  const rawGateway = gatewayOverride || PREFERRED_GATEWAY;
+  const host = rawGateway.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+
   // 2. Handle malformed ".../ipfsCID" (missing slash)
-  // Check for specific patterns: /ipfsbafy or /ipfsQm
   if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
     const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
     const parts = cleanUrl.split(split);
     if (parts.length >= 2) {
-      // parts[0] is the domain (e.g. https://sapphire...)
-      // parts[1] is the rest of the CID (e.g. beievt...)
-      // We want to reconstruct: PREFERRED_GATEWAY + / + (bafy|Qm) + parts[1]
       const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
-      const newUrl = `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cidPrefix}${parts[1]}`;
-
-      console.log('UseDedicatedGateway: Fixed malformed URL (simple)', { original: url, fixed: newUrl });
+      const newUrl = `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
       return newUrl;
     }
   }
@@ -125,7 +121,7 @@ function useDedicatedGateway(url: string | null | undefined) {
   // 3. Replace restricted or generic gateways
   return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
-    PREFERRED_GATEWAY
+    `https://${host}/ipfs/`
   );
 }
 
@@ -672,7 +668,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={useDedicatedGateway(project.coverImage)}
+              src={useDedicatedGateway(project.coverImage, project.gateway)}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"

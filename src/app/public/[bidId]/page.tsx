@@ -25,11 +25,16 @@ const PREFERRED_GATEWAY =
     : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
 
 // FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
-function useDedicatedGateway(url: string | null | undefined) {
+// FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
+function useDedicatedGateway(url: string | null | undefined, gatewayOverride?: string | null) {
   if (!url) return '';
 
   // 1. Remove the query string
   const cleanUrl = url.split('?')[0];
+
+  // Determine the gateway host to use
+  const rawGateway = gatewayOverride || PREFERRED_GATEWAY;
+  const host = rawGateway.replace(/^https?:\/\//, '').replace(/\/+$/, '');
 
   // 2. Handle malformed ".../ipfsCID" (missing slash)
   if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
@@ -37,14 +42,14 @@ function useDedicatedGateway(url: string | null | undefined) {
     const parts = cleanUrl.split(split);
     if (parts.length >= 2) {
       const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
-      return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cidPrefix}${parts[1]}`;
+      return `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
     }
   }
 
   // 3. Replace restricted or generic gateways
   return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
-    PREFERRED_GATEWAY
+    `https://${host}/ipfs/`
   );
 }
 
@@ -154,7 +159,7 @@ export default function PublicProjectDetailClient() {
       const link = document.createElement('link');
       link.rel = 'preload';
       link.as = 'image';
-      link.href = useDedicatedGateway(project.coverImage);
+      link.href = useDedicatedGateway(project.coverImage, project.gateway);
       document.head.appendChild(link);
     }
 
@@ -163,7 +168,7 @@ export default function PublicProjectDetailClient() {
       .flatMap((p: any) => p.files || [])
       .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
       .slice(0, 3)
-      .map((f: any) => useDedicatedGateway(f.url));
+      .map((f: any) => useDedicatedGateway(f.url, project.gateway));
 
     proofImages.forEach((url: string) => {
       const link = document.createElement('link');
@@ -287,7 +292,7 @@ export default function PublicProjectDetailClient() {
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
               <Image
-                src={useDedicatedGateway(project.coverImage)}
+                src={useDedicatedGateway(project.coverImage, project.gateway)}
                 alt={project.proposalTitle || 'cover'}
                 width={1600}
                 height={900}
@@ -342,7 +347,7 @@ export default function PublicProjectDetailClient() {
                       {project.images.slice(1, 10).map((u: string, i: number) => (
                         <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
                           <Image
-                            src={useDedicatedGateway(u)}
+                            src={useDedicatedGateway(u, project.gateway)}
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -459,7 +464,7 @@ export default function PublicProjectDetailClient() {
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
                                     <Image
-                                      src={useDedicatedGateway(url)}
+                                      src={useDedicatedGateway(url, project.gateway)}
                                       alt={f.name || `file ${idx + 1}`}
                                       fill
                                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"

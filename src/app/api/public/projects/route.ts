@@ -40,17 +40,19 @@ function pinataUrlFromCid(cid?: string | null) {
   return `https://${gateway}/ipfs/${cid}`;
 }
 
-function fixUrl(url: string) {
+function fixUrl(url: string, gatewayOverride?: string | null) {
   if (!url) return "";
   let u = url.trim();
+
+  // Determine the gateway host to use
+  const rawGateway = gatewayOverride || (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+  const host = rawGateway.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
   // 1. Fix malformed ".../ipfsbafy..." (missing slash)
   if (u.includes("/ipfsbafy") || u.includes("/ipfsQm")) {
     const split = u.includes("/ipfsbafy") ? "/ipfsbafy" : "/ipfsQm";
     const parts = u.split(split);
     if (parts.length >= 2) {
-      const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
-      const host = gateway.replace(/^https?:\/\//, "").replace(/\/+$/, "");
       const cidPrefix = split.replace("/ipfs", "");
       return `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
     }
@@ -58,8 +60,6 @@ function fixUrl(url: string) {
 
   // 2. Enforce preferred gateway if it's a Pinata/IPFS URL
   if (u.includes("mypinata.cloud") || u.includes("pinata.cloud") || u.includes("/ipfs/")) {
-    const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
-    const host = gateway.replace(/^https?:\/\//, "").replace(/\/+$/, "");
     // Replace the domain part
     return u.replace(/https?:\/\/[^/]+\/ipfs\//, `https://${host}/ipfs/`);
   }
@@ -67,12 +67,12 @@ function fixUrl(url: string) {
   return u;
 }
 
-function extractImagesFromDocs(docs: any[]): string[] {
+function extractImagesFromDocs(docs: any[], gatewayOverride?: string | null): string[] {
   if (!Array.isArray(docs)) return [];
   const urls: string[] = [];
   for (const d of docs) {
     const raw = d?.url || d?.link || pinataUrlFromCid(d?.cid) || "";
-    const url = fixUrl(raw);
+    const url = fixUrl(raw, gatewayOverride);
     if (!url) continue;
     if (/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(url)) urls.push(url);
     if (String(d?.contentType || "").startsWith("image/") && !urls.includes(url)) {
@@ -167,10 +167,19 @@ export async function GET() {
           getProjectFilesFromNext(proposalId, siteOrigin).catch(() => []),
         ]);
 
+        // Try to find the organization gateway
+        const orgGateway =
+          p?.gateway ||
+          p?.pinata_gateway ||
+          p?.organization?.gateway ||
+          p?.organization?.pinata_gateway ||
+          p?.org?.gateway ||
+          null;
+
         // images from proposal.docs + images from Next Files store
         const docs = Array.isArray(p?.docs) ? p.docs : [];
         const images = Array.from(
-          new Set([...(extractImagesFromDocs(docs) || []), ...(imagesFromNext || [])])
+          new Set([...(extractImagesFromDocs(docs, orgGateway) || []), ...(imagesFromNext || [])])
         );
         const coverImage = images[0] || null;
 
@@ -187,9 +196,14 @@ export async function GET() {
           proposalTitle: p?.public_title ?? p?.title ?? "",
           summary: p?.public_summary ?? p?.summary ?? p?.description ?? "",
 
+          // dynamic gateway for frontend
+          gateway: orgGateway,
+
           // media
           coverImage,
           images,
+
+          // ... rest of fields
 
           // bids + milestones
           bids,
