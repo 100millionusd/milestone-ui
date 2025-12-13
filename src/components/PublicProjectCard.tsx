@@ -102,13 +102,15 @@ function useDedicatedGateway(url: string | null | undefined) {
   // 1. Remove the query string (this removes the ?accessToken=... which causes the error)
   const cleanUrl = url.split('?')[0];
 
-  // 2. Handle malformed "sapphire.../ipfsCID" (missing slash)
-  // This specifically targets the case: sapphire.../ipfsbafybe...
-  if (cleanUrl.includes('sapphire-given-snake-741.mypinata.cloud/ipfsbafy')) {
-    return cleanUrl.replace(
-      'sapphire-given-snake-741.mypinata.cloud/ipfsbafy',
-      `${PREFERRED_GATEWAY.replace(/\/$/, '')}bafy` // Ensure we don't double slash if PREFERRED_GATEWAY has one
-    );
+  // 2. Handle malformed ".../ipfsCID" (missing slash)
+  // This targets any domain ending in /ipfsbafy... or /ipfsQm...
+  // e.g. https://sapphire.../ipfsbafy... -> https://PREFERRED/ipfs/bafy...
+  const malformedMatch = cleanUrl.match(/^(https?:\/\/[^/]+)\/ipfs(bafy|Qm)(.+)$/);
+  if (malformedMatch) {
+    // malformedMatch[1] = domain (e.g. https://sapphire...)
+    // malformedMatch[2] = bafy or Qm
+    // malformedMatch[3] = rest of CID
+    return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${malformedMatch[2]}${malformedMatch[3]}`;
   }
 
   // 3. Replace restricted or generic gateways with a reliable public one
