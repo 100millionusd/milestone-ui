@@ -1,3 +1,4 @@
+cat > next.config.js << 'EOF'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // 👇 Keep your existing settings
@@ -10,7 +11,7 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'sapphire-given-snake-741.mypinata.cloud',
+        hostname: '*.mypinata.cloud',
         pathname: '/ipfs/**',
       },
       {
@@ -34,15 +35,14 @@ const nextConfig = {
   // 👇 REQUIRED FIXES FOR WEB3
   // 1. Force these to be server-only (Prevents browser crash)
   serverExternalPackages: [
-    'pino', 
-    'pino-pretty', 
+    'pino',
+    'pino-pretty',
     'thread-stream',
-    'lokijs', 
+    'lokijs',
     'encoding'
   ],
 
-  // 2. Transpile ONLY the Web3 SDKs 
-  // ❌ REMOVED 'pino' and 'thread-stream' from here to fix the conflict error
+  // 2. Transpile ONLY the Web3 SDKs (Removed pino/thread-stream from here to fix conflict)
   transpilePackages: ['@web3auth', '@walletconnect'],
 
   // 3. Fix "Module not found" errors
@@ -82,3 +82,4 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
+EOF
