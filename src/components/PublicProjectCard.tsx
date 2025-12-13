@@ -99,32 +99,34 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
 
-  // 1. Remove the query string (this removes the ?accessToken=... which causes the error)
+  // Debug log to see what we are getting
+  // console.log('useDedicatedGateway input:', url);
+
+  // 1. Remove the query string
   const cleanUrl = url.split('?')[0];
 
   // 2. Handle malformed ".../ipfsCID" (missing slash)
-  // This targets any domain ending in /ipfsbafy... or /ipfsQm...
-  // e.g. https://sapphire.../ipfsbafy... -> https://PREFERRED/ipfs/bafy...
-  const malformedMatch = cleanUrl.match(/^(https?:\/\/[^/]+)\/ipfs(bafy|Qm)(.+)$/);
-  if (malformedMatch) {
-    console.log('UseDedicatedGateway: Fixed malformed URL', { original: url, fixed: `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${malformedMatch[2]}${malformedMatch[3]}` });
-    // malformedMatch[1] = domain (e.g. https://sapphire...)
-    // malformedMatch[2] = bafy or Qm
-    // malformedMatch[3] = rest of CID
-    return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${malformedMatch[2]}${malformedMatch[3]}`;
+  // Check for specific patterns: /ipfsbafy or /ipfsQm
+  if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
+    const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
+    const parts = cleanUrl.split(split);
+    if (parts.length >= 2) {
+      // parts[0] is the domain (e.g. https://sapphire...)
+      // parts[1] is the rest of the CID (e.g. beievt...)
+      // We want to reconstruct: PREFERRED_GATEWAY + / + (bafy|Qm) + parts[1]
+      const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
+      const newUrl = `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cidPrefix}${parts[1]}`;
+
+      console.log('UseDedicatedGateway: Fixed malformed URL (simple)', { original: url, fixed: newUrl });
+      return newUrl;
+    }
   }
 
-  // 3. Replace restricted or generic gateways with a reliable public one
-  const replaced = cleanUrl.replace(
+  // 3. Replace restricted or generic gateways
+  return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
     PREFERRED_GATEWAY
   );
-
-  if (replaced !== cleanUrl) {
-    // console.log('UseDedicatedGateway: Replaced gateway', { original: url, new: replaced });
-  }
-
-  return replaced;
 }
 
 // Per-file GPS detector
