@@ -95,13 +95,23 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 }
 
 // FIX 2: Updated helper to strip tokens and enforce public gateway
+// FIX 2: Updated helper to strip tokens and enforce public gateway
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
 
   // 1. Remove the query string (this removes the ?accessToken=... which causes the error)
   const cleanUrl = url.split('?')[0];
 
-  // 2. Replace restricted or generic gateways with a reliable public one
+  // 2. Handle malformed "sapphire.../ipfsCID" (missing slash)
+  // This specifically targets the case: sapphire.../ipfsbafybe...
+  if (cleanUrl.includes('sapphire-given-snake-741.mypinata.cloud/ipfsbafy')) {
+    return cleanUrl.replace(
+      'sapphire-given-snake-741.mypinata.cloud/ipfsbafy',
+      `${PREFERRED_GATEWAY.replace(/\/$/, '')}bafy` // Ensure we don't double slash if PREFERRED_GATEWAY has one
+    );
+  }
+
+  // 3. Replace restricted or generic gateways with a reliable public one
   return cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
     PREFERRED_GATEWAY
