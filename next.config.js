@@ -1,4 +1,3 @@
-cat > next.config.js << 'EOF'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // 👇 Keep your existing settings
@@ -82,4 +81,3 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
-EOF
