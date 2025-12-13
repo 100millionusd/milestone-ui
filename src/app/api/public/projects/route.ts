@@ -40,11 +40,39 @@ function pinataUrlFromCid(cid?: string | null) {
   return `https://${gateway}/ipfs/${cid}`;
 }
 
+function fixUrl(url: string) {
+  if (!url) return "";
+  let u = url.trim();
+
+  // 1. Fix malformed ".../ipfsbafy..." (missing slash)
+  if (u.includes("/ipfsbafy") || u.includes("/ipfsQm")) {
+    const split = u.includes("/ipfsbafy") ? "/ipfsbafy" : "/ipfsQm";
+    const parts = u.split(split);
+    if (parts.length >= 2) {
+      const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+      const host = gateway.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+      const cidPrefix = split.replace("/ipfs", "");
+      return `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
+    }
+  }
+
+  // 2. Enforce preferred gateway if it's a Pinata/IPFS URL
+  if (u.includes("mypinata.cloud") || u.includes("pinata.cloud") || u.includes("/ipfs/")) {
+    const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+    const host = gateway.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    // Replace the domain part
+    return u.replace(/https?:\/\/[^/]+\/ipfs\//, `https://${host}/ipfs/`);
+  }
+
+  return u;
+}
+
 function extractImagesFromDocs(docs: any[]): string[] {
   if (!Array.isArray(docs)) return [];
   const urls: string[] = [];
   for (const d of docs) {
-    const url = d?.url || d?.link || pinataUrlFromCid(d?.cid) || "";
+    const raw = d?.url || d?.link || pinataUrlFromCid(d?.cid) || "";
+    const url = fixUrl(raw);
     if (!url) continue;
     if (/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(url)) urls.push(url);
     if (String(d?.contentType || "").startsWith("image/") && !urls.includes(url)) {
@@ -93,7 +121,7 @@ export async function GET() {
     //    b) Also pull images/files from our own Next API store
     const siteOrigin = getSiteOrigin();
 
-    async function getBidsForProposal(proposalId: number) {
+    const getBidsForProposal = async (proposalId: number) => {
       const url = `${API_BASE}/bids?proposalId=${encodeURIComponent(String(proposalId))}&_ts=${Date.now()}`;
       const list = await fetchJSON(url, authInit());
       const arr = Array.isArray(list) ? list : [];
@@ -107,9 +135,9 @@ export async function GET() {
         updatedAt: b?.updatedAt ?? b?.updated_at ?? null,
         milestones: toMilestones(b?.milestones),
       }));
-    }
+    };
 
-    async function getProjectFilesFromNext(proposalId: number) {
+    const getProjectFilesFromNext = async (proposalId: number, siteOrigin: string) => {
       if (!siteOrigin) return [];
       // This hits your own Next API store that powers the Files tab
       const url = `${siteOrigin}/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}`;
@@ -120,14 +148,15 @@ export async function GET() {
       for (const row of arr) {
         const files = Array.isArray(row?.files) ? row.files : [];
         for (const f of files) {
-          const u = f?.url || "";
+          const raw = f?.url || "";
+          const u = fixUrl(raw);
           if (!u) continue;
           if (/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(u)) images.push(u);
         }
       }
       // De-dup
       return Array.from(new Set(images));
-    }
+    };
 
     const out = await Promise.all(
       visible.map(async (p: any) => {
@@ -135,7 +164,7 @@ export async function GET() {
 
         const [bids, imagesFromNext] = await Promise.all([
           getBidsForProposal(proposalId).catch(() => []),
-          getProjectFilesFromNext(proposalId).catch(() => []),
+          getProjectFilesFromNext(proposalId, siteOrigin).catch(() => []),
         ]);
 
         // images from proposal.docs + images from Next Files store
