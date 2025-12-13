@@ -61,7 +61,12 @@ function fixUrl(url: string, gatewayOverride?: string | null) {
   // 2. Enforce preferred gateway if it's a Pinata/IPFS URL
   if (u.includes("mypinata.cloud") || u.includes("pinata.cloud") || u.includes("/ipfs/")) {
     // Replace the domain part
-    return u.replace(/https?:\/\/[^/]+\/ipfs\//, `https://${host}/ipfs/`);
+    u = u.replace(/https?:\/\/[^/]+\/ipfs\//, `https://${host}/ipfs/`);
+  }
+
+  // 3. Fix double /ipfs/ipfs/
+  if (u.includes("/ipfs/ipfs/")) {
+    u = u.replace("/ipfs/ipfs/", "/ipfs/");
   }
 
   return u;

@@ -47,10 +47,18 @@ function useDedicatedGateway(url: string | null | undefined, gatewayOverride?: s
   }
 
   // 3. Replace restricted or generic gateways
-  return cleanUrl.replace(
+  // 3. Replace restricted or generic gateways
+  let newUrl = cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
     `https://${host}/ipfs/`
   );
+
+  // 4. Fix double /ipfs/ipfs/
+  if (newUrl.includes('/ipfs/ipfs/')) {
+    newUrl = newUrl.replace('/ipfs/ipfs/', '/ipfs/');
+  }
+
+  return newUrl;
 }
 
 // Add cache at module level (outside components)
