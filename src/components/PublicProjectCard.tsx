@@ -107,6 +107,7 @@ function useDedicatedGateway(url: string | null | undefined) {
   // e.g. https://sapphire.../ipfsbafy... -> https://PREFERRED/ipfs/bafy...
   const malformedMatch = cleanUrl.match(/^(https?:\/\/[^/]+)\/ipfs(bafy|Qm)(.+)$/);
   if (malformedMatch) {
+    console.log('UseDedicatedGateway: Fixed malformed URL', { original: url, fixed: `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${malformedMatch[2]}${malformedMatch[3]}` });
     // malformedMatch[1] = domain (e.g. https://sapphire...)
     // malformedMatch[2] = bafy or Qm
     // malformedMatch[3] = rest of CID
@@ -114,10 +115,16 @@ function useDedicatedGateway(url: string | null | undefined) {
   }
 
   // 3. Replace restricted or generic gateways with a reliable public one
-  return cleanUrl.replace(
+  const replaced = cleanUrl.replace(
     /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
     PREFERRED_GATEWAY
   );
+
+  if (replaced !== cleanUrl) {
+    // console.log('UseDedicatedGateway: Replaced gateway', { original: url, new: replaced });
+  }
+
+  return replaced;
 }
 
 // Per-file GPS detector
