@@ -1681,7 +1681,7 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
 
       if (res.ok) {
         const result = await res.json();
-        const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+        const gateway = keys.gateway || (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
         return {
           cid: result.IpfsHash,
           url: `https://${gateway}/ipfs/${result.IpfsHash}`,
@@ -1786,8 +1786,8 @@ export async function uploadFilesSequentially(
         const json = await res.json();
         const folderCid = json.IpfsHash;
 
-        // ✅ Force Dedicated Gateway
-        const gateway = "sapphire-given-snake-741.mypinata.cloud";
+        // ✅ Use Tenant Gateway if available, else fallback to env or default
+        const gateway = keys.gateway || (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
 
         console.log("✅ Batch upload success. Folder CID:", folderCid);
 

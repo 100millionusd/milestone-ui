@@ -58,9 +58,10 @@ type AuditRow = {
 const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
 
 // FIX 1: Default to a public gateway if env is missing, to avoid ERR_ID:00024
-const IPFS_GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  'https://gateway.pinata.cloud/ipfs';
+const PREFERRED_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
+    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
 
 // --- maps + taken-at helpers ---
 function mapsLink(
@@ -96,14 +97,14 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 // FIX 2: Updated helper to strip tokens and enforce public gateway
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
-  
+
   // 1. Remove the query string (this removes the ?accessToken=... which causes the error)
   const cleanUrl = url.split('?')[0];
 
   // 2. Replace restricted or generic gateways with a reliable public one
   return cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//, 
-    'https://gateway.pinata.cloud/ipfs/' 
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
+    PREFERRED_GATEWAY
   );
 }
 
@@ -150,7 +151,7 @@ function normalizeAudit(items: AuditRow[]) {
         Array.isArray(a.changedFields) && a.changedFields.length
           ? `Changed: ${a.changedFields.join(', ')}`
           : undefined,
-      ipfs: ipfs ? `${IPFS_GATEWAY}/${ipfs}` : undefined,
+      ipfs: ipfs ? `${PREFERRED_GATEWAY}/${ipfs}` : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -294,7 +295,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         if (!r.ok) return;
         const j = await r.json().catch(() => []);
         if (!cancelled && Array.isArray(j)) setFiles(j);
-      } catch {}
+      } catch { }
     })();
     return () => {
       cancelled = true;
@@ -355,7 +356,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           const changed = next.some((p, i) => p !== prev[i]);
           return changed ? next : prev;
         });
-      } catch {}
+      } catch { }
     })();
 
     return () => {
@@ -376,7 +377,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         const j = await r.json().catch(() => null);
         if (cancelled || !j) return;
         setAuditSummary(j.summary || { anchored: false });
-      } catch {}
+      } catch { }
     })();
     return () => {
       cancelled = true;
@@ -397,7 +398,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         const j = await r.json().catch(() => null);
         if (cancelled || !j) return;
         setAuditRows(Array.isArray(j.events) ? j.events : []);
-      } catch {}
+      } catch { }
     })();
     return () => {
       cancelled = true;
@@ -414,7 +415,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
+  const ipfsHref = cid ? `${PREFERRED_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
@@ -491,10 +492,10 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             {proofsToShow.map((p, idx) => {
               const rawPts = Array.isArray(p?.files)
                 ? (p.files.map((f: any) => fileCoords(f)).filter(Boolean) as Array<{
-                    lat: number;
-                    lon: number;
-                    label?: string | null;
-                  }>)
+                  lat: number;
+                  lon: number;
+                  label?: string | null;
+                }>)
                 : [];
 
               if (rawPts.length === 0 && p?.location?.approx?.lat != null && p?.location?.approx?.lon != null) {
@@ -518,10 +519,10 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                 st === 'approved'
                   ? 'bg-emerald-100 text-emerald-700'
                   : st === 'rejected'
-                  ? 'bg-rose-100 text-rose-700'
-                  : st === 'changes_requested'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-gray-100 text-gray-600';
+                    ? 'bg-rose-100 text-rose-700'
+                    : st === 'changes_requested'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-gray-100 text-gray-600';
 
               return (
                 <div key={p.proofId || idx} className="rounded-lg border p-3">
