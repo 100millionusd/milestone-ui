@@ -15,8 +15,37 @@ function usd(n: number) {
       maximumFractionDigits: 0,
     });
   } catch {
-    return `$${Math.round(n ?? 0)}`;
   }
+}
+
+// FIX: Default to a public gateway if env is missing
+const PREFERRED_GATEWAY =
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY
+    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
+    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
+
+// FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
+function useDedicatedGateway(url: string | null | undefined) {
+  if (!url) return '';
+
+  // 1. Remove the query string
+  const cleanUrl = url.split('?')[0];
+
+  // 2. Handle malformed ".../ipfsCID" (missing slash)
+  if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
+    const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
+    const parts = cleanUrl.split(split);
+    if (parts.length >= 2) {
+      const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
+      return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cidPrefix}${parts[1]}`;
+    }
+  }
+
+  // 3. Replace restricted or generic gateways
+  return cleanUrl.replace(
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
+    PREFERRED_GATEWAY
+  );
 }
 
 // Add cache at module level (outside components)
@@ -24,12 +53,12 @@ const proofsCache = new Map();
 
 async function fetchProofsClient(proposalId: number) {
   const cacheKey = `proofs-${proposalId}`;
-  
+
   // Return cached data if available (except when force refresh needed)
   if (proofsCache.has(cacheKey)) {
     return proofsCache.get(cacheKey);
   }
-  
+
   try {
     const r = await fetch(
       `/api/proofs?proposalId=${encodeURIComponent(String(proposalId))}&ts=${Date.now()}`,
@@ -41,7 +70,7 @@ async function fetchProofsClient(proposalId: number) {
     if (!r.ok) return [];
     const list = await r.json().catch(() => []);
     const result = Array.isArray(list) ? list : [];
-    
+
     // Cache the result
     proofsCache.set(cacheKey, result);
     return result;
@@ -64,10 +93,10 @@ async function fetchAuditClient(proposalId: number) {
     const list = Array.isArray(data)
       ? data
       : Array.isArray((data as any).events)
-      ? (data as any).events
-      : Array.isArray((data as any).rows)
-      ? (data as any).rows
-      : [];
+        ? (data as any).events
+        : Array.isArray((data as any).rows)
+          ? (data as any).rows
+          : [];
     return list;
   } catch {
     return [];
@@ -84,10 +113,10 @@ function normalizeAudit(items: any[]) {
         Number.isFinite(a.milestoneIndex)
           ? Number(a.milestoneIndex)
           : Number.isFinite(a.milestone_index)
-          ? Number(a.milestone_index)
-          : Number.isFinite(a.msIndex)
-          ? Number(a.msIndex)
-          : undefined;
+            ? Number(a.milestone_index)
+            : Number.isFinite(a.msIndex)
+              ? Number(a.msIndex)
+              : undefined;
       const txHash = a.txHash ?? a.payment_tx_hash ?? a.hash;
       const ipfs = a.ipfs_url ?? a.ipfsUrl ?? a.ipfs;
 
@@ -125,7 +154,7 @@ export default function PublicProjectDetailClient() {
       const link = document.createElement('link');
       link.rel = 'preload';
       link.as = 'image';
-      link.href = project.coverImage;
+      link.href = useDedicatedGateway(project.coverImage);
       document.head.appendChild(link);
     }
 
@@ -134,7 +163,7 @@ export default function PublicProjectDetailClient() {
       .flatMap((p: any) => p.files || [])
       .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
       .slice(0, 3)
-      .map((f: any) => f.url);
+      .map((f: any) => useDedicatedGateway(f.url));
 
     proofImages.forEach((url: string) => {
       const link = document.createElement('link');
@@ -257,17 +286,17 @@ export default function PublicProjectDetailClient() {
           {/* cover */}
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
- <Image
-  src={project.coverImage}
-  alt={project.proposalTitle || 'cover'}
-  width={1600}
-  height={900}
-  sizes="(max-width: 768px) 100vw, 1024px"
-  style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
-  priority
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+              <Image
+                src={useDedicatedGateway(project.coverImage)}
+                alt={project.proposalTitle || 'cover'}
+                width={1600}
+                height={900}
+                sizes="(max-width: 768px) 100vw, 1024px"
+                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+                priority
+                placeholder="blur"
+                blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgDRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+              />
             ) : (
               <div className="h-48 flex items-center justify-center text-gray-400">No image</div>
             )}
@@ -312,16 +341,16 @@ export default function PublicProjectDetailClient() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {project.images.slice(1, 10).map((u: string, i: number) => (
                         <div key={i} className="relative w-full aspect-video rounded-lg border overflow-hidden">
- <Image
-  src={u}
-  alt={`image ${i + 1}`}
-  fill
-  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-  style={{ objectFit: 'cover' }}
-  loading="lazy"
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+                          <Image
+                            src={useDedicatedGateway(u)}
+                            alt={`image ${i + 1}`}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                            style={{ objectFit: 'cover' }}
+                            loading="lazy"
+                            placeholder="blur"
+                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+                          />
                         </div>
                       ))}
                     </div>
@@ -429,16 +458,16 @@ export default function PublicProjectDetailClient() {
                               >
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
- <Image
-  src={url}
-  alt={f.name || `file ${idx + 1}`}
-  fill
-  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-  style={{ objectFit: 'cover' }}
-  loading="lazy"
-  placeholder="blur"
-  blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
-/>
+                                    <Image
+                                      src={useDedicatedGateway(url)}
+                                      alt={f.name || `file ${idx + 1}`}
+                                      fill
+                                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                                      style={{ objectFit: 'cover' }}
+                                      loading="lazy"
+                                      placeholder="blur"
+                                      blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
+                                    />
                                   </div>
                                 ) : (
                                   <div className="h-24 flex items-center justify-center text-xs text-gray-500">
