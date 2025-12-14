@@ -224,15 +224,15 @@ export default function PublicProjectDetailClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bidId]);
 
-  const tab = (sp.get('tab') || 'overview').toString();
+  const tab = (sp.get('tab') || 'files').toString();
 
   const tabs = useMemo(() => {
     const bidsLen = project?.bids?.length || 0;
     return [
-      { key: 'overview', label: 'Overview' },
+      // { key: 'overview', label: 'Overview' }, // Removed per user request
+      { key: 'files', label: `Files (${proofs.length})` },
       { key: 'bids', label: `Bids (${bidsLen})` },
       { key: 'milestones', label: 'Milestones' },
-      { key: 'files', label: `Files (${proofs.length})` },
       { key: 'audit', label: `Audit (${events.length})` },
     ] as const;
   }, [project, proofs.length, events.length]);
