@@ -824,7 +824,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             )}
 
             {tab === 'milestones' && (
-              <>
+              <div className="max-h-[600px] overflow-y-auto pr-2 space-y-3">
                 {allMilestones.length === 0 && (
                   <div className="text-sm text-gray-500">No public milestones yet.</div>
                 )}
@@ -845,14 +845,14 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                     </div>
                   </div>
                 ))}
-              </>
+              </div>
             )}
 
             {/* FILES TAB */}
             {tab === 'files' && renderFilesTab()}
 
             {tab === 'audit' && (
-              <section className="space-y-3 text-sm">
+              <section className="space-y-3 text-sm max-h-[600px] overflow-y-auto pr-2">
                 {!auditRows && <div className="text-gray-500">Loading audit…</div>}
                 {auditRows && auditRows.length === 0 && (
                   <div className="text-gray-500">No public audit events yet.</div>
