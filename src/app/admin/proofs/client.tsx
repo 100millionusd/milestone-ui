@@ -1260,41 +1260,68 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
     // Plain text proof
     const text = String(m.proof).trim();
     const showText = !!text && text !== title;
-    if (!showText) return null;
 
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = Array.from(text.matchAll(urlRegex)).map((match) => match[0]);
 
     return (
-      <div className="mt-2 space-y-2">
-        <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>
-        {urls.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {urls.map((url, i) => {
-              const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
-              if (isImage) {
-                const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
-                const startIndex = imageUrls.findIndex((u) => u === url);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
-                    className="group relative overflow-hidden rounded border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
-                  </button>
-                );
-              }
-              return (
-                <div key={i} className="p-3 rounded border bg-gray-50">
-                  <p className="truncate text-sm">Attachment</p>
-                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-                    Open
-                  </a>
-                </div>
-              );
-            })}
+      <div className="mt-2 space-y-4">
+        {/* Vendor Proof Content */}
+        {(showText || urls.length > 0) && (
+          <div className="space-y-2">
+            {showText && <p className="text-sm text-gray-700 whitespace-pre-line">{text}</p>}
+            {urls.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {urls.map((url, i) => {
+                  const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
+                  if (isImage) {
+                    const imageUrls = urls.filter((u) => /\.(png|jpe?g|gif|webp|svg)$/i.test(u));
+                    const startIndex = imageUrls.findIndex((u) => u === url);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setLightbox({ urls: imageUrls, index: Math.max(0, startIndex) })}
+                        className="group relative overflow-hidden rounded border"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                      </button>
+                    );
+                  }
+                  return (
+                    <div key={i} className="p-3 rounded border bg-gray-50">
+                      <p className="truncate text-sm">Attachment</p>
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                        Open
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Controller Report Section */}
+        {m.controllerReport && (
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold uppercase text-blue-700 tracking-wider">Controller Report</span>
+              <span className="text-xs text-blue-500">
+                by {m.controllerReport.submitter?.slice(0, 6)}...{m.controllerReport.submitter?.slice(-4)}
+              </span>
+            </div>
+
+            {m.controllerReport.description && (
+              <p className="text-sm text-blue-900 mb-3 whitespace-pre-line">{m.controllerReport.description}</p>
+            )}
+
+            {m.controllerReport.files && m.controllerReport.files.length > 0 && (
+              <FilesStrip
+                files={m.controllerReport.files}
+                onImageClick={(urls, idx) => setLightbox({ urls, index: idx })}
+              />
+            )}
           </div>
         )}
       </div>
