@@ -131,14 +131,14 @@ function uniqByMilestone(list: any[]): any[] {
 
     // Identify Vendor vs Controller
     // Robust Detection:
-    // 1. Explicit subtype/role (new reports)
-    // 2. Address mismatch (legacy reports): ONLY if subtype is not explicitly 'standard'
+    // Priority: subtype > role > address mismatch
     const vendorProofs = proofs.filter(p => {
-      const isExplicitStandard = p.subtype === 'standard' || p.submitterRole === 'vendor';
-      const isExplicitController = p.subtype === 'controller_report' || p.submitterRole === 'controller';
+      if (p.subtype === 'controller_report') return false;
+      if (p.subtype === 'standard') return true;
 
-      if (isExplicitController) return false;
-      if (isExplicitStandard) return true;
+      // Legacy / Fallback
+      if (p.submitterRole === 'controller') return false;
+      if (p.submitterRole === 'vendor') return true;
 
       // Legacy check: if submitter address is present and DIFFERENT from vendor wallet, assume controller/admin
       const vWallet = String(p.vendorWallet || '').toLowerCase();
@@ -149,11 +149,12 @@ function uniqByMilestone(list: any[]): any[] {
     });
 
     const controllerReports = proofs.filter(p => {
-      const isExplicitStandard = p.subtype === 'standard' || p.submitterRole === 'vendor';
-      const isExplicitController = p.subtype === 'controller_report' || p.submitterRole === 'controller';
+      if (p.subtype === 'controller_report') return true;
+      if (p.subtype === 'standard') return false;
 
-      if (isExplicitController) return true;
-      if (isExplicitStandard) return false;
+      // Legacy / Fallback
+      if (p.submitterRole === 'controller') return true;
+      if (p.submitterRole === 'vendor') return false;
 
       // Legacy check
       const vWallet = String(p.vendorWallet || '').toLowerCase();
