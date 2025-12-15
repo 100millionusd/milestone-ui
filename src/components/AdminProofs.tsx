@@ -129,13 +129,38 @@ function uniqByMilestone(list: any[]): any[] {
       return bt - at;
     });
 
-    const latest = proofs[0];
+    // Identify Vendor vs Controller
+    const vendorProofs = proofs.filter(p => p.subtype !== 'controller_report' && p.submitterRole !== 'controller');
+    const controllerReports = proofs.filter(p => p.subtype === 'controller_report' || p.submitterRole === 'controller');
 
-    // 3. Collect all files from ALL proofs in the group (deduplicated by URL)
+    const latestVendor = vendorProofs[0];
+    const latestController = controllerReports[0];
+
+    // Base object is Vendor Proof (preferred) or Controller Report (fallback)
+    const base = latestVendor || latestController;
+    if (!base) return;
+
+    const merged = { ...base };
+
+    // Attach Controller Report if exists
+    if (latestController) {
+      merged.controllerReport = {
+        description: latestController.description || latestController.publicText || '',
+        files: latestController.files || [],
+        submitter: latestController.submitterAddress,
+        submittedAt: latestController.submittedAt || latestController.createdAt
+      };
+    }
+
+    // 3. Collect all files from VENDOR proofs only (for the main strip)
+    // If no vendor proofs, we might want to show controller files in main strip? 
+    // No, keep them separate if possible. But if base is controller (no vendor proof), show them.
+    const sourceProofs = latestVendor ? vendorProofs : controllerReports;
+
     const allFiles: any[] = [];
     const seen = new Set<string>();
 
-    for (const p of proofs) {
+    for (const p of sourceProofs) {
       const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
       if (Array.isArray(files)) {
         for (const f of files) {
@@ -148,8 +173,8 @@ function uniqByMilestone(list: any[]): any[] {
       }
     }
 
-    // 4. Return merged object
-    out.push({ ...latest, files: allFiles });
+    merged.files = allFiles;
+    out.push(merged);
   });
 
   return out;
@@ -893,6 +918,51 @@ function ProofCard(props: ProofCardProps) {
                   <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 rounded p-4">No files attached.</div>
                 )}
               </div>
+
+              {/* Controller Report Section */}
+              {(proof as any).controllerReport && (
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs font-bold uppercase text-blue-700 tracking-wider">Controller Report</span>
+                    <span className="text-xs text-blue-500">
+                      by {(proof as any).controllerReport.submitter?.slice(0, 6)}...{(proof as any).controllerReport.submitter?.slice(-4)}
+                    </span>
+                  </div>
+
+                  {(proof as any).controllerReport.description && (
+                    <div className="mb-3 p-3 bg-white/80 rounded border border-blue-100 text-sm text-blue-900 whitespace-pre-wrap">
+                      {(proof as any).controllerReport.description}
+                    </div>
+                  )}
+
+                  {(proof as any).controllerReport.files && (proof as any).controllerReport.files.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
+                      {(proof as any).controllerReport.files.map((file: any, i: number) => {
+                        const href = toGatewayUrl(file);
+                        const imgish = isImg(href) || isImg(file.name);
+                        if (imgish) {
+                          return (
+                            <a
+                              key={i}
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group relative block w-full overflow-hidden rounded-lg border border-blue-200 bg-white hover:shadow-md transition-all"
+                            >
+                              <img src={href} alt="Controller Proof" className="w-full h-auto object-cover" />
+                            </a>
+                          );
+                        }
+                        return (
+                          <div key={i} className="p-2 rounded border border-blue-200 bg-white text-xs">
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View File</a>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Payment Info Detail (if paid) */}
               {isPaid && tx && (
