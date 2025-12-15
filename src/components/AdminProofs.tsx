@@ -131,11 +131,11 @@ function uniqByMilestone(list: any[]): any[] {
 
     // Identify Vendor vs Controller
     // Robust Detection:
-    // Priority: subtype='controller_report' > role='controller' > subtype='standard' > role='vendor' > address mismatch
+    // Priority: subtype='controller_report' > role='controller'/'admin' > subtype='standard' > role='vendor' > address mismatch
     const vendorProofs = proofs.filter(p => {
       if (p.subtype === 'controller_report') return false;
-      // FIX: Check role BEFORE accepting 'standard', to catch mislabeled controller uploads
-      if (p.submitterRole === 'controller') return false;
+      // FIX: Check role BEFORE accepting 'standard', to catch mislabeled controller/admin uploads
+      if (p.submitterRole === 'controller' || p.submitterRole === 'admin') return false;
 
       if (p.subtype === 'standard') return true;
 
@@ -143,8 +143,9 @@ function uniqByMilestone(list: any[]): any[] {
       if (p.submitterRole === 'vendor') return true;
 
       // Legacy check: if submitter address is present and DIFFERENT from vendor wallet, assume controller/admin
-      const vWallet = String(p.vendorWallet || '').toLowerCase();
-      const sAddr = String(p.submitterAddress || '').toLowerCase();
+      const vWallet = String(p.vendorWallet || p.vendor_wallet || '').toLowerCase();
+      const sAddr = String(p.submitterAddress || p.submitter_address || '').toLowerCase();
+
       if (vWallet && sAddr && vWallet !== sAddr) return false;
 
       return true;
@@ -153,7 +154,7 @@ function uniqByMilestone(list: any[]): any[] {
     const controllerReports = proofs.filter(p => {
       if (p.subtype === 'controller_report') return true;
       // FIX: Check role BEFORE rejecting 'standard'
-      if (p.submitterRole === 'controller') return true;
+      if (p.submitterRole === 'controller' || p.submitterRole === 'admin') return true;
 
       if (p.subtype === 'standard') return false;
 
@@ -161,8 +162,8 @@ function uniqByMilestone(list: any[]): any[] {
       if (p.submitterRole === 'vendor') return false;
 
       // Legacy check
-      const vWallet = String(p.vendorWallet || '').toLowerCase();
-      const sAddr = String(p.submitterAddress || '').toLowerCase();
+      const vWallet = String(p.vendorWallet || p.vendor_wallet || '').toLowerCase();
+      const sAddr = String(p.submitterAddress || p.submitter_address || '').toLowerCase();
       if (vWallet && sAddr && vWallet !== sAddr) return true;
 
       return false;

@@ -864,14 +864,6 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'admin' ||
               isAddressMismatch;
 
-            if (DEBUG_FILES) console.log('Proof Classification:', {
-              id: p.id,
-              subtype: p.subtype,
-              role: p.submitterRole,
-              mismatch: isAddressMismatch,
-              isController
-            });
-
             const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
             if (Array.isArray(files)) {
               for (const f of files) {
