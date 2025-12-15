@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { ethers } from 'ethers';
+import { Wallet, Copy, AlertTriangle, X } from 'lucide-react';
 
 interface Member {
     wallet_address: string;
@@ -19,6 +21,9 @@ export default function TeamPage() {
     const [newWallet, setNewWallet] = useState('');
     const [newRole, setNewRole] = useState('controller');
 
+    // Generated Wallet State
+    const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+
     useEffect(() => {
         loadMembers();
     }, []);
@@ -34,6 +39,12 @@ export default function TeamPage() {
         } finally {
             setLoading(false);
         }
+    }
+
+    function generateWallet() {
+        const wallet = ethers.Wallet.createRandom();
+        setNewWallet(wallet.address);
+        setGeneratedKey(wallet.privateKey);
     }
 
     async function handleAdd(e: React.FormEvent) {
@@ -78,22 +89,78 @@ export default function TeamPage() {
         <div className="max-w-4xl mx-auto p-6">
             <h1 className="text-2xl font-bold text-white mb-8">Team Management</h1>
 
+            {/* Generated Key Modal */}
+            {generatedKey && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-lg w-full shadow-2xl relative">
+                        <button
+                            onClick={() => setGeneratedKey(null)}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center gap-3 mb-4 text-amber-500">
+                            <AlertTriangle className="w-8 h-8" />
+                            <h3 className="text-xl font-bold">Save Private Key</h3>
+                        </div>
+
+                        <p className="text-gray-300 mb-6">
+                            A new wallet has been generated. You <strong>MUST</strong> save this private key now.
+                            It will not be shown again. Give this key to the team member securely.
+                        </p>
+
+                        <div className="bg-black/50 rounded-lg p-4 border border-gray-800 mb-6">
+                            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Private Key</p>
+                            <div className="flex items-center justify-between gap-2">
+                                <code className="text-green-400 font-mono text-sm break-all">{generatedKey}</code>
+                                <button
+                                    onClick={() => navigator.clipboard.writeText(generatedKey)}
+                                    className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                    title="Copy to clipboard"
+                                >
+                                    <Copy className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => setGeneratedKey(null)}
+                            className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                        >
+                            I have saved the key
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Add Member Form */}
             <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 mb-8">
                 <h2 className="text-lg font-semibold text-white mb-4">Add Team Member</h2>
-                <form onSubmit={handleAdd} className="flex gap-4 items-end">
-                    <div className="flex-1">
+                <form onSubmit={handleAdd} className="flex flex-col md:flex-row gap-4 items-end">
+                    <div className="flex-1 w-full">
                         <label className="block text-sm font-medium text-gray-300 mb-1">Wallet Address</label>
-                        <input
-                            type="text"
-                            value={newWallet}
-                            onChange={(e) => setNewWallet(e.target.value)}
-                            placeholder="0x..."
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono"
-                            required
-                        />
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={newWallet}
+                                onChange={(e) => setNewWallet(e.target.value)}
+                                placeholder="0x..."
+                                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono"
+                                required
+                            />
+                            <button
+                                type="button"
+                                onClick={generateWallet}
+                                className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg border border-gray-600 transition-colors flex items-center gap-2 whitespace-nowrap"
+                                title="Generate new wallet"
+                            >
+                                <Wallet className="w-4 h-4" />
+                                <span className="text-sm">Generate</span>
+                            </button>
+                        </div>
                     </div>
-                    <div className="w-48">
+                    <div className="w-full md:w-48">
                         <label className="block text-sm font-medium text-gray-300 mb-1">Role</label>
                         <select
                             value={newRole}
@@ -108,7 +175,7 @@ export default function TeamPage() {
                     <button
                         type="submit"
                         disabled={adding}
-                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full md:w-auto px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {adding ? 'Adding...' : 'Add Member'}
                     </button>
