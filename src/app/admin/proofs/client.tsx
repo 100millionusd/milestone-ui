@@ -853,10 +853,24 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
           const seenUrls = new Set<string>();
 
           for (const p of allForMs) {
+            const vWallet = String(p.vendorWallet || p.vendor_wallet || '').toLowerCase();
+            const sAddr = String(p.submitterAddress || p.submitter_address || '').toLowerCase();
+            // If wallets exist and differ, it's not the vendor (so it's controller/admin)
+            const isAddressMismatch = vWallet && sAddr && vWallet !== sAddr;
+
             const isController =
               p.subtype === 'controller_report' ||
               String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'controller' ||
-              String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'admin';
+              String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'admin' ||
+              isAddressMismatch;
+
+            if (DEBUG_FILES) console.log('Proof Classification:', {
+              id: p.id,
+              subtype: p.subtype,
+              role: p.submitterRole,
+              mismatch: isAddressMismatch,
+              isController
+            });
 
             const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
             if (Array.isArray(files)) {
