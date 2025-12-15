@@ -120,6 +120,11 @@ export interface Proof {
   status: "pending" | "approved" | "rejected" | "archived";
   submittedAt: string;
   aiAnalysis?: any;
+  // Added for Admin Separation
+  subtype?: string;
+  submitterRole?: string;
+  submitterAddress?: string;
+  vendorWallet?: string;
 }
 
 /** 🆕 Agent Digest types */
@@ -860,6 +865,11 @@ function toProof(p: any): Proof {
     status: p?.status ?? "pending",
     submittedAt: p?.submittedAt ?? p?.submitted_at ?? new Date().toISOString(),
     aiAnalysis: coerceAnalysis(p?.aiAnalysis ?? p?.ai_analysis),
+    // Map backend fields
+    subtype: p?.subtype ?? undefined,
+    submitterRole: p?.submitterRole ?? p?.submitter_role ?? undefined,
+    submitterAddress: p?.submitterAddress ?? p?.submitter_address ?? undefined,
+    vendorWallet: p?.vendorWallet ?? p?.vendor_wallet ?? undefined,
   };
 }
 
@@ -1681,7 +1691,7 @@ export async function uploadFileToIPFS(file: File, existingToken?: any) {
 
       if (res.ok) {
         const result = await res.json();
-        const gateway = keys.gateway || (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+        const gateway = (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
         return {
           cid: result.IpfsHash,
           url: `https://${gateway}/ipfs/${result.IpfsHash}`,
@@ -1786,8 +1796,8 @@ export async function uploadFilesSequentially(
         const json = await res.json();
         const folderCid = json.IpfsHash;
 
-        // ✅ Use Tenant Gateway if available, else fallback to env or default
-        const gateway = keys.gateway || (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY) || "gateway.pinata.cloud";
+        // ✅ Force Dedicated Gateway
+        const gateway = "sapphire-given-snake-741.mypinata.cloud";
 
         console.log("✅ Batch upload success. Folder CID:", folderCid);
 
@@ -2024,9 +2034,8 @@ export async function getPublicProject(bidId: number): Promise<any | null> {
   // } catch {}
 
   const id = encodeURIComponent(String(bidId));
-  // Force new route first with cache buster
   const candidates = [
-    `/public/projects/${id}?ts=${Date.now()}`,
+    `/public/projects/${id}`,
     `/public/bids/${id}`,
     `/bids/${id}`, // may succeed if backend exposes approved/public bids without auth
   ] as const;
