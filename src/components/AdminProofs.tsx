@@ -129,13 +129,68 @@ function uniqByMilestone(list: any[]): any[] {
       return bt - at;
     });
 
-    const latest = proofs[0];
+    // Identify Vendor vs Controller
+    // Robust Detection:
+    // 1. Explicit subtype/role (new reports)
+    // 2. Address mismatch (legacy reports): if submitter exists and != vendor wallet
+    const vendorProofs = proofs.filter(p => {
+      const isExplicitController = p.subtype === 'controller_report' || p.submitterRole === 'controller';
+      if (isExplicitController) return false;
 
-    // 3. Collect all files from ALL proofs in the group (deduplicated by URL)
+      // Legacy check: if submitter address is present and DIFFERENT from vendor wallet, assume controller/admin
+      const vWallet = String(p.vendorWallet || '').toLowerCase();
+      const sAddr = String(p.submitterAddress || '').toLowerCase();
+      if (vWallet && sAddr && vWallet !== sAddr) return false;
+
+      return true;
+    });
+
+    const controllerReports = proofs.filter(p => {
+      const isExplicitController = p.subtype === 'controller_report' || p.submitterRole === 'controller';
+      if (isExplicitController) return true;
+
+      // Legacy check
+      const vWallet = String(p.vendorWallet || '').toLowerCase();
+      const sAddr = String(p.submitterAddress || '').toLowerCase();
+      if (vWallet && sAddr && vWallet !== sAddr) return true;
+
+      return false;
+    });
+
+    const latestVendor = vendorProofs[0];
+    const latestController = controllerReports[0];
+
+    // Base object is Vendor Proof (preferred) or Controller Report (fallback)
+    const base = latestVendor || latestController;
+    if (!base) return;
+
+    const merged = { ...base };
+
+    // Attach Controller Report if exists
+    if (latestController) {
+      merged.controllerReport = {
+        description: latestController.description || latestController.publicText || '',
+        files: latestController.files || [],
+        submitter: latestController.submitterAddress,
+        submittedAt: latestController.submittedAt || latestController.createdAt
+      };
+    }
+
+    // If base is controller (no vendor proof), clear "vendor" fields to avoid duplication
+    // The controller info is already in merged.controllerReport
+    if (!latestVendor && latestController) {
+      merged.description = '';
+      merged.publicText = '';
+      // merged.files will be overwritten below anyway, but good to be explicit
+    }
+
+    // 3. Collect all files from VENDOR proofs only (for the main strip)
+    const sourceProofs = latestVendor ? vendorProofs : []; // WAS: latestVendor ? vendorProofs : controllerReports;
+
     const allFiles: any[] = [];
     const seen = new Set<string>();
 
-    for (const p of proofs) {
+    for (const p of sourceProofs) {
       const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
       if (Array.isArray(files)) {
         for (const f of files) {
@@ -148,8 +203,8 @@ function uniqByMilestone(list: any[]): any[] {
       }
     }
 
-    // 4. Return merged object
-    out.push({ ...latest, files: allFiles });
+    merged.files = allFiles;
+    out.push(merged);
   });
 
   return out;
@@ -893,6 +948,51 @@ function ProofCard(props: ProofCardProps) {
                   <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 rounded p-4">No files attached.</div>
                 )}
               </div>
+
+              {/* Controller Report Section */}
+              {(proof as any).controllerReport && (
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs font-bold uppercase text-blue-700 tracking-wider">Controller Report</span>
+                    <span className="text-xs text-blue-500">
+                      by {(proof as any).controllerReport.submitter?.slice(0, 6)}...{(proof as any).controllerReport.submitter?.slice(-4)}
+                    </span>
+                  </div>
+
+                  {(proof as any).controllerReport.description && (
+                    <div className="mb-3 p-3 bg-white/80 rounded border border-blue-100 text-sm text-blue-900 whitespace-pre-wrap">
+                      {(proof as any).controllerReport.description}
+                    </div>
+                  )}
+
+                  {(proof as any).controllerReport.files && (proof as any).controllerReport.files.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
+                      {(proof as any).controllerReport.files.map((file: any, i: number) => {
+                        const href = toGatewayUrl(file);
+                        const imgish = isImg(href) || isImg(file.name);
+                        if (imgish) {
+                          return (
+                            <a
+                              key={i}
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group relative block w-full overflow-hidden rounded-lg border border-blue-200 bg-white hover:shadow-md transition-all"
+                            >
+                              <img src={href} alt="Controller Proof" className="w-full h-auto object-cover" />
+                            </a>
+                          );
+                        }
+                        return (
+                          <div key={i} className="p-2 rounded border border-blue-200 bg-white text-xs">
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View File</a>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Payment Info Detail (if paid) */}
               {isPaid && tx && (
