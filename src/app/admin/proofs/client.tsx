@@ -864,6 +864,20 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'admin' ||
               isAddressMismatch;
 
+            // DEBUG: Log classification details for Global Admin Page
+            if (true) { // Force log
+              console.log(`[GlobalAdmin] Proof ${p.id || p.proofId} classification:`, {
+                bidId: p.bidId || p.bid_id,
+                msIdx: p.milestoneIndex || p.milestone_index,
+                subtype: p.subtype,
+                role: p.submitterRole || p.submitter_role,
+                vWallet,
+                sAddr,
+                mismatch: isAddressMismatch,
+                isController
+              });
+            }
+
             const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
             if (Array.isArray(files)) {
               for (const f of files) {
