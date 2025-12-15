@@ -417,7 +417,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
   // --- State: Caching & Local Tracking ---
   const [rejectedLocal, setRejectedLocal] = useState<Set<string>>(new Set());
   const [archMap, setArchMap] = useState<Record<string, ArchiveInfo>>({});
-  const [latestProofByKey, setLatestProofByKey] = useState<Record<string, { description?: string; files?: any[]; status?: string }>>({});
+  const [latestProofByKey, setLatestProofByKey] = useState<Record<string, { description?: string; files?: any[]; controllerFiles?: any[]; status?: string }>>({});
   const [dataCache, setDataCache] = useState<{ bids: any[]; lastUpdated: number }>({ bids: [], lastUpdated: 0 });
 
   // --- State: Payment Persistence ---
@@ -826,7 +826,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
       setBids(rows);
 
       // 🔁 Fetch latest proofs per milestone (same source Agent2 uses)
-      const map: Record<string, { description?: string; files?: any[]; status?: string }> = {};
+      const map: Record<string, { description?: string; files?: any[]; controllerFiles?: any[]; status?: string }> = {};
       for (const bid of rows) {
         let list: any[] = [];
         try {
@@ -847,28 +847,38 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
           const mine = allForMs[0];
 
-          // Collect ALL files from ALL proofs for this milestone (deduplicated)
-          // This ensures that if the "latest" logic fails or if we want to see history, we see everything.
-          const allFiles: any[] = [];
+          // Collect files, separated by Vendor vs Controller
+          const vendorFiles: any[] = [];
+          const controllerFiles: any[] = [];
           const seenUrls = new Set<string>();
 
           for (const p of allForMs) {
+            const isController =
+              p.subtype === 'controller_report' ||
+              String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'controller' ||
+              String(p.submitterRole || p.submitter_role || '').toLowerCase() === 'admin';
+
             const files = p.files || p.file_json || p.attachments || p.ai_analysis?.files || p.aiAnalysis?.files || [];
             if (Array.isArray(files)) {
               for (const f of files) {
                 const u = (f?.url || f || '').toString().trim();
                 if (u && !seenUrls.has(u)) {
                   seenUrls.add(u);
-                  allFiles.push(f);
+                  if (isController) {
+                    controllerFiles.push(f);
+                  } else {
+                    vendorFiles.push(f);
+                  }
                 }
               }
             }
           }
 
-          if (mine) {
+          if (mine || vendorFiles.length > 0 || controllerFiles.length > 0) {
             map[mkKey(bid.bidId, i)] = {
               description: mine?.description || mine?.text || mine?.vendor_prompt || mine?.title || '',
-              files: allFiles,
+              files: vendorFiles,
+              controllerFiles: controllerFiles,
               status: mine?.status,
             };
           }
@@ -1428,6 +1438,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
               // 👉 Build file list: prefer /proofs (Agent2 source), else milestone
               const lp = latestProofByKey[key];
               const fromProofs = entriesFromProofFiles(lp?.files || []);
+              const fromController = entriesFromProofFiles((lp as any)?.controllerFiles || []);
               const fromMilestone = extractFilesFromMilestone(m);
               const filesToShow = fromProofs.length ? fromProofs : fromMilestone;
 
@@ -1543,8 +1554,20 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
 
                         {/* Files */}
                         <div className="mt-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Attachments</h4>
                           <FilesStrip files={filesToShow} onImageClick={(urls, index) => setLightbox({ urls, index })} />
                         </div>
+
+                        {/* Controller Report */}
+                        {fromController.length > 0 && (
+                          <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-blue-800 mb-2 flex items-center gap-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                              Controller Report
+                            </h4>
+                            <FilesStrip files={fromController} onImageClick={(urls, index) => setLightbox({ urls, index })} />
+                          </div>
+                        )}
 
                         {/* Agent2 Panel */}
                         <Agent2PanelInline bidId={bid.bidId} milestoneIndex={origIdx} />
