@@ -9,11 +9,11 @@ const nextConfig = {
   images: {
     minimumCacheTTL: 31536000,
     remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'sapphire-given-snake-741.mypinata.cloud',
-        pathname: '/ipfs/**',
-      },
+      // {
+      //   protocol: 'https',
+      //   hostname: 'sapphire-given-snake-741.mypinata.cloud', // REMOVED
+      //   pathname: '/ipfs/**',
+      // },
       {
         protocol: 'https',
         hostname: 'gateway.pinata.cloud',
@@ -35,10 +35,10 @@ const nextConfig = {
   // 👇 REQUIRED FIXES FOR WEB3
   // 1. Force these to be server-only (Prevents browser crash)
   serverExternalPackages: [
-    'pino', 
-    'pino-pretty', 
+    'pino',
+    'pino-pretty',
     'thread-stream',
-    'lokijs', 
+    'lokijs',
     'encoding'
   ],
 

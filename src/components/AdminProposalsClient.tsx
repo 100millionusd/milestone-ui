@@ -16,13 +16,7 @@ import ProposalAgent from './ProposalAgent';
 
 // ---- 1. IPFS / GATEWAY HELPERS ----
 // ✅ FIX: Force your Dedicated Gateway to prevent 429/CORS errors
-// ✅ FIX: Force your Dedicated Gateway to prevent 429/CORS errors
-const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-      .replace(/^https?:\/\//, '')
-      .replace(/\/+$/, '')
-    : 'gateway.pinata.cloud';
+const PINATA_GATEWAY = 'gateway.pinata.cloud'; // Default to public
 
 function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
@@ -30,7 +24,7 @@ function useDedicatedGateway(url: string | null | undefined) {
 
   // Replace public gateways (or self) with the dedicated gateway constant
   return cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
+    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//,
     `https://${PINATA_GATEWAY}/ipfs/`
   );
 }
