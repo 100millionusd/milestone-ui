@@ -6,7 +6,8 @@ import {
   createProposal,
   uploadProofFiles,
   getAuthRoleOnce,
-  getProposerProfile
+  getProposerProfile,
+  API_BASE
 } from "@/lib/api";
 import Link from 'next/link';
 import { MapPin, AlertCircle, Loader2, Search, FileText, UploadCloud } from 'lucide-react';
@@ -141,18 +142,8 @@ export default function NewProposalPage() {
     formData.append('file', file);
 
     try {
-      // Use relative path since we are in the same app/domain usually, 
-      // or use API_URL if defined. Assuming relative for now as per existing patterns or direct fetch.
-      // If API_URL is needed, we might need to import it or use an env var.
-      // Given server.js is the backend, we'll try /api/parse-proposal-pdf
-      // If the frontend is on a different port, we might need the full URL.
-      // Checking existing API calls... they use `createProposal` from `@/lib/api`.
-      // I'll assume /api proxy is set up or I should use the full URL if I knew it.
-      // For now, I'll try a direct fetch to the backend URL if I can find it, or just /api if proxied.
-      // Let's try the full URL from an env var if possible, or fallback to relative.
-
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-      const res = await fetch(`${API_BASE}/api/parse-proposal-pdf`, {
+      // Hardcode Railway URL to ensure we hit production
+      const res = await fetch(`https://milestone-api-production.up.railway.app/api/parse-proposal-pdf`, {
         method: 'POST',
         body: formData,
       });
