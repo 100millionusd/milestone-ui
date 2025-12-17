@@ -296,7 +296,7 @@ export default function NewProposalPage() {
             accept=".pdf"
             onChange={handlePdfUpload}
             disabled={isParsingPdf}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
           />
           <button
             type="button"
