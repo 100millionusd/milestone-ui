@@ -15,36 +15,22 @@ import {
 } from '@/lib/milestonePaymentState';
 
 // ---------------- Consts ----------------
-// ---------------- Consts ----------------
-// FIX: Default to a public gateway if env is missing
-const PREFERRED_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
-
-// FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
-function useDedicatedGateway(url: string | null | undefined) {
-  if (!url) return '';
-
-  // 1. Remove the query string
-  const cleanUrl = url.split('?')[0];
-
-  // 2. Handle malformed ".../ipfsCID" (missing slash)
-  if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
-    const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
-    const parts = cleanUrl.split(split);
-    if (parts.length >= 2) {
-      const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
-      return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cidPrefix}${parts[1]}`;
-    }
+const PINATA_GATEWAY = (() => {
+  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
+  if (raw1) {
+    const host = raw1
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .replace(/(?:\/ipfs)+$/i, '');
+    return `https://${host}/ipfs`;
   }
 
-  // 3. Replace restricted or generic gateways
-  return cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
-    PREFERRED_GATEWAY
-  );
-}
+  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
+  const base = raw2
+    .replace(/\/+$/, '')
+    .replace(/(?:\/ipfs)+$/i, '');
+  return `${base}/ipfs`;
+})();
 
 // ⚠️ Proofs endpoint
 const PROOFS_ENDPOINT =
@@ -131,8 +117,37 @@ function parseDocs(raw: unknown): any[] {
   return [];
 }
 function normalizeIpfsUrl(input?: string, cid?: string) {
-  if (cid && (!input || /^\s*$/.test(input))) return `${PREFERRED_GATEWAY.replace(/\/$/, '')}/${cid}`;
-  return useDedicatedGateway(input);
+  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
+  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
+  if (!input) return '';
+  let u = String(input).trim();
+
+  // FIX: Handle the specific malformed case "ipfsbafy..." -> "ipfs/bafy..."
+  if (u.match(/^ipfsbafy/i)) {
+    u = u.replace(/^ipfsbafy/i, 'ipfs/bafy');
+  } else if (u.match(/\/ipfsbafy/i)) {
+    u = u.replace(/\/ipfsbafy/i, '/ipfs/bafy');
+  }
+
+  // If it's already a full URL, trust it (unless it needs the fix above)
+  if (/^https?:\/\//i.test(u)) {
+    // Just ensure no double ipfs/ipfs
+    return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  }
+
+  const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
+  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
+
+  u = u.replace(/^ipfs:\/\//i, '');
+  u = u.replace(/^\/+/, '');
+  u = u.replace(/^(?:ipfs\/)+/i, '');
+
+  // Re-check protocol after stripping
+  if (/^https?:\/\//i.test(u)) return u;
+
+  u = `${GW}/${u}`;
+  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
+  return u;
 }
 function filesFromProofRecords(items: ProofRecord[]) {
   const isBad = (u?: string) =>
@@ -152,7 +167,7 @@ function filesFromProofRecords(items: ProofRecord[]) {
       if (typeof raw === 'string') {
         url = raw;
       } else if (raw && typeof raw === 'object') {
-        url = (raw as any).url || ((raw as any).cid ? `${PREFERRED_GATEWAY}/${(raw as any).cid}` : undefined);
+        url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
       }
       if (!url || isBad(url)) continue;
       url = fixProtocol(url);
