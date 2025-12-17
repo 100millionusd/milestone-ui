@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createProposal,
@@ -129,6 +129,7 @@ export default function NewProposalPage() {
 
   // --- PDF AUTO-FILL ---
   const [isParsingPdf, setIsParsingPdf] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -294,12 +295,14 @@ export default function NewProposalPage() {
           <input
             type="file"
             accept=".pdf"
+            ref={fileInputRef}
             onChange={handlePdfUpload}
             disabled={isParsingPdf}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
+            className="hidden"
           />
           <button
             type="button"
+            onClick={() => fileInputRef.current?.click()}
             disabled={isParsingPdf}
             className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-all shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
           >
