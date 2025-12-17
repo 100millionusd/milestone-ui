@@ -458,9 +458,7 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
     ...ssrForward,
   };
 
-  if (path.includes('/auth/role')) {
-    console.log('[API] Fetching /auth/role. TenantID:', clientTenantId, 'Headers:', headers);
-  }
+
 
   if (!callerCT && !isFormData && options.body != null) {
     headers['Content-Type'] = 'application/json';
