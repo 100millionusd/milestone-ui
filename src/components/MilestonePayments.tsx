@@ -35,19 +35,19 @@ async function shrinkImageIfNeeded(file: File): Promise<File> {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d')!;
-    
+
     // Handle transparency for PNGs
     if (!file.type.includes('png')) {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
     }
-    
+
     ctx.drawImage(bitmap, 0, 0, width, height);
 
     const blob: Blob = await new Promise((resolve) =>
       canvas.toBlob(resolve as any, file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85)
     );
-    
+
     const ext = file.type === 'image/png' ? '.png' : '.jpg';
     return new File([blob!], (file.name || 'image').replace(/\.(png|webp|jpeg|jpg)$/i, '') + ext, {
       type: file.type === 'image/png' ? 'image/png' : 'image/jpeg',
@@ -87,7 +87,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
   const [crByMs, setCrByMs] = useState<Record<number, ChangeRequest[]>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [paidLocal, setPaidLocal] = useState<Record<number, true>>({});
-  
+
   const [activeProposalId, setActiveProposalId] = useState<number | undefined>(undefined);
 
   // State for collapsible sections
@@ -119,15 +119,15 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       } else if (typeof window !== 'undefined') {
         const parts = window.location.pathname.split('/');
         for (const p of parts) {
-             const val = parseInt(p);
-             if (!isNaN(val) && val > 0) {
-                 pid = val; 
-             }
+          const val = parseInt(p);
+          if (!isNaN(val) && val > 0) {
+            pid = val;
+          }
         }
         if (!pid) {
-             const validParts = parts.filter(Boolean);
-             const last = Number(validParts[validParts.length - 1]);
-             if (Number.isFinite(last)) pid = last;
+          const validParts = parts.filter(Boolean);
+          const last = Number(validParts[validParts.length - 1]);
+          if (Number.isFinite(last)) pid = last;
         }
       }
     }
@@ -205,7 +205,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     const pid = activeProposalId!;
 
     loadChangeRequests(pid);
-    
+
     const onAnyProofUpdate = () => loadChangeRequests(pid);
     window.addEventListener('proofs:updated', onAnyProofUpdate);
     window.addEventListener('proofs:changed', onAnyProofUpdate);
@@ -256,6 +256,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
 
       await saveProofFilesToDb({
         proposalId: Number(pid),
+        bidId: Number(bid.bidId), // ✅ FIX: Pass bidId
         milestoneIndex: index,
         files: filesToSave,
         note: note || 'vendor proof',
@@ -266,7 +267,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
       if (typeof window !== 'undefined') {
         const detail = { proposalId: Number(pid) };
         window.dispatchEvent(new CustomEvent('proofs:updated', { detail }));
-        window.dispatchEvent(new CustomEvent('proofs:changed', { detail })); 
+        window.dispatchEvent(new CustomEvent('proofs:changed', { detail }));
         window.dispatchEvent(
           new CustomEvent('proofs:submitted', {
             detail: { proposalId: Number(pid), bidId: Number(bid.bidId), milestoneIndex: Number(index) },
@@ -287,7 +288,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           name: f.name || (f.url.split('/').pop() || 'file'),
           url: f.url,
         })),
-      }).catch(() => {});
+      }).catch(() => { });
 
       if (Number.isFinite(pid)) await loadChangeRequests(Number(pid));
 
@@ -356,12 +357,12 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
     }
     const itemsArr =
       Array.isArray(raw) ? raw :
-      Array.isArray(raw?.items) ? raw.items :
-      [];
-    
+        Array.isArray(raw?.items) ? raw.items :
+          [];
+
     const items = (itemsArr as any[]).map((x) => ({
-        text: typeof x === 'string' ? x : String(x?.text ?? x?.title ?? ''), 
-        done: !!(x?.done ?? x?.checked)
+      text: typeof x === 'string' ? x : String(x?.text ?? x?.title ?? ''),
+      done: !!(x?.done ?? x?.checked)
     })).filter((it) => it.text);
 
     return (
@@ -438,7 +439,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           const hasOpenCR = !!(crByMs[i]?.length);
           const canSubmit = !isPaid && !isDone && (hasOpenCR || !submittedLocal[i]);
           const isExpanded = !!expanded[i];
-          
+
           const statusText = isPaid
             ? 'Paid'
             : isDone
@@ -450,47 +451,45 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
           return (
             <div
               key={i}
-              className={`border rounded overflow-hidden transition-colors ${
-                isPaid
+              className={`border rounded overflow-hidden transition-colors ${isPaid
                   ? 'bg-green-50 border-green-200'
                   : isDone
                     ? 'bg-yellow-50 border-yellow-200'
                     : 'bg-gray-50'
-              }`}
+                }`}
             >
               {/* Header - Always visible, clickable */}
-              <div 
+              <div
                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-opacity-75 transition-colors select-none"
                 onClick={() => toggleMilestone(i)}
               >
                 <div className="flex items-center gap-3">
-                   {/* Chevron Icon */}
-                   <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                   </div>
-                   <div>
+                  {/* Chevron Icon */}
+                  <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </div>
+                  <div>
                     <div className="font-medium">{m.name || `Milestone ${i + 1}`}</div>
                     {m.dueDate && (
                       <div className="text-xs text-gray-600">
                         Due: {new Date(m.dueDate).toLocaleDateString()}
                       </div>
                     )}
-                   </div>
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-lg font-bold text-green-700">
                     ${Number(m.amount || 0).toLocaleString()}
                   </div>
                   <span
-                    className={`px-2 py-1 rounded text-xs inline-block mt-1 ${
-                      isPaid
+                    className={`px-2 py-1 rounded text-xs inline-block mt-1 ${isPaid
                         ? 'bg-green-100 text-green-800'
                         : isDone
                           ? 'bg-yellow-100 text-yellow-800'
                           : 'bg-gray-100 text-gray-800'
-                    }`}
+                      }`}
                   >
                     {statusText}
                   </span>

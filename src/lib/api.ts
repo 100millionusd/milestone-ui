@@ -1845,10 +1845,11 @@ export const uploadProofFiles = uploadFilesSequentially;
 //    (this is what makes them appear in the Project “Files” tab automatically)
 export async function saveProofFilesToDb(params: {
   proposalId: number;
-  milestoneIndex: number; // ZERO-BASED (M1=0, M2=1, …)
+  bidId?: number;                  // ← new optional (but recommended)
+  milestoneIndex: number;
   files: Array<{ url: string; name?: string; cid?: string }>;
   note?: string;
-  replaceExisting?: boolean;       // ← optional: set true to wipe old files for this milestone
+  replaceExisting?: boolean;
 }) {
   const res = await fetch(`/api/proofs`, {
     method: 'POST',
@@ -1856,10 +1857,11 @@ export async function saveProofFilesToDb(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       proposalId: Number(params.proposalId),
+      bidId: params.bidId ? Number(params.bidId) : undefined, // ← pass it
       milestoneIndex: Number(params.milestoneIndex),
       note: params.note ?? null,
       files: params.files,
-      mode: params.replaceExisting ? 'replace' : 'append',  // ← new
+      mode: params.replaceExisting ? 'replace' : 'append',
     }),
   });
 
