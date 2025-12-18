@@ -283,7 +283,7 @@ function NewBidPageContent() {
                 const fd = new FormData();
                 fd.append('file', file);
 
-                const res = await fetch(`${API_BASE}/parse-bid-pdf`, {
+                const res = await fetch(`${API_BASE}/api/parse-bid-pdf`, {
                   method: 'POST',
                   body: fd,
                 });
