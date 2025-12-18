@@ -10,7 +10,7 @@ import { API_BASE, createBid, uploadFileToIPFS, getProposal, analyzeBid, getBid 
 // ---- small helpers (after imports, before the component) ----
 function fmtSize(bytes: number) {
   if (!Number.isFinite(bytes)) return '';
-  const u = ['B','KB','MB','GB','TB'];
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0, n = bytes;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   const digits = n < 10 && i > 0 ? 1 : 0;
@@ -49,16 +49,16 @@ function NewBidPageContent() {
     milestones: [{ name: 'Milestone 1', amount: '', dueDate: '' }],
   });
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-const fileInputRef = useRef<HTMLInputElement | null>(null);
-const fmtBytes = (n: number) =>
-  n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
-const removeSelectedAt = (idx: number) => {
-  setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
-};
-const clearSelected = () => {
-  setSelectedFiles([]);
-  if (fileInputRef.current) fileInputRef.current.value = '';
-};
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fmtBytes = (n: number) =>
+    n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  const removeSelectedAt = (idx: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
+  };
+  const clearSelected = () => {
+    setSelectedFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   // ✅ Agent2 modal state
   type Step = 'submitting' | 'analyzing' | 'done' | 'error';
@@ -161,91 +161,91 @@ const clearSelected = () => {
   const qs = searchParams?.toString();
   const returnTo = `/bids/new${qs ? `?${qs}` : ''}`;
 
-// --- submit handler ---
+  // --- submit handler ---
 
-// helper: upload many files to IPFS and normalize
-async function uploadManyToIPFS(fs: File[]) {
-  const out: Array<{ url: string; name: string; cid?: string; size?: number; mimetype?: string }> = [];
-  for (const f of fs) {
-    const up = await uploadFileToIPFS(f);
-    out.push({
-      url: String(up.url),
-      name: String(f.name || 'file'),
-      cid: up.cid ? String(up.cid) : undefined,
-      size: typeof f.size === 'number' ? f.size : undefined,
-      mimetype: f.type || undefined,
-    });
-  }
-  return out;
-}
-
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (submitted) return;
-  if (!proposalId) {
-    alert('No project selected. Open this page with ?proposalId=<id>.');
-    return;
-  }
-  if (missingRequiredProfile) {
-    alert('Please complete your vendor profile first.');
-    return;
+  // helper: upload many files to IPFS and normalize
+  async function uploadManyToIPFS(fs: File[]) {
+    const out: Array<{ url: string; name: string; cid?: string; size?: number; mimetype?: string }> = [];
+    for (const f of fs) {
+      const up = await uploadFileToIPFS(f);
+      out.push({
+        url: String(up.url),
+        name: String(f.name || 'file'),
+        cid: up.cid ? String(up.cid) : undefined,
+        size: typeof f.size === 'number' ? f.size : undefined,
+        mimetype: f.type || undefined,
+      });
+    }
+    return out;
   }
 
-  setLoading(true);
-  setModalOpen(true);
-  setStep('submitting');
-  setMessage('Submitting your bid…');
-  setAnalysis(null);
-  setCreatedBidId(null);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitted) return;
+    if (!proposalId) {
+      alert('No project selected. Open this page with ?proposalId=<id>.');
+      return;
+    }
+    if (missingRequiredProfile) {
+      alert('Please complete your vendor profile first.');
+      return;
+    }
 
-  try {
-    // 1) upload ALL selected files
-    const uploadedFiles = selectedFiles.length ? await uploadManyToIPFS(selectedFiles) : [];
+    setLoading(true);
+    setModalOpen(true);
+    setStep('submitting');
+    setMessage('Submitting your bid…');
+    setAnalysis(null);
+    setCreatedBidId(null);
 
-    // 2) single back-compat doc (prefer PDF, else first)
-    const doc =
-      uploadedFiles.find(f => (f.mimetype || f.name || '').toLowerCase().includes('pdf')) ||
-      uploadedFiles[0] ||
-      null;
+    try {
+      // 1) upload ALL selected files
+      const uploadedFiles = selectedFiles.length ? await uploadManyToIPFS(selectedFiles) : [];
 
-    // 3) payload with BOTH doc and files[]
-    const body: any = {
-      ...formData,
-      proposalId: Number(proposalId),
-      priceUSD: parseFloat(formData.priceUSD),
-      days: parseInt(formData.days),
-      milestones: (formData.milestones || []).map((m) => ({
-        name: m.name,
-        amount: parseFloat(String(m.amount || 0)),
-        dueDate: new Date(m.dueDate).toISOString(),
-      })),
-      doc,                // <- single object or null
-      files: uploadedFiles, // <- MULTI-FILE ARRAY
-    };
+      // 2) single back-compat doc (prefer PDF, else first)
+      const doc =
+        uploadedFiles.find(f => (f.mimetype || f.name || '').toLowerCase().includes('pdf')) ||
+        uploadedFiles[0] ||
+        null;
 
-    // optional debug
-    console.log('createBid files count =', body.files?.length ?? 0);
+      // 3) payload with BOTH doc and files[]
+      const body: any = {
+        ...formData,
+        proposalId: Number(proposalId),
+        priceUSD: parseFloat(formData.priceUSD),
+        days: parseInt(formData.days),
+        milestones: (formData.milestones || []).map((m) => ({
+          name: m.name,
+          amount: parseFloat(String(m.amount || 0)),
+          dueDate: new Date(m.dueDate).toISOString(),
+        })),
+        doc,                // <- single object or null
+        files: uploadedFiles, // <- MULTI-FILE ARRAY
+      };
 
-    // 4) create bid
-    const created = await createBid(body);
-    const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
-    if (!bidId) throw new Error('Bid created but no ID returned');
+      // optional debug
+      console.log('createBid files count =', body.files?.length ?? 0);
 
-    setCreatedBidId(bidId);
-    setStep('analyzing');
-    setMessage('Agent2 is analyzing your bid…');
+      // 4) create bid
+      const created = await createBid(body);
+      const bidId = Number((created as any)?.bidId ?? (created as any)?.bid_id);
+      if (!bidId) throw new Error('Bid created but no ID returned');
 
-    try { await analyzeBid(bidId, undefined); } catch {}
-    pollUntilAnalysis(bidId);
-  } catch (error: any) {
-    console.error('Error creating bid:', error);
-    setStep('error');
-    setMessage(error?.message || 'Failed to create bid');
-    alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
-  } finally {
-    setLoading(false);
-  }
-};
+      setCreatedBidId(bidId);
+      setStep('analyzing');
+      setMessage('Agent2 is analyzing your bid…');
+
+      try { await analyzeBid(bidId, undefined); } catch { }
+      pollUntilAnalysis(bidId);
+    } catch (error: any) {
+      console.error('Error creating bid:', error);
+      setStep('error');
+      setMessage(error?.message || 'Failed to create bid');
+      alert('Failed to create bid: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // --- UI ---
   if (!proposalId) {
@@ -261,6 +261,84 @@ const handleSubmit = async (e: React.FormEvent) => {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Submit Bid</h1>
+
+      {/* ✅ AI Autofill Button */}
+      <div className="mb-8 p-4 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center justify-between">
+        <div>
+          <h3 className="font-medium text-indigo-900">Have a bid document?</h3>
+          <p className="text-sm text-indigo-700">Upload your PDF and our AI will fill out this form for you.</p>
+        </div>
+        <div>
+          <input
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            id="bid-pdf-upload"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+
+              setLoading(true); // Re-use loading state or add a specific one
+              try {
+                const fd = new FormData();
+                fd.append('file', file);
+
+                const res = await fetch(`${API_BASE}/parse-bid-pdf`, {
+                  method: 'POST',
+                  body: fd,
+                });
+
+                if (!res.ok) throw new Error('Failed to parse PDF');
+
+                const data = await res.json();
+
+                setFormData(prev => ({
+                  ...prev,
+                  priceUSD: data.priceUSD ? String(data.priceUSD) : prev.priceUSD,
+                  days: data.days ? String(data.days) : prev.days,
+                  notes: data.notes || prev.notes,
+                  milestones: Array.isArray(data.milestones) && data.milestones.length > 0
+                    ? data.milestones.map((m: any) => ({
+                      name: m.name || 'Milestone',
+                      amount: m.amount ? String(m.amount) : '',
+                      dueDate: m.dueDate ? m.dueDate.split('T')[0] : ''
+                    }))
+                    : prev.milestones
+                }));
+
+                // Also add the file to the attachments list
+                setSelectedFiles(prev => [...prev, file]);
+
+              } catch (err) {
+                console.error(err);
+                alert('Failed to parse PDF. Please fill the form manually.');
+              } finally {
+                setLoading(false);
+                e.target.value = ''; // reset
+              }
+            }}
+          />
+          <label
+            htmlFor="bid-pdf-upload"
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium text-white cursor-pointer transition-colors ${loading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+          >
+            {loading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                Upload Bid (PDF)
+              </>
+            )}
+          </label>
+        </div>
+      </div>
 
       {/* ✅ Profile gate */}
       {profileLoading && (
@@ -479,89 +557,89 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           </div>
 
-{/* File picker: hidden native input + custom button + live summary */}
-<div className="mt-4">
-  {/* hidden real input */}
-  <input
-    id="supportingDocs"
-    type="file"
-    multiple
-    ref={fileInputRef}
-    className="sr-only"
-    onChange={(e) => {
-      const files = Array.from(e.currentTarget.files || []);
-      if (!files.length) return;
-      setSelectedFiles((prev) => [...prev, ...files]);   // append
-      e.currentTarget.value = "";                        // allow re-picking same file
-    }}
-  />
+          {/* File picker: hidden native input + custom button + live summary */}
+          <div className="mt-4">
+            {/* hidden real input */}
+            <input
+              id="supportingDocs"
+              type="file"
+              multiple
+              ref={fileInputRef}
+              className="sr-only"
+              onChange={(e) => {
+                const files = Array.from(e.currentTarget.files || []);
+                if (!files.length) return;
+                setSelectedFiles((prev) => [...prev, ...files]);   // append
+                e.currentTarget.value = "";                        // allow re-picking same file
+              }}
+            />
 
-  {/* visible trigger + live summary + clear-all */}
-  <div className="flex items-center gap-3">
-    <label
-      htmlFor="supportingDocs"
-      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 cursor-pointer"
-    >
-      Choose Files
-    </label>
+            {/* visible trigger + live summary + clear-all */}
+            <div className="flex items-center gap-3">
+              <label
+                htmlFor="supportingDocs"
+                className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 cursor-pointer"
+              >
+                Choose Files
+              </label>
 
-    <span className="text-sm text-slate-600">
-      {selectedFiles.length === 0
-        ? "No files selected yet"
-        : selectedFiles.length === 1
-          ? `${selectedFiles[0].name} — ${fmtSize((selectedFiles[0] as File).size ?? 0)}`
-          : `${selectedFiles.length} files selected`}
-    </span>
+              <span className="text-sm text-slate-600">
+                {selectedFiles.length === 0
+                  ? "No files selected yet"
+                  : selectedFiles.length === 1
+                    ? `${selectedFiles[0].name} — ${fmtSize((selectedFiles[0] as File).size ?? 0)}`
+                    : `${selectedFiles.length} files selected`}
+              </span>
 
-    {selectedFiles.length > 0 && (
-      <button
-        type="button"
-        onClick={clearSelected}
-        aria-label="Clear all selected files"
-        className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
-      >
-        Clear all
-      </button>
-    )}
-  </div>
+              {selectedFiles.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSelected}
+                  aria-label="Clear all selected files"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-rose-600 bg-rose-600 text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
 
-  {/* drag & drop */}
-  <div
-    onDragOver={(e) => { e.preventDefault(); }}
-    onDrop={(e) => {
-      e.preventDefault();
-      const dropped = Array.from(e.dataTransfer.files || []);
-      if (!dropped.length) return;
-      setSelectedFiles((prev) => [...prev, ...dropped]); // append
-    }}
-    className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
-  >
-    Drag & drop files here or use the picker above. Selections accumulate.
-  </div>
+            {/* drag & drop */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const dropped = Array.from(e.dataTransfer.files || []);
+                if (!dropped.length) return;
+                setSelectedFiles((prev) => [...prev, ...dropped]); // append
+              }}
+              className="mt-3 border border-dashed rounded p-4 text-sm text-gray-600 bg-white/60"
+            >
+              Drag & drop files here or use the picker above. Selections accumulate.
+            </div>
 
-  {/* selected chips */}
-  {selectedFiles.length > 0 && (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {selectedFiles.map((f, i) => (
-        <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
-          <span className="truncate max-w-[180px]">{f.name}</span>
-          <span className="opacity-60">{fmtSize(f.size)}</span>
-          <button
-            type="button"
-            aria-label="Remove file"
-            title="Remove"
-            onClick={() => removeSelectedAt(i)}
-            className="inline-flex items-center justify-center w-6 h-6 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
-          >
-            ×
-          </button>
-        </span>
-      ))}
-    </div>
-  )}
+            {/* selected chips */}
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedFiles.map((f, i) => (
+                  <span key={i} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs">
+                    <span className="truncate max-w-[180px]">{f.name}</span>
+                    <span className="opacity-60">{fmtSize(f.size)}</span>
+                    <button
+                      type="button"
+                      aria-label="Remove file"
+                      title="Remove"
+                      onClick={() => removeSelectedAt(i)}
+                      className="inline-flex items-center justify-center w-6 h-6 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
 
-  <p className="text-sm text-gray-500 mt-2">Upload portfolio, previous work, certifications, etc.</p>
-</div>
+            <p className="text-sm text-gray-500 mt-2">Upload portfolio, previous work, certifications, etc.</p>
+          </div>
         </fieldset>
 
         {/* Submit / Cancel */}
