@@ -30,7 +30,6 @@ type Project = {
   images?: string[];
   bids?: Bid[];
   cid?: string | null;
-  gateway?: string | null; // <--- Added dynamic gateway
 };
 
 type AuditSummary = {
@@ -59,10 +58,9 @@ type AuditRow = {
 const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
 
 // FIX 1: Default to a public gateway if env is missing, to avoid ERR_ID:00024
-const PREFERRED_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
+const IPFS_GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+  'https://gateway.pinata.cloud/ipfs';
 
 // --- maps + taken-at helpers ---
 function mapsLink(
@@ -96,40 +94,10 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
 }
 
 // FIX 2: Updated helper to strip tokens and enforce public gateway
-// FIX 2: Updated helper to strip tokens and enforce public gateway
-function useDedicatedGateway(url: string | null | undefined, gatewayOverride?: string | null) {
+function useDedicatedGateway(url: string | null | undefined) {
   if (!url) return '';
-
-  // 1. Remove the query string
-  const cleanUrl = url.split('?')[0];
-
-  // Determine the gateway host to use
-  const rawGateway = gatewayOverride || PREFERRED_GATEWAY;
-  const host = rawGateway.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-
-  // 2. Handle malformed ".../ipfsCID" (missing slash)
-  if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
-    const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
-    const parts = cleanUrl.split(split);
-    if (parts.length >= 2) {
-      const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
-      const newUrl = `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
-      return newUrl;
-    }
-  }
-
-  // 3. Replace restricted or generic gateways
-  let newUrl = cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
-    `https://${host}/ipfs/`
-  );
-
-  // 4. Fix double /ipfs/ipfs/
-  if (newUrl.includes('/ipfs/ipfs/')) {
-    newUrl = newUrl.replace('/ipfs/ipfs/', '/ipfs/');
-  }
-
-  return newUrl;
+  // Trust the backend-provided URL (which includes the token for private gateways)
+  return url;
 }
 
 // Per-file GPS detector
@@ -175,7 +143,7 @@ function normalizeAudit(items: AuditRow[]) {
         Array.isArray(a.changedFields) && a.changedFields.length
           ? `Changed: ${a.changedFields.join(', ')}`
           : undefined,
-      ipfs: ipfs ? `${PREFERRED_GATEWAY}/${ipfs}` : undefined,
+      ipfs: ipfs ? `${IPFS_GATEWAY}/${ipfs}` : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -192,7 +160,7 @@ function milestoneNamesFromProject(project: Project): Record<number, string> {
 }
 
 export default function PublicProjectCard({ project }: { project: Project }) {
-  const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('files');
+  const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('overview');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [approvedOnly, setApprovedOnly] = useState(false); // default to "All" so content shows
@@ -430,7 +398,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   }, [tab, project.proposalId, auditRows]);
 
   const tabs = [
-    // { key: 'overview' as const, label: 'Overview' },
+    { key: 'overview' as const, label: 'Overview' },
     { key: 'bids' as const, label: `Bids (${project.bids?.length || 0})` },
     { key: 'milestones' as const, label: 'Milestones' },
     { key: 'files' as const, label: `Files (${files.length})` },
@@ -439,7 +407,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-  const ipfsHref = cid ? `${PREFERRED_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
+  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
@@ -512,7 +480,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-96 md:max-h-[28rem] overflow-y-auto pr-2">
             {proofsToShow.map((p, idx) => {
               const rawPts = Array.isArray(p?.files)
                 ? (p.files.map((f: any) => fileCoords(f)).filter(Boolean) as Array<{
@@ -675,7 +643,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={useDedicatedGateway(project.coverImage, project.gateway)}
+              src={useDedicatedGateway(project.coverImage)}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -786,7 +754,37 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
           {/* tab content */}
           <div className="mt-6">
-            {/* tab === 'overview' removed */}
+            {tab === 'overview' && (
+              <>
+                {Array.isArray(project.images) && project.images.length > 1 && (
+                  <div>
+                    <h3 className="text-sm font-medium mb-2">More images</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {project.images.slice(1, 10).map((u: string, i: number) => (
+                        <div
+                          key={i}
+                          className="relative w-full aspect-video rounded-lg border overflow-hidden cursor-zoom-in"
+                          onClick={() => setLightboxUrl(u)}
+                          title="Click to zoom"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
+                        >
+                          <Image
+                            src={useDedicatedGateway(u)}
+                            alt={`image ${i + 1}`}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
+                            style={{ objectFit: 'cover' }}
+                            unoptimized={true}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
             {tab === 'bids' && (
               <>
@@ -824,7 +822,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             )}
 
             {tab === 'milestones' && (
-              <div className="max-h-[600px] overflow-y-auto pr-2 space-y-3">
+              <>
                 {allMilestones.length === 0 && (
                   <div className="text-sm text-gray-500">No public milestones yet.</div>
                 )}
@@ -845,14 +843,14 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                     </div>
                   </div>
                 ))}
-              </div>
+              </>
             )}
 
             {/* FILES TAB */}
             {tab === 'files' && renderFilesTab()}
 
             {tab === 'audit' && (
-              <section className="space-y-3 text-sm max-h-[600px] overflow-y-auto pr-2">
+              <section className="space-y-3 text-sm">
                 {!auditRows && <div className="text-gray-500">Loading audit…</div>}
                 {auditRows && auditRows.length === 0 && (
                   <div className="text-gray-500">No public audit events yet.</div>
