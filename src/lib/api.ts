@@ -200,17 +200,15 @@ export type ChatMsg = { role: "user" | "assistant"; content: string };
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
 function getApiBase(): string {
-  if (typeof window === "undefined") {
-    const s =
-      (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-      (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-      DEFAULT_API_BASE;
-    return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
-  }
-  // 🛑 FORCE Railway API for now to fix 404s (user has incorrect env var)
-  return "https://milestone-api-production.up.railway.app";
-  // return ""; // Use local API (relative path)
+  const s =
+    (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
+    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
+    DEFAULT_API_BASE;
+  return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
+
+  // Previously forced Railway API here
+
 
   /*
   const c =
