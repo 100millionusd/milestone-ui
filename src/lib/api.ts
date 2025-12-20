@@ -200,24 +200,17 @@ export type ChatMsg = { role: "user" | "assistant"; content: string };
 const DEFAULT_API_BASE = "https://milestone-api-production.up.railway.app";
 
 function getApiBase(): string {
-  const s =
-    (typeof process !== "undefined" && (process as any).env?.API_BASE_URL) ||
+  // 💡 Check for env var override first (e.g. from local .env)
+  const envUrl =
     (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-    DEFAULT_API_BASE;
-  return (s || DEFAULT_API_BASE).replace(/\/+$/, "");
+    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE);
 
-  // Previously forced Railway API here
-
-
-  /*
-  const c =
-    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE_URL) ||
-    (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_API_BASE) ||
-    DEFAULT_API_BASE;
-  return (c || DEFAULT_API_BASE).replace(/\/+$/, "");
-  */
+  // If valid env var exists, use it. Otherwise, default to the production Railway URL.
+  // This ensures that even if valid env vars are missing in production build, it defaults to the correct URL.
+  const s = envUrl || DEFAULT_API_BASE;
+  return s.replace(/\/+$/, "");
 }
+
 
 export const API_BASE = getApiBase();
 const trimSlashEnd = (s: string) => s.replace(/\/+$/, "");
