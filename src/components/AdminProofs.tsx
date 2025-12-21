@@ -935,6 +935,7 @@ function ProofCard(props: ProofCardProps) {
                             <img
                               src={href}
                               alt={file.name}
+                              crossOrigin="anonymous" // FIX: Pinata Access Control
                               // UPDATED: Changed 'h-full' to 'h-auto' to respect image ratio
                               className="w-full h-auto object-cover group-hover:scale-105 transition duration-500"
                             />
@@ -991,7 +992,7 @@ function ProofCard(props: ProofCardProps) {
                               rel="noopener noreferrer"
                               className="group relative block w-full overflow-hidden rounded-lg border border-blue-200 bg-white hover:shadow-md transition-all"
                             >
-                              <img src={href} alt="Controller Proof" className="w-full h-auto object-cover" />
+                              <img src={href} alt="Controller Proof" crossOrigin="anonymous" className="w-full h-auto object-cover" />
                             </a>
                           );
                         }
