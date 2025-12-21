@@ -14,26 +14,13 @@ import {
 } from '@/lib/api';
 import ProposalAgent from './ProposalAgent';
 
-// ---- 1. IPFS / GATEWAY HELPERS ----
-// ✅ FIX: Force your Dedicated Gateway to prevent 429/CORS errors
-const PINATA_GATEWAY = 'gateway.pinata.cloud'; // Default to public
-
-function useDedicatedGateway(url: string | null | undefined) {
-  if (!url) return '';
-  const cleanUrl = url.split('?')[0]; // strip tokens
-
-  // Replace public gateways (or self) with the dedicated gateway constant
-  return cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io)\/ipfs\//,
-    `https://${PINATA_GATEWAY}/ipfs/`
-  );
-}
+import { toGatewayUrl } from '@/lib/pinata';
 
 function resolveUrl(d: any): string {
   const url = String(d?.url || d?.href || '').trim();
-  if (url) return useDedicatedGateway(url);
+  if (url) return toGatewayUrl(url);
   const cid = String(d?.cid || '').trim();
-  if (cid) return `https://${PINATA_GATEWAY}/ipfs/${cid}`;
+  if (cid) return toGatewayUrl(cid);
   return '';
 }
 
@@ -226,7 +213,7 @@ function AttachmentGrid({
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={f.url}
+                  src={toGatewayUrl(f.url, { width: 300, height: 200, fit: 'cover', format: 'webp' })}
                   alt={f.name}
                   crossOrigin="anonymous"
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
@@ -939,7 +926,7 @@ export default function AdminProposalsClient({
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={lightbox} alt="preview" crossOrigin="anonymous" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
+            <img src={toGatewayUrl(lightbox, { width: 1200, format: 'webp' })} alt="preview" crossOrigin="anonymous" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
           </div>
         </div>
       )}

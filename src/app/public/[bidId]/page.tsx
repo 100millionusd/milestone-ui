@@ -18,48 +18,7 @@ function usd(n: number) {
   }
 }
 
-// FIX: Default to a public gateway if env is missing
-const PREFERRED_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
-    : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
-
-// FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
-// FIX: Helper to strip tokens, enforce public gateway, and fix malformed URLs
-function useDedicatedGateway(url: string | null | undefined, gatewayOverride?: string | null) {
-  if (!url) return '';
-
-  // 1. Remove the query string
-  const cleanUrl = url.split('?')[0];
-
-  // Determine the gateway host to use
-  const rawGateway = gatewayOverride || PREFERRED_GATEWAY;
-  const host = rawGateway.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-
-  // 2. Handle malformed ".../ipfsCID" (missing slash)
-  if (cleanUrl.includes('/ipfsbafy') || cleanUrl.includes('/ipfsQm')) {
-    const split = cleanUrl.includes('/ipfsbafy') ? '/ipfsbafy' : '/ipfsQm';
-    const parts = cleanUrl.split(split);
-    if (parts.length >= 2) {
-      const cidPrefix = split.replace('/ipfs', ''); // bafy or Qm
-      return `https://${host}/ipfs/${cidPrefix}${parts[1]}`;
-    }
-  }
-
-  // 3. Replace restricted or generic gateways
-  // 3. Replace restricted or generic gateways
-  let newUrl = cleanUrl.replace(
-    /https?:\/\/(gateway\.pinata\.cloud|ipfs\.io|sapphire-given-snake-741\.mypinata\.cloud)\/ipfs\//,
-    `https://${host}/ipfs/`
-  );
-
-  // 4. Fix double /ipfs/ipfs/
-  if (newUrl.includes('/ipfs/ipfs/')) {
-    newUrl = newUrl.replace('/ipfs/ipfs/', '/ipfs/');
-  }
-
-  return newUrl;
-}
+import { toGatewayUrl } from '@/lib/pinata';
 
 // Add cache at module level (outside components)
 const proofsCache = new Map();
@@ -168,7 +127,7 @@ export default function PublicProjectDetailClient() {
       link.rel = 'preload';
       link.as = 'image';
       link.crossOrigin = 'anonymous'; // FIX: Pass Origin header for Pinata whitelist
-      link.href = useDedicatedGateway(project.coverImage, project.gateway);
+      link.href = toGatewayUrl(project.coverImage, { width: 1200, format: 'webp' });
       document.head.appendChild(link);
     }
 
@@ -177,7 +136,7 @@ export default function PublicProjectDetailClient() {
       .flatMap((p: any) => p.files || [])
       .filter((f: any) => /\.(png|jpe?g|webp|gif)/i.test(f.url || ''))
       .slice(0, 3)
-      .map((f: any) => useDedicatedGateway(f.url, project.gateway));
+      .map((f: any) => toGatewayUrl(f.url, { width: 400, format: 'webp' }));
 
     proofImages.forEach((url: string) => {
       const link = document.createElement('link');
@@ -302,7 +261,7 @@ export default function PublicProjectDetailClient() {
           <div className="mt-4 rounded-2xl overflow-hidden bg-gray-50">
             {project.coverImage ? (
               <Image
-                src={useDedicatedGateway(project.coverImage, project.gateway)}
+                src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp' })}
                 alt={project.proposalTitle || 'cover'}
                 width={1600}
                 height={900}
@@ -480,7 +439,7 @@ export default function PublicProjectDetailClient() {
                                 {isImg ? (
                                   <div className="relative w-full aspect-video">
                                     <Image
-                                      src={useDedicatedGateway(url, project.gateway)}
+                                      src={toGatewayUrl(f.url, { width: 400, height: 300, fit: 'cover', format: 'webp' })}
                                       alt={f.name || `file ${idx + 1}`}
                                       fill
                                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"

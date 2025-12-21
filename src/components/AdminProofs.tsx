@@ -16,6 +16,7 @@ import {
   API_BASE,
 } from '@/lib/api';
 import useMilestonesUpdated from '@/hooks/useMilestonesUpdated';
+import { toGatewayUrl } from '@/lib/pinata';
 
 /* ============================
    Broadcast helpers (payments)
@@ -32,45 +33,12 @@ function notifyMsChange(bidId: number, milestoneIndex: number) {
 /* ============================
    IPFS gateway + helpers
 ============================ */
-const PINATA_GATEWAY =
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY
-    ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY)
-      .replace(/^https?:\/\//, '')
-      .replace(/\/+$/, '')}/ipfs`
-    : 'https://gateway.pinata.cloud/ipfs';
 
 function isImg(s?: string) {
   if (!s) return false;
   return /\.(png|jpe?g|gif|webp|svg)(?=($|\?|#))/i.test(s);
 }
 
-// Build a safe https URL for any combination of {url, cid}
-function toGatewayUrl(file: { url?: string; cid?: string } | undefined): string {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
-  if (!file) return '';
-
-  const rawUrl = (file as any)?.url ? String((file as any).url).trim() : '';
-  const rawCid = (file as any)?.cid ? String((file as any).cid).trim() : '';
-
-  if ((!rawUrl || /^\s*$/.test(rawUrl)) && rawCid) return `${GW}/${rawCid}`;
-  if (!rawUrl) return '';
-
-  let u = rawUrl;
-
-  // bare CID (optionally with query)
-  const cidOnly = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (cidOnly) return `${GW}/${cidOnly[1]}${cidOnly[2] || ''}`;
-
-  // ipfs://, leading slashes, repeated ipfs/ segments
-  u = u.replace(/^ipfs:\/\//i, '');
-  u = u.replace(/^\/+/, '');
-  u = u.replace(/^(?:ipfs\/)+/i, '');
-
-  if (!/^https?:\/\//i.test(u)) u = `${GW}/${u}`;
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-
-  return u;
-}
 
 function toMilestones(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
@@ -918,7 +886,9 @@ function ProofCard(props: ProofCardProps) {
                   // UPDATED: Added 'items-start' to prevent grid items from stretching and creating empty space
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
                     {proof.files.map((file, i) => {
-                      const href = toGatewayUrl(file);
+                      const urlStr = String((file as any).url || (file as any).cid || '').trim();
+                      const href = toGatewayUrl(urlStr);
+                      const thumbSrc = toGatewayUrl(urlStr, { width: 400, height: 300, fit: 'cover', format: 'webp' });
                       const imgish = isImg(href) || isImg(file.name);
                       if (imgish) {
                         return (
@@ -933,7 +903,7 @@ function ProofCard(props: ProofCardProps) {
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={href}
+                              src={thumbSrc}
                               alt={file.name}
                               crossOrigin="anonymous" // FIX: Pinata Access Control
                               // UPDATED: Changed 'h-full' to 'h-auto' to respect image ratio
@@ -981,7 +951,10 @@ function ProofCard(props: ProofCardProps) {
                   {(proof as any).controllerReport.files && (proof as any).controllerReport.files.length > 0 && (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-start">
                       {(proof as any).controllerReport.files.map((file: any, i: number) => {
-                        const href = toGatewayUrl(file);
+                        const urlStr = String(file.url || file.cid || '').trim();
+                        const href = toGatewayUrl(urlStr);
+                        // Optimize controller report images too
+                        const thumbSrc = toGatewayUrl(urlStr, { width: 400, height: 300, fit: 'cover', format: 'webp' });
                         const imgish = isImg(href) || isImg(file.name);
                         if (imgish) {
                           return (
@@ -992,7 +965,7 @@ function ProofCard(props: ProofCardProps) {
                               rel="noopener noreferrer"
                               className="group relative block w-full overflow-hidden rounded-lg border border-blue-200 bg-white hover:shadow-md transition-all"
                             >
-                              <img src={href} alt="Controller Proof" crossOrigin="anonymous" className="w-full h-auto object-cover" />
+                              <img src={thumbSrc} alt="Controller Proof" crossOrigin="anonymous" className="w-full h-auto object-cover" />
                             </a>
                           );
                         }

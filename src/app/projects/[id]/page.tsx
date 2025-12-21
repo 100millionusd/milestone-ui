@@ -14,23 +14,7 @@ import {
   hasSafeMarker as msHasSafeMarker,
 } from '@/lib/milestonePaymentState';
 
-// ---------------- Consts ----------------
-const PINATA_GATEWAY = (() => {
-  const raw1 = (process.env.NEXT_PUBLIC_PINATA_GATEWAY || '').trim();
-  if (raw1) {
-    const host = raw1
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '')
-      .replace(/(?:\/ipfs)+$/i, '');
-    return `https://${host}/ipfs`;
-  }
-
-  const raw2 = (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud').trim();
-  const base = raw2
-    .replace(/\/+$/, '')
-    .replace(/(?:\/ipfs)+$/i, '');
-  return `${base}/ipfs`;
-})();
+import { toGatewayUrl } from '@/lib/pinata';
 
 // ⚠️ Proofs endpoint
 const PROOFS_ENDPOINT =
@@ -116,39 +100,13 @@ function parseDocs(raw: unknown): any[] {
   }
   return [];
 }
+
+// Replaced with centralized helper
 function normalizeIpfsUrl(input?: string, cid?: string) {
-  const GW = PINATA_GATEWAY.replace(/\/+$/, '');
-  if (cid && (!input || /^\s*$/.test(input))) return `${GW}/${cid}`;
-  if (!input) return '';
-  let u = String(input).trim();
-
-  // FIX: Handle the specific malformed case "ipfsbafy..." -> "ipfs/bafy..."
-  if (u.match(/^ipfsbafy/i)) {
-    u = u.replace(/^ipfsbafy/i, 'ipfs/bafy');
-  } else if (u.match(/\/ipfsbafy/i)) {
-    u = u.replace(/\/ipfsbafy/i, '/ipfs/bafy');
-  }
-
-  // If it's already a full URL, trust it (unless it needs the fix above)
-  if (/^https?:\/\//i.test(u)) {
-    // Just ensure no double ipfs/ipfs
-    return u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-  }
-
-  const m = u.match(/^([A-Za-z0-9]{46,})(\?.*)?$/);
-  if (m) return `${GW}/${m[1]}${m[2] || ''}`;
-
-  u = u.replace(/^ipfs:\/\//i, '');
-  u = u.replace(/^\/+/, '');
-  u = u.replace(/^(?:ipfs\/)+/i, '');
-
-  // Re-check protocol after stripping
-  if (/^https?:\/\//i.test(u)) return u;
-
-  u = `${GW}/${u}`;
-  u = u.replace(/\/ipfs\/(?:ipfs\/)+/gi, '/ipfs/');
-  return u;
+  const raw = input || (cid ? `ipfs://${cid}` : '');
+  return toGatewayUrl(raw);
 }
+
 function filesFromProofRecords(items: ProofRecord[]) {
   const isBad = (u?: string) =>
     !u || u.includes('<gw>') || u.includes('<CID') || u.includes('>') || /^\s*$/.test(u);
@@ -162,19 +120,20 @@ function filesFromProofRecords(items: ProofRecord[]) {
       .concat(p.files || [])
       .concat((p.urls || []) as ProofFile[])
       .concat((p.cids || []) as ProofFile[]);
-    for (const raw of list) {
+    for (const rawFile of list) { // Renamed 'raw' to 'rawFile' to avoid conflict with outer scope 'raw' parameter if this was nested.
       let url: string | undefined;
-      if (typeof raw === 'string') {
-        url = raw;
-      } else if (raw && typeof raw === 'object') {
-        url = (raw as any).url || ((raw as any).cid ? `${PINATA_GATEWAY}/${(raw as any).cid}` : undefined);
+      if (typeof rawFile === 'string') {
+        url = rawFile;
+      } else if (rawFile && typeof rawFile === 'object') {
+        const rawUrl = (rawFile as any).url || ((rawFile as any).cid ? `ipfs://${(rawFile as any).cid}` : '');
+        url = rawUrl ? toGatewayUrl(rawUrl) : undefined;
       }
       if (!url || isBad(url)) continue;
       url = fixProtocol(url);
       const nameFromUrl = decodeURIComponent((url.split('/').pop() || '').trim());
       const explicitName =
-        typeof raw === 'object' && raw && (raw as any).name
-          ? String((raw as any).name)
+        typeof rawFile === 'object' && rawFile && (rawFile as any).name
+          ? String((rawFile as any).name)
           : undefined;
       const name = explicitName && explicitName.toLowerCase() !== 'file' ? explicitName : nameFromUrl || 'file';
       rows.push({ scope, doc: { url, name } });

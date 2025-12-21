@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 
+import { toGatewayUrl } from '@/lib/pinata';
+
 type Attachment = {
   cid?: string;
   url?: string;
@@ -13,14 +15,15 @@ type Attachment = {
 type Props = {
   docs?: Attachment[];
   cid?: string; // optional IPFS directory cid
-  gatewayBase?: string; // defaults to Pinata gateway
+  gatewayBase?: string; // DEPRECATED: ignored in favor of toGatewayUrl
   variant?: 'grid' | 'compact';
   showToolbar?: boolean;
   className?: string;
 };
 
 type RenderFile = Attachment & {
-  href?: string;
+  href: string;
+  thumbSrc?: string;
   type: FileType;
   sizeLabel?: string;
 };
@@ -29,7 +32,7 @@ type FileType = 'image' | 'pdf' | 'doc' | 'sheet' | 'ppt' | 'zip' | 'audio' | 'v
 export default function Attachments({
   docs = [],
   cid,
-  gatewayBase = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs',
+  gatewayBase, // ignored
   variant = 'grid',
   showToolbar = false,
   className = '',
@@ -39,16 +42,25 @@ export default function Attachments({
 
   const files: RenderFile[] = useMemo(() => {
     return (docs || []).map((d) => {
-      const href = d.url || (d.cid ? `${gatewayBase}/${d.cid}` : '#');
+      // Use toGatewayUrl to resolve the primary link
+      const rawUrl = d.url || (d.cid ? `ipfs://${d.cid}` : '');
+      const href = rawUrl ? toGatewayUrl(rawUrl) : '#';
+
+      // Generate optimized thumbnail for images
+      const thumbSrc = rawUrl
+        ? toGatewayUrl(rawUrl, { width: 300, height: 200, fit: 'cover', format: 'webp' })
+        : undefined;
+
       const type = classifyType(d);
       return {
         ...d,
         href,
+        thumbSrc,
         type,
         sizeLabel: typeof d.size === 'number' ? formatBytes(d.size) : undefined,
       };
     });
-  }, [docs, gatewayBase]);
+  }, [docs]);
 
   const hasDocs = files.length > 0;
   const activeVariant = showToolbar ? localVariant : variant;
@@ -62,7 +74,7 @@ export default function Attachments({
           {!hasDocs && cid && (
             <a
               className="text-xs font-medium text-blue-600 hover:text-blue-700 underline underline-offset-2"
-              href={`${gatewayBase}/${cid}`}
+              href={toGatewayUrl(cid)}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -76,8 +88,8 @@ export default function Attachments({
                 type="button"
                 onClick={() => setLocalVariant('grid')}
                 className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${activeVariant === 'grid'
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-700 hover:bg-slate-50'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-700 hover:bg-slate-50'
                   }`}
               >
                 Grid
@@ -86,8 +98,8 @@ export default function Attachments({
                 type="button"
                 onClick={() => setLocalVariant('compact')}
                 className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${activeVariant === 'compact'
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-700 hover:bg-slate-50'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-700 hover:bg-slate-50'
                   }`}
               >
                 List
@@ -145,7 +157,7 @@ export default function Attachments({
                       </button>
                       {f.type === 'image' && (
                         <button
-                          onClick={() => setLightbox(f.href!)}
+                          onClick={() => setLightbox(f.href)}
                           className="text-xs text-slate-600 hover:text-slate-900"
                         >
                           Preview
@@ -171,7 +183,7 @@ export default function Attachments({
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={f.href}
+                    src={f.thumbSrc || f.href}
                     alt={f.name}
                     className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
                     loading="lazy"
@@ -250,7 +262,7 @@ export default function Attachments({
       {lightbox && (
         <div className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="preview" crossOrigin="anonymous" className="mx-auto max-h-full rounded-xl shadow-2xl" />
+          <img src={toGatewayUrl(lightbox, { width: 1200, format: 'webp' })} alt="preview" crossOrigin="anonymous" className="mx-auto max-h-full rounded-xl shadow-2xl" />
         </div>
       )}
     </div>

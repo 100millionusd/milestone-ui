@@ -57,10 +57,7 @@ type AuditRow = {
 // ----- ENV (client-safe) -----
 const EXPLORER_BASE = process.env.NEXT_PUBLIC_EXPLORER_BASE || '';
 
-// FIX 1: Default to a public gateway if env is missing, to avoid ERR_ID:00024
-const IPFS_GATEWAY =
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
-  'https://gateway.pinata.cloud/ipfs';
+import { toGatewayUrl } from '@/lib/pinata';
 
 // --- maps + taken-at helpers ---
 function mapsLink(
@@ -91,13 +88,6 @@ function getProofStatus(p: any): 'approved' | 'rejected' | 'changes_requested' |
   if (s.includes('reject')) return 'rejected';
   if (s.includes('change')) return 'changes_requested';
   return s || 'submitted';
-}
-
-// FIX 2: Updated helper to strip tokens and enforce public gateway
-function useDedicatedGateway(url: string | null | undefined) {
-  if (!url) return '';
-  // Trust the backend-provided URL (which includes the token for private gateways)
-  return url;
 }
 
 // Per-file GPS detector
@@ -143,7 +133,7 @@ function normalizeAudit(items: AuditRow[]) {
         Array.isArray(a.changedFields) && a.changedFields.length
           ? `Changed: ${a.changedFields.join(', ')}`
           : undefined,
-      ipfs: ipfs ? `${IPFS_GATEWAY}/${ipfs}` : undefined,
+      ipfs: ipfs ? toGatewayUrl(ipfs) : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -407,7 +397,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-  const ipfsHref = cid ? `${IPFS_GATEWAY}/${String(cid).replace(/^ipfs:\/\//, '')}` : undefined;
+  const ipfsHref = cid ? toGatewayUrl(cid) : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
@@ -598,7 +588,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={useDedicatedGateway(String(f.url))}
+                                  src={toGatewayUrl(String(f.url), { width: 400, height: 300, fit: 'cover', format: 'webp' })}
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -645,7 +635,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={useDedicatedGateway(project.coverImage)}
+              src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp' })}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -773,7 +763,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={useDedicatedGateway(u)}
+                            src={toGatewayUrl(u, { width: 400, height: 300, fit: 'cover', format: 'webp' })}
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -886,7 +876,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={useDedicatedGateway(lightboxUrl)}
+              src={toGatewayUrl(lightboxUrl)}
               alt="Zoomed image"
               fill
               sizes="100vw"
