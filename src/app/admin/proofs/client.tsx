@@ -336,6 +336,7 @@ function FilesStrip({
                 <img
                   src={href!}
                   alt={file.name || 'image'}
+                  crossOrigin="anonymous"
                   className="h-24 w-24 object-cover group-hover:scale-105 transition"
                   onError={(e) => {
                     if (DEBUG_FILES) console.log('🔍 Image failed to load:', href);
@@ -1314,7 +1315,7 @@ export default function Client({ initialBids = [] as any[] }: { initialBids?: an
                         className="group relative overflow-hidden rounded border"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={url} alt={`Proof ${i}`} className="h-32 w-full object-cover group-hover:scale-105 transition" />
+                        <img src={url} alt={`Proof ${i}`} crossOrigin="anonymous" className="h-32 w-full object-cover group-hover:scale-105 transition" />
                       </button>
                     );
                   }

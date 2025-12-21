@@ -1639,6 +1639,7 @@ export default function ProjectDetailPage() {
                                   <img
                                     src={href}
                                     alt={name}
+                                    crossOrigin="anonymous"
                                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                                   />
                                 ) : (
