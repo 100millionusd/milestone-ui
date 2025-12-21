@@ -228,6 +228,7 @@ function AttachmentGrid({
                 <img
                   src={f.url}
                   alt={f.name}
+                  crossOrigin="anonymous"
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
               </button>
@@ -938,7 +939,7 @@ export default function AdminProposalsClient({
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={lightbox} alt="preview" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
+            <img src={lightbox} alt="preview" crossOrigin="anonymous" className="max-h-[90vh] w-auto rounded-lg shadow-2xl border border-slate-700" />
           </div>
         </div>
       )}
