@@ -167,6 +167,7 @@ export default function PublicProjectDetailClient() {
       const link = document.createElement('link');
       link.rel = 'preload';
       link.as = 'image';
+      link.crossOrigin = 'anonymous'; // FIX: Pass Origin header for Pinata whitelist
       link.href = useDedicatedGateway(project.coverImage, project.gateway);
       document.head.appendChild(link);
     }
@@ -182,6 +183,7 @@ export default function PublicProjectDetailClient() {
       const link = document.createElement('link');
       link.rel = 'preload';
       link.as = 'image';
+      link.crossOrigin = 'anonymous'; // FIX: Pass Origin header for Pinata whitelist
       link.href = url;
       document.head.appendChild(link);
     });

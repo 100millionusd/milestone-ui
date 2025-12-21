@@ -119,7 +119,7 @@ export default function AdminBidsPage() {
         return withSearch.filter((b) => b.status === 'archived');
       default:
         return withSearch;
-      }
+    }
   }, [bids, proposals, tab, query]);
 
   const handleApprove = async (bidId: number) => {
@@ -192,6 +192,7 @@ export default function AdminBidsPage() {
           <img
             src={href}
             alt={nd.name}
+            crossOrigin="anonymous"
             className="h-16 w-16 object-cover group-hover:scale-105 transition"
           />
         </button>
@@ -583,6 +584,7 @@ export default function AdminBidsPage() {
           <img
             src={lightbox}
             alt="attachment preview"
+            crossOrigin="anonymous"
             className="max-h-[90vh] max-w-full rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
