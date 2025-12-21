@@ -75,22 +75,20 @@ export default function Attachments({
               <button
                 type="button"
                 onClick={() => setLocalVariant('grid')}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${
-                  activeVariant === 'grid'
+                className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${activeVariant === 'grid'
                     ? 'bg-slate-900 text-white'
                     : 'text-slate-700 hover:bg-slate-50'
-                }`}
+                  }`}
               >
                 Grid
               </button>
               <button
                 type="button"
                 onClick={() => setLocalVariant('compact')}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${
-                  activeVariant === 'compact'
+                className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition ${activeVariant === 'compact'
                     ? 'bg-slate-900 text-white'
                     : 'text-slate-700 hover:bg-slate-50'
-                }`}
+                  }`}
               >
                 List
               </button>
@@ -177,6 +175,7 @@ export default function Attachments({
                     alt={f.name}
                     className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
                     loading="lazy"
+                    crossOrigin="anonymous"
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
                     <p className="truncate text-xs font-medium text-white">{f.name}</p>
@@ -251,7 +250,7 @@ export default function Attachments({
       {lightbox && (
         <div className="fixed inset-0 z-50 bg-black/80 p-4 md:p-8" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="preview" className="mx-auto max-h-full rounded-xl shadow-2xl" />
+          <img src={lightbox} alt="preview" crossOrigin="anonymous" className="mx-auto max-h-full rounded-xl shadow-2xl" />
         </div>
       )}
     </div>
@@ -292,16 +291,16 @@ function formatBytes(bytes: number, decimals = 1) {
   if (!bytes) return '0 B';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B','KB','MB','GB','TB'];
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
 function copy(text: string) {
-  try { navigator.clipboard?.writeText(text); } catch {}
+  try { navigator.clipboard?.writeText(text); } catch { }
 }
 
-function setLightboxIfImage(f: RenderFile, setLightbox: (s: string)=>void) {
+function setLightboxIfImage(f: RenderFile, setLightbox: (s: string) => void) {
   if (f.type === 'image' && f.href) setLightbox(f.href);
 }
 
@@ -312,7 +311,7 @@ function Thumb({
     return (
       <button onClick={onPreview} className="h-9 w-9 overflow-hidden rounded-md ring-1 ring-slate-200">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="h-full w-full object-cover" />
+        <img src={src} alt={alt} crossOrigin="anonymous" className="h-full w-full object-cover" />
       </button>
     );
   }
