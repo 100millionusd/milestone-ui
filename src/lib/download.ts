@@ -4,8 +4,15 @@ export async function secureOpen(url: string, filename?: string) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to load file: ${res.statusText}`);
 
-        // 2. Create Blob
-        const blob = await res.blob();
+        // 2. Create Blob with explicit type if PDF to ensure preview works
+        const contentType = res.headers.get('content-type');
+        let blob: Blob;
+        if (filename?.toLowerCase().endsWith('.pdf') || url.toLowerCase().split('?')[0].endsWith('.pdf')) {
+            const data = await res.arrayBuffer();
+            blob = new Blob([data], { type: 'application/pdf' });
+        } else {
+            blob = await res.blob();
+        }
         const objectUrl = URL.createObjectURL(blob);
 
         // 3. Open in new tab or download
