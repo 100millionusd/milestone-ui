@@ -1336,9 +1336,11 @@ export default function ProjectDetailPage() {
                               return (
                                 <a
                                   href={finalHref}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs cursor-pointer"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    secureOpen(finalHref, finalHref.split('/').pop() || 'document');
+                                  }}
                                 >
                                   View Document
                                 </a>
