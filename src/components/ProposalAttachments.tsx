@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toGatewayUrl } from '@/lib/pinata';
+import { secureOpen } from '@/lib/download';
 
 type Doc = {
     url?: string;
@@ -77,13 +78,14 @@ export default function ProposalAttachments({ docs = [] }: { docs: Doc[] }) {
                             className="group block rounded border bg-white hover:shadow-sm transition p-2 cursor-pointer relative"
                             title={item.name}
                             onClick={(e) => {
-                                // If it's an image, open lightbox. If not, open new tab.
+                                // If it's an image, open lightbox.
                                 if (item.isImg) {
                                     e.preventDefault();
                                     setLightboxUrl(item.url);
                                 } else {
-                                    // Allow default behavior (link) or force window.open
-                                    window.open(item.url, '_blank', 'noopener,noreferrer');
+                                    // For files, fetch securely (blob) to bypass gateway origin checks
+                                    e.preventDefault();
+                                    secureOpen(item.url, item.name);
                                 }
                             }}
                         >
