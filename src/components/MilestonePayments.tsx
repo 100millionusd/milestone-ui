@@ -14,6 +14,8 @@ import {
 } from '@/lib/api';
 import ManualPaymentProcessor from './ManualPaymentProcessor';
 import PaymentVerification from './PaymentVerification';
+import { secureOpen } from '@/lib/download';
+import { toGatewayUrl } from '@/lib/pinata';
 
 // ---- upload helpers (shrink big images) ----
 async function shrinkImageIfNeeded(file: File): Promise<File> {
@@ -452,10 +454,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
             <div
               key={i}
               className={`border rounded overflow-hidden transition-colors ${isPaid
-                  ? 'bg-green-50 border-green-200'
-                  : isDone
-                    ? 'bg-yellow-50 border-yellow-200'
-                    : 'bg-gray-50'
+                ? 'bg-green-50 border-green-200'
+                : isDone
+                  ? 'bg-yellow-50 border-yellow-200'
+                  : 'bg-gray-50'
                 }`}
             >
               {/* Header - Always visible, clickable */}
@@ -485,10 +487,10 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                   </div>
                   <span
                     className={`px-2 py-1 rounded text-xs inline-block mt-1 ${isPaid
-                        ? 'bg-green-100 text-green-800'
-                        : isDone
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-gray-100 text-gray-800'
+                      ? 'bg-green-100 text-green-800'
+                      : isDone
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-gray-100 text-gray-800'
                       }`}
                   >
                     {statusText}
@@ -513,12 +515,48 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                             <span className="font-mono text-blue-700">{m.paymentTxHash}</span>
                           </div>
                         )}
-                        {m.proof && (
-                          <div className="mt-1">
-                            <span className="font-medium">Proof: </span>
-                            {m.proof}
-                          </div>
-                        )}
+                        {m.proof && (() => {
+                          let content = m.proof;
+                          let files: any[] = [];
+                          try {
+                            const parsed = JSON.parse(m.proof);
+                            content = parsed.description || m.proof;
+                            if (Array.isArray(parsed.files)) files = parsed.files;
+                          } catch { /* not json */ }
+
+                          return (
+                            <div className="mt-1">
+                              <span className="font-medium">Proof: </span>
+                              <span>{content}</span>
+                              {files.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {files.map((f, fi) => {
+                                    const isImg = /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(f.name || f.url);
+                                    const href = toGatewayUrl(f.url);
+                                    return (
+                                      <a
+                                        key={fi}
+                                        href={href}
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          secureOpen(f.url, f.name);
+                                        }}
+                                        className="flex items-center gap-1 border rounded p-1 pr-2 bg-gray-50 hover:bg-gray-100 transition-colors text-xs text-blue-600"
+                                      >
+                                        {isImg ? (
+                                          <img src={toGatewayUrl(f.url, { width: 40, height: 40, fit: 'cover' })} alt="thumb" className="w-6 h-6 object-cover rounded" />
+                                        ) : (
+                                          <span className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-[10px] text-gray-500">DOC</span>
+                                        )}
+                                        <span className="max-w-[100px] truncate">{f.name || 'file'}</span>
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <PaymentVerification
