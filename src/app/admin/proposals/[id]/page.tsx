@@ -2,6 +2,7 @@
 import Agent2Inline from "@/components/Agent2Inline";
 import AdminProofs from "@/components/AdminProofs";
 import { getProposal, getBids } from "@/lib/api";
+import { toGatewayUrl } from '@/lib/pinata';
 import Link from "next/link";
 
 type PageProps = { params: { id: string } };
@@ -34,9 +35,16 @@ function isImage(url: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
 }
 
+
 function AttachmentTile({ doc }: { doc: any }) {
-  const url = asUrl(doc);
-  if (!url) return null;
+  // Use centralized helper
+  const rawUrl = asUrl(doc);
+  if (!rawUrl) return null;
+
+  const url = toGatewayUrl(rawUrl);
+  // Optimization: request webp, 200px width for the tile
+  const thumbSrc = toGatewayUrl(rawUrl, { width: 200, height: 200, fit: 'cover', format: 'webp' });
+
   const name = asName(doc);
   const img = isImage(url);
 
@@ -50,8 +58,9 @@ function AttachmentTile({ doc }: { doc: any }) {
     >
       {img ? (
         <img
-          src={url}
+          src={thumbSrc}
           alt={name}
+          crossOrigin="anonymous"
           className="w-24 h-24 object-cover rounded"
           loading="lazy"
         />
