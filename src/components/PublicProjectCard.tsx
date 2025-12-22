@@ -150,7 +150,7 @@ function milestoneNamesFromProject(project: Project): Record<number, string> {
 }
 
 export default function PublicProjectCard({ project }: { project: Project }) {
-  const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'bids' | 'milestones' | 'files' | 'audit'>('bids');
   const [files, setFiles] = useState<any[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [approvedOnly, setApprovedOnly] = useState(false); // default to "All" so content shows
@@ -388,7 +388,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
   }, [tab, project.proposalId, auditRows]);
 
   const tabs = [
-    { key: 'overview' as const, label: 'Overview' },
+
     { key: 'bids' as const, label: `Bids (${project.bids?.length || 0})` },
     { key: 'milestones' as const, label: 'Milestones' },
     { key: 'files' as const, label: `Files (${files.length})` },
@@ -746,39 +746,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
           {/* tab content */}
           <div className="mt-6">
-            {tab === 'overview' && (
-              <>
-                {Array.isArray(project.images) && project.images.length > 1 && (
-                  <div>
-                    <h3 className="text-sm font-medium mb-2">More images</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {project.images.slice(1, 10).map((u: string, i: number) => (
-                        <div
-                          key={i}
-                          className="relative w-full aspect-video rounded-lg border overflow-hidden cursor-zoom-in"
-                          onClick={() => setLightboxUrl(u)}
-                          title="Click to zoom"
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
-                        >
-                          <Image
-                            src={toGatewayUrl(u, { width: 400, height: 300, fit: 'cover', format: 'webp' })}
-                            alt={`image ${i + 1}`}
-                            fill
-                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
-                            style={{ objectFit: 'cover' }}
-                            unoptimized={true}
-                            // @ts-ignore
-                            crossOrigin="anonymous"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+
 
             {tab === 'bids' && (
               <>
