@@ -15,6 +15,7 @@ import {
 import ProposalAgent from './ProposalAgent';
 
 import { toGatewayUrl } from '@/lib/pinata';
+import { secureOpen } from '@/lib/download';
 
 function resolveUrl(d: any): string {
   const url = String(d?.url || d?.href || '').trim();
@@ -26,12 +27,12 @@ function resolveUrl(d: any): string {
 
 function isImageUrl(u: string) {
   if (!u) return false;
-  return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)(?:\?.*)?$/i.test(u);
+  return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)((?=[?#])|$|\s)/i.test(u);
 }
 
 function isPdfUrl(u: string) {
   if (!u) return false;
-  return /\.pdf(?:\?.*)?$/i.test(u) || u.toLowerCase().includes('application/pdf');
+  return /\.pdf((?=[?#])|$|\s)/i.test(u) || u.toLowerCase().includes('application/pdf');
 }
 
 // ---- 2. MAPS & TIME HELPERS ----
@@ -226,10 +227,12 @@ function AttachmentGrid({
             <a
               key={i}
               href={f.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center p-3 aspect-video rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors group text-center"
+              className="flex flex-col items-center justify-center p-3 aspect-video rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors group text-center cursor-pointer"
               title={f.name}
+              onClick={(e) => {
+                e.preventDefault();
+                secureOpen(f.url, f.name);
+              }}
             >
               {isPdf ? (
                 <div className="flex flex-col items-center gap-1">
