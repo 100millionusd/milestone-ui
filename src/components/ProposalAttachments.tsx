@@ -36,8 +36,8 @@ function asName(d: any): string {
 function isImage(url: string): boolean {
     if (!url) return false;
     const u = url.toLowerCase();
-    // Basic check + common IPFS image extensions
-    return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
+    // Basic check + common IPFS image extensions, ignoring query params
+    return /\.(png|jpe?g|gif|webp|bmp|svg)(?=[?#]|$)/i.test(u);
 }
 
 export default function ProposalAttachments({ docs = [] }: { docs: Doc[] }) {
