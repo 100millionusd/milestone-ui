@@ -155,7 +155,7 @@ function withFilename(url: string, name?: string) {
   }
 }
 function isImageName(n?: string) {
-  return !!n && /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
+  return !!n && /\.(png|jpe?g|gif|webp|svg)(?=[?#]|$)/i.test(n);
 }
 
 // ---- local helpers: keys ----
@@ -1859,8 +1859,9 @@ export default function ProjectDetailPage() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={lightbox}
+            src={toGatewayUrl(lightbox, { width: 1200, format: 'webp' })}
             alt="attachment preview"
+            crossOrigin="anonymous"
             className="max-h-full max-w-full rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
