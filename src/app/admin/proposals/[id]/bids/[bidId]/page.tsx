@@ -7,11 +7,12 @@ import Link from 'next/link';
 import { getBid, approveBid, rejectBid } from '@/lib/api'; // Fixed import
 import { toGatewayUrl } from '@/lib/pinata';
 import MilestonePayments from '@/components/MilestonePayments';
+import ProposalAttachments from '@/components/ProposalAttachments';
 
 export default function AdminBidDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [bid, setBid] = useState(null);
+  const [bid, setBid] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -112,45 +113,11 @@ export default function AdminBidDetailPage() {
         const files = Array.isArray((bid as any)?.files) ? (bid as any).files : [];
         const all = [...docs, ...files, ...legacy].filter(Boolean);
 
-        const asUrl = (d: any) => (typeof d === "string" ? d : String(d?.url || ""));
-        const asName = (d: any) =>
-          typeof d === "string"
-            ? (d.split("/").pop() || "file")
-            : (d?.name || d?.filename || d?.title || d?.cid || "file");
-
-        const isImg = (u: string) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u || "");
-
         if (all.length === 0) return null;
         return (
           <div className="bg-white p-4 rounded shadow mb-4">
             <h3 className="text-lg font-semibold mb-2">Attachments</h3>
-            <div className="flex flex-wrap gap-3">
-              {all.map((d: any, i: number) => {
-                const url = asUrl(d);
-                const name = asName(d);
-                const img = isImg(url);
-                if (!url) return null;
-                return (
-                  <a
-                    key={i}
-                    href={toGatewayUrl(url)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group block rounded border bg-white hover:shadow-sm transition p-2"
-                    title={name}
-                  >
-                    {img ? (
-                      <img src={toGatewayUrl(url, { width: 200, height: 200, fit: 'cover', format: 'webp' })} alt={name} crossOrigin="anonymous" className="w-24 h-24 object-cover rounded" loading="lazy" />
-                    ) : (
-                      <div className="w-24 h-24 rounded grid place-items-center bg-slate-50 text-slate-600 text-xs">
-                        PDF / File
-                      </div>
-                    )}
-                    <div className="mt-1 w-24 truncate text-[11px] text-slate-700">{name}</div>
-                  </a>
-                );
-              })}
-            </div>
+            <ProposalAttachments docs={all} />
           </div>
         );
       })()}

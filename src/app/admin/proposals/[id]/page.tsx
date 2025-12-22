@@ -1,9 +1,10 @@
+
 // src/app/admin/proposals/[id]/page.tsx
 import Agent2Inline from "@/components/Agent2Inline";
 import AdminProofs from "@/components/AdminProofs";
 import { getProposal, getBids } from "@/lib/api";
-import { toGatewayUrl } from '@/lib/pinata';
 import Link from "next/link";
+import ProposalAttachments from "@/components/ProposalAttachments"; // Import the new component
 
 type PageProps = { params: { id: string } };
 
@@ -12,66 +13,6 @@ function normList(x: any): any[] {
   if (!x) return [];
   if (Array.isArray(x)) return x.filter(Boolean);
   return [x].filter(Boolean);
-}
-function asUrl(d: any): string {
-  if (!d) return "";
-  if (typeof d === "string") return d;
-  return String(d.url || d.href || d.link || "");
-}
-function asName(d: any): string {
-  if (!d) return "";
-  if (typeof d === "string") {
-    try {
-      const u = new URL(d);
-      return decodeURIComponent(u.pathname.split("/").pop() || "file");
-    } catch {
-      return d.split("/").pop() || "file";
-    }
-  }
-  return String(d.name || d.filename || d.title || d.cid || "file");
-}
-function isImage(url: string): boolean {
-  const u = url.toLowerCase();
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
-}
-
-
-function AttachmentTile({ doc }: { doc: any }) {
-  // Use centralized helper
-  const rawUrl = asUrl(doc);
-  if (!rawUrl) return null;
-
-  const url = toGatewayUrl(rawUrl);
-  // Optimization: request webp, 200px width for the tile
-  const thumbSrc = toGatewayUrl(rawUrl, { width: 200, height: 200, fit: 'cover', format: 'webp' });
-
-  const name = asName(doc);
-  const img = isImage(url);
-
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="group block rounded border bg-white hover:shadow-sm transition p-2"
-      title={name}
-    >
-      {img ? (
-        <img
-          src={thumbSrc}
-          alt={name}
-          crossOrigin="anonymous"
-          className="w-24 h-24 object-cover rounded"
-          loading="lazy"
-        />
-      ) : (
-        <div className="w-24 h-24 rounded grid place-items-center bg-slate-50 text-slate-600 text-xs">
-          PDF / File
-        </div>
-      )}
-      <div className="mt-1 w-24 truncate text-[11px] text-slate-700">{name}</div>
-    </a>
-  );
 }
 
 export default async function ProposalDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -90,7 +31,6 @@ export default async function ProposalDetailPage(props: { params: Promise<{ id: 
     const fmtUSD = (n: number) =>
       new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
 
-    // --- normalize proposal attachments (proposal.docs is already an array) ---
     // --- normalize proposal attachments: support doc (single), docs[], files[] ---
     const legacyP = normList((proposal as any)?.doc);
     const docsP = normList((proposal as any)?.docs);
@@ -124,15 +64,7 @@ export default async function ProposalDetailPage(props: { params: Promise<{ id: 
           {/* ✅ Proposal Attachments */}
           <div className="mt-4">
             <h3 className="text-sm font-semibold mb-2">Attachments</h3>
-            {proposalDocs.length === 0 ? (
-              <div className="text-sm text-slate-500">No attachments.</div>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {proposalDocs.map((d, i) => (
-                  <AttachmentTile key={i} doc={d} />
-                ))}
-              </div>
-            )}
+            <ProposalAttachments docs={proposalDocs} />
           </div>
         </section>
 
@@ -169,15 +101,7 @@ export default async function ProposalDetailPage(props: { params: Promise<{ id: 
                     {/* ✅ Bid attachments */}
                     <div>
                       <h4 className="text-sm font-semibold mb-2">Bid Attachments</h4>
-                      {all.length === 0 ? (
-                        <div className="text-sm text-slate-500">No attachments.</div>
-                      ) : (
-                        <div className="flex flex-wrap gap-3">
-                          {all.map((d, i) => (
-                            <AttachmentTile key={i} doc={d} />
-                          ))}
-                        </div>
-                      )}
+                      <ProposalAttachments docs={all} />
                     </div>
 
                     {/* ✅ Agent 2 inline prompt + results */}

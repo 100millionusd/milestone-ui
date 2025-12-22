@@ -1608,18 +1608,20 @@ export default function ProjectDetailPage() {
                                 )}
 
                                 {/* Overlay Actions */}
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-start justify-end p-2 opacity-0 group-hover:opacity-100 pointer-events-none">
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="pointer-events-auto p-1.5 bg-white text-gray-700 rounded shadow-sm hover:text-blue-600 hover:shadow transition-all"
-                                    title="Open in new tab"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                  </a>
-                                </div>
+                                {!isImg && (
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-start justify-end p-2 opacity-0 group-hover:opacity-100 pointer-events-none">
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="pointer-events-auto p-1.5 bg-white text-gray-700 rounded shadow-sm hover:text-blue-600 hover:shadow transition-all"
+                                      title="Open in new tab"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                    </a>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Metadata Area - ONLY MILESTONE (Name hidden) */}
