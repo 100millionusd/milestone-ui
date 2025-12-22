@@ -6,6 +6,7 @@ export type OptimizationOptions = {
     fit?: 'scaleDown' | 'contain' | 'cover' | 'crop' | 'pad';
     animation?: boolean;
     sharpen?: number;
+    gateway?: string;
 };
 
 // FIX: Default to a public gateway if env is missing
@@ -26,7 +27,7 @@ export function toGatewayUrl(url: string | null | undefined, opts?: Optimization
     const cleanUrl = url.split('?')[0];
 
     // Determine the gateway host to use
-    const rawGateway = PREFERRED_GATEWAY;
+    const rawGateway = opts?.gateway || PREFERRED_GATEWAY;
     const host = rawGateway.replace(/^https?:\/\//, '').replace(/\/+$/, '');
 
     let newUrl = cleanUrl;
