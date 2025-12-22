@@ -133,7 +133,7 @@ function normalizeAudit(items: AuditRow[]) {
         Array.isArray(a.changedFields) && a.changedFields.length
           ? `Changed: ${a.changedFields.join(', ')}`
           : undefined,
-      ipfs: ipfs ? toGatewayUrl(ipfs) : undefined,
+      ipfs: ipfs ? toGatewayUrl(ipfs, { gateway: 'https://gateway.pinata.cloud' }) : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -397,7 +397,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-  const ipfsHref = cid ? toGatewayUrl(cid) : undefined;
+  const ipfsHref = cid ? toGatewayUrl(cid, { gateway: 'https://gateway.pinata.cloud' }) : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
@@ -588,7 +588,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={toGatewayUrl(String(f.url), { width: 400, height: 300, fit: 'cover', format: 'webp' })}
+                                  src={toGatewayUrl(String(f.url), { width: 400, height: 300, fit: 'cover', format: 'webp', gateway: 'https://gateway.pinata.cloud' })}
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -635,7 +635,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp' })}
+              src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp', gateway: 'https://gateway.pinata.cloud' })}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -844,7 +844,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={toGatewayUrl(lightboxUrl)}
+              src={toGatewayUrl(lightboxUrl, { gateway: 'https://gateway.pinata.cloud' })}
               alt="Zoomed image"
               fill
               sizes="100vw"
