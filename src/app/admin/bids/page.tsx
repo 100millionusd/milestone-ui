@@ -9,6 +9,8 @@ import {
   rejectBid,
   getProposals,
 } from '@/lib/api';
+import { secureOpen } from '@/lib/download';
+import { toGatewayUrl } from '@/lib/pinata';
 
 const GATEWAY =
   process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
@@ -208,9 +210,11 @@ export default function AdminBidsPage() {
         <p className="truncate font-medium mb-1">{nd.name}</p>
         <a
           href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline text-[10px] uppercase tracking-wide"
+          className="text-blue-600 hover:underline text-[10px] uppercase tracking-wide cursor-pointer"
+          onClick={(e) => {
+            e.preventDefault();
+            secureOpen(href, nd.name);
+          }}
         >
           Open File ↗
         </a>
