@@ -16,28 +16,31 @@ type Doc = {
 
 function asUrl(d: any): string {
     if (!d) return "";
-    if (typeof d === "string") return d;
-    return String(d.url || d.href || d.link || d.cid || "");
+    if (typeof d === "string") return d.trim();
+    return String(d.url || d.href || d.link || d.cid || "").trim();
 }
 
 function asName(d: any): string {
     if (!d) return "";
+    let val = "";
     if (typeof d === "string") {
         try {
             const u = new URL(d);
-            return decodeURIComponent(u.pathname.split("/").pop() || "file");
+            val = decodeURIComponent(u.pathname.split("/").pop() || "file");
         } catch {
-            return d.split("/").pop() || "file";
+            val = d.split("/").pop() || "file";
         }
+    } else {
+        val = String(d.name || d.filename || d.title || d.cid || "file");
     }
-    return String(d.name || d.filename || d.title || d.cid || "file");
+    return val.trim();
 }
 
 function isImage(url: string): boolean {
     if (!url) return false;
-    const u = url.toLowerCase();
-    // Basic check + common IPFS image extensions, ignoring query params
-    return /\.(png|jpe?g|gif|webp|bmp|svg)(?=[?#]|$)/i.test(u);
+    const u = url.toLowerCase().trim();
+    // Looser check: looks for extension followed by end of string, query param, or whitespace
+    return /\.(png|jpe?g|gif|webp|bmp|svg)((?=[?#])|$|\s)/i.test(u);
 }
 
 export default function ProposalAttachments({ docs = [] }: { docs: Doc[] }) {
