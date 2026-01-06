@@ -281,7 +281,7 @@ function toIso(d: any): string {
   }
 }
 
-function getJwt(): string | null {
+export function getJwt(): string | null {
   if (typeof window === "undefined") return null;
   try {
     return localStorage.getItem("lx_jwt");
@@ -290,7 +290,7 @@ function getJwt(): string | null {
   }
 }
 
-function setJwt(token: string | null) {
+export function setJwt(token: string | null) {
   if (typeof window === "undefined") return;
   try {
     if (token) localStorage.setItem("lx_jwt", token);
