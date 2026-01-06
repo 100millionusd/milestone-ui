@@ -96,7 +96,7 @@ export default function PublicVotingPage() {
                                         <h3 className="text-lg font-bold text-slate-800 leading-tight mb-2 line-clamp-2 group-hover:text-indigo-600 transition-colors">
                                             {project.title}
                                         </h3>
-                                        <p className="text-sm text-slate-500 leading-relaxed line-clamp-3">
+                                        <p className="text-sm text-slate-500 leading-relaxed max-h-32 overflow-y-auto pr-2">
                                             {project.description}
                                         </p>
                                     </div>
