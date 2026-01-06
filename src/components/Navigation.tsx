@@ -164,6 +164,7 @@ export default function Navigation() {
           { href: '/admin/oversight', label: 'Oversight' },
           { href: '/admin/proposals', label: 'Proposals' },
           { href: '/admin/bids', label: 'Bids' },
+          { href: '/admin/voting', label: 'Voting' },
           { href: '/admin/proofs', label: 'Proofs' },
           { href: '/admin/entities', label: 'Entities' },
           { href: '/admin/vendors', label: 'Vendors' },
