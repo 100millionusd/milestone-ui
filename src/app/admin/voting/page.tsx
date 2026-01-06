@@ -8,6 +8,7 @@ type VotingProject = {
     title: string;
     description: string;
     image_url: string;
+    image_cid?: string;
     status: string;
     department: string;
 };
@@ -151,7 +152,9 @@ export default function AdminVotingPage() {
                 {projects.map(proj => (
                     <div key={proj.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
                         <div className="h-48 bg-gray-100 relative">
-                            {proj.image_url ? (
+                            {proj.image_cid ? (
+                                <img src={`https://gateway.pinata.cloud/ipfs/${proj.image_cid}`} alt={proj.title} className="w-full h-full object-cover" />
+                            ) : proj.image_url ? (
                                 <img src={proj.image_url} alt={proj.title} className="w-full h-full object-cover" />
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-400">No Image</div>
