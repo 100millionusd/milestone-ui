@@ -17,6 +17,7 @@ type VotingProject = {
 export default function PublicVotingPage() {
     const [projects, setProjects] = useState<VotingProject[]>([]);
     const [loading, setLoading] = useState(true);
+    const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
     useEffect(() => {
         fetchProjects();
@@ -68,9 +69,19 @@ export default function PublicVotingPage() {
                                 {/* Image Area */}
                                 <div className="relative h-48 w-full overflow-hidden bg-slate-100">
                                     {project.image_cid ? (
-                                        <img className="h-full w-full object-cover transform group-hover:scale-105 transition-transform duration-700" src={`https://gateway.pinata.cloud/ipfs/${project.image_cid}`} alt={project.title} />
+                                        <img
+                                            className="h-full w-full object-cover transform group-hover:scale-105 transition-transform duration-700 cursor-zoom-in"
+                                            src={`https://gateway.pinata.cloud/ipfs/${project.image_cid}`}
+                                            alt={project.title}
+                                            onClick={() => setSelectedImage(`https://gateway.pinata.cloud/ipfs/${project.image_cid}`)}
+                                        />
                                     ) : project.image_url ? (
-                                        <img className="h-full w-full object-cover transform group-hover:scale-105 transition-transform duration-700" src={project.image_url} alt={project.title} />
+                                        <img
+                                            className="h-full w-full object-cover transform group-hover:scale-105 transition-transform duration-700 cursor-zoom-in"
+                                            src={project.image_url}
+                                            alt={project.title}
+                                            onClick={() => setSelectedImage(project.image_url)}
+                                        />
                                     ) : (
                                         <div className="h-full w-full flex items-center justify-center text-slate-300">
                                             <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
@@ -108,6 +119,31 @@ export default function PublicVotingPage() {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                )}
+
+                {/* Lightbox Modal */}
+                {selectedImage && (
+                    <div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm"
+                        onClick={() => setSelectedImage(null)}
+                    >
+                        <div className="relative max-w-5xl w-full max-h-screen flex items-center justify-center">
+                            <button
+                                className="absolute -top-12 right-0 text-white/80 hover:text-white transition-colors"
+                                onClick={() => setSelectedImage(null)}
+                            >
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                            <img
+                                src={selectedImage}
+                                alt="Enlarged project"
+                                className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        </div>
                     </div>
                 )}
             </div>
