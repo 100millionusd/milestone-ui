@@ -30,7 +30,7 @@ export default function AdminVotingPage() {
     const fetchProjects = async () => {
         try {
             setLoading(true);
-            const res = await apiFetch<VotingProject[]>('/api/voting/projects');
+            const res = await apiFetch<VotingProject[]>('/api/admin/voting/projects');
             if (res) {
                 setProjects(res);
             }
@@ -150,8 +150,9 @@ export default function AdminVotingPage() {
             {/* LIST */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {projects.map(proj => (
-                    <div key={proj.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-                        <div className="h-48 bg-gray-100 relative">
+                    <div key={proj.id} className={`rounded-xl shadow-sm border overflow-hidden flex flex-col ${proj.status === 'archived' ? 'bg-gray-50 border-gray-200 opacity-75' : 'bg-white border-gray-200'}`}>
+                        <div className="h-48 bg-gray-100 relative grayscale-0">
+                            {proj.status === 'archived' && <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-10"></div>}
                             {proj.image_cid ? (
                                 <img src={`https://gateway.pinata.cloud/ipfs/${proj.image_cid}`} alt={proj.title} className="w-full h-full object-cover" />
                             ) : proj.image_url ? (
@@ -159,7 +160,7 @@ export default function AdminVotingPage() {
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-400">No Image</div>
                             )}
-                            <span className="absolute top-2 right-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded font-bold uppercase">
+                            <span className={`absolute top-2 right-2 text-xs px-2 py-1 rounded font-bold uppercase z-20 ${proj.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
                                 {proj.status}
                             </span>
                         </div>
@@ -169,20 +170,22 @@ export default function AdminVotingPage() {
                         </div>
                         <div className="p-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 flex justify-between items-center">
                             <span>ID: {proj.id} • Dept: {proj.department}</span>
-                            <button
-                                onClick={async () => {
-                                    if (!confirm('Archive this project? It will be hidden from public view.')) return;
-                                    try {
-                                        await apiFetch(`/api/voting/projects/${proj.id}/archive`, { method: 'PUT' });
-                                        fetchProjects();
-                                    } catch (e) {
-                                        alert('Failed to archive');
-                                    }
-                                }}
-                                className="text-red-600 hover:text-red-800 font-bold hover:underline"
-                            >
-                                Archive
-                            </button>
+                            {proj.status === 'active' && (
+                                <button
+                                    onClick={async () => {
+                                        if (!confirm('Archive this project? It will be hidden from public view.')) return;
+                                        try {
+                                            await apiFetch(`/api/voting/projects/${proj.id}/archive`, { method: 'PUT' });
+                                            fetchProjects();
+                                        } catch (e) {
+                                            alert('Failed to archive');
+                                        }
+                                    }}
+                                    className="text-red-600 hover:text-red-800 font-bold hover:underline"
+                                >
+                                    Archive
+                                </button>
+                            )}
                         </div>
                     </div>
                 ))}
