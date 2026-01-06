@@ -167,8 +167,22 @@ export default function AdminVotingPage() {
                             <h3 className="font-bold text-lg text-gray-800 mb-2">{proj.title}</h3>
                             <p className="text-sm text-gray-600 line-clamp-3">{proj.description}</p>
                         </div>
-                        <div className="p-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
-                            ID: {proj.id} • Dept: {proj.department}
+                        <div className="p-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 flex justify-between items-center">
+                            <span>ID: {proj.id} • Dept: {proj.department}</span>
+                            <button
+                                onClick={async () => {
+                                    if (!confirm('Archive this project? It will be hidden from public view.')) return;
+                                    try {
+                                        await apiFetch(`/api/voting/projects/${proj.id}/archive`, { method: 'PUT' });
+                                        fetchProjects();
+                                    } catch (e) {
+                                        alert('Failed to archive');
+                                    }
+                                }}
+                                className="text-red-600 hover:text-red-800 font-bold hover:underline"
+                            >
+                                Archive
+                            </button>
                         </div>
                     </div>
                 ))}
