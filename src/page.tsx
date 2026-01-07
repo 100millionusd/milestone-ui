@@ -1,4 +1,10 @@
 import HeroCtas from '@/components/HeroCtas';
+// Static logo imports
+import sonicLogo from '../../public/images/logos/sonic.png';
+import safeLogo from '../../public/images/logos/safe.png';
+import tetherLogo from '../../public/images/logos/tether.png';
+import circleLogo from '../../public/images/logos/circle.png';
+import Image from 'next/image'; // Use Next.js Image component for optimization
 
 export const dynamic = 'force-dynamic'; // Ensure we check headers/cookies on every request
 
@@ -71,7 +77,8 @@ export default async function Home() {
                 <img
                   src="/images/logos/sonic.png"
                   alt="SonicLabs"
-                  className="h-6 w-auto" // Adjust height as needed
+                  className="h-5 w-auto object-contain" // Reduced to h-5 (20px)
+                  style={{ height: '20px' }}
                 />
               </div>
               <p className="text-sm text-gray-500">
@@ -89,17 +96,20 @@ export default async function Home() {
               <img
                 src="/images/logos/safe.png"
                 alt="Safe{Wallet}"
-                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity" // Slightly increased height for visibility
+                className="h-5 w-auto object-contain opacity-75 hover:opacity-100 transition-opacity" // Reduced to h-5 (20px)
+                style={{ height: '20px' }}
               />
               <img
                 src="/images/logos/tether.png"
                 alt="Tether"
-                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity"
+                className="h-5 w-auto object-contain opacity-75 hover:opacity-100 transition-opacity"
+                style={{ height: '20px' }}
               />
               <img
                 src="/images/logos/circle.png"
                 alt="Circle"
-                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity"
+                className="h-5 w-auto object-contain opacity-75 hover:opacity-100 transition-opacity"
+                style={{ height: '20px' }}
               />
             </div>
           </div>
