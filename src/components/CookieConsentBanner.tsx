@@ -4,14 +4,16 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 export default function CookieConsentBanner() {
-    const [show, setShow] = useState(false);
+    // DEBUG: Force visible immediately to rule out logic issues
+    const [show, setShow] = useState(true);
 
     useEffect(() => {
         // Check localStorage on mount
         const consent = localStorage.getItem('mx_cookie_consent');
         console.log('CookieBanner mount:', { consent });
-        if (!consent) {
-            setShow(true);
+        // Only hide if EXPLICITLY consented
+        if (consent === 'true') {
+            setShow(false);
         }
     }, []);
 
@@ -23,9 +25,10 @@ export default function CookieConsentBanner() {
     if (!show) return null;
 
     return (
-        <div className="fixed bottom-0 left-0 right-0 z-[2147483647] bg-gray-900 border-t border-gray-800 p-4 shadow-lg">
+        <div className="fixed bottom-0 left-0 right-0 z-[2147483647] bg-red-500 border-t-4 border-yellow-400 p-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
             <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="text-sm text-gray-300 text-center sm:text-left">
+                <div className="text-white text-center sm:text-left font-bold text-lg">
+                    DEBUG MODE: COOKIE BANNER VISIBLE?
                     <p>
                         We use cookies to improve your experience and ensure the security of our platform.
                         By continuing, you agree to our usage.
