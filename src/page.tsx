@@ -59,8 +59,7 @@ export default async function Home() {
       {/* CTA Section (no buttons) */}
       <section className="bg-gray-50 py-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-
-          {/*           {/* Transparency & Security Section */}
+          {/* Transparency & Security Section */}
           <div className="mb-12">
             <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
               Transparency & Security
@@ -71,7 +70,7 @@ export default async function Home() {
                 <img
                   src="/images/logos/sonic.png"
                   alt="SonicLabs"
-                  className="h-5 w-auto object-contain" // Reduced to h-5 (20px)
+                  className="h-5 w-auto object-contain"
                   style={{ height: '20px' }}
                 />
               </div>
@@ -90,7 +89,7 @@ export default async function Home() {
               <img
                 src="/images/logos/safe.png"
                 alt="Safe{Wallet}"
-                className="h-5 w-auto object-contain opacity-75 hover:opacity-100 transition-opacity" // Reduced to h-5 (20px)
+                className="h-5 w-auto object-contain opacity-75 hover:opacity-100 transition-opacity"
                 style={{ height: '20px' }}
               />
               <img
@@ -106,7 +105,7 @@ export default async function Home() {
                 style={{ height: '20px' }}
               />
             </div>
-          </div> */}
+          </div>
 
           <h2 className="text-3xl font-bold text-gray-900 mb-6">
             Build with Confidence
