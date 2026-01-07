@@ -24,6 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 999999, background: 'magenta', padding: 20, color: 'white' }}>
+          LAYOUT RAW DEBUG
+        </div>
         <AuthSync />
         <CookieConsentBanner />
         <ClientBootstrap>
