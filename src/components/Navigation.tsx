@@ -154,7 +154,7 @@ export default function Navigation() {
       { href: '/', label: 'Dashboard' },
       { href: '/projects', label: 'Projects', roles: ['admin', 'vendor'], requiresApproval: true },
       { href: '/public', label: 'Public Projects', roles: ['admin', 'vendor', 'proposer', 'guest'] },
-      { href: '/public/voting', label: 'Vote for Potosi', roles: ['guest', 'proposer', 'vendor', 'admin'] },
+      { href: '/public/voting', label: 'Vote', roles: ['guest', 'proposer', 'vendor', 'admin'] },
       { href: '/new', label: 'Submit Proposal', roles: ['guest', 'proposer'] },
       { href: '/create-tenant', label: 'Create Org', roles: ['guest', 'vendor', 'proposer', 'admin'] },
 
