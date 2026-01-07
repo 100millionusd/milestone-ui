@@ -7,6 +7,7 @@ import { Web3AuthProvider } from '@/providers/Web3AuthProvider';
 import ClientBootstrap from './ClientBootstrap';
 import ImageEnhancer from '@/components/ImageEnhancer';
 import AuthSync from '@/components/AuthSync';
+import CookieConsentBanner from '@/components/CookieConsentBanner';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -24,6 +25,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthSync />
+        <CookieConsentBanner />
         <ClientBootstrap>
           <Web3AuthProvider>
             <ImageEnhancer />

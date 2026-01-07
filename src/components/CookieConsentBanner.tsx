@@ -4,16 +4,13 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 export default function CookieConsentBanner() {
-    // DEBUG: Force visible immediately to rule out logic issues
-    const [show, setShow] = useState(true);
+    const [show, setShow] = useState(false);
 
     useEffect(() => {
         // Check localStorage on mount
         const consent = localStorage.getItem('mx_cookie_consent');
-        console.log('CookieBanner mount:', { consent });
-        // Only hide if EXPLICITLY consented
-        if (consent === 'true') {
-            setShow(false);
+        if (!consent) {
+            setShow(true);
         }
     }, []);
 
@@ -25,36 +22,22 @@ export default function CookieConsentBanner() {
     if (!show) return null;
 
     return (
-        <div style={{
-            position: 'fixed',
-            bottom: '0',
-            left: '0',
-            right: '0',
-            width: '100vw',
-            zIndex: 999999,
-            padding: '20px',
-            backgroundColor: 'red',
-            color: 'white',
-            borderTop: '5px solid yellow',
-            display: 'block'
-        }}>
+        <div className="fixed bottom-0 left-0 right-0 z-[2147483647] bg-gray-900 border-t border-gray-800 p-4 shadow-lg animate-fade-in-up">
             <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="font-bold text-lg">
-                    DEBUG MODE: INLINE STYLES
-                    <p className="font-normal text-sm">
-                        We use cookies to improve your experience.
+                <div className="text-sm text-gray-300 text-center sm:text-left">
+                    <p>
+                        We use cookies to improve your experience and ensure the security of our platform.
+                        By continuing, you agree to our usage.
                     </p>
+                    <div className="mt-1">
+                        <Link href="/cookies" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+                            Learn more in our Cookie Policy
+                        </Link>
+                    </div>
                 </div>
                 <button
                     onClick={accept}
-                    style={{
-                        backgroundColor: 'blue',
-                        color: 'white',
-                        padding: '10px 20px',
-                        borderRadius: '20px',
-                        border: 'none',
-                        cursor: 'pointer'
-                    }}
+                    className="whitespace-nowrap bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-full text-sm font-medium transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
                 >
                     Accept & Continue
                 </button>
