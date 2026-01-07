@@ -59,6 +59,51 @@ export default async function Home() {
       {/* CTA Section (no buttons) */}
       <section className="bg-gray-50 py-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+
+          {/* Transparency & Security Section */}
+          <div className="mb-12">
+            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
+              Transparency & Security
+            </h3>
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <div className="flex items-center space-x-2 text-gray-600">
+                <span>Audit Trail Anchored on</span>
+                <img
+                  src="/images/logos/sonic.png"
+                  alt="SonicLabs"
+                  className="h-6 w-auto" // Adjust height as needed
+                />
+              </div>
+              <p className="text-sm text-gray-500">
+                All project events are immutably verified on-chain.
+              </p>
+            </div>
+          </div>
+
+          {/* Payments Powered By Section */}
+          <div className="mb-16">
+            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">
+              Payments Powered By
+            </h3>
+            <div className="flex flex-wrap items-center justify-center gap-8 md:gap-12">
+              <img
+                src="/images/logos/safe.png"
+                alt="Safe{Wallet}"
+                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity" // Slightly increased height for visibility
+              />
+              <img
+                src="/images/logos/tether.png"
+                alt="Tether"
+                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity"
+              />
+              <img
+                src="/images/logos/circle.png"
+                alt="Circle"
+                className="h-8 w-auto opacity-75 hover:opacity-100 transition-opacity"
+              />
+            </div>
+          </div>
+
           <h2 className="text-3xl font-bold text-gray-900 mb-6">
             Build with Confidence
           </h2>
