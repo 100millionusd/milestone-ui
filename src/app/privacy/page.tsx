@@ -5,20 +5,17 @@ export default function PrivacyPage() {
         <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
             <div className="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow">
                 <h1 className="text-3xl font-bold mb-6">Privacy Policy</h1>
-                <p className="mb-4 text-sm text-gray-500">Last Updated: January 7, 2026</p>
+                <p className="mb-6 text-sm text-gray-500">Last Updated: January 7, 2026</p>
 
                 <section className="mb-8">
                     <h2 className="text-xl font-semibold mb-4">1. Introduction</h2>
-                    <p className="mb-4 text-gray-700">
-                        MilestoneX is a product of <strong>Heitaria Swiss AG</strong> (the “Company”, “we”, “us”). We value privacy and aim to be transparent about how personal information is collected, used, shared, and retained when using MilestoneX to manage projects and payments. By using MilestoneX, you acknowledge the practices described in this policy.
+                    <p className="text-gray-700">
+                        MilestoneX is a product of <strong>Heitaria Swiss AG</strong> ("we," "us," or "our"). We provide a B2B platform for project management and payments. We value your privacy and are committed to being transparent about the data we process.
                     </p>
                 </section>
 
                 <section className="mb-8">
                     <h2 className="text-xl font-semibold mb-4">2. Who We Are (Controller)</h2>
-                    <p className="mb-4 text-gray-700">
-                        MilestoneX is a product of <strong>Heitaria Swiss AG</strong> ("Heitaria"). Heitaria is the <strong>data controller</strong> for personal information processed under this policy.
-                    </p>
                     <div className="bg-gray-50 p-4 rounded border border-gray-200 text-sm">
                         <p className="font-semibold">Heitaria Swiss AG</p>
                         <p>Rigistrasse 1</p>
@@ -26,123 +23,100 @@ export default function PrivacyPage() {
                         <p>Switzerland</p>
                         <p className="mt-2"><strong>Email:</strong> <a href="mailto:info@heitaria.ch" className="text-blue-600 hover:underline">info@heitaria.ch</a></p>
                     </div>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">3. Information We Collect</h2>
-
-                    <h3 className="text-lg font-medium mb-2">A. Account and Project Data</h3>
-                    <p className="mb-2 text-gray-700">To provide our project management services, we may collect:</p>
-                    <ul className="list-disc pl-5 mb-4 text-gray-700 space-y-1">
-                        <li><strong>Identity and contact details:</strong> Name, email address, wallet address.</li>
-                        <li><strong>Project details:</strong> Information regarding bids, proposals, milestones, and proofs of work.</li>
-                        <li><strong>Organization details:</strong> Company name and business information.</li>
-                    </ul>
-
-                    <h3 className="text-lg font-medium mb-2">B. Technical and Usage Data</h3>
-                    <p className="mb-2 text-gray-700">We may automatically collect:</p>
-                    <ul className="list-disc pl-5 mb-4 text-gray-700 space-y-1">
-                        <li><strong>Device and app data:</strong> device type, operating system, browser type.</li>
-                        <li><strong>Log and analytics data:</strong> IP address, timestamps, pages/screens viewed, and interactions.</li>
-                        <li><strong>Cookies and similar technologies:</strong> for authentication and session management.</li>
-                    </ul>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">4. How We Use Information</h2>
-                    <p className="mb-4 text-gray-700">We use personal information for the following purposes:</p>
-
-                    <div className="space-y-4">
-                        <div>
-                            <h3 className="text-lg font-medium mb-1">A. Service Provision</h3>
-                            <ul className="list-disc pl-5 text-gray-700">
-                                <li>Create and manage accounts and project workspaces.</li>
-                                <li>Process milestone payments and verify proofs of work.</li>
-                                <li>Provide customer support.</li>
-                            </ul>
-                        </div>
-
-                        <div>
-                            <h3 className="text-lg font-medium mb-1">B. Safety and Operations</h3>
-                            <ul className="list-disc pl-5 text-gray-700">
-                                <li>Prevent fraud, spam, and unauthorized access.</li>
-                                <li>Debug and improve platform performance.</li>
-                            </ul>
-                        </div>
-
-                        <div>
-                            <h3 className="text-lg font-medium mb-1">C. Legal and Compliance</h3>
-                            <ul className="list-disc pl-5 text-gray-700">
-                                <li>Tax, accounting, audits, legal claims, and regulatory obligations.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">5. Legal Bases (EEA/UK)</h2>
-                    <p className="mb-2 text-gray-700">Where GDPR/UK GDPR applies, processing is based on:</p>
-                    <ul className="list-disc pl-5 mb-4 text-gray-700 space-y-1">
-                        <li><strong>Contract:</strong> to provide the requested services.</li>
-                        <li><strong>Legitimate interests:</strong> to secure the platform and improve features.</li>
-                        <li><strong>Legal obligation:</strong> where retention or disclosure is required by law.</li>
-                    </ul>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">6. How We Share Information</h2>
-                    <p className="mb-4 text-gray-700">We share personal information only as needed:</p>
-
-                    <div className="space-y-4">
-                        <div>
-                            <h3 className="text-lg font-medium mb-1">A. Service Providers</h3>
-                            <ul className="list-disc pl-5 text-gray-700">
-                                <li>Hosting, analytics, and infrastructure providers (e.g., blockchain nodes, IPFS gateways).</li>
-                            </ul>
-                        </div>
-
-                        <div>
-                            <h3 className="text-lg font-medium mb-1">B. Legal and Business Transfers</h3>
-                            <p className="text-gray-700">We may disclose information:</p>
-                            <ul className="list-disc pl-5 text-gray-700">
-                                <li>to comply with law or lawful requests,</li>
-                                <li>in connection with a merger, acquisition, or asset sale.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">7. Data Retention</h2>
-                    <p className="mb-2 text-gray-700">We keep information only as long as needed:</p>
-                    <ul className="list-disc pl-5 mb-4 text-gray-700 space-y-1">
-                        <li><strong>Project records:</strong> retained as necessary for tax and legal compliance.</li>
-                        <li><strong>Technical logs:</strong> retained for a limited period for security and analytics.</li>
-                    </ul>
-                </section>
-
-                <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">8. Security</h2>
-                    <p className="text-gray-700">
-                        MilestoneX uses reasonable administrative, technical, and organizational measures designed to protect information.
+                    <p className="mt-4 text-gray-700">
+                        For the purpose of Swiss Federal Act on Data Protection (nFADP) and GDPR, Heitaria is the Data Controller for the data collected through our website interface. However, you remain the sole controller of your private keys and on-chain assets.
                     </p>
                 </section>
 
                 <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">9. Cookies</h2>
+                    <h2 className="text-xl font-semibold mb-4">3. Non-Custodial Service & User Responsibility</h2>
+                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                        <p className="font-bold text-yellow-800">Important: MilestoneX is a non-custodial service.</p>
+                    </div>
+                    <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                        <li><strong>No Access to Keys:</strong> We do not have access to your private keys, seed phrases, or passwords. We cannot recover your account if you lose these credentials.</li>
+                        <li><strong>User Control:</strong> You retain full control over your wallet and assets at all times.</li>
+                        <li><strong>Local Data:</strong> Some settings may be stored locally on your device. If you clear your browser cache, these settings may be lost.</li>
+                    </ul>
+                </section>
+
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">4. Information We Collect</h2>
+                    <p className="mb-4 text-gray-700">We collect only the minimum amount of data required to provide our services:</p>
+
+                    <div className="mb-4">
+                        <h3 className="text-lg font-medium mb-2">A. Data You Provide</h3>
+                        <ul className="list-disc pl-5 text-gray-700 space-y-1">
+                            <li><strong>Public Wallet Address:</strong> To link your account and display your project history.</li>
+                            <li><strong>Profile Information:</strong> If you choose to add a name, email, or company details to your profile.</li>
+                            <li><strong>Project Metadata:</strong> Descriptions, titles, and milestones you input for your projects.</li>
+                        </ul>
+                    </div>
+
+                    <div className="mb-4">
+                        <h3 className="text-lg font-medium mb-2">B. Automatically Collected Data</h3>
+                        <ul className="list-disc pl-5 text-gray-700 space-y-1">
+                            <li><strong>Technical Logs:</strong> IP address, browser type, and operating system (for security and debugging).</li>
+                            <li><strong>Cookies:</strong> Essential session cookies (see our Cookie Policy).</li>
+                        </ul>
+                    </div>
+
+                    <div className="mb-4">
+                        <h3 className="text-lg font-medium mb-2">C. What We DO NOT Collect</h3>
+                        <p className="text-gray-700">We never collect or store your private keys, seed phrases, or raw transaction signatures.</p>
+                    </div>
+                </section>
+
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">5. How We Use Information</h2>
+                    <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                        <li><strong>To Provide the Service:</strong> Displaying your projects, verifying ownership of your wallet address, and facilitating interactions.</li>
+                        <li><strong>Security:</strong> Detecting potentially fraudulent access patterns (e.g., bot attacks).</li>
+                        <li><strong>Legal Compliance:</strong> Keeping records required by Swiss law for B2B contracts.</li>
+                    </ul>
+                </section>
+
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">6. Blockchain Immutability</h2>
+                    <p className="mb-4 text-gray-700">Please be aware that any transaction you sign and broadcast to a blockchain is public, permanent, and immutable.</p>
+                    <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                        <li><strong>Right to Erasure Limitation:</strong> We cannot delete or modify data that has been written to the blockchain. This data is outside our control.</li>
+                        <li><strong>Publicity:</strong> Your public wallet address and transaction history are visible to anyone on the internet.</li>
+                    </ul>
+                </section>
+
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">7. International Transfers</h2>
                     <p className="text-gray-700">
-                        We use essential cookies for authentication and security. See our Cookie Policy for details.
+                        Heitaria Swiss AG is based in Switzerland. We may use service providers (e.g., hosting or analytics) located in the USA or other countries. In such cases, we ensure your data is protected using recognized legal standards (such as Standard Contractual Clauses).
                     </p>
                 </section>
 
                 <section className="mb-8">
-                    <h2 className="text-xl font-semibold mb-4">10. Privacy Rights</h2>
-                    <p className="mb-2 text-gray-700">Depending on your location, you may have rights to access, correct, or delete your personal data.</p>
+                    <h2 className="text-xl font-semibold mb-4">8. Data Retention</h2>
+                    <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                        <li><strong>Account Data:</strong> Retained as long as you use the service or as required by Swiss tax/commercial law (typically 10 years for business records).</li>
+                        <li><strong>Technical Logs:</strong> Retained for a limited period for security auditing, then deleted.</li>
+                    </ul>
                 </section>
 
-                <section>
-                    <h2 className="text-xl font-semibold mb-4">11. Contact</h2>
-                    <p className="mb-2 text-gray-700">To ask questions or exercise privacy rights, contact:</p>
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">9. Your Rights</h2>
+                    <p className="mb-4 text-gray-700">Under Swiss nFADP and GDPR, you have the right to:</p>
+                    <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                        <li><strong>Access:</strong> Request a copy of the personal data we hold (e.g., your email/profile).</li>
+                        <li><strong>Rectify:</strong> Update incorrect profile data.</li>
+                        <li><strong>Delete:</strong> Request deletion of your off-chain profile data (subject to legal retention requirements).</li>
+                        <li><strong>Export:</strong> Receive your data in a portable format.</li>
+                    </ul>
+                    <p className="mt-4 text-gray-600 italic">
+                        Note: We cannot fulfill requests to delete or alter data stored on the public blockchain.
+                    </p>
+                </section>
+
+                <section className="mb-8">
+                    <h2 className="text-xl font-semibold mb-4">10. Contact Us</h2>
+                    <p className="mb-2 text-gray-700">For privacy inquiries:</p>
                     <div className="bg-gray-50 p-4 rounded border border-gray-200 text-sm">
                         <p className="font-semibold">Heitaria Swiss AG</p>
                         <p>Rigistrasse 1</p>
