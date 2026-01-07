@@ -1,10 +1,4 @@
 import HeroCtas from '@/components/HeroCtas';
-// Static logo imports
-import sonicLogo from '../../public/images/logos/sonic.png';
-import safeLogo from '../../public/images/logos/safe.png';
-import tetherLogo from '../../public/images/logos/tether.png';
-import circleLogo from '../../public/images/logos/circle.png';
-import Image from 'next/image'; // Use Next.js Image component for optimization
 
 export const dynamic = 'force-dynamic'; // Ensure we check headers/cookies on every request
 
