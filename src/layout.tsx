@@ -25,6 +25,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthSync />
+        <CookieConsentBanner />
         <ClientBootstrap>
           <Web3AuthProvider>
             <ImageEnhancer />
@@ -72,7 +73,6 @@ export default function RootLayout({
                 </div>
               </footer>
             </div>
-            <CookieConsentBanner />
           </Web3AuthProvider>
         </ClientBootstrap>
       </body>
