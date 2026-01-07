@@ -9,6 +9,7 @@ export default function CookieConsentBanner() {
     useEffect(() => {
         // Check localStorage on mount
         const consent = localStorage.getItem('mx_cookie_consent');
+        console.log('CookieBanner mount:', { consent });
         if (!consent) {
             setShow(true);
         }
@@ -22,7 +23,7 @@ export default function CookieConsentBanner() {
     if (!show) return null;
 
     return (
-        <div className="fixed bottom-0 left-0 right-0 z-[10000] bg-gray-900 border-t border-gray-800 p-4 shadow-lg animate-fade-in-up">
+        <div className="fixed bottom-0 left-0 right-0 z-[2147483647] bg-gray-900 border-t border-gray-800 p-4 shadow-lg">
             <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-sm text-gray-300 text-center sm:text-left">
                     <p>
