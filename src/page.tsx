@@ -70,8 +70,8 @@ export default async function Home() {
                 <img
                   src="/images/logos/sonic.png"
                   alt="SonicLabs"
-                  className="h-5 w-auto object-contain"
-                  style={{ height: '20px' }}
+                  className="h-[30px] w-auto object-contain"
+                  style={{ height: '30px' }}
                 />
               </div>
               <p className="text-sm text-gray-500">
