@@ -10,7 +10,7 @@ export default async function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
             <h1 className="text-4xl md:text-5xl font-bold mb-6">
-              Proof, Not Promises —
+              Proof, Not Promises
               <br />
               <span className="text-cyan-400">AI-Guided Funding, Blockchain-Backed Trust</span>
             </h1>
