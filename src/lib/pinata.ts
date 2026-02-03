@@ -7,6 +7,7 @@ export type OptimizationOptions = {
     animation?: boolean;
     sharpen?: number;
     gateway?: string;
+    skipToken?: boolean; // Skip adding gateway token (for public fallback gateways)
 };
 
 // FIX: Default to a public gateway if env is missing
@@ -14,6 +15,12 @@ const PREFERRED_GATEWAY =
     process.env.NEXT_PUBLIC_PINATA_GATEWAY
         ? `https://${String(process.env.NEXT_PUBLIC_PINATA_GATEWAY).replace(/^https?:\/\//, '').replace(/\/+$/, '')}/ipfs/`
         : (process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/');
+
+// Gateway token for authenticated access to dedicated gateway
+const GATEWAY_TOKEN =
+    typeof process !== 'undefined'
+        ? (process as any).env?.NEXT_PUBLIC_PINATA_GATEWAY_TOKEN
+        : '';
 
 /**
  * Normalizes an IPFS URL to use the dedicated Pinata gateway.
@@ -67,20 +74,25 @@ export function toGatewayUrl(url: string | null | undefined, opts?: Optimization
         newUrl = newUrl.replace('/ipfs/ipfs/', '/ipfs/');
     }
 
-    // 5. Append Optimization Params
-    if (opts) {
-        const params = new URLSearchParams();
-        if (opts.width) params.set('img-width', opts.width.toString());
-        if (opts.height) params.set('img-height', opts.height.toString());
-        if (opts.format) params.set('img-format', opts.format);
-        if (opts.fit) params.set('img-fit', opts.fit);
-        if (opts.animation === false) params.set('img-anim', 'false');
-        if (opts.sharpen) params.set('img-sharpen', opts.sharpen.toString());
+    // 5. Append Optimization Params + Gateway Token
+    const params = new URLSearchParams();
 
-        const qs = params.toString();
-        if (qs) {
-            newUrl += `?${qs}`;
-        }
+    // Add image optimization params
+    if (opts?.width) params.set('img-width', opts.width.toString());
+    if (opts?.height) params.set('img-height', opts.height.toString());
+    if (opts?.format) params.set('img-format', opts.format);
+    if (opts?.fit) params.set('img-fit', opts.fit);
+    if (opts?.animation === false) params.set('img-anim', 'false');
+    if (opts?.sharpen) params.set('img-sharpen', opts.sharpen.toString());
+
+    // 🔑 Add gateway token for dedicated gateway authentication (fixes 401 errors)
+    if (GATEWAY_TOKEN && !opts?.skipToken) {
+        params.set('pinataGatewayToken', GATEWAY_TOKEN);
+    }
+
+    const qs = params.toString();
+    if (qs) {
+        newUrl += `?${qs}`;
     }
 
     return newUrl;
