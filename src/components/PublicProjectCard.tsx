@@ -133,7 +133,7 @@ function normalizeAudit(items: AuditRow[]) {
         Array.isArray(a.changedFields) && a.changedFields.length
           ? `Changed: ${a.changedFields.join(', ')}`
           : undefined,
-      ipfs: ipfs ? toGatewayUrl(ipfs, { gateway: 'https://dweb.link' }) : undefined,
+      ipfs: ipfs ? toGatewayUrl(ipfs) : undefined,
       milestoneIndex: Number.isFinite(a.milestoneIndex as number) ? Number(a.milestoneIndex) : undefined,
       txHash: a.txHash || undefined,
     };
@@ -177,7 +177,10 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
     let cancelled = false;
 
-    (async () => {
+    // ⏱️ PERF: Defer GPS extraction by 2s so images load first (better perceived perf)
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+
       const exifr = (await import('exifr')).default as any;
 
       const MAX_RANGE_BYTES = 524_287; // ~512 KB
@@ -226,10 +229,11 @@ export default function PublicProjectCard({ project }: { project: Project }) {
           return next;
         });
       }
-    })();
+    }, 2000); // ⏱️ Defer GPS extraction by 2s
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
     // 🔑 only re-run when the FILE LIST changes; do NOT depend on gpsByUrl
   }, [files]);
@@ -397,7 +401,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
 
   const cid = (auditSummary?.cid ?? project.cid ?? null) as string | null;
   const anchored = Boolean(cid || auditSummary?.anchored || auditSummary?.txHash || auditSummary?.anchoredAt);
-  const ipfsHref = cid ? toGatewayUrl(cid, { gateway: 'https://dweb.link' }) : undefined;
+  const ipfsHref = cid ? toGatewayUrl(cid) : undefined;
   const explorerHref =
     auditSummary?.txHash && EXPLORER_BASE ? `${EXPLORER_BASE}/tx/${auditSummary.txHash}` : undefined;
   const anchorHref = ipfsHref || explorerHref;
@@ -588,7 +592,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                             {isImg ? (
                               <div className="relative w-full aspect-video">
                                 <Image
-                                  src={toGatewayUrl(String(f.url), { width: 400, height: 300, fit: 'cover', format: 'webp', gateway: 'https://dweb.link' })}
+                                  src={toGatewayUrl(String(f.url), { width: 400, height: 300, fit: 'cover', format: 'webp' })}
                                   alt={f.name || `file ${i + 1}`}
                                   fill
                                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -635,7 +639,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
         >
           {project.coverImage ? (
             <Image
-              src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp', gateway: 'https://dweb.link' })}
+              src={toGatewayUrl(project.coverImage, { width: 1200, format: 'webp' })}
               alt={project.proposalTitle || 'cover'}
               fill
               sizes="(max-width: 768px) 100vw, 33vw"
@@ -765,7 +769,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
                           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLightboxUrl(u)}
                         >
                           <Image
-                            src={toGatewayUrl(u, { width: 400, height: 300, fit: 'cover', format: 'webp', gateway: 'https://dweb.link' })}
+                            src={toGatewayUrl(u, { width: 400, height: 300, fit: 'cover', format: 'webp' })}
                             alt={`image ${i + 1}`}
                             fill
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 33vw"
@@ -878,7 +882,7 @@ export default function PublicProjectCard({ project }: { project: Project }) {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src={toGatewayUrl(lightboxUrl, { gateway: 'https://dweb.link' })}
+              src={toGatewayUrl(lightboxUrl, { width: 1600, format: 'webp' })}
               alt="Zoomed image"
               fill
               sizes="100vw"

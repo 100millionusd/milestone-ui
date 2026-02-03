@@ -544,7 +544,7 @@ const MilestonePayments: React.FC<MilestonePaymentsProps> = ({ bid, onUpdate, pr
                                         className="flex items-center gap-1 border rounded p-1 pr-2 bg-gray-50 hover:bg-gray-100 transition-colors text-xs text-blue-600"
                                       >
                                         {isImg ? (
-                                          <img src={toGatewayUrl(f.url, { width: 40, height: 40, fit: 'cover', gateway: 'https://dweb.link' })} alt="thumb" className="w-6 h-6 object-cover rounded" />
+                                          <img src={toGatewayUrl(f.url, { width: 40, height: 40, fit: 'cover' })} alt="thumb" className="w-6 h-6 object-cover rounded" />
                                         ) : (
                                           <span className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-[10px] text-gray-500">DOC</span>
                                         )}
